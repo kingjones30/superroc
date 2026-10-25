@@ -1,0 +1,20 @@
+# Recipe: ROCMFP4 (GGUF ftype 100) — dual-scale 4.50 bpw + Q5_K/Q6_K boosts.
+# Reproduces llama-quant.cpp's per-category ladder for ftype 100. See SPEC-LOCK.md.
+format_version = 1
+recipe = "rocmfp4"
+ftype = 100
+default = 100            # Q4_0_ROCMFP4
+[classes]
+output   = 14            # Q6_K
+token_embd = 100
+attn_qkv = 13            # Q5_K
+attn_kv_b = 13           # Q5_K
+attn_v   = 13            # Q5_K
+attn_k   = 100
+attn_q   = 100
+attn_out = 13            # Q5_K
+ffn_up   = 100
+ffn_gate = 100           # -> Q5_K if use_more_bits
+ffn_down = "q6_first_2_3_q5_last_1_3"
+other    = 100
+mtp_proj = 8             # Q8_0 (draft-sensitive floor)

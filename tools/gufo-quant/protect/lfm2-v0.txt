@@ -1,0 +1,3 @@
+# lfm2 (dense LFM2.5) protect preset v0 (Jay 2026-10-21). Same rule as lfm2moe-v0: the dense LFM2.5 models also tie the
+# output head to the token embeddings. Rule grammar: tools/gufo-quant/rules.hpp v0.5; first matching rule wins.
+=token_embd.weight Q6_K  # tied head + embeddings: never 4-bit

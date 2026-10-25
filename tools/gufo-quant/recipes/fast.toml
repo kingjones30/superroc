@@ -1,0 +1,19 @@
+# Recipe: FAST (GGUF ftype 103) — single-scale 101 everywhere (4.25 bpw).
+format_version = 1
+recipe = "fast"
+ftype = 103
+default = 101
+[classes]
+output   = 101
+token_embd = 14          # Q6_K
+attn_qkv = 101
+attn_kv_b = 101
+attn_v   = 101
+attn_k   = 101
+attn_q   = 101
+attn_out = 101
+ffn_up   = 101
+ffn_gate = 101
+ffn_down = 101
+other    = 101
+mtp_proj = 8

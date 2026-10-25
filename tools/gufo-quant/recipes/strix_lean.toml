@@ -1,0 +1,19 @@
+# Recipe: STRIX_LEAN (GGUF ftype 106) — single-scale 101 + dual-scale K/V + Q5_K embed.
+format_version = 1
+recipe = "strix_lean"
+ftype = 106
+default = 101
+[classes]
+output   = 101
+token_embd = 13          # Q5_K
+attn_qkv = 100
+attn_kv_b = 100
+attn_v   = 100
+attn_k   = 100
+attn_q   = 101
+attn_out = 101
+ffn_up   = 101
+ffn_gate = 101
+ffn_down = 101
+other    = 101
+mtp_proj = 8

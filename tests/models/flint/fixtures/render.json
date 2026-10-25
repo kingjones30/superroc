@@ -1,0 +1,155 @@
+[
+  {
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a coding assistant."
+      },
+      {
+        "role": "user",
+        "content": "Write a fibonacci function."
+      }
+    ],
+    "tools": [],
+    "text": "<|system|>You are a coding assistant.<|user|>Write a fibonacci function.<|assistant|>"
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello"
+      }
+    ],
+    "tools": [],
+    "text": "<|user|>Hello<|assistant|>"
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "What is 2+2?"
+      },
+      {
+        "role": "assistant",
+        "content": "4",
+        "reasoning_content": "Simple arithmetic: 2 plus 2 is 4."
+      },
+      {
+        "role": "user",
+        "content": "And 3+3?"
+      }
+    ],
+    "tools": [],
+    "text": "<|user|>What is 2+2?<|assistant|><think>Simple arithmetic: 2 plus 2 is 4.</think>4<|user|>And 3+3?<|assistant|>"
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "What's the weather in Paris?"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get the weather for a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      },
+      {
+        "type": "function",
+        "function": {
+          "name": "get_time",
+          "description": "Get the local time for a timezone",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "tz": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "text": "<|system|>\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"name\": \"get_weather\", \"description\": \"Get the weather for a city\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}, \"required\": [\"city\"]}}\n{\"name\": \"get_time\", \"description\": \"Get the local time for a timezone\", \"parameters\": {\"type\": \"object\", \"properties\": {\"tz\": {\"type\": \"string\"}}}}\n</tools>\n\nFor each function call, output the function name and arguments within the following XML format:\n<tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value>...</tool_call>\n<|user|>What's the weather in Paris?<|assistant|>"
+  },
+  {
+    "messages": [
+      {
+        "role": "user",
+        "content": "Weather in Paris?"
+      },
+      {
+        "role": "assistant",
+        "content": "",
+        "tool_calls": [
+          {
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": {
+                "city": "Paris"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "content": "22C sunny"
+      },
+      {
+        "role": "user",
+        "content": "Thanks, and London?"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "get_weather",
+          "description": "Get the weather for a city",
+          "parameters": {
+            "type": "object",
+            "properties": {
+              "city": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "city"
+            ]
+          }
+        }
+      }
+    ],
+    "text": "<|system|>\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>\n{\"name\": \"get_weather\", \"description\": \"Get the weather for a city\", \"parameters\": {\"type\": \"object\", \"properties\": {\"city\": {\"type\": \"string\"}}, \"required\": [\"city\"]}}\n</tools>\n\nFor each function call, output the function name and arguments within the following XML format:\n<tool_call>{function-name}<arg_key>{arg-key-1}</arg_key><arg_value>{arg-value-1}</arg_value>...</tool_call>\n<|user|>Weather in Paris?<|assistant|><tool_call>get_weather<arg_key>city</arg_key><arg_value>Paris</arg_value></tool_call><|observation|><tool_response>22C sunny</tool_response><|user|>Thanks, and London?<|assistant|>"
+  },
+  {
+    "messages": [
+      {
+        "role": "developer",
+        "content": "Always respond in JSON."
+      },
+      {
+        "role": "user",
+        "content": "Status?"
+      }
+    ],
+    "tools": [],
+    "text": "<|developer|>Always respond in JSON.<|user|>Status?<|assistant|>"
+  }
+]

@@ -1,0 +1,23 @@
+# Recipe: ROCMFP4_EVEN (GGUF ftype 100 + --pure) — via the fork this maps to
+# Q4_0_ROCMFP4_EVEN, which is ftype 100 with params.pure=true: EVERY tensor
+# quantizes to the default type (100), no Q5_K/Q6_K/ROCMFPX mixes. We reproduce
+# it as the ROCMFP4 recipe with all classes -> default 100.
+format_version = 1
+recipe = "rocmfp4-even"
+ftype = 100
+pure = true
+default = 100            # Q4_0_ROCMFP4
+[classes]
+output   = 100
+token_embd = 100
+attn_qkv = 100
+attn_kv_b = 100
+attn_v   = 100
+attn_k   = 100
+attn_q   = 100
+attn_out = 100
+ffn_up   = 100
+ffn_gate = 100
+ffn_down = 100
+other    = 100
+mtp_proj = 8             # Q8_0 floor still applies
