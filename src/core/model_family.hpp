@@ -22,6 +22,7 @@ enum class ModelFamilyId : std::uint8_t {
   kLfm2Moe,      // LFM2.5: short-conv + GQA MoE on the Qwen chassis
   kLfm2,         // LFM2.5 dense: short-conv + GQA, SwiGLU FFN in every layer
   kFlint,  // RecursiveSI/flint: Qwen-chassis MoE, sliding/NoPE, attention sinks
+  kLlama,  // plain Llama: dense GQA + SwiGLU, adjacent-pair RoPE, untied output
 };
 
 struct ModelFamily {
@@ -35,7 +36,7 @@ struct ModelFamily {
   std::string_view speculative_refusal;
 };
 
-inline constexpr std::array<ModelFamily, 9> kModelFamilies{{
+inline constexpr std::array<ModelFamily, 10> kModelFamilies{{
     {ModelFamilyId::kQwen35Moe, "qwen35moe", false, "", ""},
     {ModelFamilyId::kQwen4Exp, "qwen4exp", false, "", ""},
     {ModelFamilyId::kDeepSeek4, "deepseek4", false, "", ""},
@@ -51,6 +52,8 @@ inline constexpr std::array<ModelFamily, 9> kModelFamilies{{
     {ModelFamilyId::kLfm2, "lfm2", false, "lfm2 does not support vision", ""},
     {ModelFamilyId::kFlint, "flint", false, "flint does not support vision",
      "flint has no speculative decoding yet"},
+    {ModelFamilyId::kLlama, "llama", false, "llama does not support vision",
+     "llama has no speculative decoding yet"},
     {ModelFamilyId::kQwen35, "qwen", true, "", ""},
 }};
 

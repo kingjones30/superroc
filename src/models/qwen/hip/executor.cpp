@@ -9,6 +9,7 @@
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R3): detach.
+#include "src/models/llama/spm_tokenizer.hpp"
 
 namespace gufo::hip {
 namespace {
@@ -61,7 +62,7 @@ QwenGpuExecutor::QwenGpuExecutor(std::shared_ptr<const QwenGpuModel> model,
                                  QwenExecutionPolicy policy)
     : model_(std::move(model)),
       weights_(RequireModel(model_).GetWeights()),
-      tokenizer_(&model_->GetTokenizer()),
+      tokenizer_(model_->GetConfig().llama ? nullptr : &model_->GetTokenizer()),
       policy_(policy),
       arena_(weights_.config, max_context, policy_),
       graph_key_(BuildGraphCaptureKey(weights_, policy_, max_context)),
@@ -530,14 +531,22 @@ std::vector<tokenization::TokenId> QwenGpuExecutor::GenerateFromPrefix(
 
   // 2. Auto-regressive decode generation loop
   while (output_tokens.size() < options.max_new_tokens) {
-    if (tokenizer_->IsStopToken(next_token)) {
+    const bool stop = tokenizer_ != nullptr
+                          ? tokenizer_->IsStopToken(next_token)
+                          : (model_->GetLlamaTokenizer() != nullptr &&
+                             model_->GetLlamaTokenizer()->IsStop(
+                                 static_cast<std::int32_t>(next_token)));
+    if (stop) {
       break;
     }
 
     output_tokens.push_back(next_token);
     sampler.Accept(next_token);
     if (on_token) {
-      const auto piece = tokenizer_->DecodeToken(next_token);
+      const auto piece = tokenizer_ != nullptr
+                             ? tokenizer_->DecodeToken(next_token)
+                             : model_->GetLlamaTokenizer()->TokenText(
+                                   static_cast<std::int32_t>(next_token));
       if (!on_token(next_token, piece)) {
         break;
       }

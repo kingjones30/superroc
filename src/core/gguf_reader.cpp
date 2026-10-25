@@ -1326,6 +1326,112 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     }
   }
 
+  if (gufo::core::IsModelFamily(config.architecture,
+                                gufo::core::ModelFamilyId::kLlama)) {
+    // LLAMA: a plain dense transformer. Every architectural key is required:
+    // the struct defaults are Qwen's, so a missing key must never be inherited.
+    if (HasMtpTensors() || embedded_mtp_layers.value_or(0U) != 0U) {
+      if (error_msg != nullptr) {
+        *error_msg = "llama does not support MTP";
+      }
+      return std::nullopt;
+    }
+    if (config.is_moe) {
+      if (error_msg != nullptr) {
+        *error_msg = "llama does not support MoE (expert_count must be 0)";
+      }
+      return std::nullopt;
+    }
+    const auto fail = [error_msg](std::string_view key) {
+      if (error_msg != nullptr) {
+        *error_msg = "llama is missing or has an invalid " + std::string(key);
+      }
+      return std::nullopt;
+    };
+    const auto block_count = GetMetadataUint32(prefix + "block_count");
+    const auto embedding = GetMetadataUint32(prefix + "embedding_length");
+    const auto feed_forward = GetMetadataUint32(prefix + "feed_forward_length");
+    const auto heads = GetMetadataUint32(prefix + "attention.head_count");
+    const auto kv_heads = GetMetadataUint32(prefix + "attention.head_count_kv");
+    const auto key_len = GetMetadataUint32(prefix + "attention.key_length");
+    const auto value_len = GetMetadataUint32(prefix + "attention.value_length");
+    const auto rope_dim = GetMetadataUint32(prefix + "rope.dimension_count");
+    const auto context = GetMetadataUint32(prefix + "context_length");
+    const auto vocab = GetMetadataUint32(prefix + "vocab_size");
+    const auto eps =
+        GetMetadataFloat32(prefix + "attention.layer_norm_rms_epsilon");
+    const auto theta = GetMetadataFloat32(prefix + "rope.freq_base");
+    if (!block_count.has_value() || *block_count == 0U) {
+      return fail("block_count");
+    }
+    if (!embedding.has_value() || *embedding == 0U) {
+      return fail("embedding_length");
+    }
+    if (!feed_forward.has_value() || *feed_forward == 0U) {
+      return fail("feed_forward_length");
+    }
+    if (!heads.has_value() || *heads == 0U) {
+      return fail("attention.head_count");
+    }
+    if (!kv_heads.has_value() || *kv_heads == 0U || *kv_heads > *heads ||
+        (*heads % *kv_heads) != 0U) {
+      return fail("attention.head_count_kv");
+    }
+    if (!key_len.has_value() || *key_len == 0U || (*key_len % 2U) != 0U ||
+        !value_len.has_value() || *value_len != *key_len) {
+      return fail("attention.key_length / attention.value_length");
+    }
+    if (!rope_dim.has_value() || *rope_dim != *key_len) {
+      return fail("rope.dimension_count");
+    }
+    if (!context.has_value() || *context == 0U) {
+      return fail("context_length");
+    }
+    if (!vocab.has_value() || *vocab == 0U) {
+      return fail("vocab_size");
+    }
+    if (!eps.has_value() || !std::isfinite(*eps) || !(*eps > 0.0F)) {
+      return fail("attention.layer_norm_rms_epsilon");
+    }
+    if (!theta.has_value() || !std::isfinite(*theta) || !(*theta > 0.0F)) {
+      return fail("rope.freq_base");
+    }
+    if (const auto* token_embd = FindTensor("token_embd.weight");
+        token_embd != nullptr &&
+        token_embd->ElementCount() !=
+            static_cast<std::uint64_t>(*vocab) * *embedding) {
+      return fail("token_embd.weight shape vs vocab_size * embedding_length");
+    }
+
+    config.llama = true;
+    config.num_layers = *block_count;
+    config.hidden_size = *embedding;
+    config.intermediate_size = *feed_forward;
+    config.num_attention_heads = *heads;
+    config.num_key_value_heads = *kv_heads;
+    config.head_dim = *key_len;
+    config.rotary_dim = *rope_dim;
+    config.context_length = *context;
+    config.vocab_size = *vocab;
+    config.norm_eps_pre = *eps;
+    config.norm_eps_post = *eps;
+    config.rope_theta = *theta;
+    // Every layer is full causal attention with adjacent-pair (NORM) RoPE.
+    config.full_attention_interval = 1;
+    config.rope_variant = gufo::core::RopeVariant::kNorm;
+    config.attn_gate_mode = gufo::core::AttnGateMode::kFused;
+    config.mtp_num_layers = 0;
+    config.is_moe = false;
+    config.attn_sinks = false;
+    config.swa_window = 0;
+    if (config.num_layers > config.use_rope.size()) {
+      return fail("block_count");
+    }
+    for (std::uint32_t i = 0; i < config.num_layers; ++i) {
+      config.use_rope[i] = 1U;
+    }
+  }
+
   // 6. Validate configuration against Qwen3.5/3.8 structural rules
   if (!config.IsValidQwen()) {
     if (error_msg != nullptr) {

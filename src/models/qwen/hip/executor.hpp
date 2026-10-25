@@ -32,6 +32,10 @@
 #include "src/models/qwen/hip/ops/token.hpp"
 #include "src/models/qwen/vision/device_input.hpp"
 
+namespace gufo::models::llama {
+class SpmTokenizer;
+}
+
 namespace gufo::hip {
 
 class HipblasLtGemm;
@@ -76,11 +80,13 @@ struct QwenGpuMemoryUsage {
 /// Immutable GPU-visible Qwen model resources shared by executor sessions.
 class QwenGpuModel {
 public:
-  QwenGpuModel(std::shared_ptr<const core::GgufReader> reader,
-               models::QwenModelWeights weights,
-               std::shared_ptr<const tokenization::QwenTokenizer> tokenizer,
-               std::vector<QwenGpuWeightRegion> weight_regions,
-               std::shared_ptr<models::qwen::vision::Encoder> vision = {});
+  QwenGpuModel(
+      std::shared_ptr<const core::GgufReader> reader,
+      models::QwenModelWeights weights,
+      std::shared_ptr<const tokenization::QwenTokenizer> tokenizer,
+      std::vector<QwenGpuWeightRegion> weight_regions,
+      std::shared_ptr<models::qwen::vision::Encoder> vision = {},
+      std::shared_ptr<const models::llama::SpmTokenizer> llama_tokenizer = {});
   ~QwenGpuModel();
 
   QwenGpuModel(const QwenGpuModel&) = delete;
@@ -104,6 +110,10 @@ public:
       const noexcept {
     return *tokenizer_;
   }
+  [[nodiscard]] const models::llama::SpmTokenizer* GetLlamaTokenizer()
+      const noexcept {
+    return llama_tokenizer_.get();
+  }
   [[nodiscard]] const core::GgufReader& GetReader() const noexcept {
     return *reader_;
   }
@@ -121,6 +131,7 @@ private:
   std::shared_ptr<const core::GgufReader> reader_;
   models::QwenModelWeights weights_;
   std::shared_ptr<const tokenization::QwenTokenizer> tokenizer_;
+  std::shared_ptr<const models::llama::SpmTokenizer> llama_tokenizer_;
   std::vector<QwenGpuWeightRegion> weight_regions_;
   std::shared_ptr<models::qwen::vision::Encoder> vision_;
 };
@@ -653,6 +664,12 @@ private:
       std::span<const tokenization::TokenId> prompt_tokens,    // LFM2
       std::uint32_t start_pos, bool compute_logits);           // LFM2
   [[nodiscard]] tokenization::TokenId ForwardFlintPromptChunk(
+      std::span<const tokenization::TokenId> prompt_tokens,
+      std::uint32_t start_pos, bool compute_logits);
+  [[nodiscard]] tokenization::TokenId ForwardLlamaPromptChunk(
+      std::span<const tokenization::TokenId> prompt_tokens,
+      std::uint32_t start_pos, bool compute_logits);
+  [[nodiscard]] tokenization::TokenId ForwardLlamaPromptBatch(
       std::span<const tokenization::TokenId> prompt_tokens,
       std::uint32_t start_pos, bool compute_logits);
   [[nodiscard]] tokenization::TokenId ForwardFlintPromptBatch(

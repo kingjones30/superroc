@@ -12,6 +12,7 @@
 #include <thread>
 #include <utility>
 
+#include "src/models/llama/spm_tokenizer.hpp"
 #include "src/models/qwen/chat_template.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/fp4_launch.hpp"
@@ -166,10 +167,12 @@ QwenGpuModel::QwenGpuModel(
     models::QwenModelWeights weights,
     std::shared_ptr<const tokenization::QwenTokenizer> tokenizer,
     std::vector<QwenGpuWeightRegion> weight_regions,
-    std::shared_ptr<models::qwen::vision::Encoder> vision)
+    std::shared_ptr<models::qwen::vision::Encoder> vision,
+    std::shared_ptr<const models::llama::SpmTokenizer> llama_tokenizer)
     : reader_(std::move(reader)),
       weights_(std::move(weights)),
       tokenizer_(std::move(tokenizer)),
+      llama_tokenizer_(std::move(llama_tokenizer)),
       weight_regions_(std::move(weight_regions)),
       vision_(std::move(vision)) {}
 
@@ -198,20 +201,29 @@ std::shared_ptr<const QwenGpuModel> QwenGpuModel::CreateFromGguf(
     return nullptr;
   }
 
-  if (!tokenization::QwenChatTemplate::ValidateGgufTemplate(*reader,
-                                                            error_msg)) {
-    return nullptr;
-  }
-
   auto weights_opt = models::QwenModelWeights::LoadFromGguf(*reader, error_msg);
   if (!weights_opt.has_value()) {
     return nullptr;
   }
 
-  auto tokenizer =
-      tokenization::QwenTokenizer::CreateFromGguf(*reader, error_msg);
-  if (!tokenizer)
-    return nullptr;
+  std::shared_ptr<const models::llama::SpmTokenizer> llama_tokenizer;
+  std::unique_ptr<tokenization::QwenTokenizer> tokenizer;
+  if (weights_opt->config.llama) {
+    auto spm = models::llama::SpmTokenizer::FromGguf(*reader, error_msg);
+    if (!spm.has_value()) {
+      return nullptr;
+    }
+    llama_tokenizer =
+        std::make_shared<const models::llama::SpmTokenizer>(std::move(*spm));
+  } else {
+    if (!tokenization::QwenChatTemplate::ValidateGgufTemplate(*reader,
+                                                              error_msg)) {
+      return nullptr;
+    }
+    tokenizer = tokenization::QwenTokenizer::CreateFromGguf(*reader, error_msg);
+    if (!tokenizer)
+      return nullptr;
+  }
 
   std::vector<QwenGpuWeightRegion> weight_regions;
   if (!CreateWeightRegions(*reader, weight_regions, error_msg)) {
@@ -273,7 +285,7 @@ std::shared_ptr<const QwenGpuModel> QwenGpuModel::CreateFromGguf(
       std::move(tokenizer));
   return std::make_shared<const QwenGpuModel>(
       std::move(reader), std::move(*weights_opt), std::move(shared_tokenizer),
-      std::move(weight_regions), std::move(vision));
+      std::move(weight_regions), std::move(vision), std::move(llama_tokenizer));
 }
 
 namespace {

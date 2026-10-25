@@ -10,6 +10,7 @@
 #include "src/models/flint/hip/flint_decode.hpp"
 #include "src/models/glimmer/hip/glimmer_decode.hpp"  // GLIMMER
 #include "src/models/lfm2/hip/lfm2_decode.hpp"        // LFM2
+#include "src/models/llama/hip/llama_decode.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/ops.hpp"
@@ -56,6 +57,11 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
   }
   if (weights.config.flint) {
     ExecuteFlintDecodeStep(arena, weights, token_id, pos, compute_logits,
+                           image_input);
+    return;
+  }
+  if (weights.config.llama) {
+    ExecuteLlamaDecodeStep(arena, weights, token_id, pos, compute_logits,
                            image_input);
     return;
   }

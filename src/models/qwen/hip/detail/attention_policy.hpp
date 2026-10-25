@@ -31,6 +31,9 @@ inline constexpr std::uint32_t kGlimmerHeadDim{128};
 inline constexpr std::uint32_t kFlintQueryHeads{32};
 inline constexpr std::uint32_t kFlintKvHeads{4};
 inline constexpr std::uint32_t kFlintHeadDim{128};
+inline constexpr std::uint32_t kLlamaQueryHeads{56};
+inline constexpr std::uint32_t kLlamaKvHeads{8};
+inline constexpr std::uint32_t kLlamaHeadDim{128};
 inline constexpr std::size_t kSplitKDecodeAttentionMinContext{128};
 inline constexpr std::uint32_t kSplitKDecodeAttentionMaxSplits{32};
 // gfx1151, from rocminfo on this box: 40 CUs, 32 waves/CU, wavefront 32.

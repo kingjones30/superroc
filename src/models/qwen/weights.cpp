@@ -1,3 +1,5 @@
+#include "src/models/llama/weights.hpp"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -1051,6 +1053,9 @@ std::optional<QwenModelWeights> QwenModelWeights::LoadFromGguf(
   }  // LFM2
   if (config_opt->flint) {
     return BindFlintWeights(reader, *config_opt, error_msg);
+  }
+  if (config_opt->llama) {
+    return BindLlamaWeights(reader, *config_opt, error_msg);
   }
 
   QwenModelWeights weights;
