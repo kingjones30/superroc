@@ -371,6 +371,9 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
   if (config.flint) {
     return ForwardFlintPromptChunk(prompt_tokens, start_pos, compute_logits);
   }
+  if (config.llama) {
+    return ForwardLlamaPromptChunk(prompt_tokens, start_pos, compute_logits);
+  }
   auto scratch = arena_.GetScratchView(batch_size);
   const auto attention_workspace =
       arena_.GetScratchView(arena_.GetMaxBatch()).ffn;

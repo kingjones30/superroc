@@ -54,7 +54,8 @@ tokenization::TokenId QwenGpuExecutor::ForwardToken(
                            arena_.stream));
 
   // GLIMMER: host audit can throw. Do not capture this path in a HIP graph.
-  if (config.attention_only || config.lfm2 || config.flint) {  // LFM2
+  if (config.attention_only || config.lfm2 || config.flint ||
+      config.llama) {  // LFM2
     ExecuteDecodeStep(arena_, weights_, policy_, token_id, pos, compute_logits,
                       recurrent_state, &vision_input_);
     if (!compute_logits) {

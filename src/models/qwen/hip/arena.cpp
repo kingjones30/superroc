@@ -841,7 +841,7 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
       HIP_CHECK(hipMalloc(&d_moe_shexp_y, batch * hidden_size * sizeof(float)));
     }
     // LFM2 / Flint: split-K decode-attention scratch (n_splits max 64).
-    if (config_.lfm2 || config_.flint) {
+    if (config_.lfm2 || config_.flint || config_.llama) {
       HIP_CHECK(
           hipMalloc(&d_lfm2_attn_partial,
                     static_cast<std::size_t>(config_.num_attention_heads) * 64 *

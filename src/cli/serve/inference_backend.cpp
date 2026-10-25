@@ -60,6 +60,7 @@
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/deepseek_v4_flash/dspark_sampler.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
+#include "src/models/llama/spm_tokenizer.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 #include "src/models/qwen/hip/executor.hpp"
@@ -1147,6 +1148,11 @@ public:
       execution_policy_.fuse_qk_norm_rope_kv = false;
       execution_policy_.glimmer_fp16_kv = true;
     }
+    if (model_->GetConfig().llama) {
+      execution_policy_.kv_cache_storage = hip::QwenKvCacheStorage::kFp32;
+      execution_policy_.fuse_qk_norm_rope_kv = false;
+      execution_policy_.glimmer_fp16_kv = true;
+    }
     if (!artifact_fingerprint.empty()) {
       // Persistent snapshots cover DFlash and MTP sessions: the identity
       // encodes the draft artifact, and each draft backend persists its draft
@@ -1293,6 +1299,17 @@ public:
 
   [[nodiscard]] std::shared_ptr<const sampling::ConstraintVocabulary>
   BuildConstraintVocabulary() const override {
+    if (model_->GetConfig().llama) {
+      const auto* tok = model_->GetLlamaTokenizer();
+      const std::uint32_t n = tok != nullptr ? tok->Size() : 0;
+      return std::make_shared<const sampling::ConstraintVocabulary>(
+          n, [tok](std::uint32_t id) {
+            return sampling::ConstraintVocabulary::Piece{
+                tok != nullptr ? tok->TokenText(static_cast<std::int32_t>(id))
+                               : std::string{},
+                tok != nullptr && tok->IsStop(static_cast<std::int32_t>(id))};
+          });
+    }
     return std::make_shared<const sampling::ConstraintVocabulary>(
         model_->GetTokenizer().GetVocabSize(), [this](std::uint32_t id) {
           const auto& tokenizer = model_->GetTokenizer();
@@ -1301,6 +1318,10 @@ public:
         });
   }
   [[nodiscard]] std::uint32_t VocabularySize() const override {
+    if (model_->GetConfig().llama) {
+      const auto* tok = model_->GetLlamaTokenizer();
+      return tok != nullptr ? tok->Size() : 0;
+    }
     return static_cast<std::uint32_t>(model_->GetTokenizer().GetVocabSize());
   }
 
@@ -1312,6 +1333,22 @@ public:
 
   [[nodiscard]] std::vector<TextRunnerToken> Tokenize(
       std::string_view text) const override {
+    if (model_->GetConfig().llama) {
+      const auto* tok = model_->GetLlamaTokenizer();
+      if (tok == nullptr) {
+        return {};
+      }
+      models::llama::SpmTokenizer::EncodeOptions options;
+      options.add_special = true;
+      options.parse_special = true;
+      const auto ids = tok->Encode(text, options);
+      std::vector<TextRunnerToken> out;
+      out.reserve(ids.size());
+      for (const std::int32_t id : ids) {
+        out.push_back(static_cast<TextRunnerToken>(id));
+      }
+      return out;
+    }
     return model_->GetTokenizer().Encode(text);
   }
 
@@ -1358,6 +1395,13 @@ public:
           model_->GetTokenizer(), messages, tools,
           QwenChatOptions(request, max_context_));
     }
+    if (model_->GetConfig().llama) {
+      std::string concat;
+      for (const auto& message : request.messages) {
+        concat += message.content;
+      }
+      return Tokenize(concat);
+    }
     return tokenization::QwenChatTemplate::RenderAndTokenize(
         model_->GetTokenizer(), request.messages,
         request.tool_choice == ChatRequest::ToolChoice::kNone
@@ -1379,6 +1423,13 @@ public:
     }
     // LFM2: the same tokens-only TextPreparedPrompt as Glimmer.
     if (gufo::core::IsLfm2Family(model_->GetConfig().architecture)) {
+      auto tokens = RenderAndTokenize(request);
+      if (!tokens.has_value()) {
+        return std::nullopt;
+      }
+      return TextPreparedPrompt{std::move(*tokens), {}, 0};
+    }
+    if (model_->GetConfig().llama) {
       auto tokens = RenderAndTokenize(request);
       if (!tokens.has_value()) {
         return std::nullopt;
@@ -1412,7 +1463,7 @@ public:
 
   [[nodiscard]] std::optional<std::size_t> CountPromptTokens(
       const ChatRequest& request) const override {
-    if (model_->GetConfig().flint) {
+    if (model_->GetConfig().flint || model_->GetConfig().llama) {
       auto tokens = RenderAndTokenize(request);
       if (!tokens.has_value()) {
         return std::nullopt;
@@ -1433,6 +1484,9 @@ public:
 
   [[nodiscard]] TextGenerationBackend::InitialOutputState InitialOutputState(
       const ChatRequest& request) const override {
+    if (model_->GetConfig().llama) {
+      return TextGenerationBackend::InitialOutputState::kContent;
+    }
     if (model_->GetConfig().flint)
       return TextGenerationBackend::InitialOutputState::kAuto;
     // GLM: thinking on means the first Glimmer channel is reasoning. The
@@ -1471,6 +1525,18 @@ public:
 
   [[nodiscard]] std::string Decode(
       std::span<const TextRunnerToken> tokens) const override {
+    if (model_->GetConfig().llama) {
+      const auto* tok = model_->GetLlamaTokenizer();
+      if (tok == nullptr) {
+        return {};
+      }
+      std::vector<std::int32_t> ids;
+      ids.reserve(tokens.size());
+      for (const auto id : tokens) {
+        ids.push_back(static_cast<std::int32_t>(id));
+      }
+      return tok->Decode(ids);
+    }
     return model_->GetTokenizer().Decode(tokens);
   }
 
@@ -1552,7 +1618,13 @@ public:
       TextRunnerState& state, sampling::SamplerState& sampler) const override {
     auto& qwen = RequireQwenState(state);
     const TextRunnerToken token = qwen.SelectFrontier(sampler);
-    if (EndsTurn(qwen, model_->GetTokenizer(), token)) {
+    const bool stop =
+        model_->GetConfig().llama
+            ? (qwen.stop_at_eos() && model_->GetLlamaTokenizer() != nullptr &&
+               model_->GetLlamaTokenizer()->IsStop(
+                   static_cast<std::int32_t>(token)))
+            : EndsTurn(qwen, model_->GetTokenizer(), token);
+    if (stop) {
       return {
           .stop = true,
           .token = 0,
@@ -1562,10 +1634,18 @@ public:
     // Keep the selected token separate from the argmax frontier: sampled
     // cancellation and prompt snapshot restore must not replace that argmax.
     qwen.set_pending_token(token);
+    std::string piece;
+    if (model_->GetConfig().llama) {
+      const auto* tok = model_->GetLlamaTokenizer();
+      piece = tok != nullptr ? tok->TokenText(static_cast<std::int32_t>(token))
+                             : std::string{};
+    } else {
+      piece = std::string(model_->GetTokenizer().DecodeToken(token));
+    }
     return {
         .stop = false,
         .token = token,
-        .piece = std::string(model_->GetTokenizer().DecodeToken(token)),
+        .piece = std::move(piece),
     };
   }
 
@@ -1941,7 +2021,7 @@ public:
 
 private:
   [[nodiscard]] std::size_t MaximumDecodeBatchWidth() const noexcept {
-    if (model_->GetConfig().flint) {
+    if (model_->GetConfig().flint || model_->GetConfig().llama) {
       return 1;
     }
     const std::size_t rows_per_session = SpeculationEnabled() ? 8 : 1;

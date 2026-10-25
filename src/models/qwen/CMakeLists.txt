@@ -8,6 +8,8 @@ target_sources(gufo_core PRIVATE
   ${PROJECT_SOURCE_DIR}/src/models/glimmer/glimmer_chat.cpp
   ${PROJECT_SOURCE_DIR}/src/models/lfm2/lfm2_chat.cpp  # LFM2
   ${PROJECT_SOURCE_DIR}/src/models/flint/flint_chat.cpp
+  ${PROJECT_SOURCE_DIR}/src/models/llama/spm_tokenizer.cpp
+  ${PROJECT_SOURCE_DIR}/src/models/llama/weights.cpp
   ${PROJECT_SOURCE_DIR}/src/models/qwen/state.cpp
   ${PROJECT_SOURCE_DIR}/src/models/qwen/weights.cpp
   ${PROJECT_SOURCE_DIR}/src/models/qwen/ssm.cpp
@@ -41,6 +43,9 @@ if (ENGINE_ENABLE_HIP)
     ${PROJECT_SOURCE_DIR}/src/models/flint/hip/flint_decode.hip
     ${PROJECT_SOURCE_DIR}/src/models/flint/hip/flint_attention.hip
     ${PROJECT_SOURCE_DIR}/src/models/flint/hip/flint_prefill.hip
+    ${PROJECT_SOURCE_DIR}/src/models/llama/hip/llama_rope.hip
+    ${PROJECT_SOURCE_DIR}/src/models/llama/hip/llama_decode.hip
+    ${PROJECT_SOURCE_DIR}/src/models/llama/hip/llama_prefill.hip
     ${PROJECT_SOURCE_DIR}/src/models/lfm2/hip/lfm2_prefill_attention.hip  # LFM2
     ${PROJECT_SOURCE_DIR}/src/models/lfm2/hip/lfm2_attention.hip  # LFM2
     ${PROJECT_SOURCE_DIR}/src/models/glimmer/hip/glimmer_prefill.hip  # GLIMMER

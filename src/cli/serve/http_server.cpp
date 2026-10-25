@@ -1148,6 +1148,11 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
   resp["choices"] = std::move(choices);
   resp["usage"] = UsageJson(res);
   resp["timings"] = GenerationTimings(res);
+  json::Value token_ids = json::Value::array();
+  for (const auto token : res.tokens) {
+    token_ids.push_back(static_cast<long long>(token));
+  }
+  resp["tokens"] = std::move(token_ids);
   return WithTiming(Ok(resp), res);
 } catch (const std::length_error& error) {
   return Err(400, "Bad Request", error.what(), "invalid_request_error",
@@ -1444,6 +1449,11 @@ HttpResponse LlamaCompletion(const HttpRequest& req,
   resp["tokens_predicted"] = res.completion_tokens;
   resp["tokens_evaluated"] = res.prompt_tokens;
   resp["tokens_cached"] = res.cached_prompt_tokens;
+  json::Value token_ids = json::Value::array();
+  for (const auto token : res.tokens) {
+    token_ids.push_back(static_cast<long long>(token));
+  }
+  resp["tokens"] = std::move(token_ids);
   resp["timings"] = GenerationTimings(res);
   resp["usage"] = UsageJson(res);
   return WithTiming(Ok(resp), res);

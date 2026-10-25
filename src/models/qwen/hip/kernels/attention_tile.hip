@@ -561,5 +561,12 @@ template __global__ void PackTiledAttentionKvKernel<
     __half* __restrict__, float* __restrict__, float* __restrict__,
     std::uint32_t, std::uint32_t, std::size_t, std::uint32_t);
 
+// Llama: (56, 8, 128) pack instantiation for the WMMA launcher.
+template __global__ void PackTiledAttentionKvKernel<
+    detail::kLlamaQueryHeads, detail::kLlamaKvHeads, detail::kLlamaHeadDim>(
+    const float* __restrict__, const float* __restrict__, __half* __restrict__,
+    __half* __restrict__, float* __restrict__, float* __restrict__,
+    std::uint32_t, std::uint32_t, std::size_t, std::uint32_t);
+
 }  // namespace gufo::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

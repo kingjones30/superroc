@@ -58,7 +58,10 @@ int main() {
 
   // Unknown and empty fail closed; near misses do not match.
   Check(FindModelFamily("") == nullptr, "empty");
-  Check(FindModelFamily("llama") == nullptr, "llama");
+  Check(IsModelFamily("llama", ModelFamilyId::kLlama), "llama");
+  Check(ModelFamilyArch(ModelFamilyId::kLlama) == "llama", "arch llama");
+  Check(!IsModelFamily("llama", ModelFamilyId::kQwen35),
+        "llama is not the qwen prefix");
   Check(IsModelFamily("lfm2", ModelFamilyId::kLfm2), "lfm2 dense");
   Check(!IsModelFamily("lfm2", ModelFamilyId::kLfm2Moe), "lfm2 is not lfm2moe");
   Check(gufo::core::IsLfm2Family("lfm2") &&
@@ -100,6 +103,13 @@ int main() {
   Check(flint != nullptr && flint->speculative_refusal ==
                                 "flint has no speculative decoding yet",
         "flint speculative text");
+  const auto* llama = FindModelFamily("llama");
+  Check(llama != nullptr &&
+            llama->vision_refusal == "llama does not support vision",
+        "llama vision text");
+  Check(llama != nullptr && llama->speculative_refusal ==
+                                "llama has no speculative decoding yet",
+        "llama speculative text");
 
   // Compile-time use (package constants are initialised from the table).
   static_assert(gufo::core::IsModelFamily("lfm2moe", ModelFamilyId::kLfm2Moe));

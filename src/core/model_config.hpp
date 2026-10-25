@@ -82,6 +82,9 @@ struct ModelConfig {
   /// Flint: per-head softmax sinks (`blk.N.attn_sinks`) participate in
   /// decode/prefill softmax.
   bool attn_sinks{false};
+  /// Llama: plain dense transformer (GQA + SwiGLU in every layer, full causal
+  /// attention, adjacent-pair RoPE, untied output).
+  bool llama{false};
 
   [[nodiscard]] constexpr std::uint32_t AttentionSize() const noexcept {
     const std::uint64_t n =
@@ -91,7 +94,7 @@ struct ModelConfig {
 
   [[nodiscard]] constexpr std::uint32_t FullAttentionLayerCount()
       const noexcept {
-    if (flint) {
+    if (flint || llama) {
       return num_layers;
     }
     if (lfm2) {
@@ -161,6 +164,22 @@ struct ModelConfig {
   /// Returns true if this configuration conforms to the Qwen3.5/3.8 repeating
   /// block structure, or to the muse-glimmer attention-only block.
   [[nodiscard]] constexpr bool IsValidQwen() const noexcept {
+    // Llama: plain dense geometry. Every layer is full causal attention, the
+    // FFN is dense SwiGLU, RoPE rotates adjacent pairs and the output head is
+    // untied.
+    if (llama) {
+      return num_layers > 0 && num_layers <= use_rope.size() &&
+             hidden_size > 0 && intermediate_size > 0 &&
+             num_attention_heads > 0 && num_key_value_heads > 0 &&
+             num_key_value_heads <= num_attention_heads &&
+             (num_attention_heads % num_key_value_heads) == 0 &&
+             AttentionSize() > 0 && vocab_size > 0 && rotary_dim == head_dim &&
+             (rotary_dim % 2) == 0 && norm_eps_pre > 0.0F &&
+             rope_theta > 0.0F && context_length > 0 &&
+             full_attention_interval == 1 &&
+             rope_variant == RopeVariant::kNorm && !is_moe && !flint && !lfm2 &&
+             !attention_only && is_text_only;
+    }
     if (flint) {
       const bool ffn_ok =
           is_moe && expert_count > 0 && expert_used_count > 0 &&

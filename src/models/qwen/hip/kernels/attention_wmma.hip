@@ -153,7 +153,8 @@ constexpr std::uint32_t kWmmaKStride = kHeadDim + 8;
 // value at 256, so the (24,4)/(16,2) instantiations are unchanged.
 template<std::uint32_t kQueryRows, std::uint32_t kKeys, bool kHeadMajor = false,
          std::uint32_t kHq = kQueryHeads, std::uint32_t kHkv = kKvHeads,
-         std::uint32_t kHeadDimT = kHeadDim, bool kWindowed = false>
+         std::uint32_t kHeadDimT = kHeadDim, bool kWindowed = false,
+         std::uint32_t kWmmaHeadsT = kWmmaHeads>
 __launch_bounds__(256, 2) __global__
     void WmmaCausalAttention(const float* __restrict__ q,
                              const float* __restrict__ gate,
@@ -178,6 +179,7 @@ __launch_bounds__(256, 2) __global__
   static_assert(kDimTilesPerWave == 1 || kDimTilesPerWave == 2,
                 "head dim 128 or 256");
   constexpr std::uint32_t kGqa = kHq / kHkv;
+  constexpr std::uint32_t kWmmaHeads = kWmmaHeadsT;
   constexpr std::uint32_t kAttnWidth = kHq * kHeadDim;
   constexpr std::uint32_t kKvWidth = kHkv * kHeadDim;
   static_assert(kHq % kHkv == 0, "GQA must be integral");
@@ -788,11 +790,16 @@ bool LaunchQwenWmmaAttentionImpl(
     std::span<float> packed_k_workspace, std::span<float> packed_v_workspace,
     std::uint32_t window = 0, const float* sinks = nullptr) {
   constexpr std::uint32_t kGqa = kHq / kHkv;
+  // Default tile is 32 query rows x 2 heads (kSTiles=4). Llama GQA is 7, which
+  // 2 does not divide, so that instantiation uses 1 head x 64 rows instead.
+  constexpr std::uint32_t kHeadsPerBlock =
+      (kGqa % kWmmaHeads == 0) ? kWmmaHeads : 1u;
+  constexpr std::uint32_t kQueryRowsT =
+      (kHeadsPerBlock == kWmmaHeads) ? kWmmaQueryRows : 64u;
   constexpr std::uint32_t kKvWidth = kHkv * kHeadDimT;
   constexpr std::uint32_t kKvHeads = kHkv;
   static_assert(kHq % kHkv == 0, "GQA must be integral");
-  static_assert((kHq / kHkv) % kWmmaHeads == 0,
-                "kWmmaHeads must divide GQA");
+  static_assert(kGqa % kHeadsPerBlock == 0, "kHeadsPerBlock must divide GQA");
   const detail::AttentionSupportParams support_params{
       .batch_size = batch_size,
       .start_pos = start_pos,
@@ -844,9 +851,9 @@ bool LaunchQwenWmmaAttentionImpl(
     if (::gufo::hip_check::LaunchFailed()) return false;
   }
 
-  const dim3 grid(static_cast<unsigned int>((batch_size + kWmmaQueryRows - 1) /
-                                            kWmmaQueryRows),
-                  kKvHeads * (kGqa / kWmmaHeads));
+  const dim3 grid(static_cast<unsigned int>((batch_size + kQueryRowsT - 1) /
+                                            kQueryRowsT),
+                  kKvHeads * (kGqa / kHeadsPerBlock));
   const auto length = start_pos + static_cast<std::uint32_t>(batch_size);
   const std::size_t key_head_bytes =
       static_cast<std::size_t>(length) * kHeadDimT * sizeof(__half);
@@ -873,9 +880,9 @@ bool LaunchQwenWmmaAttentionImpl(
               layer_k + first * kHeadDimT, layer_v + first * kHeadDimT,
               packed_k, packed_v, length);
       if (::gufo::hip_check::LaunchFailed()) return false;
-      const dim3 group_grid(grid.x, heads * (kGqa / kWmmaHeads));
-      WmmaCausalAttention<kWmmaQueryRows, kWmmaKeys, true, kHq, kHkv, kHeadDimT,
-                          kWindowed>
+      const dim3 group_grid(grid.x, heads * (kGqa / kHeadsPerBlock));
+      WmmaCausalAttention<kQueryRowsT, kWmmaKeys, true, kHq, kHkv, kHeadDimT,
+                          kWindowed, kHeadsPerBlock>
           <<<group_grid, block_size, 0, stream>>>(
               q + query_offset, gate ? gate + query_offset : nullptr, packed_k,
               packed_v, out_context + query_offset, start_pos, batch_size,
@@ -885,8 +892,8 @@ bool LaunchQwenWmmaAttentionImpl(
     }
     return true;
   }
-  WmmaCausalAttention<kWmmaQueryRows, kWmmaKeys, false, kHq, kHkv, kHeadDimT,
-                      kWindowed>
+  WmmaCausalAttention<kQueryRowsT, kWmmaKeys, false, kHq, kHkv, kHeadDimT,
+                      kWindowed, kHeadsPerBlock>
       <<<grid, block_size, 0, stream>>>(q, gate, layer_k, layer_v, out_context,
                                         start_pos, batch_size, lse_out,
                                         key_begin, window, sinks);
@@ -993,6 +1000,23 @@ bool LaunchQwenWmmaAttention(
         layer_idx, start_pos, batch_size, max_context, num_heads, num_kv_heads,
         head_dim, stream, lse_out, key_begin, skip_kv_write,
         packed_k_workspace, packed_v_workspace, window, sinks);
+  }
+  // Llama (56 Q, 8 KV, head_dim 128). Window 0 is full attention; GQA 7 uses
+  // the 1-head x 64-row tile inside the impl.
+  if (detail::IsWmmaAttentionSupportedFor<detail::kLlamaQueryHeads,
+                                          detail::kLlamaKvHeads,
+                                          detail::kLlamaHeadDim>(
+          support_params)) {
+    if (window == 0) {
+      return LaunchQwenWmmaAttentionImpl<detail::kLlamaQueryHeads,
+                                         detail::kLlamaKvHeads,
+                                         detail::kLlamaHeadDim, false>(
+          q, k, v, gate, k_cache, v_cache, k_cache_f16, v_cache_f16,
+          out_context, layer_idx, start_pos, batch_size, max_context,
+          num_heads, num_kv_heads, head_dim, stream, lse_out, key_begin,
+          skip_kv_write, packed_k_workspace, packed_v_workspace, window,
+          nullptr);
+    }
   }
   return false;
 }
