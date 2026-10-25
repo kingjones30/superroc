@@ -1,0 +1,23 @@
+# qwen35 protect preset v0 (QF_BRIEF §1.C; rule grammar from tools/gufo-quant/rules.hpp v0.5)
+# RULE grammar (verbatim from lqp1/tools/gufo-quant/rules.hpp):
+#   =NAME      exact full-name match
+#   ^PREFIX    prefix match
+#   SUFFIX$    suffix match
+#   A*B*C      full-name glob (only `*` is special; everything else literal)
+#   plain      substring match (pre-v0.5; kept for compat)
+# Protect file lines: `RULE TYPE  # why`. TYPE must be in TypeNameTable
+# (F32 F16 Q4_0 Q8_0 Q5_K Q6_K BF16 Q4_0_ROCMFP4 Q4_0_ROCMFP4_FAST G4_Q4 G4_Q4_FAST; case-insensitive).
+# Re-verified against gufo at 1194feaa9fbee6ca0438ca5af882ee09ac62bea4, 2026-10-10.
+# DECISIONS binding (16:21 CDT): rule LITERALS match the lqf/lqp in-tree file; this file
+# only adds `# why` tails (no rule change). DECISIONS condition: every rule matching
+# >= 1 tensor on the shipped arch file, OR listed allow-unmatched with a reason.
+# Allow-unmatched on this preset (reason per rule): the `*ffn_gate_inp.weight Q8_0`
+# rule matches 0 on a DENSE qwen35 (the rule only fires on qwen35moe; the dense router
+# set is F32 by the loader [repo:src/models/qwen/weights.cpp:84-91]). Always pass
+# `--protect-allow-unmatched` when applying this preset on a dense file.
+=output.weight Q6_K  # head: exact — never 4-bit (Ornith rule); precondition hidden%256==0 (27B: 5120 OK) — src/models/qwen/weights.cpp:436-438
+=token_embd.weight Q6_K  # embeddings: exact; the 27B winner recipe — src/models/qwen/weights.cpp:431-433
+*nextn.eh_proj.weight Q8_0  # MTP/draft projection (also the recipe's Q8_0 floor) — tools/gufo-quant/recipe.hpp:134-141 (IsDraftSensitiveProjection)
+*ffn_gate_inp.weight Q8_0  # MoE router unlock (Q8_0 in kProjection's accepted set); dense qwen35: 0 matches, ALLOW-UNMATCHED — src/models/qwen/weights.cpp:84-91
+*ssm_alpha.weight Q8_0  # tiny [5120,48]; unlocks the fused alpha/beta decode path — src/models/qwen/hip/batched_decode.cpp:273-289
+*ssm_beta.weight Q8_0  # tiny [5120,48]; unlocks the fused alpha/beta decode path — src/models/qwen/hip/batched_decode.cpp:273-289

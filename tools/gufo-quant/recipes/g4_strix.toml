@@ -1,0 +1,23 @@
+# Recipe: G4_STRIX (gufo-native, split-scale-plane) — the STRIX recipe in the G4
+# layout. Default single-scale G4 121; attention K/V and shared experts stay
+# dual-scale G4 120; Q6_K embeddings; 121 head. File type = 105, format v2.
+# format_version here is the *recipe file* version, not the GGUF gufo.quant
+# format_version (which is 2 for any G4 file).
+format_version = 1
+recipe = "g4-strix"
+ftype = 105
+default = 121            # G4_Q4_FAST
+[classes]
+output   = 121
+token_embd = 14          # Q6_K
+attn_qkv = 120           # G4 dual-scale K/V
+attn_kv_b = 120
+attn_v   = 120
+attn_k   = 120
+attn_q   = 121
+attn_out = 121
+ffn_up   = 121
+ffn_gate = 121
+ffn_down = 121
+other    = 121
+mtp_proj = 8             # Q8_0 floor (draft-sensitive; stays G4-free)

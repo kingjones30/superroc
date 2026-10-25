@@ -1,0 +1,4 @@
+# lfm2moe protect preset v0 (Jay 2026-10-21; committed from docs/models/lfm2.5-24b-a2b/RECIPE.md build D, where it was used
+# on 2026-10-14 but never added to protect/). Rule grammar: tools/gufo-quant/rules.hpp v0.5; first matching rule wins.
+# LFM2.5 ties the output head to the token embeddings (there is no output.weight), so this one rule protects both.
+=token_embd.weight Q6_K  # tied head + embeddings: never 4-bit (build D, paired q 0.927 vs stock Q4_K_M on wiki 512x320)

@@ -1,0 +1,19 @@
+# Recipe: FAST_COHERENT (GGUF ftype 104) — single-scale 101 with Q6_K token_embd.
+format_version = 1
+recipe = "fast_coherent"
+ftype = 104
+default = 101
+[classes]
+output   = 101
+token_embd = 14          # Q6_K
+attn_qkv = 101
+attn_kv_b = 101
+attn_v   = 101
+attn_k   = 101
+attn_q   = 101
+attn_out = 101
+ffn_up   = 101
+ffn_gate = 101
+ffn_down = 101
+other    = 101
+mtp_proj = 8

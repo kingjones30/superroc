@@ -1,0 +1,19 @@
+# Recipe: LEAN (GGUF ftype 101) — pure dual-scale 100 with Q5_K token_embd.
+format_version = 1
+recipe = "lean"
+ftype = 101
+default = 100
+[classes]
+output   = 100
+token_embd = 13          # Q5_K
+attn_qkv = 100
+attn_kv_b = 100
+attn_v   = 100
+attn_k   = 100
+attn_q   = 100
+attn_out = 100
+ffn_up   = 100
+ffn_gate = 100
+ffn_down = 100
+other    = 100
+mtp_proj = 8

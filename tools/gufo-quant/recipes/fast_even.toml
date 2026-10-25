@@ -1,0 +1,21 @@
+# Recipe: FAST_EVEN (GGUF ftype 103 + --pure) — Q4_0_ROCMFP4_FAST_EVEN: ftype
+# 103 with params.pure=true, every tensor to the single-scale default 101.
+format_version = 1
+recipe = "fast-even"
+ftype = 103
+pure = true
+default = 101            # Q4_0_ROCMFP4_FAST
+[classes]
+output   = 101
+token_embd = 101
+attn_qkv = 101
+attn_kv_b = 101
+attn_v   = 101
+attn_k   = 101
+attn_q   = 101
+attn_out = 101
+ffn_up   = 101
+ffn_gate = 101
+ffn_down = 101
+other    = 101
+mtp_proj = 8             # Q8_0 floor still applies
