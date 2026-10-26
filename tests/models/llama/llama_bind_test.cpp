@@ -3,12 +3,19 @@
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <sstream>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "src/core/gguf_reader.hpp"
+#include "src/core/model_config.hpp"
+#include "src/core/quant/ggml_dequant.hpp"
+#include "src/models/llama/weights.hpp"
 #include "src/models/qwen/state.hpp"
 
 namespace {
@@ -26,9 +33,173 @@ void Expect(bool ok, const std::string& msg) {
   }
 }
 
+// Minimal in-memory GGUF writer: header plus F32 tensors, enough for the
+// F6 bind-type test via OpenMemory.
+void AppendBytes(std::vector<std::uint8_t>& buf, const void* data,
+                 std::size_t size) {
+  const auto* bytes = static_cast<const std::uint8_t*>(data);
+  buf.insert(buf.end(), bytes, bytes + size);
+}
+
+template<typename T>
+void AppendPod(std::vector<std::uint8_t>& buf, T value) {
+  AppendBytes(buf, &value, sizeof(value));
+}
+
+void AppendString(std::vector<std::uint8_t>& buf, std::string_view text) {
+  AppendPod(buf, static_cast<std::uint64_t>(text.size()));
+  AppendBytes(buf, text.data(), text.size());
+}
+
+void AppendTensor(std::vector<std::uint8_t>& header,
+                  std::vector<std::uint8_t>& payload, std::string_view name,
+                  gufo::core::GgmlType type,
+                  std::initializer_list<std::uint64_t> dims,
+                  std::uint64_t& offset) {
+  AppendString(header, name);
+  AppendPod(header, static_cast<std::uint32_t>(dims.size()));
+  std::size_t elements = 1;
+  for (const auto dim : dims) {
+    AppendPod(header, dim);
+    elements *= dim;
+  }
+  AppendPod(header, static_cast<std::uint32_t>(type));
+  AppendPod(header, offset);
+  const std::size_t bytes = type == gufo::core::GgmlType::kF32
+                                ? elements * 4
+                                : gufo::quant::EncodedSizeBytes(type, elements);
+  Expect(bytes > 0, "tensor payload size must be positive");
+  payload.resize(payload.size() + bytes, 0);
+  offset += bytes;
+}
+
+void AppendF32Tensor(std::vector<std::uint8_t>& header,
+                     std::vector<std::uint8_t>& payload, std::string_view name,
+                     std::initializer_list<std::uint64_t> dims,
+                     std::uint64_t& offset) {
+  AppendTensor(header, payload, name, gufo::core::GgmlType::kF32, dims, offset);
+}
+
+// F6: an F32 projection (output.weight) must be refused at bind time: the
+// batched prefill FP16 GEMM throws on F32/BF16/Q8_K. Runs without
+// NANBEIGE_GGUF.
+void TestF32ProjectionRefused() {
+  constexpr std::uint64_t kHidden = 32;
+  constexpr std::uint64_t kVocab = 64;
+  std::vector<std::uint8_t> header;
+  std::vector<std::uint8_t> payload;
+  std::uint64_t offset = 0;
+  AppendF32Tensor(header, payload, "token_embd.weight", {kHidden, kVocab},
+                  offset);
+  AppendF32Tensor(header, payload, "output_norm.weight", {kHidden}, offset);
+  AppendF32Tensor(header, payload, "output.weight", {kHidden, kVocab}, offset);
+  std::vector<std::uint8_t> file;
+  AppendBytes(file, "GGUF", 4);
+  AppendPod(file, static_cast<std::uint32_t>(3));  // version
+  AppendPod(file, static_cast<std::uint64_t>(3));  // tensor count
+  AppendPod(file, static_cast<std::uint64_t>(1));  // metadata count
+  AppendString(file, "general.architecture");
+  AppendPod(file,
+            static_cast<std::uint32_t>(gufo::core::GgufValueType::kString));
+  AppendString(file, "llama");
+  file.insert(file.end(), header.begin(), header.end());
+  while (file.size() % 32 != 0) {
+    file.push_back(0);
+  }
+  file.insert(file.end(), payload.begin(), payload.end());
+  std::string error;
+  const auto reader =
+      gufo::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
+  Expect(reader != nullptr, "open synthetic GGUF: " + error);
+  gufo::core::ModelConfig config;
+  config.llama = true;
+  config.num_layers = 1;
+  config.hidden_size = static_cast<std::uint32_t>(kHidden);
+  config.intermediate_size = 64;
+  config.num_attention_heads = 2;
+  config.num_key_value_heads = 2;
+  config.head_dim = 16;
+  config.rotary_dim = 16;
+  config.context_length = 128;
+  config.vocab_size = static_cast<std::uint32_t>(kVocab);
+  const auto weights = gufo::models::BindLlamaWeights(*reader, config, &error);
+  Expect(!weights.has_value(), "F32 output.weight must not bind");
+  Expect(error.find("Unsupported llama tensor type") != std::string::npos,
+         "F32 projection refused for its type, got: " + error);
+}
+
+// F6 allowlist + F15: an all-quant 1-layer file binds, and binding prints
+// nothing on stdout (the prompt CLI owns stdout as the generation stream).
+void TestQuantFileBindsQuietly() {
+  constexpr std::uint64_t kHidden = 32;
+  constexpr std::uint64_t kVocab = 64;
+  constexpr std::uint64_t kInter = 64;
+  constexpr std::uint64_t kAttn = 32;
+  constexpr auto kQ8 = gufo::core::GgmlType::kQ8_0;
+  std::vector<std::uint8_t> header;
+  std::vector<std::uint8_t> payload;
+  std::uint64_t offset = 0;
+  std::uint64_t tensor_count = 0;
+  const auto add = [&](std::string_view name, gufo::core::GgmlType type,
+                       std::initializer_list<std::uint64_t> dims) {
+    AppendTensor(header, payload, name, type, dims, offset);
+    ++tensor_count;
+  };
+  add("token_embd.weight", gufo::core::GgmlType::kF32, {kHidden, kVocab});
+  add("output_norm.weight", gufo::core::GgmlType::kF32, {kHidden});
+  add("output.weight", kQ8, {kHidden, kVocab});
+  const std::string prefix = "blk.0.";
+  add(prefix + "attn_norm.weight", gufo::core::GgmlType::kF32, {kHidden});
+  add(prefix + "ffn_norm.weight", gufo::core::GgmlType::kF32, {kHidden});
+  add(prefix + "attn_q.weight", kQ8, {kAttn, kHidden});
+  add(prefix + "attn_k.weight", kQ8, {kAttn, kHidden});
+  add(prefix + "attn_v.weight", kQ8, {kAttn, kHidden});
+  add(prefix + "attn_output.weight", kQ8, {kHidden, kAttn});
+  add(prefix + "ffn_gate.weight", kQ8, {kInter, kHidden});
+  add(prefix + "ffn_up.weight", kQ8, {kInter, kHidden});
+  add(prefix + "ffn_down.weight", kQ8, {kHidden, kInter});
+  std::vector<std::uint8_t> file;
+  AppendBytes(file, "GGUF", 4);
+  AppendPod(file, static_cast<std::uint32_t>(3));  // version
+  AppendPod(file, tensor_count);
+  AppendPod(file, static_cast<std::uint64_t>(1));  // metadata count
+  AppendString(file, "general.architecture");
+  AppendPod(file,
+            static_cast<std::uint32_t>(gufo::core::GgufValueType::kString));
+  AppendString(file, "llama");
+  file.insert(file.end(), header.begin(), header.end());
+  while (file.size() % 32 != 0) {
+    file.push_back(0);
+  }
+  file.insert(file.end(), payload.begin(), payload.end());
+  std::string error;
+  const auto reader =
+      gufo::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
+  Expect(reader != nullptr, "open synthetic quant GGUF: " + error);
+  gufo::core::ModelConfig config;
+  config.llama = true;
+  config.num_layers = 1;
+  config.hidden_size = static_cast<std::uint32_t>(kHidden);
+  config.intermediate_size = static_cast<std::uint32_t>(kInter);
+  config.num_attention_heads = 2;
+  config.num_key_value_heads = 2;
+  config.head_dim = 16;
+  config.rotary_dim = 16;
+  config.context_length = 128;
+  config.vocab_size = static_cast<std::uint32_t>(kVocab);
+  std::stringstream captured;
+  auto* const old_cout = std::cout.rdbuf(captured.rdbuf());
+  const auto weights = gufo::models::BindLlamaWeights(*reader, config, &error);
+  std::cout.rdbuf(old_cout);
+  Expect(weights.has_value(), "quant llama file must bind: " + error);
+  Expect(captured.str().empty(), "bind must not print on stdout");
+}
+
 }  // namespace
 
 int main() {
+  TestF32ProjectionRefused();
+  TestQuantFileBindsQuietly();
   const char* gguf_env = std::getenv("NANBEIGE_GGUF");
   if (gguf_env == nullptr || gguf_env[0] == '\0') {
     std::cout << "SKIP llama_bind_test: NANBEIGE_GGUF is not set\n";

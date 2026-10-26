@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstring>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -328,13 +329,17 @@ void QrhHeadCases() {
 // Super ROC QVB: LaunchQwenMoeRouteRows (1..4 rows, with and without the
 // shared-expert gate) must match per-row LaunchQwenMoeRoute +
 // LaunchQwenMoeShexpSigmoid bit for bit on real KAT layer-0 router weights.
-void QvbRowsCases() {
+bool QvbRowsCases() {
   const char* path_env = std::getenv("KAT_GGUF");
   const std::string path =
       path_env != nullptr
           ? path_env
           : "/path/to/models/swap/kat-coder/"
             "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf";
+  if (!std::filesystem::exists(path)) {
+    std::cout << "SKIP: KAT GGUF not found: " << path << " (set KAT_GGUF)\n";
+    return false;
+  }
   std::string error;
   auto reader = gufo::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "qvb open: " + error);
@@ -438,6 +443,7 @@ void QvbRowsCases() {
   std::cout << "QVB rows vs per-row: " << cases << " cases, " << mismatched
             << " mismatched\n";
   Expect(mismatched == 0, "qvb rows bit-identical");
+  return true;
 }
 
 }  // namespace
@@ -450,7 +456,9 @@ int main() {
                                        nullptr) == 1,
          "qrh null rejected");
   QrhHeadCases();
-  QvbRowsCases();
+  if (!QvbRowsCases()) {
+    return 77;
+  }
 
   constexpr int k_small = 32;
   constexpr int e_small = 32;
@@ -482,6 +490,10 @@ int main() {
           ? path_env
           : "/path/to/models/swap/kat-coder/"
             "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf";
+  if (!std::filesystem::exists(path)) {
+    std::cout << "SKIP: KAT GGUF not found: " << path << " (set KAT_GGUF)\n";
+    return 77;
+  }
   std::string error;
   auto reader = gufo::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open: " + error);

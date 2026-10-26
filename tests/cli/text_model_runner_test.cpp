@@ -2636,7 +2636,45 @@ void TestServerInstructionsAreFraming() {
 
 }  // namespace
 
+void TestLlamaRenderPrompt() {
+  using gufo::tokenization::ChatRole;
+  // F13: content plus framing_suffix (structured-output instructions) reach
+  // the prompt when no tools are requested.
+  ChatRequest plain({{ChatRole::kUser, "hi"}});
+  plain.messages.front().framing_suffix = " [suffix]";
+  const auto rendered = gufo::server::LlamaRenderPrompt(plain);
+  Expect(rendered.has_value() && *rendered == "hi [suffix]",
+         "llama render keeps content and framing_suffix");
+  // F13: tool requests are refused, not silently dropped.
+  for (const auto choice :
+       {ChatRequest::ToolChoice::kAuto, ChatRequest::ToolChoice::kRequired}) {
+    ChatRequest tools({{ChatRole::kUser, "hi"}});
+    tools.tool_choice = choice;
+    tools.tools = {{.name = "get_weather"}};
+    Expect(!gufo::server::LlamaRenderPrompt(tools).has_value(),
+           "llama render refuses tool requests");
+  }
+  // ToolChoice::kNone means the tools ride along unused, as in the Qwen
+  // template path.
+  ChatRequest none({{ChatRole::kUser, "hi"}});
+  none.tool_choice = ChatRequest::ToolChoice::kNone;
+  none.tools = {{.name = "get_weather"}};
+  Expect(gufo::server::LlamaRenderPrompt(none).has_value(),
+         "llama render ignores tools when choice is none");
+}
+
+void TestLlamaIncrementalTextNotExact() {
+  // F14: llama TokenText pieces are not Decode()-exact (leading space),
+  // other families are unaffected.
+  Expect(!gufo::server::RunnerIncrementalTextIsExact(true),
+         "llama incremental text is not exact");
+  Expect(gufo::server::RunnerIncrementalTextIsExact(false),
+         "non-llama incremental text stays exact");
+}
+
 int main() {
+  TestLlamaRenderPrompt();
+  TestLlamaIncrementalTextNotExact();
   TestPromptCountingValidatesCapabilitiesBeforeInference();
   TestFlintToolGrammarStartsInTheAutoPhase();
   TestServerInstructionsAreFraming();

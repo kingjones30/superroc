@@ -32,8 +32,8 @@
 //
 // Also asserts the dispatch contract: the shared IsTiledAttentionSupported
 // still rejects (32,2,128) and (16,2), the WMMA launcher accepts
-// (32,2,128) with window 0 and window > 0 plus (24,4,256) and (16,2,256),
-// and rejects (32,2,256), (16,2,128) and (32,4,128).
+// (32,2,128) with window 0 and window > 0 plus (24,4,256), (16,2,256),
+// (32,4,128) and (56,8,128), and rejects (32,2,256) and (16,2,128).
 
 #include <algorithm>
 #include <array>
@@ -863,9 +863,10 @@ void CheckScalePair() {
 }
 
 // The dispatch contract: the WMMA launcher accepts (32,2,128) with window
-// 0 and window > 0 plus (24,4,256) and (16,2,256), and rejects anything
-// else, so unknown shapes keep falling back. The windowed instantiation
-// rejects lse_out (no split path with a per-row window).
+// 0 and window > 0 plus (24,4,256), (16,2,256), (32,4,128) and (56,8,128),
+// and rejects anything else, so unknown shapes keep falling back. The
+// windowed instantiation rejects lse_out (no split path with a per-row
+// window).
 void CheckDispatch() {
   constexpr std::size_t kBatch = 64;
   constexpr std::uint32_t kCtx = 1024;
@@ -897,11 +898,11 @@ void CheckDispatch() {
         kBatch, kCtx, hq, hkv, hd, nullptr, lse, 0, false, {}, {}, window);
   };
   if (!wmma(16, 2, 256, 0) || !wmma(24, 4, 256, 0) || !wmma(32, 2, 128, 0) ||
-      !wmma(32, 2, 128, 2048)) {
+      !wmma(32, 2, 128, 2048) || !wmma(32, 4, 128, 0) || !wmma(56, 8, 128, 0)) {
     std::cerr << "WMMA launcher rejected a supported head config\n";
     std::abort();
   }
-  if (wmma(32, 2, 256, 0) || wmma(16, 2, 128, 0) || wmma(32, 4, 128, 0)) {
+  if (wmma(32, 2, 256, 0) || wmma(16, 2, 128, 0)) {
     std::cerr << "WMMA launcher accepted an unsupported head config\n";
     std::abort();
   }
@@ -921,7 +922,8 @@ void CheckDispatch() {
     std::abort();
   }
   HIP_CHECK(hipDeviceSynchronize());
-  std::cout << "  dispatch: WMMA accepts (32,2,128)x2+(24,4)+(16,2), rejects "
+  std::cout << "  dispatch: WMMA accepts "
+               "(32,2,128)x2+(24,4)+(16,2)+(32,4)+(56,8), rejects "
                "the rest; tiled still rejects Glimmer\n";
   for (float* p : {d_q, d_gate, d_k, d_v, d_cache, d_out, d_lse}) {
     HIP_CHECK(hipFree(p));

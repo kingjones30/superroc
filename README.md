@@ -16,7 +16,8 @@ Super ROC is a fork of [Gufo](https://github.com/gufo-org/gufo) v0.19.0. Issues,
   for byte the same as the ROCmFPX `llama-quantize`. See [docs/gufo-quant.md](docs/gufo-quant.md).
 - **More model families**: `qwen35` / `qwen35moe` ROC builds (Qwen3.8, KAT-Coder, Ornith, MiniCPM-V, OxCoder, Agnes,
   Nex, BTL-4, MiMo), `bailingmoe3` (Ling-3.0-flash and Ling-3.0-flash-VL), `lfm2` / `lfm2moe` (LFM2.5), `flint`
-  (Flint 40B-A2.5B: sliding-window and position-free attention layers with attention sinks) and Muse Glimmer.
+  (Flint 40B-A2.5B: sliding-window and position-free attention layers with attention sinks), `llama`
+  (Nanbeige4.3-33B-Base, serve-only: [limits](docs/models/llama/README.md)) and Muse Glimmer.
 - **Drafting**: embedded and sidecar MTP heads with a per-request draft depth and exact verification, the DSpark
   drafter, and prompt-cache snapshots that keep working while a drafter is on.
 - **Tool calls** in each model's native format (Qwen, GLM-style, Ling, Flint), constrained by a grammar built from the
@@ -142,9 +143,7 @@ export ANTHROPIC_SMALL_FAST_MODEL=kat-coder
 claude
 ```
 
-`ANTHROPIC_MODEL` is the name the server was started with (`--served-model-name`). In a test with
-[Flint 40B-A2.5B](docs/models/flint/README.md), Claude Code created `hello.py`, ran it with `python3` and reported its
-output with no API error.
+`ANTHROPIC_MODEL` is the name the server was started with (`--served-model-name`).
 
 For Open WebUI, VS Code, the OpenAI SDK and Responses-API clients, set the API base URL to `http://localhost:8080/v1`.
 Anthropic SDK clients and Claude Code use `http://localhost:8080` as the base URL.

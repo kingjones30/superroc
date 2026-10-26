@@ -1195,6 +1195,13 @@ int RunPrompt(std::span<const char* const> args) {
     auto gpu_exec = gufo::hip::QwenGpuExecutor::CreateFromGguf(
         reader, &err, /*max_context=*/4096, GlimmerAwarePolicy(*reader));
     if (gpu_exec) {
+      // LLAMA (F3): prompt/chat drive only the Qwen tokenizer. Refuse
+      // llama here with a clear error instead of dereferencing null below.
+      if (gpu_exec->GetConfig().llama) {
+        std::cerr << "Error: llama models are not supported by `prompt`; "
+                     "serve them with `superroc serve`.\n";
+        return 1;
+      }
       PrintModelLoadTime(model_load_start);
       auto prompt_tokens = encode_prompt(gpu_exec->GetTokenizer());
       try {
@@ -1261,6 +1268,12 @@ int RunPrompt(std::span<const char* const> args) {
   }
   PrintModelLoadTime(model_load_start);
 
+  // LLAMA (F3): the CPU generator path also drives the Qwen tokenizer only.
+  if (generator->GetConfig().llama) {
+    std::cerr << "Error: llama models are not supported by `prompt`; "
+                 "serve them with `superroc serve`.\n";
+    return 1;
+  }
   const auto prompt_tokens = encode_prompt(generator->GetTokenizer());
 
   if (opt.verbose) {
@@ -1402,6 +1415,14 @@ int RunChat(std::span<const char* const> args) {
       PrintModelLoadTime(model_load_start, false);
       return 1;
     }
+    // LLAMA (F3): chat drives only the Qwen tokenizer. Refuse llama here
+    // with a clear error instead of dereferencing null below.
+    if (gpu_executor->GetConfig().llama) {
+      std::cerr << "Error: llama models are not supported by `chat`; "
+                   "serve them with `superroc serve`.\n";
+      PrintModelLoadTime(model_load_start, false);
+      return 1;
+    }
     tokenizer = &gpu_executor->GetTokenizer();
     architecture = gpu_executor->GetConfig().architecture;
     if (opt.verbose)
@@ -1420,6 +1441,13 @@ int RunChat(std::span<const char* const> args) {
     generator = models::QwenGenerator::CreateFromGguf(*reader, &err);
     if (!generator) {
       std::cerr << "Error creating Qwen generator: " << err << '\n';
+      PrintModelLoadTime(model_load_start, false);
+      return 1;
+    }
+    // LLAMA (F3): the CPU chat path also drives the Qwen tokenizer only.
+    if (generator->GetConfig().llama) {
+      std::cerr << "Error: llama models are not supported by `chat`; "
+                   "serve them with `superroc serve`.\n";
       PrintModelLoadTime(model_load_start, false);
       return 1;
     }

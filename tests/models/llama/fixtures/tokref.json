@@ -1,8 +1,5 @@
 {
- "model": "/home/kingjones/models/nanbeige/nanbeige4.3-33b-base-q4_k_m.gguf",
  "add_special": true,
- "server": "/home/kingjones/src/rocmfpx-fork-cachefix/build-hipvk/bin/llama-server",
- "ngl": 0,
  "cases": [
   {
    "name": "english",

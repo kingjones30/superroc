@@ -73,6 +73,12 @@ std::optional<SpmTokenizer> SpmTokenizer::FromGguf(
   if (!model.has_value() || *model != "llama") {
     return fail("tokenizer.ggml.model must be llama");
   }
+  // LLAMA (F12): only the default pre-tokenizer is implemented; any other
+  // pre would silently mis-segment every prompt.
+  const auto pre = reader.GetMetadataString("tokenizer.ggml.pre");
+  if (pre.has_value() && *pre != "default") {
+    return fail("tokenizer.ggml.pre must be default");
+  }
   const auto tokens = reader.GetMetadataStringArray("tokenizer.ggml.tokens");
   const auto* scores_meta = reader.FindMetadata("tokenizer.ggml.scores");
   const auto* score_values =
@@ -83,6 +89,13 @@ std::optional<SpmTokenizer> SpmTokenizer::FromGguf(
   if (tokens.empty() || score_values == nullptr ||
       tokens.size() != score_values->size() || tokens.size() != types.size()) {
     return fail("tokenizer tokens/scores/token_type length mismatch");
+  }
+  // LLAMA (F7): an id >= vocab_size overruns the embedding table, so the
+  // tokenizer array must match the model vocab exactly.
+  const auto vocab_size = reader.GetMetadataUint32("llama.vocab_size");
+  if (!vocab_size.has_value() || *vocab_size == 0U ||
+      tokens.size() != *vocab_size) {
+    return fail("tokenizer tokens must match llama.vocab_size");
   }
 
   SpmTokenizer tok;
@@ -114,17 +127,46 @@ std::optional<SpmTokenizer> SpmTokenizer::FromGguf(
               return tok.texts_[static_cast<std::size_t>(a)].size() >
                      tok.texts_[static_cast<std::size_t>(b)].size();
             });
+  // LLAMA (F8): a byte with no fallback token made Encode emit -1, which the
+  // serve backend casts to 4294967295 and reads out of bounds. Fall back to
+  // the unknown token so Encode never emits a negative id.
+  std::int32_t unk = -1;
+  for (std::size_t i = 0; i < tok.types_.size(); ++i) {
+    if (tok.types_[i] == TokenType::kUnknown) {
+      unk = static_cast<std::int32_t>(i);
+      break;
+    }
+  }
+  if (unk < 0) {
+    return fail("tokenizer has no unknown token");
+  }
+  for (unsigned i = 0; i < 256; ++i) {
+    if (tok.byte_id_[i] < 0) {
+      tok.byte_id_[i] = unk;
+    }
+  }
 
+  // LLAMA (F7): bos/eos/pad are emitted unchecked by Encode; an id outside
+  // the vocab overruns the embedding table.
   if (const auto bos =
           reader.GetMetadataUint32("tokenizer.ggml.bos_token_id")) {
+    if (*bos >= tokens.size()) {
+      return fail("tokenizer.ggml.bos_token_id out of range");
+    }
     tok.bos_ = static_cast<std::int32_t>(*bos);
   }
   if (const auto eos =
           reader.GetMetadataUint32("tokenizer.ggml.eos_token_id")) {
+    if (*eos >= tokens.size()) {
+      return fail("tokenizer.ggml.eos_token_id out of range");
+    }
     tok.eos_ = static_cast<std::int32_t>(*eos);
   }
   if (const auto pad =
           reader.GetMetadataUint32("tokenizer.ggml.padding_token_id")) {
+    if (*pad >= tokens.size()) {
+      return fail("tokenizer.ggml.padding_token_id out of range");
+    }
     tok.pad_ = static_cast<std::int32_t>(*pad);
   }
   if (const auto add_bos =

@@ -1199,7 +1199,9 @@ public:
                 .snapshot = true,
                 .fork = true,
                 .final_token_advance_required = !speculative_enabled,
-                .incremental_text_is_exact = true,
+                // LLAMA (F14): TokenText pieces are not Decode()-exact.
+                .incremental_text_is_exact =
+                    RunnerIncrementalTextIsExact(model_->GetConfig().llama),
                 .multi_token_decode = speculative_enabled,
                 // LFM2 verifies per session: the batched verifier kernels
                 // assume the Qwen DeltaNet stack (see
@@ -1396,11 +1398,13 @@ public:
           QwenChatOptions(request, max_context_));
     }
     if (model_->GetConfig().llama) {
-      std::string concat;
-      for (const auto& message : request.messages) {
-        concat += message.content;
+      // LLAMA (F13): content plus framing_suffix (structured-output
+      // instructions); tool requests are refused, not silently dropped.
+      const auto rendered = LlamaRenderPrompt(request);
+      if (!rendered.has_value()) {
+        return std::nullopt;
       }
-      return Tokenize(concat);
+      return Tokenize(*rendered);
     }
     return tokenization::QwenChatTemplate::RenderAndTokenize(
         model_->GetTokenizer(), request.messages,

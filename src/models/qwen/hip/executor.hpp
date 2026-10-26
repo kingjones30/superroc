@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -77,6 +78,15 @@ struct QwenGpuMemoryUsage {
   }
 };
 
+/// LLAMA (F4): llama decodes/prefills require the fp32 KV cache. Central
+/// override applied by QwenGpuExecutor::Create, factored out so CPU tests can
+/// verify the policy without a loaded GPU model.
+inline void ApplyLlamaExecutionPolicy(QwenExecutionPolicy& policy) {
+  policy.kv_cache_storage = QwenKvCacheStorage::kFp32;
+  policy.fuse_qk_norm_rope_kv = false;
+  policy.glimmer_fp16_kv = true;
+}
+
 /// Immutable GPU-visible Qwen model resources shared by executor sessions.
 class QwenGpuModel {
 public:
@@ -106,8 +116,13 @@ public:
   [[nodiscard]] const models::QwenModelWeights& GetWeights() const noexcept {
     return weights_;
   }
-  [[nodiscard]] const tokenization::QwenTokenizer& GetTokenizer()
-      const noexcept {
+  // LLAMA (F3): llama models carry no Qwen tokenizer; fail loudly instead
+  // of dereferencing null.
+  [[nodiscard]] const tokenization::QwenTokenizer& GetTokenizer() const {
+    if (tokenizer_ == nullptr) {
+      throw std::logic_error(
+          "llama model has no Qwen tokenizer; use GetLlamaTokenizer()");
+    }
     return *tokenizer_;
   }
   [[nodiscard]] const models::llama::SpmTokenizer* GetLlamaTokenizer()
@@ -479,8 +494,14 @@ public:
     return weights_.config;
   }
 
-  [[nodiscard]] const tokenization::QwenTokenizer& GetTokenizer()
-      const noexcept {
+  // LLAMA (F3): llama executors carry no Qwen tokenizer; fail loudly
+  // instead of dereferencing null.
+  [[nodiscard]] const tokenization::QwenTokenizer& GetTokenizer() const {
+    if (tokenizer_ == nullptr) {
+      throw std::logic_error(
+          "llama model has no Qwen tokenizer; use "
+          "GetModel().GetLlamaTokenizer()");
+    }
     return *tokenizer_;
   }
 

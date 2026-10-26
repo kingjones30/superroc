@@ -1384,6 +1384,15 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     if (!rope_dim.has_value() || *rope_dim != *key_len) {
       return fail("rope.dimension_count");
     }
+    // LLAMA (F11): decode runs Flint split-K attention, which refuses
+    // head_dim != 128 and GQA groups over 8. Refuse those files at load
+    // instead of throwing on the first decode token.
+    if (*key_len != 128U) {
+      return fail("attention.key_length (llama requires head_dim 128)");
+    }
+    if ((*heads / *kv_heads) > 8U) {
+      return fail("attention.head_count_kv (llama GQA group over 8)");
+    }
     if (!context.has_value() || *context == 0U) {
       return fail("context_length");
     }
@@ -1423,6 +1432,18 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     config.mtp_num_layers = 0;
     config.is_moe = false;
     config.attn_sinks = false;
+    // LLAMA (F9): sliding-window attention and scaled RoPE are not
+    // implemented; a file declaring them would generate silently wrong
+    // output under full causal attention, so refuse it at load.
+    if (const auto window =
+            GetMetadataUint32(prefix + "attention.sliding_window");
+        window.has_value() && *window != 0U) {
+      return fail("attention.sliding_window");
+    }
+    if (const auto scaling = GetMetadataString(prefix + "rope.scaling.type");
+        scaling.has_value() && *scaling != "none") {
+      return fail("rope.scaling.type");
+    }
     config.swa_window = 0;
     if (config.num_layers > config.use_rope.size()) {
       return fail("block_count");
