@@ -196,7 +196,7 @@ void QwenDFlashGpuExecutor::InjectTargetContextBatch(
   LaunchBatchedRMSNorm(coordinator.d_fused_features_,
                        static_cast<const float*>(weights.fc_norm.data),
                        coordinator.d_block_normed_, nullptr, rows, hidden_size,
-                       1e-6F, stream);
+                       weights.config.norm_eps_pre, stream);
   for (std::size_t index = 0; index < requests.size(); ++index) {
     const auto& request = requests[index];
     if (counts[index] != 0 && request.trace)
@@ -228,7 +228,7 @@ void QwenDFlashGpuExecutor::InjectTargetContextBatch(
             static_cast<const float*>(layer.attn_k_norm.data), nullptr, key,
             nullptr, nullptr, nullptr, nullptr, 0, request.position, count, 0,
             0, config.num_key_value_heads, config.head_dim, config.rotary_dim,
-            config.rope_theta, 1e-6F, stream);
+            config.rope_theta, config.norm_eps_pre, stream);
       } else {
         LaunchBatchedRoPE(nullptr, key, count, 0, config.num_key_value_heads,
                           config.head_dim, config.rotary_dim, request.position,
@@ -407,9 +407,10 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
         emit("layer." + std::to_string(layer_index) + "." + std::string(name),
              source, width);
     };
-    LaunchBatchedRMSNorm(
-        scratch.hidden, static_cast<const float*>(layer.attn_norm.data),
-        scratch.normed, nullptr, rows, hidden_size, 1e-6F, stream);
+    LaunchBatchedRMSNorm(scratch.hidden,
+                         static_cast<const float*>(layer.attn_norm.data),
+                         scratch.normed, nullptr, rows, hidden_size,
+                         weights.config.norm_eps_pre, stream);
     stage("attn_norm", scratch.normed, hidden_size);
     const float* attn_in = scratch.normed;
     if (draft.has_dynamic_conv) {
@@ -433,7 +434,7 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
           nullptr, nullptr, nullptr, nullptr, 0, requests[index].position,
           counts[index] + 1U, 0, config.num_attention_heads,
           config.num_key_value_heads, config.head_dim, config.rotary_dim,
-          config.rope_theta, 1e-6F, stream);
+          config.rope_theta, config.norm_eps_pre, stream);
     }
     stage("q", scratch.query, query_size);
     stage("k", scratch.key, kv_size);
@@ -469,9 +470,10 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
     LaunchBatchedResidualAdd(scratch.hidden, attn_residual_in, scratch.hidden,
                              rows, hidden_size, stream);
     stage("attn_residual", scratch.hidden, hidden_size);
-    LaunchBatchedRMSNorm(
-        scratch.hidden, static_cast<const float*>(layer.ffn_norm.data),
-        scratch.normed, nullptr, rows, hidden_size, 1e-6F, stream);
+    LaunchBatchedRMSNorm(scratch.hidden,
+                         static_cast<const float*>(layer.ffn_norm.data),
+                         scratch.normed, nullptr, rows, hidden_size,
+                         weights.config.norm_eps_pre, stream);
     stage("ffn_norm", scratch.normed, hidden_size);
     const float* ffn_in = scratch.normed;
     if (draft.has_dynamic_conv) {
@@ -501,9 +503,10 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
                              rows, hidden_size, stream);
     stage("output", scratch.hidden, hidden_size);
   }
-  LaunchBatchedRMSNorm(
-      scratch.hidden, static_cast<const float*>(weights.output_norm.data),
-      scratch.normed, nullptr, rows, hidden_size, 1e-6F, stream);
+  LaunchBatchedRMSNorm(scratch.hidden,
+                       static_cast<const float*>(weights.output_norm.data),
+                       scratch.normed, nullptr, rows, hidden_size,
+                       weights.config.norm_eps_pre, stream);
   emit("normalized", scratch.normed, hidden_size);
   // The vocabulary projection consumes proposals only. The old hidden buffer
   // is free after normalization, and holds these compacted input rows.

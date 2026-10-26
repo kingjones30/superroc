@@ -1180,6 +1180,12 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
 std::vector<tokenization::TokenId> QwenGpuExecutor::ForwardVerificationChunk(
     std::span<const tokenization::TokenId> candidate_tokens,
     std::uint32_t start_pos, bool capture_logits) {
+  // NBFAST T1: llama verifies through its own prefill path (adjacent-pair
+  // RoPE, fp32 KV); the decode-equivalent stack below is Qwen-shaped.
+  if (weights_.config.llama) {
+    return ForwardLlamaVerificationChunk(candidate_tokens, start_pos,
+                                         capture_logits);
+  }
   if (!weights_.config.lfm2) {
     return ForwardDecodeEquivalentVerificationChunk(candidate_tokens, start_pos,
                                                     capture_logits);
@@ -1227,6 +1233,19 @@ void QwenGpuExecutor::CommitVerificationChunk(
     std::span<const tokenization::TokenId> committed_tokens,
     std::uint32_t start_pos) {
   if (committed_tokens.empty()) {
+    return;
+  }
+  // NBFAST T1: llama has no recurrent state to rebuild, and its verification
+  // forward already wrote the committed rows' KV at their final positions
+  // (the same state a fully-accepted chunk keeps). Rejected rows sit beyond
+  // the committed position and are overwritten by the next forward, which
+  // writes KV before reading it. Re-forwarding the committed prefix through
+  // single-token decode would cost one full weight pass per token and erase
+  // the speculation gain, so commit is bookkeeping only here.
+  if (weights_.config.llama) {
+    replaying_ssm_state_ = false;
+    arena_.DisableSsmReplayCapture();
+    HIP_CHECK(hipStreamSynchronize(arena_.stream));
     return;
   }
   std::size_t replayed = 0;

@@ -56,6 +56,16 @@ void ReadMatrixRow(const models::QwenTensorRef& tensor, std::size_t row,
     }
     return;
   }
+  // NBFAST T1: the loader accepts F16 matrices (IsSupportedMatrixType) but
+  // the packer had no F16 reader; F16 drafters failed to load at all.
+  if (tensor.type == core::GgmlType::kF16) {
+    const std::size_t offset = row * columns;
+    for (std::size_t column = 0; column < columns; ++column) {
+      output[column] = quant::Fp16ToFloat(
+          static_cast<const std::uint16_t*>(tensor.data)[offset + column]);
+    }
+    return;
+  }
 
   const void* source = QuantizedRow(tensor, row, columns);
   if (source == nullptr) {

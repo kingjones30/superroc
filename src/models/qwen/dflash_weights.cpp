@@ -213,6 +213,14 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
     return std::nullopt;
   }
 
+  // NBFAST T1: carry the drafter's RMSNorm epsilon (Nanbeige: 1e-5; the
+  // Qwen file's 1e-6 matches the executor's former hardcoded value, so
+  // existing drafters are unchanged). Absent key keeps the 1e-6 default.
+  if (const auto eps = reader.GetMetadataFloat32(
+          prefix + "attention.layer_norm_rms_epsilon");
+      eps.has_value() && *eps > 0.0F) {
+    config.norm_eps_pre = *eps;
+  }
   config.hidden_size = *hidden_size;
   config.intermediate_size = *intermediate_size;
   config.num_attention_heads = *num_attention_heads;
@@ -307,7 +315,9 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
         df_cfg.conv_group_size == 0 ||
         config.hidden_size % df_cfg.conv_group_size != 0 ||
         df_cfg.selector_rank == 0 || df_cfg.selector_top_k == 0 ||
-        df_cfg.selector_top_k > 16U ||
+        // NBFAST T1: the Nanbeige DFlash2 drafter is trained with top-k 32;
+        // the selector kernels size their lists by kMaxSelectorTopK (32).
+        df_cfg.selector_top_k > 32U ||
         df_cfg.sliding_window < df_cfg.block_size || *is_causal) {
       SetError(error_msg, "DFlash-2 GGUF has an invalid diffusion topology");
       return std::nullopt;
