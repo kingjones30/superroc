@@ -107,8 +107,9 @@ int main() {
   Check(llama != nullptr &&
             llama->vision_refusal == "llama does not support vision",
         "llama vision text");
-  Check(llama != nullptr && llama->speculative_refusal ==
-                                "llama has no speculative decoding yet",
+  // NBFAST T1: llama gained DFlash2 drafting; like LFM2, the blanket
+  // refusal stays empty and the serve loader refuses other backends.
+  Check(llama != nullptr && llama->speculative_refusal.empty(),
         "llama speculative text");
 
   // Compile-time use (package constants are initialised from the table).

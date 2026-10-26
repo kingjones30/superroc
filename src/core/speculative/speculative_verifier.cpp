@@ -17,6 +17,7 @@
 #include <type_traits>
 
 #include "src/core/sampling.hpp"
+#include "src/models/llama/spm_tokenizer.hpp"
 
 namespace gufo::speculative {
 namespace {
@@ -226,7 +227,9 @@ public:
     std::size_t rows = 0;
     for (const auto& item : items) {
       auto* target = dynamic_cast<QwenGpuSpeculativeTarget*>(item.executor);
-      if (target == nullptr)
+      // NBFAST T1: the static batched verifier runs the Qwen layer stack;
+      // llama targets verify per session through their own prefill path.
+      if (target == nullptr || target->executor_.GetConfig().llama)
         return ISpeculativeTargetExecutor::ForwardVerificationBatch(items);
       targets.push_back(target);
       gpu_items.push_back({&target->executor_, item.tokens, item.position,
@@ -257,10 +260,27 @@ public:
 
   void FinishVerification() override { executor_.FinishVerification(); }
 
+  // NBFAST T1: llama executors have no Qwen tokenizer (GetTokenizer throws);
+  // route through the SPM tokenizer when the target is a llama config.
+  const models::llama::SpmTokenizer* LlamaTokenizer() const noexcept {
+    return executor_.GetConfig().llama
+               ? executor_.GetModel().GetLlamaTokenizer()
+               : nullptr;
+  }
+
   tokenization::TokenId GetEosTokenId() const noexcept override {
+    if (executor_.GetConfig().llama) {
+      const auto* tok = LlamaTokenizer();
+      return tok != nullptr ? static_cast<tokenization::TokenId>(tok->Eos())
+                            : 0;
+    }
     return executor_.GetTokenizer().GetEosTokenId();
   }
   bool IsStopToken(tokenization::TokenId token) const noexcept override {
+    if (executor_.GetConfig().llama) {
+      const auto* tok = LlamaTokenizer();
+      return tok != nullptr && tok->IsStop(static_cast<std::int32_t>(token));
+    }
     return executor_.GetTokenizer().IsStopToken(token);
   }
 
@@ -270,6 +290,18 @@ public:
 
   std::string_view DecodeToken(
       tokenization::TokenId token_id) const noexcept override {
+    if (executor_.GetConfig().llama) {
+      // The caller consumes the piece before the next DecodeToken call.
+      try {
+        const auto* tok = LlamaTokenizer();
+        llama_piece_ = tok != nullptr
+                           ? tok->TokenText(static_cast<std::int32_t>(token_id))
+                           : std::string{};
+      } catch (...) {
+        llama_piece_.clear();
+      }
+      return llama_piece_;
+    }
     return executor_.GetTokenizer().DecodeToken(token_id);
   }
 
@@ -300,6 +332,7 @@ private:
   }
 
   hip::QwenGpuExecutor& executor_;
+  mutable std::string llama_piece_;
 };
 
 }  // namespace

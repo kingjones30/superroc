@@ -166,6 +166,18 @@ void ExecuteLlamaDecodeStep(QwenGpuArena& arena,
       LaunchResidualAdd(scratch.decode.hidden.data(), scratch.ffn.out.data(),
                         scratch.decode.hidden.data(), hidden, arena.stream);
     }
+    // NBFAST T1: DFlash2 target-layer tap, same point as the Qwen decode
+    // step (layer output after the FFN residual add).
+    if (const auto tap_index = arena.GetTargetLayerCaptureIndex(l);
+        tap_index.has_value()) {
+      if (hipMemcpyAsync(arena.d_target_layer_features +
+                             (*tap_index * hidden),
+                         scratch.decode.hidden.data(),
+                         hidden * sizeof(float), hipMemcpyDeviceToDevice,
+                         arena.stream) != hipSuccess) {
+        throw std::runtime_error("llama target-layer tap copy failed");
+      }
+    }
   }
 
   if (!compute_logits) {
@@ -209,6 +221,13 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptChunk(
     const std::uint32_t pos = start_pos + static_cast<std::uint32_t>(i);
     ExecuteLlamaDecodeStep(arena_, weights_, prompt_tokens[i], pos,
                            compute_logits && i + 1 == batch, &vision_input_);
+    // NBFAST T1: prompt hidden capture for the single-token chunk path,
+    // appended in the same [token][tap][hidden] order as the batched path.
+    if (capture_prompt_hidden_) {
+      const auto hidden = CopyLastHidden();
+      h_prompt_hidden_.insert(h_prompt_hidden_.end(), hidden.begin(),
+                              hidden.end());
+    }
   }
   if (!compute_logits) {
     return 0;

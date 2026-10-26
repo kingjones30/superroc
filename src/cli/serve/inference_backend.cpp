@@ -776,11 +776,17 @@ public:
     // covers EOS, so a sentinel id here would change nothing. An ignore-EOS
     // request instead publishes the stop token in AppendSpeculativeSelection
     // and continues, at the cost of a window clipped on every EOS crossing.
+    const auto eos_id = model_->GetConfig().llama
+                            ? static_cast<tokenization::TokenId>(
+                                  model_->GetLlamaTokenizer() != nullptr
+                                      ? model_->GetLlamaTokenizer()->Eos()
+                                      : 0)
+                            : model_->GetTokenizer().GetEosTokenId();
     return {*verifier_,
             sequence_,
             static_cast<std::uint32_t>(position_),
             *frontier_,
-            model_->GetTokenizer().GetEosTokenId(),
+            eos_id,
             static_cast<std::uint32_t>(std::min<std::size_t>(
                 remaining, std::numeric_limits<std::uint32_t>::max())),
             sampler};
@@ -956,14 +962,28 @@ private:
   bool AppendSpeculativeSelection(TextRunnerToken token,
                                   sampling::SamplerState& sampler,
                                   TextDecodeStep& result) {
-    if (stop_at_eos() && model_->GetTokenizer().IsStopToken(token)) {
+    const bool stop =
+        model_->GetConfig().llama
+            ? (stop_at_eos() && model_->GetLlamaTokenizer() != nullptr &&
+               model_->GetLlamaTokenizer()->IsStop(
+                   static_cast<std::int32_t>(token)))
+            : (stop_at_eos() && model_->GetTokenizer().IsStopToken(token));
+    if (stop) {
       result.stop = true;
       return false;
+    }
+    std::string piece;
+    if (model_->GetConfig().llama) {
+      const auto* tok = model_->GetLlamaTokenizer();
+      piece = tok != nullptr ? tok->TokenText(static_cast<std::int32_t>(token))
+                             : std::string{};
+    } else {
+      piece = std::string(model_->GetTokenizer().DecodeToken(token));
     }
     result.selections.push_back({
         .stop = false,
         .token = token,
-        .piece = std::string(model_->GetTokenizer().DecodeToken(token)),
+        .piece = std::move(piece),
     });
     sequence_.push_back(token);
     set_pending_token(token);
@@ -4033,6 +4053,16 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
       SetError(error, std::string(arch) +
                           " supports only --speculative dflash2 with a DSpark "
                           "drafter (--dflash-model); it has no MTP head");
+      return false;
+    }
+    // NBFAST T1: plain Llama accepts only DFlash2 drafting, for the same
+    // reason as LFM2 (no MTP head in the target file).
+    if (gufo::core::IsModelFamily(arch, gufo::core::ModelFamilyId::kLlama) &&
+        speculative_config.backend != TextSpeculativeBackend::kDisabled &&
+        speculative_config.backend != TextSpeculativeBackend::kDFlash) {
+      SetError(error, std::string(arch) +
+                          " supports only --speculative dflash2 "
+                          "(--dflash-model); it has no MTP head");
       return false;
     }
   }

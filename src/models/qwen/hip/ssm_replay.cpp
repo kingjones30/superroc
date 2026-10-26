@@ -20,6 +20,12 @@ void QwenGpuArena::AllocateRecurrentSnapshot() {
   const std::size_t total_deltanet =
       recurrent_layers * config_.ssm_time_step_rank * config_.ssm_state_size *
       config_.SsmValueSize();
+  // NBFAST T1: pure-attention configs (llama) have no recurrent state to
+  // snapshot; hipMalloc(0) may hand back a null pointer and would otherwise
+  // re-run (and leak the pair bookkeeping) on every SaveState.
+  if (total_conv == 0 && total_deltanet == 0) {
+    return;
+  }
   // A zero-size deltanet (LFM2: conv state only) leaves its pointer null
   // after a successful hipMalloc; that alone must not re-allocate (and
   // leak) the conv buffer on every SaveState.
@@ -136,7 +142,11 @@ std::uint64_t QwenGpuArena::RecurrentIoIdentity() const noexcept {
 }
 
 bool QwenGpuArena::AllocateSsmReplayLog() {
-  if (d_ssm_replay_qkv_ != nullptr) {
+  // NBFAST T1: key the already-allocated check on the enabled flag, which is
+  // allocated on every path below; a zero-layer (llama) log's qkv malloc of
+  // 0 bytes may return nullptr and would otherwise re-allocate (leaking the
+  // enabled buffer) on every SaveState.
+  if (d_ssm_replay_enabled_ != nullptr) {
     return false;
   }
 

@@ -52,8 +52,11 @@ inline constexpr std::array<ModelFamily, 10> kModelFamilies{{
     {ModelFamilyId::kLfm2, "lfm2", false, "lfm2 does not support vision", ""},
     {ModelFamilyId::kFlint, "flint", false, "flint does not support vision",
      "flint has no speculative decoding yet"},
+    // Llama accepts only DFlash2 drafting via --speculative dflash2; the
+    // serve loader enforces that backend-by-backend (there is no MTP head),
+    // so the blanket refusal stays empty.
     {ModelFamilyId::kLlama, "llama", false, "llama does not support vision",
-     "llama has no speculative decoding yet"},
+     ""},
     {ModelFamilyId::kQwen35, "qwen", true, "", ""},
 }};
 

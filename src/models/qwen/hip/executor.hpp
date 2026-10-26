@@ -693,6 +693,12 @@ private:
   [[nodiscard]] tokenization::TokenId ForwardLlamaPromptBatch(
       std::span<const tokenization::TokenId> prompt_tokens,
       std::uint32_t start_pos, bool compute_logits);
+  // NBFAST T1: block verification for llama through its prefill path
+  // (logits for every row, target-layer taps per row).
+  [[nodiscard]] std::vector<tokenization::TokenId>
+  ForwardLlamaVerificationChunk(
+      std::span<const tokenization::TokenId> candidate_tokens,
+      std::uint32_t start_pos, bool capture_logits);
   [[nodiscard]] tokenization::TokenId ForwardFlintPromptBatch(
       std::span<const tokenization::TokenId> prompt_tokens,
       std::uint32_t start_pos, bool compute_logits);

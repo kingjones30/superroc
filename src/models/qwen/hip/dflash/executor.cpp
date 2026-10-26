@@ -210,16 +210,16 @@ void NormalizeAndRotateQK(float* query, float* key, const float* query_weight,
         query, key, key, query_weight, key_weight, query, key, nullptr, nullptr,
         nullptr, nullptr, 0, position, rows, 0, query_heads,
         config.num_key_value_heads, config.head_dim, config.rotary_dim,
-        config.rope_theta, 1e-6F, stream);
+        config.rope_theta, config.norm_eps_pre, stream);
     return;
   }
   if (query_heads != 0) {
     LaunchBatchedPerHeadRMSNorm(query, query_weight, query, rows, query_heads,
-                                config.head_dim, 1e-6F, stream);
+                                config.head_dim, config.norm_eps_pre, stream);
   }
   LaunchBatchedPerHeadRMSNorm(key, key_weight, key, rows,
                               config.num_key_value_heads, config.head_dim,
-                              1e-6F, stream);
+                              config.norm_eps_pre, stream);
   LaunchBatchedRoPE(query, key, rows, query_heads, config.num_key_value_heads,
                     config.head_dim, config.rotary_dim, position,
                     config.rope_theta, stream);
@@ -975,9 +975,10 @@ bool QwenDFlashGpuExecutor::InjectTargetContextChunk(
   RunInjectGemm(weights.fc_projection, d_target_features_, d_fused_features_,
                 num_tokens, hidden_size, enc_in_dim);
 
-  LaunchBatchedRMSNorm(
-      d_fused_features_, static_cast<const float*>(weights.fc_norm.data),
-      d_block_normed_, nullptr, num_tokens, hidden_size, 1e-6F, stream_);
+  LaunchBatchedRMSNorm(d_fused_features_,
+                       static_cast<const float*>(weights.fc_norm.data),
+                       d_block_normed_, nullptr, num_tokens, hidden_size,
+                       weights.config.norm_eps_pre, stream_);
   const auto prefix =
       trace ? "context." + std::to_string(position) + "." : std::string{};
   if (trace)
@@ -1122,9 +1123,10 @@ std::vector<tokenization::TokenId> QwenDFlashGpuExecutor::ForwardBlock(
                     data, block_count * width, stream_);
     };
 
-    LaunchBatchedRMSNorm(
-        d_block_hidden_, static_cast<const float*>(layer.attn_norm.data),
-        d_block_normed_, nullptr, block_count, hidden_size, 1e-6F, stream_);
+    LaunchBatchedRMSNorm(d_block_hidden_,
+                         static_cast<const float*>(layer.attn_norm.data),
+                         d_block_normed_, nullptr, block_count, hidden_size,
+                         weights.config.norm_eps_pre, stream_);
     emit("attn_norm", d_block_normed_, hidden_size);
 
     const float* attn_in = d_block_normed_;
@@ -1183,9 +1185,10 @@ std::vector<tokenization::TokenId> QwenDFlashGpuExecutor::ForwardBlock(
                              block_count, hidden_size, stream_);
     emit("attn_residual", d_block_hidden_, hidden_size);
 
-    LaunchBatchedRMSNorm(
-        d_block_hidden_, static_cast<const float*>(layer.ffn_norm.data),
-        d_block_normed_, nullptr, block_count, hidden_size, 1e-6F, stream_);
+    LaunchBatchedRMSNorm(d_block_hidden_,
+                         static_cast<const float*>(layer.ffn_norm.data),
+                         d_block_normed_, nullptr, block_count, hidden_size,
+                         weights.config.norm_eps_pre, stream_);
     emit("ffn_norm", d_block_normed_, hidden_size);
 
     const float* ffn_in = d_block_normed_;
@@ -1228,9 +1231,10 @@ std::vector<tokenization::TokenId> QwenDFlashGpuExecutor::ForwardBlock(
     emit("output", d_block_hidden_, hidden_size);
   }
 
-  LaunchBatchedRMSNorm(
-      d_block_hidden_, static_cast<const float*>(weights.output_norm.data),
-      d_block_normed_, nullptr, block_count, hidden_size, 1e-6F, stream_);
+  LaunchBatchedRMSNorm(d_block_hidden_,
+                       static_cast<const float*>(weights.output_norm.data),
+                       d_block_normed_, nullptr, block_count, hidden_size,
+                       weights.config.norm_eps_pre, stream_);
   TraceTensor(trace, "normalized", d_block_normed_, block_count * hidden_size,
               stream_);
   if (g_dspark_prof.on) {

@@ -952,11 +952,13 @@ __global__ void dflash_noncausal_attention_kernel(
 }
 
 constexpr uint32_t kSelectorThreads = 128;
-constexpr uint32_t kMaxSelectorTopK = 16;
+// NBFAST T1: the Nanbeige DFlash2 drafter is trained with selector_top_k 32
+// where the Qwen drafter uses 16. The selector device code below is templated
+// on the list width and instantiated for both, so a top-k <= 16 drafter runs
+// the original 16-wide kernels unchanged; only wider drafters pay for the
+// 32-wide lists. kMaxSelectorTopK remains the host-side cap and scratch size.
+constexpr uint32_t kMaxSelectorTopK = 32;
 constexpr uint32_t kSelectorTokensPerBlock = 2048;
-/// Threads that cooperate on one candidate's low-rank transition score.
-constexpr uint32_t kSelectorTransitionLanes =
-    kSelectorThreads / kMaxSelectorTopK;
 
 __device__ __forceinline__ void InsertSelectorCandidate(
     float score, uint32_t id, float* scores, uint32_t* ids,
@@ -979,19 +981,20 @@ __device__ __forceinline__ void InsertSelectorCandidate(
 /// kSelectorThreads lists serially, which dominated both selector kernels; a
 /// pairwise merge does the same work in log2(threads) rounds. Ties keep the
 /// lower slot, which is the same preference the serial fold had.
+template <uint32_t MaxTopK>
 __device__ void MergeSelectorLists(float* scores, uint32_t* ids,
                                    uint32_t selector_top_k) {
   for (uint32_t stride = kSelectorThreads / 2U; stride > 0U; stride >>= 1U) {
     __syncthreads();
     if (threadIdx.x < stride) {
-      float* mine_scores = scores + (threadIdx.x * kMaxSelectorTopK);
-      uint32_t* mine_ids = ids + (threadIdx.x * kMaxSelectorTopK);
+      float* mine_scores = scores + (threadIdx.x * MaxTopK);
+      uint32_t* mine_ids = ids + (threadIdx.x * MaxTopK);
       const float* other_scores =
-          scores + ((threadIdx.x + stride) * kMaxSelectorTopK);
+          scores + ((threadIdx.x + stride) * MaxTopK);
       const uint32_t* other_ids =
-          ids + ((threadIdx.x + stride) * kMaxSelectorTopK);
-      float merged_scores[kMaxSelectorTopK];
-      uint32_t merged_ids[kMaxSelectorTopK];
+          ids + ((threadIdx.x + stride) * MaxTopK);
+      float merged_scores[MaxTopK];
+      uint32_t merged_ids[MaxTopK];
       uint32_t mine = 0;
       uint32_t other = 0;
       for (uint32_t index = 0; index < selector_top_k; ++index) {
@@ -1017,6 +1020,7 @@ __device__ void MergeSelectorLists(float* scores, uint32_t* ids,
   __syncthreads();
 }
 
+template <uint32_t MaxTopK>
 __global__ void dflash_selector_partial_topk_kernel(
     const float* __restrict__ logits, float* __restrict__ partial_scores,
     uint32_t* __restrict__ partial_ids, uint32_t vocab_size,
@@ -1024,13 +1028,13 @@ __global__ void dflash_selector_partial_topk_kernel(
   logits += uint64_t(blockIdx.y) * vocab_size;
   partial_scores += uint64_t(blockIdx.y) * gridDim.x * selector_top_k;
   partial_ids += uint64_t(blockIdx.y) * gridDim.x * selector_top_k;
-  __shared__ float shared_scores[kSelectorThreads * kMaxSelectorTopK];
-  __shared__ uint32_t shared_ids[kSelectorThreads * kMaxSelectorTopK];
+  __shared__ float shared_scores[kSelectorThreads * MaxTopK];
+  __shared__ uint32_t shared_ids[kSelectorThreads * MaxTopK];
 
-  float local_scores[kMaxSelectorTopK];
-  uint32_t local_ids[kMaxSelectorTopK];
+  float local_scores[MaxTopK];
+  uint32_t local_ids[MaxTopK];
 #pragma unroll
-  for (uint32_t index = 0; index < kMaxSelectorTopK; ++index) {
+  for (uint32_t index = 0; index < MaxTopK; ++index) {
     local_scores[index] = -INFINITY;
     local_ids[index] = 0;
   }
@@ -1043,14 +1047,14 @@ __global__ void dflash_selector_partial_topk_kernel(
                             selector_top_k);
   }
 
-  const uint32_t shared_offset = threadIdx.x * kMaxSelectorTopK;
+  const uint32_t shared_offset = threadIdx.x * MaxTopK;
 #pragma unroll
-  for (uint32_t index = 0; index < kMaxSelectorTopK; ++index) {
+  for (uint32_t index = 0; index < MaxTopK; ++index) {
     shared_scores[shared_offset + index] = local_scores[index];
     shared_ids[shared_offset + index] = local_ids[index];
   }
 
-  MergeSelectorLists(shared_scores, shared_ids, selector_top_k);
+  MergeSelectorLists<MaxTopK>(shared_scores, shared_ids, selector_top_k);
 
   const uint32_t output_offset = blockIdx.x * selector_top_k;
   for (uint32_t index = threadIdx.x; index < selector_top_k;
@@ -1060,6 +1064,7 @@ __global__ void dflash_selector_partial_topk_kernel(
   }
 }
 
+template <uint32_t MaxTopK>
 __device__ __forceinline__ void FinalizeSelector(
     const float* __restrict__ partial_scores,
     const uint32_t* __restrict__ partial_ids,
@@ -1072,15 +1077,17 @@ __device__ __forceinline__ void FinalizeSelector(
     uint32_t* __restrict__ candidate_ids,
     float* __restrict__ candidate_probabilities, uint32_t partial_count,
     uint32_t selector_rank, uint32_t selector_top_k) {
-  __shared__ float shared_scores[kSelectorThreads * kMaxSelectorTopK];
-  __shared__ uint32_t shared_ids[kSelectorThreads * kMaxSelectorTopK];
+  // Threads that cooperate on one candidate's low-rank transition score.
+  constexpr uint32_t kTransitionLanes = kSelectorThreads / MaxTopK;
+  __shared__ float shared_scores[kSelectorThreads * MaxTopK];
+  __shared__ uint32_t shared_ids[kSelectorThreads * MaxTopK];
   __shared__ float
-      shared_transition[kMaxSelectorTopK * kSelectorTransitionLanes];
+      shared_transition[MaxTopK * kTransitionLanes];
 
-  float local_scores[kMaxSelectorTopK];
-  uint32_t local_ids[kMaxSelectorTopK];
+  float local_scores[MaxTopK];
+  uint32_t local_ids[MaxTopK];
 #pragma unroll
-  for (uint32_t index = 0; index < kMaxSelectorTopK; ++index) {
+  for (uint32_t index = 0; index < MaxTopK; ++index) {
     local_scores[index] = -INFINITY;
     local_ids[index] = 0;
   }
@@ -1091,37 +1098,37 @@ __device__ __forceinline__ void FinalizeSelector(
                             local_scores, local_ids, selector_top_k);
   }
 
-  const uint32_t shared_offset = threadIdx.x * kMaxSelectorTopK;
+  const uint32_t shared_offset = threadIdx.x * MaxTopK;
 #pragma unroll
-  for (uint32_t index = 0; index < kMaxSelectorTopK; ++index) {
+  for (uint32_t index = 0; index < MaxTopK; ++index) {
     shared_scores[shared_offset + index] = local_scores[index];
     shared_ids[shared_offset + index] = local_ids[index];
   }
 
-  MergeSelectorLists(shared_scores, shared_ids, selector_top_k);
+  MergeSelectorLists<MaxTopK>(shared_scores, shared_ids, selector_top_k);
 
   const uint32_t predecessor = *predecessor_token;
   const hip_bfloat16* predecessor_row =
       predecessor_codebook + (uint64_t)predecessor * selector_rank;
 
-  // Score the low-rank transitions in parallel: kSelectorTransitionLanes
+  // Score the low-rank transitions in parallel: kTransitionLanes
   // threads share each candidate and reduce through shared memory. Thread zero
   // used to walk all selector_top_k x selector_rank products by itself.
   {
-    const uint32_t candidate_index = threadIdx.x / kSelectorTransitionLanes;
-    const uint32_t part = threadIdx.x % kSelectorTransitionLanes;
+    const uint32_t candidate_index = threadIdx.x / kTransitionLanes;
+    const uint32_t part = threadIdx.x % kTransitionLanes;
     if (candidate_index < selector_top_k) {
       const uint32_t candidate = shared_ids[candidate_index];
       const hip_bfloat16* successor_row =
           successor_codebook + (uint64_t)candidate * selector_rank;
       float partial = 0.0F;
       for (uint32_t rank = part; rank < selector_rank;
-           rank += kSelectorTransitionLanes) {
+           rank += kTransitionLanes) {
         partial += static_cast<float>(predecessor_row[rank]) *
                    projected_hidden[rank] *
                    static_cast<float>(successor_row[rank]);
       }
-      shared_transition[(candidate_index * kSelectorTransitionLanes) + part] =
+      shared_transition[(candidate_index * kTransitionLanes) + part] =
           partial;
     }
   }
@@ -1131,8 +1138,8 @@ __device__ __forceinline__ void FinalizeSelector(
     return;
   }
 
-  float top_scores[kMaxSelectorTopK];
-  uint32_t top_ids[kMaxSelectorTopK];
+  float top_scores[MaxTopK];
+  uint32_t top_ids[MaxTopK];
   for (uint32_t index = 0; index < selector_top_k; ++index) {
     top_scores[index] = shared_scores[index];
     top_ids[index] = shared_ids[index];
@@ -1140,13 +1147,13 @@ __device__ __forceinline__ void FinalizeSelector(
 
   float best_score = -INFINITY;
   uint32_t best_index = 0;
-  float path_scores[kMaxSelectorTopK];
+  float path_scores[MaxTopK];
   for (uint32_t candidate_index = 0; candidate_index < selector_top_k;
        ++candidate_index) {
     float transition = 0.0F;
-    for (uint32_t part = 0; part < kSelectorTransitionLanes; ++part) {
+    for (uint32_t part = 0; part < kTransitionLanes; ++part) {
       transition +=
-          shared_transition[(candidate_index * kSelectorTransitionLanes) +
+          shared_transition[(candidate_index * kTransitionLanes) +
                             part];
     }
     const float score = top_scores[candidate_index] + transition;
@@ -1204,6 +1211,7 @@ __device__ __forceinline__ void FinalizeSelector(
   }
 }
 
+template <uint32_t MaxTopK>
 __global__ void dflash_selector_finalize_kernel(
     const float* partial_scores, const uint32_t* partial_ids,
     const float* projected_hidden, const hip_bfloat16* predecessor_codebook,
@@ -1212,7 +1220,7 @@ __global__ void dflash_selector_finalize_kernel(
     const float* sample_uniform, uint32_t* candidate_ids,
     float* candidate_probabilities, uint32_t partial_count,
     uint32_t selector_rank, uint32_t selector_top_k) {
-  FinalizeSelector(partial_scores, partial_ids, projected_hidden,
+  FinalizeSelector<MaxTopK>(partial_scores, partial_ids, projected_hidden,
                    predecessor_codebook, successor_codebook, predecessor_token,
                    output_token, output_confidence, temperature, sample_uniform,
                    candidate_ids, candidate_probabilities, partial_count,
@@ -1225,6 +1233,7 @@ struct SelectorBatch {
   uint32_t token_offsets[8];
 };
 
+template <uint32_t MaxTopK>
 __global__ void dflash_selector_finalize_batch_kernel(
     const float* partial_scores, const uint32_t* partial_ids,
     const float* projected_hidden, const hip_bfloat16* predecessor_codebook,
@@ -1242,7 +1251,7 @@ __global__ void dflash_selector_finalize_batch_kernel(
     const uint32_t token = batch.token_offsets[blockIdx.x] + step;
     const uint64_t partial = uint64_t(row) * partial_count * selector_top_k;
     const uint64_t candidate = uint64_t(row) * selector_top_k;
-    FinalizeSelector(
+    FinalizeSelector<MaxTopK>(
         partial_scores + partial, partial_ids + partial,
         projected_hidden + uint64_t(row) * selector_rank, predecessor_codebook,
         successor_codebook, &predecessor, tokens + token + 1U,
@@ -1561,17 +1570,33 @@ void LaunchDFlashSelectorStep(
   }
   const std::uint32_t partial_count =
       (vocab_size + kSelectorTokensPerBlock - 1U) / kSelectorTokensPerBlock;
-  dflash_selector_partial_topk_kernel<<<partial_count, kSelectorThreads, 0,
-                                        stream>>>(
-      logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+  if (selector_top_k <= 16U) {
+    dflash_selector_partial_topk_kernel<16U><<<partial_count, kSelectorThreads,
+                                               0, stream>>>(
+        logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+  } else {
+    dflash_selector_partial_topk_kernel<32U><<<partial_count, kSelectorThreads,
+                                               0, stream>>>(
+        logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+  }
   GUFO_CHECK_LAUNCH("dflash_selector_partial_topk_kernel");
-  dflash_selector_finalize_kernel<<<1, kSelectorThreads, 0, stream>>>(
+  if (selector_top_k <= 16U) {
+    dflash_selector_finalize_kernel<16U><<<1, kSelectorThreads, 0, stream>>>(
       partial_scores, partial_ids, projected_hidden,
       static_cast<const hip_bfloat16*>(predecessor_codebook_bf16),
       static_cast<const hip_bfloat16*>(successor_codebook_bf16),
       predecessor_token, output_token, output_confidence, temperature,
       sample_uniform, candidate_ids, candidate_probabilities, partial_count,
       selector_rank, selector_top_k);
+  } else {
+    dflash_selector_finalize_kernel<32U><<<1, kSelectorThreads, 0, stream>>>(
+        partial_scores, partial_ids, projected_hidden,
+        static_cast<const hip_bfloat16*>(predecessor_codebook_bf16),
+        static_cast<const hip_bfloat16*>(successor_codebook_bf16),
+        predecessor_token, output_token, output_confidence, temperature,
+        sample_uniform, candidate_ids, candidate_probabilities, partial_count,
+        selector_rank, selector_top_k);
+  }
   GUFO_CHECK_LAUNCH("dflash_selector_finalize_kernel");
 }
 
@@ -1609,17 +1634,33 @@ void LaunchDFlashSelectorBatch(
   const auto partial_count = static_cast<std::uint32_t>(
       (static_cast<std::uint64_t>(vocab_size) + kSelectorTokensPerBlock - 1U) /
       kSelectorTokensPerBlock);
-  dflash_selector_partial_topk_kernel<<<dim3(partial_count, rows),
-                                        kSelectorThreads, 0, stream>>>(
-      logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+  if (selector_top_k <= 16U) {
+    dflash_selector_partial_topk_kernel<16U><<<dim3(partial_count, rows),
+                                               kSelectorThreads, 0, stream>>>(
+        logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+  } else {
+    dflash_selector_partial_topk_kernel<32U><<<dim3(partial_count, rows),
+                                               kSelectorThreads, 0, stream>>>(
+        logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+  }
   GUFO_CHECK_LAUNCH("dflash_selector_partial_topk_kernel");
-  dflash_selector_finalize_batch_kernel<<<sequences.size(), kSelectorThreads, 0,
-                                          stream>>>(
-      partial_scores, partial_ids, projected_hidden,
-      static_cast<const hip_bfloat16*>(predecessor_codebook_bf16),
-      static_cast<const hip_bfloat16*>(successor_codebook_bf16), tokens,
-      confidences, uniforms, candidate_ids, candidate_probabilities, batch,
-      partial_count, selector_rank, selector_top_k);
+  if (selector_top_k <= 16U) {
+    dflash_selector_finalize_batch_kernel<16U><<<sequences.size(),
+                                                 kSelectorThreads, 0, stream>>>(
+        partial_scores, partial_ids, projected_hidden,
+        static_cast<const hip_bfloat16*>(predecessor_codebook_bf16),
+        static_cast<const hip_bfloat16*>(successor_codebook_bf16), tokens,
+        confidences, uniforms, candidate_ids, candidate_probabilities, batch,
+        partial_count, selector_rank, selector_top_k);
+  } else {
+    dflash_selector_finalize_batch_kernel<32U><<<sequences.size(),
+                                                 kSelectorThreads, 0, stream>>>(
+        partial_scores, partial_ids, projected_hidden,
+        static_cast<const hip_bfloat16*>(predecessor_codebook_bf16),
+        static_cast<const hip_bfloat16*>(successor_codebook_bf16), tokens,
+        confidences, uniforms, candidate_ids, candidate_probabilities, batch,
+        partial_count, selector_rank, selector_top_k);
+  }
   GUFO_CHECK_LAUNCH("dflash_selector_finalize_batch_kernel");
 }
 
