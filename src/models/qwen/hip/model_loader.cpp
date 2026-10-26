@@ -393,6 +393,11 @@ std::unique_ptr<QwenGpuExecutor> QwenGpuExecutor::Create(
   }
 
   const auto& config = model->GetConfig();
+  // LLAMA (F4): apply the llama policy centrally here so every creator
+  // (serve, prompt, bench) gets it, not only the serve runner.
+  if (config.llama) {
+    ApplyLlamaExecutionPolicy(policy);
+  }
   const std::uint32_t model_context =
       config.context_length > 0 ? config.context_length : max_context;
   if (max_context == 0 || max_context > model_context) {

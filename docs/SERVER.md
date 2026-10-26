@@ -982,6 +982,21 @@ Return an OpenAI-style error object:
 }
 ```
 
+`/v1/messages` and `/v1/messages/count_tokens` return the Anthropic shape
+instead, including generation failures (queue full, backend error) and device
+loss:
+
+```json
+{
+  "type": "error",
+  "error": {
+    "type": "invalid_request_error",
+    "message": "'messages' must contain text, image, thinking, tool_use or tool_result blocks",
+    "code": "invalid_request"
+  }
+}
+```
+
 Use appropriate HTTP status codes:
 
 - `400` invalid request or unsupported field

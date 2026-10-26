@@ -195,6 +195,8 @@ public:
       result.text = output_;
     }
     result.prompt_tokens = 10;
+    // F18: fixed generated ids so completion tests can pin the tokens array.
+    result.tokens = {7, 8, 9};
     result.cached_prompt_tokens = 8;
     result.cache_hit = true;
     result.draft_accepted_tokens = 4;
@@ -1158,6 +1160,18 @@ void TestCompatibilityRequests() {
        }) {
     auto body = parse(endpoint.body);
     response_body(server.Post(endpoint.path, body.dump()));
+    // F18: the additive tokens array carries the backend's generated ids on
+    // the completion routes (missing or prompt ids would fail this).
+    if (std::string_view(endpoint.path) == "/v1/completions" ||
+        std::string_view(endpoint.path) == "/completion") {
+      const auto completed =
+          response_body(server.Post(endpoint.path, body.dump()));
+      const auto* tokens = completed.find("tokens");
+      assert(tokens != nullptr && tokens->is_array());
+      const auto& ids = tokens->items();
+      assert(ids.size() == 3 && ids[0].as_double() == 7.0 &&
+             ids[1].as_double() == 8.0 && ids[2].as_double() == 9.0);
+    }
     assert(server.backend->LastCall().max_tokens == 0);
     server.backend->defaults.model = gufo::sampling::TextModelPreset::kQwen38;
     server.backend->defaults.supplied = {};
@@ -1291,6 +1305,38 @@ void TestCompatibilityRequests() {
     assert(error != nullptr && error->is_object());
     assert(!error->member_str("type").empty());
     assert(!error->member_str("message").empty());
+    // F18: malformed JSON must keep the same shape, with a code.
+    const auto malformed = server.Post(path, "{");
+    ExpectStatus(malformed, 400);
+    const auto malformed_parsed =
+        parse(malformed.substr(malformed.find("\r\n\r\n") + 4));
+    assert(malformed_parsed.member_str("type") == "error");
+    const auto* malformed_error = malformed_parsed.find("error");
+    assert(malformed_error != nullptr && malformed_error->is_object());
+    assert(!malformed_error->member_str("code").empty());
+  }
+  // F5: generation failures on /v1/messages keep the Anthropic shape
+  // (previously the dispatcher's OpenAI shape), with the stable code.
+  {
+    RunningServer failing;
+    failing.backend->failure = 3;
+    const auto body = R"({"messages":[{"role":"user","content":"hi"}]})";
+    const auto failed = failing.Post("/v1/messages", body);
+    ExpectStatus(failed, 503);
+    const auto parsed = parse(failed.substr(failed.find("\r\n\r\n") + 4));
+    assert(parsed.member_str("type") == "error");
+    const auto* error = parsed.find("error");
+    assert(error != nullptr && error->is_object());
+    assert(!error->member_str("type").empty());
+    assert(!error->member_str("message").empty());
+    assert(error->member_str("code") == "device_lost");
+    // Device loss latches: the next request takes the DeviceLost branch,
+    // which must also keep the Anthropic shape.
+    const auto lost = failing.Post("/v1/messages", body);
+    ExpectStatus(lost, 503);
+    const auto lost_parsed = parse(lost.substr(lost.find("\r\n\r\n") + 4));
+    assert(lost_parsed.member_str("type") == "error");
+    assert(lost_parsed.find("error")->member_str("code") == "device_lost");
   }
   ExpectStatus(
       server.Post("/infill", R"({"input_prefix":"one","input_suffix":"two"})"),

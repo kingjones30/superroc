@@ -702,6 +702,22 @@ private:
     sampling::SamplingConfig* sampling,
     std::optional<sampling::JsonConstraint::ToolFormat>* tool_format = nullptr);
 
+/// LLAMA (F13): render a llama chat prompt by concatenating message content
+/// and framing_suffix (which carries structured-output instructions, as the
+/// Qwen template does). Llama has no tool template, so a request carrying
+/// tools is refused (nullopt) instead of silently dropped while the Qwen
+/// tool grammar constrains sampling.
+[[nodiscard]] std::optional<std::string> LlamaRenderPrompt(
+    const ChatRequest& request);
+
+/// LLAMA (F14): llama pieces from TokenText join with a leading space that
+/// Decode() strips, so streamed/final text built from pieces is not the
+/// Decode() the incremental_text_is_exact flag claims. Report false for
+/// llama so the scheduler recomputes Decode().
+[[nodiscard]] inline bool RunnerIncrementalTextIsExact(bool is_llama) noexcept {
+  return !is_llama;
+}
+
 }  // namespace gufo::server
 
 #endif  // GUFO_SERVER_TEXT_MODEL_RUNNER_HPP_

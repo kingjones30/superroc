@@ -1,8 +1,6 @@
 #include "src/models/llama/weights.hpp"
 
 #include <cstdint>
-#include <iostream>
-#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -46,11 +44,14 @@ enum class TensorRole : std::uint8_t { kEmbedding, kNorm, kProjection };
              type == core::GgmlType::kQ6_K;
     case TensorRole::kNorm:
       return type == core::GgmlType::kF32;
+    // LLAMA (F6): the batched prefill FP16 GEMM only implements
+    // Q8_0/Q4_K/Q3_K/Q5_K/Q6_K. F32/BF16/Q8_K projections load but then
+    // throw "unexpected half prefill weight format" on the first 2+ token
+    // chunk, so refuse them here at bind time.
     case TensorRole::kProjection:
-      return type == core::GgmlType::kF32 || type == core::GgmlType::kBF16 ||
-             type == core::GgmlType::kQ8_0 || type == core::GgmlType::kQ8_K ||
-             type == core::GgmlType::kQ5_K || type == core::GgmlType::kQ6_K ||
-             type == core::GgmlType::kQ4_K || type == core::GgmlType::kQ3_K;
+      return type == core::GgmlType::kQ8_0 || type == core::GgmlType::kQ5_K ||
+             type == core::GgmlType::kQ6_K || type == core::GgmlType::kQ4_K ||
+             type == core::GgmlType::kQ3_K;
   }
   return false;
 }
@@ -206,7 +207,8 @@ std::optional<QwenModelWeights> BindLlamaWeights(
                 " tensors but the file has " +
                 std::to_string(reader.GetTensorCount()));
   }
-  std::map<std::string, std::uint64_t> census;
+  // LLAMA (F15): no stdout census on load; the prompt CLI owns stdout as
+  // the generation stream and the server logs through its own logger.
   for (const auto& tensor : reader.GetTensors()) {
     bool found = false;
     for (const auto& name : bound) {
@@ -218,14 +220,8 @@ std::optional<QwenModelWeights> BindLlamaWeights(
     if (!found) {
       return fail("llama file has unbound tensor " + std::string(tensor.name));
     }
-    census[std::string(core::ToString(tensor.type))] += 1;
   }
 
-  std::cout << "llama_bind census tensors=" << reader.GetTensorCount();
-  for (const auto& [ty, n] : census) {
-    std::cout << " " << ty << "=" << n;
-  }
-  std::cout << "\n";
   return weights;
 }
 

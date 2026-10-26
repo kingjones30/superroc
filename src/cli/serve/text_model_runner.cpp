@@ -131,6 +131,19 @@ std::optional<ChatRequest> ConstrainChatRequest(
   return constrained;
 }
 
+std::optional<std::string> LlamaRenderPrompt(const ChatRequest& request) {
+  if (!request.tools.empty() &&
+      request.tool_choice != ChatRequest::ToolChoice::kNone) {
+    return std::nullopt;
+  }
+  std::string concat;
+  for (const auto& message : request.messages) {
+    concat += message.content;
+    concat += message.framing_suffix;
+  }
+  return concat;
+}
+
 std::optional<std::uint64_t> MeminfoAvailableBytes(std::string_view meminfo) {
   std::optional<std::uint64_t> available_kib;
   std::uint64_t cma_free_kib = 0;

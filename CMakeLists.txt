@@ -958,7 +958,8 @@ if (BUILD_TESTING)
   add_executable(kat_bind_test tests/models/qwen/kat_bind_test.cpp)  # KAT:
   target_link_libraries(kat_bind_test PRIVATE gufo_core)
   add_test(NAME kat_bind_test COMMAND kat_bind_test)
-  set_tests_properties(kat_bind_test PROPERTIES LABELS "cpu;models;qwen;kat")
+  set_tests_properties(kat_bind_test PROPERTIES LABELS "cpu;models;qwen;kat"
+    SKIP_RETURN_CODE 77)
 
   add_executable(kat_bf16_slice_test tests/models/qwen/kat_bf16_slice_test.cpp)  # KAT:
   target_link_libraries(kat_bf16_slice_test PRIVATE gufo_core)
@@ -968,7 +969,8 @@ if (BUILD_TESTING)
   add_executable(kat_moe_oracle_test tests/models/qwen/kat_moe_oracle_test.cpp)  # KAT:
   target_link_libraries(kat_moe_oracle_test PRIVATE gufo_core)
   add_test(NAME kat_moe_oracle_test COMMAND kat_moe_oracle_test)
-  set_tests_properties(kat_moe_oracle_test PROPERTIES LABELS "cpu;models;qwen;kat")
+  set_tests_properties(kat_moe_oracle_test PROPERTIES LABELS "cpu;models;qwen;kat"
+    SKIP_RETURN_CODE 77)
 
   add_executable(kat_mtp_pmin_test tests/models/qwen/kat_mtp_pmin_test.cpp)  # KAT-MTP:
   target_link_libraries(kat_mtp_pmin_test PRIVATE gufo_core)
@@ -999,7 +1001,8 @@ if (BUILD_TESTING)
       TARGET_DIRECTORY kat_moe_route_test
       PROPERTIES LANGUAGE HIP)
     add_test(NAME kat_moe_route_test COMMAND kat_moe_route_test)
-    set_tests_properties(kat_moe_route_test PROPERTIES LABELS "gpu;models;qwen;kat")
+    set_tests_properties(kat_moe_route_test PROPERTIES LABELS "gpu;models;qwen;kat"
+      SKIP_RETURN_CODE 77)
 
     add_executable(kat_moe_ffn_test tests/models/qwen/hip/kat_moe_ffn_test.hip)  # KAT:
     target_link_libraries(kat_moe_ffn_test PRIVATE gufo_core)
@@ -1008,7 +1011,8 @@ if (BUILD_TESTING)
       TARGET_DIRECTORY kat_moe_ffn_test
       PROPERTIES LANGUAGE HIP)
     add_test(NAME kat_moe_ffn_test COMMAND kat_moe_ffn_test)
-    set_tests_properties(kat_moe_ffn_test PROPERTIES LABELS "gpu;models;qwen;kat")
+    set_tests_properties(kat_moe_ffn_test PROPERTIES LABELS "gpu;models;qwen;kat"
+      SKIP_RETURN_CODE 77)
 
     # SQ10: FP4 slot ownership (two-stream interleave, exhaustion, zero-alloc).
     add_executable(fp4_slot_owner_test tests/core/rocm_fp4/fp4_slot_owner_test.cpp)

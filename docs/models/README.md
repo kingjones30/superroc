@@ -24,6 +24,7 @@ Strix Halo, quality numbers where they exist, and known limits.
 | MiniCPM-V-4.7-35B-A3B, ROCmFP4 LEAN with Q6_K trunk | [card](minicpm-v-4.7-35b-a3b/README.md) |
 | LFM2.5 (24B-A2B, 8B-A1B, 2.6B, 1.2B-Instruct), ROCmFP4 LEAN | [card](lfm2.5/README.md) |
 | Flint 40B-A2.5B, ROCmFP4 COHERENT-PAS | [card](flint/README.md) |
+| Nanbeige4.3-33B-Base, Q4_K_M (`llama`, serve-only) | [card](llama/README.md) |
 
 ## Models from Gufo v0.19.0
 

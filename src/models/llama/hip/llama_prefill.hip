@@ -121,15 +121,33 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
     const char* env = std::getenv("LLAMA_PREFILL_TIME");
     return env != nullptr && env[0] != '\0' && env[0] != '0';
   }();
+  // LLAMA (F16): the layer loop below throws on cancellation or launch
+  // failure; hold the timer events in a small RAII guard created before the
+  // loop so a throw cannot leak them (including a second create failing
+  // after the first succeeded).
+  struct ScopedPrefillTimers {
+    hipEvent_t first{nullptr};
+    hipEvent_t second{nullptr};
+    ~ScopedPrefillTimers() {
+      if (first != nullptr) {
+        (void)hipEventDestroy(first);
+      }
+      if (second != nullptr) {
+        (void)hipEventDestroy(second);
+      }
+    }
+  } timers;
   hipEvent_t time_a = nullptr;
   hipEvent_t time_b = nullptr;
   float layer0_gemm_ms = 0.0F;
   float layer0_attn_ms = 0.0F;
   if (time_parts) {
-    if (hipEventCreate(&time_a) != hipSuccess ||
-        hipEventCreate(&time_b) != hipSuccess) {
+    if (hipEventCreate(&timers.first) != hipSuccess ||
+        hipEventCreate(&timers.second) != hipSuccess) {
       throw std::runtime_error("llama prefill timer create failed");
     }
+    time_a = timers.first;
+    time_b = timers.second;
   }
   const auto stamp = [&](hipEvent_t ev) {
     if (time_parts) {
@@ -252,8 +270,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
                  "batch=%zu start_pos=%u wmma=%d\n",
                  layer0_gemm_ms, layer0_attn_ms, batch, start_pos,
                  static_cast<int>(LlamaWmmaEnabled() && k_f16 != nullptr));
-    hipEventDestroy(time_a);
-    hipEventDestroy(time_b);
+    // Events are destroyed by the ScopedPrefillTimers guard above.
   }
 
   last_hidden_offset_ = (batch - 1) * H;

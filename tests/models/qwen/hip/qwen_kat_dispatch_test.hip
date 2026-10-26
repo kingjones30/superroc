@@ -26,6 +26,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -200,6 +201,10 @@ int main() {
           ? path_env
           : "/path/to/models/swap/kat-coder/"
             "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf";
+  if (!std::filesystem::exists(path)) {
+    std::cout << "SKIP: KAT GGUF not found: " << path << " (set KAT_GGUF)\n";
+    return 77;
+  }
   std::string error;
   auto reader = gufo::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open: " + error);

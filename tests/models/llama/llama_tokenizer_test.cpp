@@ -7,7 +7,9 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "src/core/gguf_reader.hpp"
@@ -33,9 +35,162 @@ std::string ReadFile(const fs::path& path) {
           std::istreambuf_iterator<char>()};
 }
 
+void Expect(bool ok, const std::string& msg) {
+  if (!ok) {
+    Fail(msg);
+  }
+}
+
+// Minimal metadata-only GGUF writer for the synthetic tokenizer tests.
+void AppendPod(std::vector<std::uint8_t>& buf, std::uint64_t value,
+               std::size_t size) {
+  for (std::size_t i = 0; i < size; ++i) {
+    buf.push_back(static_cast<std::uint8_t>(value >> (8 * i)));
+  }
+}
+
+void AppendString(std::vector<std::uint8_t>& buf, std::string_view text) {
+  AppendPod(buf, text.size(), 8);
+  buf.insert(buf.end(), text.begin(), text.end());
+}
+
+void AppendStringValue(std::vector<std::uint8_t>& buf, std::string_view key,
+                       std::string_view value) {
+  AppendString(buf, key);
+  AppendPod(buf, 8, 4);  // kString
+  AppendString(buf, value);
+}
+
+void AppendUint32Value(std::vector<std::uint8_t>& buf, std::string_view key,
+                       std::uint32_t value) {
+  AppendString(buf, key);
+  AppendPod(buf, 4, 4);  // kUint32
+  AppendPod(buf, value, 4);
+}
+
+// Builds a 4-token llama SPM tokenizer GGUF: <unk>=0, <s>=1, </s>=2,
+// hello=3. `pre` empty means the key is absent.
+std::vector<std::uint8_t> BuildSyntheticTokenizer(std::string_view pre,
+                                                  std::uint32_t vocab_size,
+                                                  std::uint32_t bos) {
+  std::vector<std::uint8_t> buf;
+  buf.insert(buf.end(), {'G', 'G', 'U', 'F'});
+  AppendPod(buf, 3, 4);  // version
+  AppendPod(buf, 0, 8);  // tensor count
+  // arch, model, vocab_size, bos, eos, pad, tokens, scores, token_type,
+  // plus pre when present.
+  std::uint64_t metadata_count = 9 + (pre.empty() ? 0 : 1);
+  AppendPod(buf, metadata_count, 8);
+  AppendStringValue(buf, "general.architecture", "llama");
+  AppendStringValue(buf, "tokenizer.ggml.model", "llama");
+  if (!pre.empty()) {
+    AppendStringValue(buf, "tokenizer.ggml.pre", pre);
+  }
+  AppendUint32Value(buf, "llama.vocab_size", vocab_size);
+  AppendUint32Value(buf, "tokenizer.ggml.bos_token_id", bos);
+  AppendUint32Value(buf, "tokenizer.ggml.eos_token_id", 2);
+  AppendUint32Value(buf, "tokenizer.ggml.padding_token_id", 0);
+  // tokens array
+  AppendString(buf, "tokenizer.ggml.tokens");
+  AppendPod(buf, 9, 4);  // kArray
+  AppendPod(buf, 8, 4);  // kString
+  AppendPod(buf, 4, 8);
+  for (std::string_view token : {"<unk>", "<s>", "</s>", "hello"}) {
+    AppendString(buf, token);
+  }
+  // scores array
+  AppendString(buf, "tokenizer.ggml.scores");
+  AppendPod(buf, 9, 4);
+  AppendPod(buf, 6, 4);  // kFloat32
+  AppendPod(buf, 4, 8);
+  for (int i = 0; i < 4; ++i) {
+    AppendPod(buf, 0, 4);
+  }
+  // token_type array: unknown, control, control, normal
+  AppendString(buf, "tokenizer.ggml.token_type");
+  AppendPod(buf, 9, 4);
+  AppendPod(buf, 4, 4);  // kUint32
+  AppendPod(buf, 4, 8);
+  for (std::uint32_t type : {2, 3, 3, 1}) {
+    AppendPod(buf, type, 4);
+  }
+  // ParseHeaders aligns the tensor payload base to the 32-byte GGUF
+  // alignment; a real file always carries tensor bytes after the headers, so
+  // pad this header-only buffer the same way.
+  while (buf.size() % 32 != 0) {
+    buf.push_back(0);
+  }
+  return buf;
+}
+
+std::unique_ptr<gufo::core::GgufReader> OpenSynthetic(
+    const std::vector<std::uint8_t>& file, std::string& error) {
+  auto reader =
+      gufo::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
+  Expect(reader != nullptr, "open synthetic tokenizer GGUF: " + error);
+  return reader;
+}
+
+// F7: the tokenizer array must match llama.vocab_size, and bos/eos/pad must
+// be in range. Runs without NANBEIGE_GGUF.
+void TestTokenizerVocabValidation() {
+  std::string error;
+  const auto short_vocab =
+      BuildSyntheticTokenizer("default", /*vocab_size=*/3, /*bos=*/1);
+  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+              *OpenSynthetic(short_vocab, error), &error)
+              .has_value(),
+         "tokenizer longer than llama.vocab_size must be refused");
+  const auto bad_bos =
+      BuildSyntheticTokenizer("default", /*vocab_size=*/4, /*bos=*/99);
+  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+              *OpenSynthetic(bad_bos, error), &error)
+              .has_value(),
+         "out-of-range bos_token_id must be refused");
+  const auto good =
+      BuildSyntheticTokenizer("default", /*vocab_size=*/4, /*bos=*/1);
+  Expect(gufo::models::llama::SpmTokenizer::FromGguf(
+             *OpenSynthetic(good, error), &error)
+             .has_value(),
+         "matching vocab with in-range ids must load: " + error);
+}
+
+// F8: a character with no vocab piece must fall back to <unk>, never emit
+// -1 (the serve backend casts ids to unsigned for the embedding lookup).
+void TestByteFallbackNeverNegative() {
+  std::string error;
+  const auto file =
+      BuildSyntheticTokenizer("default", /*vocab_size=*/4, /*bos=*/1);
+  auto tokenizer = gufo::models::llama::SpmTokenizer::FromGguf(
+      *OpenSynthetic(file, error), &error);
+  Expect(tokenizer.has_value(), "synthetic tokenizer must load: " + error);
+  gufo::models::llama::SpmTokenizer::EncodeOptions options;
+  options.add_special = false;
+  options.parse_special = false;
+  const auto ids = tokenizer->Encode("~", options);
+  Expect(!ids.empty(), "byte fallback must emit a token");
+  for (const auto id : ids) {
+    Expect(id >= 0, "Encode must never emit a negative id");
+  }
+}
+
+// F12: only the default pre-tokenizer is implemented.
+void TestNonDefaultPreRefused() {
+  std::string error;
+  const auto file =
+      BuildSyntheticTokenizer("llama-bpe", /*vocab_size=*/4, /*bos=*/1);
+  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+              *OpenSynthetic(file, error), &error)
+              .has_value(),
+         "non-default tokenizer.ggml.pre must be refused");
+}
+
 }  // namespace
 
 int main() {
+  TestTokenizerVocabValidation();
+  TestByteFallbackNeverNegative();
+  TestNonDefaultPreRefused();
   const char* gguf_env = std::getenv("NANBEIGE_GGUF");
   if (gguf_env == nullptr || gguf_env[0] == '\0') {
     std::cout << "SKIP llama_tokenizer_test: NANBEIGE_GGUF is not set\n";
