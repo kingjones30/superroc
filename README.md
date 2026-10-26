@@ -1,8 +1,9 @@
 # Super ROC
 
 Super ROC is an LLM inference engine for AMD Strix Halo: Ryzen AI Max+ 395 systems with the Radeon 8060S GPU (`gfx1151`)
-and up to 128 GB of unified memory. It serves GGUF models, including 4-bit ROCmFP4 builds, through an OpenAI-compatible
-server with MTP and DSpark drafting and a prompt cache that can resume from any earlier conversation state.
+and up to 128 GB of unified memory. It serves GGUF models, including 4-bit ROCmFP4 builds, through an OpenAI- and
+Anthropic-compatible server with MTP and DSpark drafting and a prompt cache that can resume from any earlier
+conversation state.
 
 Super ROC is a fork of [Gufo](https://github.com/gufo-org/gufo) v0.19.0. Issues, pull requests and forks are welcome.
 
@@ -116,7 +117,37 @@ curl http://localhost:8080/v1/chat/completions \
   -d '{"model": "kat-coder", "messages": [{"role": "user", "content": "Write a Python function that reverses a list."}]}'
 ```
 
+### Anthropic API and Claude Code
+
+The same server speaks the Anthropic Messages API:
+
+```sh
+curl http://localhost:8080/v1/messages \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "x-api-key: none" \
+  -d '{"model": "kat-coder", "max_tokens": 64, "messages": [{"role": "user", "content": "Write a Python function that reverses a list."}]}'
+```
+
+It supports streaming SSE, system prompts, tools with `tool_result` round trips, thinking blocks, `count_tokens`,
+and prompt-cache usage fields. The request and response shapes are in [docs/SERVER.md](docs/SERVER.md#responses-api-subset).
+
+Claude Code works against the server with these variables:
+
+```sh
+export ANTHROPIC_BASE_URL=http://localhost:8080
+export ANTHROPIC_AUTH_TOKEN=none
+export ANTHROPIC_MODEL=kat-coder
+export ANTHROPIC_SMALL_FAST_MODEL=kat-coder
+claude
+```
+
+`ANTHROPIC_MODEL` is the name the server was started with (`--served-model-name`). In a test with
+[Flint 40B-A2.5B](docs/models/flint/README.md), Claude Code created `hello.py`, ran it with `python3` and reported its
+output with no API error.
+
 For Open WebUI, VS Code, the OpenAI SDK and Responses-API clients, set the API base URL to `http://localhost:8080/v1`.
+Anthropic SDK clients and Claude Code use `http://localhost:8080` as the base URL.
 Chat Completions and Responses support text, images, function tools, structured output and streaming. The server uses
 the model's native context by default; `--context N` sets the context per session and `--max-tokens N` a default
 response limit that clients can override (reasoning tokens count toward it). The full API contract is in

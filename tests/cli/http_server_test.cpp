@@ -1281,6 +1281,17 @@ void TestCompatibilityRequests() {
                            R"({"messages":[{"role":"tool","content":"hi"}]})"),
                400);
   ExpectStatus(server.Post("/v1/messages", R"({"messages":[]})"), 400);
+  // Messages failures use the Anthropic {"type":"error","error":{...}} shape.
+  for (const auto* path : {"/v1/messages", "/v1/messages/count_tokens"}) {
+    const auto rejected = server.Post(path, R"({"max_tokens":64})");
+    ExpectStatus(rejected, 400);
+    const auto parsed = parse(rejected.substr(rejected.find("\r\n\r\n") + 4));
+    assert(parsed.member_str("type") == "error");
+    const auto* error = parsed.find("error");
+    assert(error != nullptr && error->is_object());
+    assert(!error->member_str("type").empty());
+    assert(!error->member_str("message").empty());
+  }
   ExpectStatus(
       server.Post("/infill", R"({"input_prefix":"one","input_suffix":"two"})"),
       501);

@@ -511,6 +511,40 @@ HttpResponse Err(int status, const char* reason, const char* message,
   return {.status = status, .reason = reason, .body = e.dump()};
 }
 
+// Anthropic errors use {"type":"error","error":{"type":...,"message":...}};
+// `code`, when set, keeps the machine-readable reason the OpenAI routes give.
+HttpResponse AnthropicErr(int status, const std::string& reason,
+                          std::string message, std::string type,
+                          std::string code = {}) {
+  json::Value body = json::Value::object();
+  json::Value error = json::Value::object();
+  error["type"] = std::move(type);
+  error["message"] = std::move(message);
+  if (!code.empty())
+    error["code"] = std::move(code);
+  body["type"] = "error";
+  body["error"] = std::move(error);
+  return {.status = status, .reason = reason, .body = body.dump()};
+}
+
+// Validation for the Messages routes is shared with the OpenAI-compatible
+// routes, so its failures arrive in the {"error":...} shape. Translate them
+// at the Anthropic boundary.
+HttpResponse ToAnthropicError(HttpResponse response) {
+  try {
+    const json::Value parsed = json::parse(response.body);
+    const json::Value* error = parsed.find("error");
+    if (error == nullptr || !error->is_object())
+      return response;
+    return AnthropicErr(response.status, response.reason,
+                        error->member_str("message", ""),
+                        error->member_str("type", "invalid_request_error"),
+                        error->member_str("code", ""));
+  } catch (...) {
+    return response;
+  }
+}
+
 // Health, readiness and generation share one body once the device is lost:
 // `status` matches the health/readiness shape and `error` the API error shape.
 HttpResponse DeviceLost() {
@@ -1340,8 +1374,8 @@ HttpResponse AnthropicMessages(const HttpRequest& req,
   try {
     body = json::parse(req.body);
   } catch (const std::exception& e) {
-    return Err(400, "Bad Request", e.what(), "invalid_request_error",
-               "parse_error");
+    return AnthropicErr(400, "Bad Request", e.what(), "invalid_request_error",
+                        "parse_error");
   }
 
   ChatRequest chat;
@@ -1349,17 +1383,17 @@ HttpResponse AnthropicMessages(const HttpRequest& req,
   sampling::SamplingConfig sampling_config;
   if (auto error =
           ReadAnthropicChat(body, b, &chat, &max_tokens, &sampling_config))
-    return std::move(*error);
+    return ToAnthropicError(std::move(*error));
   chat.client_id = req.client_id;
   return CreateAnthropicMessage(
       req, b, chat, max_tokens, sampling_config,
       body.find("stream") != nullptr && body.find("stream")->as_bool());
 } catch (const std::length_error& error) {
-  return Err(400, "Bad Request", error.what(), "invalid_request_error",
-             "context_length_exceeded");
+  return AnthropicErr(400, "Bad Request", error.what(), "invalid_request_error",
+                      "context_length_exceeded");
 } catch (const std::invalid_argument& error) {
-  return Err(400, "Bad Request", error.what(), "invalid_request_error",
-             "invalid_prompt");
+  return AnthropicErr(400, "Bad Request", error.what(), "invalid_request_error",
+                      "invalid_prompt");
 }
 
 // The prompt size a Messages request would have, without generating.
@@ -1369,8 +1403,8 @@ HttpResponse AnthropicCountTokens(const HttpRequest& req,
   try {
     body = json::parse(req.body);
   } catch (const std::exception& e) {
-    return Err(400, "Bad Request", e.what(), "invalid_request_error",
-               "parse_error");
+    return AnthropicErr(400, "Bad Request", e.what(), "invalid_request_error",
+                        "parse_error");
   }
 
   ChatRequest chat;
@@ -1378,21 +1412,22 @@ HttpResponse AnthropicCountTokens(const HttpRequest& req,
   sampling::SamplingConfig sampling_config;
   if (auto error =
           ReadAnthropicChat(body, b, &chat, &max_tokens, &sampling_config))
-    return std::move(*error);
+    return ToAnthropicError(std::move(*error));
   if (body.find("stream") != nullptr && body.find("stream")->as_bool())
-    return InvalidCompatibilityRequest("'stream' must be false");
+    return AnthropicErr(400, "Bad Request", "'stream' must be false",
+                        "invalid_request_error");
   const auto tokens = b.count_chat_tokens(chat);
   if (!tokens)
-    return NotImplemented(req, b);
+    return ToAnthropicError(NotImplemented(req, b));
   json::Value resp = json::Value::object();
   resp["input_tokens"] = *tokens;
   return Ok(resp);
 } catch (const std::length_error& error) {
-  return Err(400, "Bad Request", error.what(), "invalid_request_error",
-             "context_length_exceeded");
+  return AnthropicErr(400, "Bad Request", error.what(), "invalid_request_error",
+                      "context_length_exceeded");
 } catch (const std::invalid_argument& error) {
-  return Err(400, "Bad Request", error.what(), "invalid_request_error",
-             "invalid_prompt");
+  return AnthropicErr(400, "Bad Request", error.what(), "invalid_request_error",
+                      "invalid_prompt");
 }
 
 HttpResponse LlamaCompletion(const HttpRequest& req,
