@@ -207,6 +207,7 @@ __global__ void GlimmerCastKvKernel(const float* __restrict__ src,
                                     std::uint32_t max_context,
                                     std::uint32_t num_kv_heads,
                                     std::uint32_t head_dim,
+                                    std::uint32_t row_begin,
                                     std::uint32_t valid_rows,
                                     std::uint32_t layer_base,
                                     std::uint32_t plane_layers) {
@@ -220,7 +221,7 @@ __global__ void GlimmerCastKvKernel(const float* __restrict__ src,
       (plane_layers != 0U ? plane_layers : layers) * max_context *
       num_kv_heads * head_dim;
   const std::size_t per_head =
-      static_cast<std::size_t>(valid_rows) * head_dim;
+      static_cast<std::size_t>(valid_rows - row_begin) * head_dim;
   const std::size_t stride =
       static_cast<std::size_t>(gridDim.x) * blockDim.x;
   const std::size_t head_f32 =
@@ -231,7 +232,8 @@ __global__ void GlimmerCastKvKernel(const float* __restrict__ src,
            static_cast<std::size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
        i < per_head; i += stride) {
     const std::uint32_t d = static_cast<std::uint32_t>(i % head_dim);
-    const std::uint32_t p = static_cast<std::uint32_t>(i / head_dim);
+    const std::uint32_t p =
+        row_begin + static_cast<std::uint32_t>(i / head_dim);
     const std::size_t f32 =
         half * plane + head_f32 + static_cast<std::size_t>(p) * head_dim + d;
     const std::size_t tm = half * plane + head_tm +
@@ -252,16 +254,18 @@ bool MulOk(std::size_t a, std::size_t b, std::size_t* out) noexcept {
 
 }  // namespace
 
-GlimmerLaunchStatus LaunchGlimmerCastKvFp16(
+GlimmerLaunchStatus LaunchGlimmerCastKvFp16Range(
     const float* src, void* dst, std::uint32_t layers,
     std::uint32_t max_context, std::uint32_t num_kv_heads,
-    std::uint32_t head_dim, std::uint32_t valid_rows, hipStream_t stream,
+    std::uint32_t head_dim, std::uint32_t row_begin,
+    std::uint32_t valid_rows, hipStream_t stream,
     std::uint32_t layer_base, std::uint32_t plane_layers) {
-  if (valid_rows == 0) {
+  if (valid_rows == 0 || row_begin >= valid_rows) {
     return {true, nullptr};
   }
   if (src == nullptr || dst == nullptr || layers == 0 || max_context == 0 ||
-      num_kv_heads == 0 || head_dim == 0 || valid_rows > max_context) {
+      num_kv_heads == 0 || head_dim == 0 || row_begin > valid_rows ||
+      valid_rows > max_context) {
     return {false, "glimmer fp16 kv cast refused by host audit"};
   }
   if (plane_layers != 0 &&
@@ -280,7 +284,8 @@ GlimmerLaunchStatus LaunchGlimmerCastKvFp16(
              static_cast<std::size_t>(max_context) * head_dim *
                  num_kv_heads,
              &plane) ||
-      !MulOk(valid_rows, head_dim, &per_head) || per_head == 0) {
+      !MulOk(valid_rows - row_begin, head_dim, &per_head) ||
+      per_head == 0) {
     return {false, "glimmer fp16 kv cast index out of range"};
   }
   constexpr std::uint32_t kBlock = 256U;
@@ -290,11 +295,21 @@ GlimmerLaunchStatus LaunchGlimmerCastKvFp16(
   const dim3 grid(grid_x, static_cast<unsigned int>(2 * per_half));
   GlimmerCastKvKernel<<<grid, kBlock, 0, stream>>>(
       src, static_cast<__half*>(dst), layers, max_context, num_kv_heads,
-      head_dim, valid_rows, layer_base, plane_layers);
+      head_dim, row_begin, valid_rows, layer_base, plane_layers);
   if (hipGetLastError() != hipSuccess) {
     return {false, "glimmer fp16 kv cast launch failed"};
   }
   return {true, nullptr};
+}
+
+GlimmerLaunchStatus LaunchGlimmerCastKvFp16(
+    const float* src, void* dst, std::uint32_t layers,
+    std::uint32_t max_context, std::uint32_t num_kv_heads,
+    std::uint32_t head_dim, std::uint32_t valid_rows, hipStream_t stream,
+    std::uint32_t layer_base, std::uint32_t plane_layers) {
+  return LaunchGlimmerCastKvFp16Range(src, dst, layers, max_context,
+                                      num_kv_heads, head_dim, 0, valid_rows,
+                                      stream, layer_base, plane_layers);
 }
 
 bool GlimmerSharedAttnOn() noexcept {

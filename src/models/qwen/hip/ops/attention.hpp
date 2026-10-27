@@ -154,7 +154,7 @@ void LaunchBatchedFusedQKNormRoPEKvWrite(
     std::uint32_t key_begin = 0, bool skip_kv_write = false,
     std::span<float> packed_k_workspace = {},
     std::span<float> packed_v_workspace = {}, std::uint32_t window = 0,
-    const float* sinks = nullptr);
+    const float* sinks = nullptr, std::uint32_t key_limit = 0);
 
 /// Large-batch causal attention using float32 QK/PV GEMMs and one reusable
 /// [batch, context] score buffer.

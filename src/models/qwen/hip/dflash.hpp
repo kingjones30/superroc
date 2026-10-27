@@ -168,6 +168,14 @@ public:
   ForwardBlockBatch(std::span<const QwenDFlashBlockRequest> requests);
 
   [[nodiscard]] std::unique_ptr<QwenDFlashGpuSnapshot> SaveSnapshot() const;
+  /// Exact payload bytes of SaveSnapshotAt().
+  [[nodiscard]] std::size_t SnapshotPayloadBytesAt(
+      std::uint32_t valid_context) const;
+  /// Snapshot truncated to an earlier injected-context length. The ring
+  /// holds rows in absolute slot order only while the context fits the
+  /// history, so a wrapped cache refuses instead of truncating.
+  [[nodiscard]] std::unique_ptr<QwenDFlashGpuSnapshot> SaveSnapshotAt(
+      std::uint32_t valid_context) const;
   void RestoreSnapshot(const QwenDFlashGpuSnapshot& snapshot);
   void RestorePersistentSnapshot(std::span<const std::uint8_t> payload);
   [[nodiscard]] std::size_t StateBytes() const noexcept;
@@ -209,6 +217,10 @@ private:
   void RunInjectGemm(const models::QwenTensorRef& weight, const float* input,
                      float* output, std::size_t num_tokens,
                      std::size_t output_size, std::size_t input_size);
+  void RunInjectGemmWide(const models::QwenTensorRef& weight,
+                         const float* input, float* output,
+                         std::size_t num_tokens, std::size_t output_size,
+                         std::size_t input_size);
 
   std::shared_ptr<const QwenDFlashGpuModel> model_;
   std::uint32_t max_context_{4096};
@@ -248,6 +260,7 @@ private:
   float* d_confidences_{nullptr};
   std::uint32_t* d_out_token_{nullptr};
   hip_bfloat16* d_bf16_input_{nullptr};
+  hip_bfloat16* d_inject_bf16_{nullptr};
   std::size_t scratch_bytes_{0};
   void* d_batch_scratch_{nullptr};
   std::size_t batch_scratch_bytes_{0};
@@ -316,6 +329,10 @@ public:
   [[nodiscard]] std::size_t SnapshotPayloadBytes() const override;
   [[nodiscard]] std::unique_ptr<speculative::IDraftBackendSnapshot> Snapshot()
       const override;
+  [[nodiscard]] std::size_t SnapshotPayloadBytesAtPosition(
+      std::uint32_t position) const override;
+  [[nodiscard]] std::unique_ptr<speculative::IDraftBackendSnapshot>
+  SnapshotAtPosition(std::uint32_t position) const override;
   void RestoreSnapshot(
       const speculative::IDraftBackendSnapshot& snapshot) override;
   void RestorePersistentSnapshot(

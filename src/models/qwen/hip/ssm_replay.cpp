@@ -97,6 +97,12 @@ void QwenGpuArena::RestoreState() {
   }
 
   live_recurrent_ = saved_recurrent_;
+  // Verification rewinds to the saved position: the fp16 KV mirror may hold
+  // rows of the rejected draft above it, so only the saved prefix stays
+  // valid and the next cast must re-convert the rewritten rows.
+  glimmer_kv_f16_valid_rows_ = glimmer_kv_f16_valid_rows_ < saved_context_
+                                   ? glimmer_kv_f16_valid_rows_
+                                   : saved_context_;
   // LFM2: the next ForwardToken diverts into the other buffer
   // (BeginRecurrentWrite), whose in-place short-conv state is the
   // rejected tentative state. Re-seed it from the saved buffer so the

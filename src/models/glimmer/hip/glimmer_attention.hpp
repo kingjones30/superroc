@@ -37,6 +37,16 @@ namespace gufo::hip {
     std::uint32_t head_dim, std::uint32_t valid_rows, hipStream_t stream,
     std::uint32_t layer_base = 0, std::uint32_t plane_layers = 0);
 
+/// Same remap, restricted to the row range [row_begin, valid_rows): callers
+/// that keep an fp16 mirror of the fp32 cache convert only the rows written
+/// since their previous cast.
+[[nodiscard]] GlimmerLaunchStatus LaunchGlimmerCastKvFp16Range(
+    const float* src, void* dst, std::uint32_t layers,
+    std::uint32_t max_context, std::uint32_t num_kv_heads,
+    std::uint32_t head_dim, std::uint32_t row_begin, std::uint32_t valid_rows,
+    hipStream_t stream, std::uint32_t layer_base = 0,
+    std::uint32_t plane_layers = 0);
+
 /// LGA: GQA-shared windowed attention over the token-major fp16 plane. One
 /// block owns one KV head and up to 4 query rows, reads each fp16 K/V row
 /// once, and serves all 16 query heads of that KV head. Q stays fp32.

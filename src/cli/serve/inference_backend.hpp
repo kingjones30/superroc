@@ -12,6 +12,7 @@
 
 #include "src/cli/serve/text_generation_backend.hpp"
 #include "src/cli/serve/text_generation_scheduler.hpp"
+#include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/qwen/dflash_policy.hpp"
 
 namespace gufo::hip {
@@ -57,6 +58,9 @@ struct TextSpeculativeConfig {
   std::uint32_t min_draft_tokens{1};
   speculative::DFlashDraftPolicy dflash_policy{
       speculative::DFlashDraftPolicy::kAdaptive};
+  /// Guard floor measured on this box: plain-decode tok/s per context
+  /// length, ascending. Empty disables the guard.
+  std::vector<speculative::PlainDecodeRatePoint> plain_decode_rates;
 };
 
 struct TextDiskCacheConfig {

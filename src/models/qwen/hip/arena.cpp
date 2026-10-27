@@ -636,6 +636,7 @@ void QwenGpuArena::RestoreSnapshot(const QwenGpuSnapshot& snapshot) {
       throw std::runtime_error(
           cast.error != nullptr ? cast.error : "glimmer fp16 kv cast failed");
     }
+    glimmer_kv_f16_valid_rows_ = snapshot.valid_context_;
   }
   ThrowOnHipError(hipMemcpyAsync(d_ssm_conv_state, snapshot.d_ssm_conv_,
                                  snapshot.conv_elements_ * sizeof(float),
@@ -720,6 +721,7 @@ void QwenGpuArena::RestoreCompactSnapshot(
       throw std::runtime_error(
           cast.error != nullptr ? cast.error : "glimmer fp16 kv cast failed");
     }
+    glimmer_kv_f16_valid_rows_ = layout.valid_context;
   }
   if (layout.conv_bytes != 0)
     ThrowOnHipError(
@@ -1044,6 +1046,7 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   d_ssm_replay_beta_ = other.d_ssm_replay_beta_;
   d_ssm_replay_enabled_ = other.d_ssm_replay_enabled_;
   saved_context_ = other.saved_context_;
+  glimmer_kv_f16_valid_rows_ = other.glimmer_kv_f16_valid_rows_;
   replay_last_position_ = other.replay_last_position_;
   replay_captured_positions_ = other.replay_captured_positions_;
   has_saved_state_ = other.has_saved_state_;
@@ -1099,6 +1102,7 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   other.d_ssm_replay_beta_ = nullptr;
   other.d_ssm_replay_enabled_ = nullptr;
   other.saved_context_ = 0;
+  other.glimmer_kv_f16_valid_rows_ = 0;
   other.replay_last_position_ = 0;
   other.replay_captured_positions_ = 0;
   other.has_saved_state_ = false;
@@ -1164,6 +1168,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     d_ssm_replay_beta_ = other.d_ssm_replay_beta_;
     d_ssm_replay_enabled_ = other.d_ssm_replay_enabled_;
     saved_context_ = other.saved_context_;
+    glimmer_kv_f16_valid_rows_ = other.glimmer_kv_f16_valid_rows_;
     replay_last_position_ = other.replay_last_position_;
     replay_captured_positions_ = other.replay_captured_positions_;
     has_saved_state_ = other.has_saved_state_;
@@ -1219,6 +1224,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     other.d_ssm_replay_beta_ = nullptr;
     other.d_ssm_replay_enabled_ = nullptr;
     other.saved_context_ = 0;
+    other.glimmer_kv_f16_valid_rows_ = 0;
     other.replay_last_position_ = 0;
     other.replay_captured_positions_ = 0;
     other.has_saved_state_ = false;
@@ -1258,6 +1264,7 @@ void QwenGpuArena::Reset() {
   }
   DisableSsmReplayCapture();
   saved_context_ = 0;
+  glimmer_kv_f16_valid_rows_ = 0;
   replay_last_position_ = 0;
   replay_captured_positions_ = 0;
   has_saved_state_ = false;

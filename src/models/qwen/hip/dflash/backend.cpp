@@ -332,7 +332,8 @@ bool QwenDFlashGpuDraftBackend::PrimeTargetContext(
     }
     primed_ = true;
     return true;
-  } catch (const std::exception&) {
+  } catch (const std::exception& exc) {
+    std::fprintf(stderr, "[SpecPrime] prime failed: %s\n", exc.what());
     Reset();
     return false;
   }
@@ -663,6 +664,35 @@ QwenDFlashGpuDraftBackend::Snapshot() const {
   }
   return std::make_unique<QwenDFlashDraftSnapshot>(
       executor_->SaveSnapshot(), pending_target_features_,
+      executor_->GetTargetFeaturesSize(), config_, controller_.State(),
+      controller_.LastFullWidth(), primed_);
+}
+
+std::size_t QwenDFlashGpuDraftBackend::SnapshotPayloadBytesAtPosition(
+    std::uint32_t position) const {
+  if (position > executor_->GetInjectedContextLength()) {
+    throw std::logic_error(
+        "DFlash position snapshot exceeds the injected context");
+  }
+  // Pending features are the tail past injected_context_len_: they sit
+  // beyond the truncation point, so the snapshot drops them and a restoring
+  // session re-appends its own committed tokens.
+  return CheckedPersistentAdd(executor_->SnapshotPayloadBytesAt(position),
+                              sizeof(float) + sizeof(std::uint32_t));
+}
+
+std::unique_ptr<speculative::IDraftBackendSnapshot>
+QwenDFlashGpuDraftBackend::SnapshotAtPosition(std::uint32_t position) const {
+  if (proposal_active_) {
+    throw std::logic_error(
+        "DFlash snapshot requires a committed proposal boundary");
+  }
+  if (position > executor_->GetInjectedContextLength()) {
+    throw std::logic_error(
+        "DFlash position snapshot exceeds the injected context");
+  }
+  return std::make_unique<QwenDFlashDraftSnapshot>(
+      executor_->SaveSnapshotAt(position), std::vector<float>{},
       executor_->GetTargetFeaturesSize(), config_, controller_.State(),
       controller_.LastFullWidth(), primed_);
 }

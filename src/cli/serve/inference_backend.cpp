@@ -850,9 +850,19 @@ public:
 
   [[nodiscard]] TextDecodeStep DecodeSpeculative(
       std::size_t max_tokens, sampling::SamplerState& sampler) {
+    if (verifier_->SpeculationDisabled()) {
+      return DecodePlainRound(max_tokens, sampler);
+    }
     TextDecodeStep result;
     sampling::SamplerState working_sampler = sampler;
+    const auto started = std::chrono::steady_clock::now();
+    // A round that drains the deferred drafter prime carries
+    // time-to-first-token work, not steady decode throughput: the guard
+    // must not bill it.
+    const bool drains_prime = verifier_->HasPendingDraftContext();
+    bool verified = false;
     if (PrepareSpeculativeDecode(max_tokens, working_sampler, result)) {
+      verified = true;
       const auto request = VerificationRequest(
           max_tokens - result.selections.size(), working_sampler);
       auto verification = verifier_->VerifyStep(
@@ -861,6 +871,64 @@ public:
       FinishSpeculativeDecode(std::move(verification), working_sampler, result);
     }
     sampler.SetRngState(working_sampler.rng_state());
+    if (verified && !drains_prime) {
+      const bool was_disabled = verifier_->SpeculationDisabled();
+      const double seconds = std::chrono::duration<double>(
+                                 std::chrono::steady_clock::now() - started)
+                                 .count();
+      verifier_->RecordDecodeRound(result.selections.size(), seconds,
+                                   static_cast<std::uint32_t>(position_));
+      if (!was_disabled && verifier_->SpeculationDisabled()) {
+        Logger::Info("spec", "event=spec_guard_plain_switch context=" +
+                                 std::to_string(position_) + " published=" +
+                                 std::to_string(result.selections.size()) +
+                                 " round_seconds=" + std::to_string(seconds));
+      }
+    }
+    return result;
+  }
+
+  /// Plain single-token steps, used once the guard switched this request
+  /// off speculation. It keeps the spec flow's publication contract: every
+  /// step publishes its own selections and leaves exactly one published
+  /// frontier unforwarded. The greedy frontier is the same token
+  /// verification would commit, so greedy output does not change.
+  [[nodiscard]] TextDecodeStep DecodePlainRound(
+      std::size_t max_tokens, sampling::SamplerState& sampler) {
+    if (max_tokens == 0) {
+      throw std::invalid_argument(
+          "Qwen speculative decode budget must be at least one token");
+    }
+    if (!frontier_.has_value()) {
+      throw std::logic_error("Qwen speculative state has no frontier");
+    }
+    TextDecodeStep result;
+    resume_tokens_.clear();
+    if (!frontier_published_) {
+      if (!sampler.config().can_use_unmodified_argmax())
+        frontier_ = SelectFrontier(sampler);
+      if (!AppendSpeculativeSelection(*frontier_, sampler, result))
+        return result;
+      frontier_published_ = true;
+      if (result.selections.size() >= max_tokens)
+        return result;
+    }
+    // Forward the published frontier through the target, keeping the
+    // drafter's committed context in sync, then publish the next frontier.
+    const auto token = *frontier_;
+    frontier_ = verifier_->AdvanceCommittedToken(
+        token, static_cast<std::uint32_t>(position_));
+    ++position_;
+    frontier_logits_.clear();
+    // The forwarded token is committed, so nothing speculative is in
+    // flight and the rollback frontier is the committed state itself.
+    frontier_published_ = false;
+    rollback_position_.reset();
+    if (!sampler.config().can_use_unmodified_argmax())
+      frontier_ = SelectFrontier(sampler);
+    if (!AppendSpeculativeSelection(*frontier_, sampler, result))
+      return result;
+    frontier_published_ = true;
     return result;
   }
 
@@ -904,6 +972,73 @@ public:
   SaveVerifierSnapshot() const {
     return verifier_ != nullptr ? verifier_->Snapshot() : nullptr;
   }
+  /// R1: prompt-boundary captures deferred while the drafter is unprimed.
+  /// The drafter primes with the first decoded token, so the serve layer
+  /// copies the boundary's frontier here and retries the capture at request
+  /// end against device state truncated back to the boundary.
+  [[nodiscard]] bool HasPendingSpeculativePrime() const {
+    return verifier_ != nullptr && verifier_->HasPendingDraftContext();
+  }
+  void DrainSpeculativePrime() {
+    if (verifier_ != nullptr) {
+      verifier_->FlushPendingDraftContext();
+    }
+  }
+  [[nodiscard]] TextDeferredPromptBoundary CaptureDeferredPromptBoundary()
+      const {
+    if (!frontier_.has_value()) {
+      throw std::logic_error("Qwen state has no exact frontier to snapshot");
+    }
+    TextDeferredPromptBoundary boundary;
+    boundary.position = position_;
+    boundary.frontier = frontier_;
+    boundary.frontier_logits = CopyFrontierLogits();
+    boundary.pending_tokens = pending_tokens();
+    return boundary;
+  }
+  void CheckDeferredPromptBoundary(
+      const TextDeferredPromptBoundary& boundary) const {
+    // Recurrent state is position-coupled and cannot be truncated: only
+    // attention-only models (llama) support deferred boundary captures.
+    if (model_->GetConfig().SsmLayerCount() != 0) {
+      throw std::logic_error(
+          "recurrent state cannot be truncated to a prompt boundary");
+    }
+    if (!boundary.frontier.has_value() || boundary.position > position_) {
+      throw std::logic_error(
+          "deferred prompt boundary is outside the committed context");
+    }
+  }
+  [[nodiscard]] std::size_t SnapshotPayloadBytesAtBoundary(
+      const TextDeferredPromptBoundary& boundary) const {
+    CheckDeferredPromptBoundary(boundary);
+    std::size_t bytes = executor_->SnapshotPayloadBytes(
+        static_cast<std::uint32_t>(boundary.position));
+    const auto checked_add = [&bytes](std::size_t value) {
+      if (value > std::numeric_limits<std::size_t>::max() - bytes) {
+        throw std::overflow_error("Qwen snapshot size overflows");
+      }
+      bytes += value;
+    };
+    if (boundary.frontier_logits.size() >
+        std::numeric_limits<std::size_t>::max() / sizeof(float)) {
+      throw std::overflow_error("Qwen snapshot size overflows");
+    }
+    checked_add(boundary.frontier_logits.size() * sizeof(float));
+    checked_add(boundary.pending_tokens.size() * sizeof(TextRunnerToken));
+    checked_add(std::ranges::count_if(executor_->VisionLayout().images,
+                                      [&boundary](const auto& image) {
+                                        return image.offset < boundary.position;
+                                      }) *
+                sizeof(models::qwen::vision::ImageGrid));
+    if (verifier_ != nullptr) {
+      checked_add(verifier_->SnapshotPayloadBytesAtPosition(
+          static_cast<std::uint32_t>(boundary.position)));
+    }
+    return bytes;
+  }
+  [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> SnapshotAtBoundary(
+      const TextDeferredPromptBoundary& boundary) const;
   // F7: refuse an MTP capture unless the draft prefix covers exactly the
   // target's committed context. A lagging draft would restore at the wrong
   // position and every later Propose would throw (an HTTP 500 in serve),
@@ -1042,6 +1177,20 @@ public:
   std::vector<TextRunnerToken> pending_tokens;
   std::unique_ptr<speculative::SpeculativeVerifierSnapshot> verifier_snapshot;
 };
+
+std::unique_ptr<TextRunnerSnapshot> QwenTextRunnerState::SnapshotAtBoundary(
+    const TextDeferredPromptBoundary& boundary) const {
+  CheckDeferredPromptBoundary(boundary);
+  return std::make_unique<QwenTextRunnerSnapshot>(
+      model_,
+      executor_->SaveSnapshot(static_cast<std::uint32_t>(boundary.position)),
+      boundary.position, boundary.frontier,
+      std::vector<float>(boundary.frontier_logits),
+      std::vector<TextRunnerToken>(boundary.pending_tokens),
+      verifier_ != nullptr ? verifier_->SnapshotAtPosition(
+                                 static_cast<std::uint32_t>(boundary.position))
+                           : nullptr);
+}
 
 QwenTextRunnerState& RequireQwenState(TextRunnerState& state) {
   auto* qwen = dynamic_cast<QwenTextRunnerState*>(&state);
@@ -1811,6 +1960,33 @@ public:
             static_cast<std::uint32_t>(qwen.position())),
         qwen.position(), qwen.frontier(), qwen.CopyFrontierLogits(),
         qwen.pending_tokens(), qwen.SaveVerifierSnapshot());
+  }
+
+  [[nodiscard]] bool HasPendingSpeculativePrime(
+      const TextRunnerState& state) const override {
+    return RequireQwenState(state).HasPendingSpeculativePrime();
+  }
+
+  void DrainSpeculativePrime(TextRunnerState& state) const override {
+    RequireQwenState(state).DrainSpeculativePrime();
+  }
+
+  [[nodiscard]] TextDeferredPromptBoundary CaptureDeferredPromptBoundary(
+      const TextRunnerState& state) const override {
+    return RequireQwenState(state).CaptureDeferredPromptBoundary();
+  }
+
+  [[nodiscard]] std::size_t DeferredPromptSnapshotPayloadBytes(
+      const TextRunnerState& state,
+      const TextDeferredPromptBoundary& boundary) const override {
+    return RequireQwenState(state).SnapshotPayloadBytesAtBoundary(boundary);
+  }
+
+  [[nodiscard]] std::unique_ptr<TextRunnerSnapshot>
+  SnapshotDeferredPromptBoundary(
+      const TextRunnerState& state,
+      const TextDeferredPromptBoundary& boundary) const override {
+    return RequireQwenState(state).SnapshotAtBoundary(boundary);
   }
 
   void RestoreOrFork(TextRunnerState& state,
@@ -4354,6 +4530,8 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
       // DFlash2 diffuses a fixed block, so it pins the length instead.
       speculative_options.enable_adaptive_draft_length = true;
     }
+    speculative_options.plain_decode_rates =
+        speculative_config.plain_decode_rates;
 
     PrepareVision(model->VisionEncoder());
     auto new_state = std::make_shared<Impl::State>();

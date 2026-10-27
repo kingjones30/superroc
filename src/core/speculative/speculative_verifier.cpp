@@ -368,6 +368,12 @@ SpeculativeVerifier::SpeculativeVerifier(
 
 void SpeculativeVerifier::Reset() noexcept {
   stats_ = {};
+  pending_draft_contexts_.clear();
+  guard_rounds_.clear();
+  guard_recorded_rounds_ = 0;
+  guard_published_tokens_ = 0;
+  guard_below_floor_windows_ = 0;
+  speculation_disabled_ = false;
   ResetAdaptiveDraftLength();
   if (draft_backend_ != nullptr) {
     draft_backend_->Reset();
@@ -376,9 +382,93 @@ void SpeculativeVerifier::Reset() noexcept {
 
 void SpeculativeVerifier::BeginRequest() noexcept {
   stats_ = {};
+  guard_rounds_.clear();
+  guard_recorded_rounds_ = 0;
+  guard_published_tokens_ = 0;
+  guard_below_floor_windows_ = 0;
+  speculation_disabled_ = false;
   ResetAdaptiveDraftLength();
   if (draft_backend_ != nullptr)
     draft_backend_->BeginRequest();
+}
+
+double SpeculativeVerifier::PlainRateForContext(
+    std::uint32_t context_length) const noexcept {
+  const auto& rates = options_.plain_decode_rates;
+  if (rates.empty()) {
+    return 0.0;
+  }
+  if (context_length <= rates.front().context_tokens) {
+    return rates.front().tokens_per_second;
+  }
+  for (std::size_t index = 1; index < rates.size(); ++index) {
+    if (context_length <= rates[index].context_tokens) {
+      const auto& lower = rates[index - 1];
+      const auto& upper = rates[index];
+      const double span = upper.context_tokens - lower.context_tokens;
+      if (span <= 0.0) {
+        return upper.tokens_per_second;
+      }
+      const double weight =
+          static_cast<double>(context_length - lower.context_tokens) / span;
+      return lower.tokens_per_second +
+             weight * (upper.tokens_per_second - lower.tokens_per_second);
+    }
+  }
+  return rates.back().tokens_per_second;
+}
+
+void SpeculativeVerifier::RecordDecodeRound(std::size_t published_tokens,
+                                            double seconds,
+                                            std::uint32_t context_length) {
+  if (options_.plain_decode_rates.empty() || speculation_disabled_) {
+    return;
+  }
+  if (published_tokens == 0 || seconds <= 0.0 || !std::isfinite(seconds)) {
+    // A round that produced nothing (a stop) says nothing about throughput.
+    return;
+  }
+  guard_rounds_.emplace_back(published_tokens, seconds);
+  while (guard_rounds_.size() > kGuardWindowRounds) {
+    guard_rounds_.pop_front();
+  }
+  ++guard_recorded_rounds_;
+  guard_published_tokens_ += published_tokens;
+  if (guard_rounds_.size() < kGuardWindowRounds ||
+      guard_recorded_rounds_ < kGuardSettleRounds ||
+      guard_published_tokens_ < kGuardSettleTokens) {
+    // A full window inside the settling budget is acceptance ramp-up, not
+    // evidence that speculation runs slower than plain decoding.
+    return;
+  }
+  std::size_t tokens = 0;
+  double elapsed = 0.0;
+  for (const auto& round : guard_rounds_) {
+    tokens += round.first;
+    elapsed += round.second;
+  }
+  if (elapsed <= 0.0) {
+    return;
+  }
+  const double rate = static_cast<double>(tokens) / elapsed;
+  const double floor = PlainRateForContext(context_length);
+  if (g_cost.on) {
+    std::fprintf(stderr,
+                 "[SpecGuard] ctx=%u window_tokens=%zu window_s=%.4f "
+                 "rate=%.2f floor=%.2f below_run=%zu\n",
+                 static_cast<unsigned>(context_length), tokens, elapsed, rate,
+                 floor, guard_below_floor_windows_);
+  }
+  if (rate >= floor) {
+    guard_below_floor_windows_ = 0;
+    return;
+  }
+  // Published tokens arrive in lumpy blocks, so short runs of slow windows
+  // are noise: confirm before switching the request to plain decoding.
+  ++guard_below_floor_windows_;
+  if (guard_below_floor_windows_ >= kGuardConfirmWindows) {
+    speculation_disabled_ = true;
+  }
 }
 
 void SpeculativeVerifier::ConfigureAdaptiveDraftPolicy() {
@@ -421,8 +511,83 @@ void SpeculativeVerifier::UpdateAdaptiveDraftLength(std::size_t accepted,
   }
 }
 
+void SpeculativeVerifier::QueueDraftContext(
+    std::span<const tokenization::TokenId> tokens, std::size_t hidden_offset,
+    std::size_t hidden_count, std::size_t hidden_size,
+    tokenization::TokenId first_token, std::uint32_t position, bool append) {
+  PendingDraftContext pending;
+  pending.tokens.assign(tokens.begin(), tokens.end());
+  pending.hidden_offset = hidden_offset;
+  pending.hidden_count = hidden_count;
+  pending.hidden_size = hidden_size;
+  pending.first_token = first_token;
+  pending.position = position;
+  pending.append = append;
+  pending_draft_contexts_.push_back(std::move(pending));
+}
+
+void SpeculativeVerifier::FlushPendingDraftContext() {
+  if (pending_draft_contexts_.empty()) {
+    return;
+  }
+  if (draft_backend_ == nullptr) {
+    pending_draft_contexts_.clear();
+    return;
+  }
+  // The rows are re-derived from the live capture buffer at drain time: the
+  // buffer only ever appends between the queueing and the drain.
+  const auto prompt_hidden = target_executor_->GetPromptHiddenStates();
+  // Drain in capture order: Prime's context initializes the drafter, then
+  // later prompt chunks append at their recorded positions.
+  CostTimer cost_prime(g_cost.prime_ms);
+  if (g_cost.on) {
+    std::size_t prime_tokens = 0;
+    std::size_t append_tokens = 0;
+    for (const auto& pending : pending_draft_contexts_) {
+      (pending.append ? append_tokens : prime_tokens) += pending.tokens.size();
+    }
+    const auto epoch_ms =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    std::fprintf(stderr,
+                 "[SpecPrime] %lld drain %zu contexts: prime %zu tokens, "
+                 "append %zu tokens\n",
+                 static_cast<long long>(epoch_ms),
+                 pending_draft_contexts_.size(), prime_tokens, append_tokens);
+  }
+  for (const auto& pending : pending_draft_contexts_) {
+    if (pending.hidden_offset > prompt_hidden.size() ||
+        pending.hidden_count > prompt_hidden.size() - pending.hidden_offset ||
+        pending.hidden_count != pending.tokens.size() * pending.hidden_size) {
+      throw std::runtime_error(
+          "deferred draft context no longer matches the captured prompt "
+          "features");
+    }
+    const DraftTargetContext context{
+        .prompt_tokens = pending.tokens,
+        .prompt_hidden_states =
+            prompt_hidden.subspan(pending.hidden_offset, pending.hidden_count),
+        .hidden_size = pending.hidden_size,
+        .first_token = pending.first_token,
+    };
+    const bool ok =
+        pending.append
+            ? draft_backend_->AppendTargetContext(context, pending.position)
+            : draft_backend_->PrimeTargetContext(context);
+    if (!ok) {
+      throw std::runtime_error("draft backend failed to prime target context");
+    }
+    if (g_cost.on) {
+      g_cost.prime_tokens += pending.tokens.size();
+    }
+  }
+  pending_draft_contexts_.clear();
+}
+
 tokenization::TokenId SpeculativeVerifier::AdvanceCommittedToken(
     tokenization::TokenId token, std::uint32_t position) {
+  FlushPendingDraftContext();
   const auto next = target_executor_->ForwardToken(token, position);
   if (draft_backend_ != nullptr &&
       draft_backend_->RequiresTargetHiddenStates()) {
@@ -531,6 +696,7 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifyStep(
 
 SpeculativeVerifier::PreparedStep SpeculativeVerifier::PrepareStep(
     const StepRequest& request, bool defer_target_only, bool defer_proposal) {
+  FlushPendingDraftContext();
   request.sampler.config().Validate();
   if (request.max_emitted_tokens == 0) {
     throw std::invalid_argument(
@@ -1081,6 +1247,7 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
     std::span<const tokenization::TokenId> current_sequence,
     std::uint32_t cur_pos, tokenization::TokenId current_token,
     tokenization::TokenId eos_id, std::uint32_t max_emitted_tokens) {
+  FlushPendingDraftContext();
   if (max_emitted_tokens == 0) {
     throw std::invalid_argument(
         "speculative verification must emit at least one token");
@@ -1367,11 +1534,8 @@ std::size_t SpeculativeVerifierSnapshot::SerializePersistent(
   return destination.size();
 }
 
-std::size_t SpeculativeVerifier::SnapshotPayloadBytes() const {
-  if (draft_backend_ == nullptr) {
-    throw std::logic_error("speculative verifier has no draft backend to size");
-  }
-  std::size_t bytes = draft_backend_->SnapshotPayloadBytes();
+std::size_t SpeculativeVerifier::TrailingSnapshotBytes(
+    std::size_t bytes) const {
   const auto checked_add = [&bytes](std::size_t value) {
     if (value > std::numeric_limits<std::size_t>::max() - bytes) {
       throw std::overflow_error("speculative snapshot size overflows");
@@ -1388,15 +1552,70 @@ std::size_t SpeculativeVerifier::SnapshotPayloadBytes() const {
   return bytes;
 }
 
+std::size_t SpeculativeVerifier::SnapshotPayloadBytes() const {
+  if (draft_backend_ == nullptr) {
+    throw std::logic_error("speculative verifier has no draft backend to size");
+  }
+  // A session whose prompt never reached the drafter cannot be captured: the
+  // drafter state would lag the target context. The capture path records a
+  // skip, exactly as MTP's position check does, and the queue drains at the
+  // first decode step instead.
+  if (HasPendingDraftContext()) {
+    throw std::logic_error(
+        "speculative drafter is not primed for the captured context");
+  }
+  return TrailingSnapshotBytes(draft_backend_->SnapshotPayloadBytes());
+}
+
+std::size_t SpeculativeVerifier::SnapshotPayloadBytesAtPosition(
+    std::uint32_t position) const {
+  if (draft_backend_ == nullptr) {
+    throw std::logic_error("speculative verifier has no draft backend to size");
+  }
+  if (HasPendingDraftContext()) {
+    throw std::logic_error(
+        "speculative drafter is not primed for the captured context");
+  }
+  return TrailingSnapshotBytes(
+      draft_backend_->SnapshotPayloadBytesAtPosition(position));
+}
+
 std::unique_ptr<SpeculativeVerifierSnapshot> SpeculativeVerifier::Snapshot()
     const {
   if (draft_backend_ == nullptr) {
     throw std::logic_error(
         "speculative verifier has no draft backend to snapshot");
   }
+  // Refuse like SnapshotPayloadBytes: an unprimed drafter cannot be
+  // persisted for the target's committed context.
+  if (HasPendingDraftContext()) {
+    throw std::logic_error(
+        "speculative drafter is not primed for the captured context");
+  }
   auto snapshot = std::unique_ptr<SpeculativeVerifierSnapshot>(
       new SpeculativeVerifierSnapshot());
   snapshot->draft_snapshot_ = draft_backend_->Snapshot();
+  snapshot->stats_ = stats_;
+  snapshot->current_draft_length_ = current_draft_length_;
+  snapshot->rolling_acceptance_ = rolling_acceptance_;
+  return snapshot;
+}
+
+std::unique_ptr<SpeculativeVerifierSnapshot>
+SpeculativeVerifier::SnapshotAtPosition(std::uint32_t position) const {
+  if (draft_backend_ == nullptr) {
+    throw std::logic_error(
+        "speculative verifier has no draft backend to snapshot");
+  }
+  // Refuse like Snapshot(): the drafter must already cover the position, and
+  // a queued prime means it does not.
+  if (HasPendingDraftContext()) {
+    throw std::logic_error(
+        "speculative drafter is not primed for the captured context");
+  }
+  auto snapshot = std::unique_ptr<SpeculativeVerifierSnapshot>(
+      new SpeculativeVerifierSnapshot());
+  snapshot->draft_snapshot_ = draft_backend_->SnapshotAtPosition(position);
   snapshot->stats_ = stats_;
   snapshot->current_draft_length_ = current_draft_length_;
   snapshot->rolling_acceptance_ = rolling_acceptance_;
@@ -1408,6 +1627,8 @@ void SpeculativeVerifier::RestoreSnapshot(
   if (draft_backend_ == nullptr || snapshot.draft_snapshot_ == nullptr) {
     throw std::invalid_argument("speculative verifier snapshot is incomplete");
   }
+  // The restored drafter state replaces any deferred priming.
+  pending_draft_contexts_.clear();
   const bool capture_hidden = draft_backend_->RequiresTargetHiddenStates();
   const auto target_layer_ids = capture_hidden
                                     ? draft_backend_->TargetHiddenLayerIds()
@@ -1425,6 +1646,8 @@ void SpeculativeVerifier::RestorePersistentSnapshot(
     throw std::logic_error(
         "speculative verifier has no draft backend to restore");
   }
+  // The restored drafter state replaces any deferred priming.
+  pending_draft_contexts_.clear();
   if (payload.size() < kVerifierPersistentHeaderBytes ||
       !std::equal(kVerifierPersistentMagic.begin(),
                   kVerifierPersistentMagic.end(), payload.begin()) ||
@@ -1602,19 +1825,23 @@ tokenization::TokenId SpeculativeVerifier::ExtendPrompt(
   target_executor_->SetPromptHiddenCapture(
       capture, capture ? draft_backend_->TargetHiddenLayerIds()
                        : std::span<const std::uint32_t>{});
+  // The capture buffer accumulates across prompt chunks (ForwardPromptBatch
+  // appends for a nonzero position), so this chunk's rows extend the queue
+  // without touching earlier ones.
+  const std::size_t hidden_offset =
+      target_executor_->GetPromptHiddenStates().size();
   const auto next =
       target_executor_->ForwardPromptSuffix(tokens, position, compute_logits);
   if (capture) {
     const auto hidden = target_executor_->GetPromptHiddenStates();
-    if (hidden.empty() || hidden.size() % tokens.size() != 0 ||
-        !draft_backend_->AppendTargetContext(
-            {.prompt_tokens = tokens,
-             .prompt_hidden_states = hidden,
-             .hidden_size = hidden.size() / tokens.size(),
-             .first_token = next},
-            position)) {
+    const std::size_t hidden_count = hidden.size() - hidden_offset;
+    if (hidden.empty() || tokens.empty() || hidden_count % tokens.size() != 0) {
       throw std::runtime_error("draft failed to append target prompt features");
     }
+    // Deferred with the prompt capture: the first drafter use after the
+    // first token drains it together with Prime()'s context.
+    QueueDraftContext(tokens, hidden_offset, hidden_count,
+                      hidden_count / tokens.size(), next, position, true);
   }
   return next;
 }
@@ -1654,23 +1881,12 @@ tokenization::TokenId SpeculativeVerifier::Prime(
       throw std::runtime_error(
           "target executor did not capture complete prompt hidden states");
     }
-    const DraftTargetContext context{
-        .prompt_tokens = prompt_tokens,
-        .prompt_hidden_states = prompt_hidden,
-        .hidden_size = prompt_hidden.size() / prompt_tokens.size(),
-        .first_token = first_token,
-    };
-    bool primed = false;
-    {
-      CostTimer cost_prime(g_cost.prime_ms);
-      primed = draft_backend_->PrimeTargetContext(context);
-    }
-    if (g_cost.on) {
-      g_cost.prime_tokens += prompt_tokens.size();
-    }
-    if (!primed) {
-      throw std::runtime_error("draft backend failed to prime target context");
-    }
+    // Drafter priming is deferred out of time-to-first-token: the first
+    // drafter use after the first token (proposal, committed-token append)
+    // drains the queue.
+    QueueDraftContext(prompt_tokens, 0, prompt_hidden.size(),
+                      prompt_hidden.size() / prompt_tokens.size(), first_token,
+                      0, false);
   }
   return first_token;
 }

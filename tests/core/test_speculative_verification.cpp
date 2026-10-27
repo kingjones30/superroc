@@ -527,6 +527,93 @@ void TestSpeculativeStats() {
          "non-empty acceptance rate");
 }
 
+void TestPlainRateGuard() {
+  ScriptedTargetExecutor target({}, 900);
+  auto draft = [] {
+    return std::make_unique<gufo::speculative::MockDraftBackend>(
+        std::vector<TokenId>{101, 102, 103});
+  };
+
+  // No rate table: the guard never arms.
+  gufo::speculative::SpeculativeVerifier unguarded(
+      target, draft(), gufo::speculative::SpeculativeOptions{});
+  for (int round = 0; round < 30; ++round) {
+    unguarded.RecordDecodeRound(1, 1.0, 512);
+  }
+  Expect(!unguarded.SpeculationDisabled(),
+         "empty rate table keeps the guard off");
+
+  gufo::speculative::SpeculativeOptions policy;
+  policy.plain_decode_rates = {{512, 10.0}, {4096, 8.0}, {8192, 7.0}};
+  gufo::speculative::SpeculativeVerifier verifier(target, draft(), policy);
+
+  // Rounds that produce nothing are not evidence about throughput.
+  for (int round = 0; round < 30; ++round) {
+    verifier.RecordDecodeRound(0, 1.0, 512);
+  }
+  Expect(!verifier.SpeculationDisabled(), "empty rounds do not arm the guard");
+
+  // Fewer than eight rounds is not a full window.
+  for (int round = 0; round < 7; ++round) {
+    verifier.RecordDecodeRound(6, 1.0, 512);
+  }
+  Expect(!verifier.SpeculationDisabled(),
+         "partial window does not trip the guard");
+
+  // Rounds inside the settling budget are acceptance ramp-up, not evidence.
+  for (int round = 7; round < 23; ++round) {
+    verifier.RecordDecodeRound(6, 1.0, 512);
+  }
+  Expect(!verifier.SpeculationDisabled(),
+         "settling rounds do not trip the guard");
+
+  // Past the settling budget, 6 tok/s sits under the 512-context floor of
+  // 10 tok/s; one and two below-floor windows are still noise.
+  verifier.RecordDecodeRound(6, 1.0, 512);
+  Expect(!verifier.SpeculationDisabled(),
+         "one below-floor window does not trip the guard");
+  verifier.RecordDecodeRound(6, 1.0, 512);
+  Expect(!verifier.SpeculationDisabled(),
+         "two below-floor windows do not trip the guard");
+  verifier.RecordDecodeRound(6, 1.0, 512);
+  Expect(verifier.SpeculationDisabled(),
+         "a third below-floor window switches the request to plain "
+         "decoding");
+
+  verifier.BeginRequest();
+  Expect(!verifier.SpeculationDisabled(),
+         "BeginRequest re-arms the guard for the next request");
+
+  // 2304 sits halfway between (512, 10) and (4096, 8): the interpolated
+  // floor is 9 tok/s. 9.5 stays above it; 8.5 falls below.
+  for (int round = 0; round < 26; ++round) {
+    verifier.RecordDecodeRound(19, 2.0, 2304);
+  }
+  Expect(!verifier.SpeculationDisabled(),
+         "above the interpolated floor does not trip the guard");
+  verifier.BeginRequest();
+  for (int round = 0; round < 26; ++round) {
+    verifier.RecordDecodeRound(17, 2.0, 2304);
+  }
+  Expect(verifier.SpeculationDisabled(),
+         "below the interpolated floor trips the guard");
+
+  // Contexts outside the table clamp to its ends: 100 -> 10 tok/s,
+  // 9000 -> 7 tok/s.
+  verifier.BeginRequest();
+  for (int round = 0; round < 26; ++round) {
+    verifier.RecordDecodeRound(19, 2.0, 100);
+  }
+  Expect(verifier.SpeculationDisabled(),
+         "below the clamped first-entry floor trips the guard");
+  verifier.BeginRequest();
+  for (int round = 0; round < 26; ++round) {
+    verifier.RecordDecodeRound(15, 2.0, 9000);
+  }
+  Expect(!verifier.SpeculationDisabled(),
+         "above the clamped last-entry floor does not trip the guard");
+}
+
 void TestStopTokensFollowTargetVocabulary() {
   const std::vector<TokenId> generated{10, 151643, 248044, 248046, 11, 37, 12};
   for (const bool batched : {false, true}) {
@@ -1473,6 +1560,7 @@ void TestPersistentVerifierSnapshotRoundTrip() {
 int main() {
   TestSpeculativeDraftBackendInterface();
   TestSpeculativeStats();
+  TestPlainRateGuard();
   TestStopTokensFollowTargetVocabulary();
   TestFullAcceptanceProducesTargetBonusToken();
   TestPartialRejectionRestoresAndReplaysState();

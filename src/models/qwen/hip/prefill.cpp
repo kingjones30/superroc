@@ -48,11 +48,16 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptBatch(
   replaying_ssm_state_ = false;
   arena_.DisableSsmReplayCapture();
   if (capture_prompt_hidden_) {
-    h_prompt_hidden_.clear();
+    // Speculative prompt chunks append their target features to the capture
+    // buffer; only a prompt that starts at position 0 begins a fresh buffer.
+    if (start_pos == 0) {
+      h_prompt_hidden_.clear();
+    }
     const std::size_t captured_layers =
         std::max<std::size_t>(arena_.GetTargetLayerCapture().size(), 1U);
-    h_prompt_hidden_.reserve(prompt_tokens.size() * captured_layers *
-                             weights_.config.hidden_size);
+    h_prompt_hidden_.reserve(h_prompt_hidden_.size() +
+                             prompt_tokens.size() * captured_layers *
+                                 weights_.config.hidden_size);
   }
 
   const std::size_t end_pos =

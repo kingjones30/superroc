@@ -473,6 +473,18 @@
   "_ZN4gufo3hip41Wave32FusedSSMInputProjectionsKernel_1RowILj4EEEvPKvNS_4core8GgmlTypeES3_S5_S3_S5_S3_S5_PKfPfS8_S8_S8_mmmm": {
    "max_scratch": 8
   },
+  "_ZN4gufo3hip7kernels31dflash_selector_finalize_kernelILj32EEEvPKfPKjS4_PK12hip_bfloat16S9_S6_PjPffS4_SA_SB_jjj": {
+   "max_scratch": 528,
+   "note": "llama DFlash2 drafter top-k 32 (Nanbeige): 32 candidates per thread; runs once per draft step"
+  },
+  "_ZN4gufo3hip7kernels35dflash_selector_partial_topk_kernelILj32EEEvPKfPfPjjj": {
+   "max_scratch": 272,
+   "note": "llama DFlash2 drafter top-k 32 (Nanbeige): 32 candidates per thread; runs once per draft step"
+  },
+  "_ZN4gufo3hip7kernels37dflash_selector_finalize_batch_kernelILj32EEEvPKfPKjS4_PK12hip_bfloat16S9_PjPfS4_SA_SB_NS1_13SelectorBatchEjjj": {
+   "max_scratch": 528,
+   "note": "llama DFlash2 drafter top-k 32 (Nanbeige): 32 candidates per thread; runs once per draft step"
+  },
   "_ZN4gufo6models17qwen38_flash_next4rocm12_GLOBAL__N_117GdnRowSplitKernelEPKfS5_S5_PfS6_jjjNS2_13GdnCheckpointE": {
    "max_scratch": 112,
    "comment": "upstream Flash-Next prefill GDN row-split (newer than baseline b722a61; pure upstream fails identically)"
