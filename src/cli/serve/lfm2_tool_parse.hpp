@@ -1,6 +1,6 @@
 // LFM2: pythonic tool-call parser for the pinned LFM2.5 template.
-#ifndef GUFO_SERVER_LFM2_TOOL_PARSE_HPP_
-#define GUFO_SERVER_LFM2_TOOL_PARSE_HPP_
+#ifndef SUPERROC_SERVER_LFM2_TOOL_PARSE_HPP_
+#define SUPERROC_SERVER_LFM2_TOOL_PARSE_HPP_
 
 #include <optional>
 #include <string>
@@ -9,7 +9,7 @@
 
 #include "src/models/qwen/chat_template.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 // LFM2: one pythonic tool call parsed from the text between
 // <|tool_call_start|> and <|tool_call_end|>.
@@ -25,6 +25,6 @@ struct Lfm2Call {
 std::optional<std::vector<Lfm2Call>> ParseLfm2PythonicCalls(
     std::string_view body);
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_LFM2_TOOL_PARSE_HPP_
+#endif  // SUPERROC_SERVER_LFM2_TOOL_PARSE_HPP_

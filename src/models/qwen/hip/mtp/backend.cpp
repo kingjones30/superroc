@@ -19,8 +19,9 @@
 #include "src/models/qwen/hip/mtp.hpp"
 #include "src/models/qwen/hip/mtp/kat_mtp_pmin.hpp"
 #include "src/models/qwen/hip/mtp/snapshot_guard.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 QwenMtpGpuDraftBackend::QwenMtpGpuDraftBackend(
     std::unique_ptr<QwenMtpGpuExecutor> executor, QwenMtpGpuDraftConfig config,
@@ -35,34 +36,34 @@ QwenMtpGpuDraftBackend::QwenMtpGpuDraftBackend(
     throw std::invalid_argument(
         "MTP target output_norm width does not match the hidden size");
   }
-  if (const char* kv_dump = std::getenv("GUFO_MTP_KV_DUMP");
+  if (const char* kv_dump = ::superroc::core::GetEnvCompat("SUPERROC_MTP_KV_DUMP");
       kv_dump != nullptr && *kv_dump != '\0') {
     kv_dump_path_ = kv_dump;
   }
-  if (const char* serial = std::getenv("GUFO_MTP_PRIME_SERIAL");
+  if (const char* serial = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_SERIAL");
       serial != nullptr && *serial != '\0' && std::atoi(serial) != 0) {
     batch_prime_ = false;
   }
-  if (const char* prenorm = std::getenv("GUFO_MTP_PRENORM_H");
+  if (const char* prenorm = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRENORM_H");
       prenorm != nullptr && *prenorm != '\0' && std::atoi(prenorm) != 0) {
     norm_at_ingest_ = false;
   }
-  if (const char* path = std::getenv("GUFO_MTP_TF_DUMP");
+  if (const char* path = ::superroc::core::GetEnvCompat("SUPERROC_MTP_TF_DUMP");
       path != nullptr && *path != '\0') {
     tf_path_ = path;
     tf_file_ = std::fopen(path, "w");
     if (tf_file_ == nullptr) {
-      throw std::runtime_error("GUFO_MTP_TF_DUMP path is not writable: " +
+      throw std::runtime_error("SUPERROC_MTP_TF_DUMP path is not writable: " +
                                tf_path_);
     }
     std::fprintf(tf_file_,
                  "# TF cell=MTP KV position of the input pair; prediction "
                  "target position is cell+idx+1\n");
-    if (const char* logits = std::getenv("GUFO_MTP_TF_LOGITS");
+    if (const char* logits = ::superroc::core::GetEnvCompat("SUPERROC_MTP_TF_LOGITS");
         logits != nullptr && *logits != '\0' && std::atoi(logits) != 0) {
       tf_logits_file_ = std::fopen((tf_path_ + ".bin").c_str(), "wb");
       if (tf_logits_file_ == nullptr) {
-        throw std::runtime_error("GUFO_MTP_TF_LOGITS path is not writable");
+        throw std::runtime_error("SUPERROC_MTP_TF_LOGITS path is not writable");
       }
     }
   }
@@ -357,7 +358,7 @@ speculative::DraftProposal QwenMtpGpuDraftBackend::Propose(
   proposed_tokens_.clear();
   proposed_tokens_.reserve(count);
 
-  // KAT-MTP: fork draft-mtp p-min. Default 0 keeps every draft. GUFO_MTP_PMIN
+  // KAT-MTP: fork draft-mtp p-min. Default 0 keeps every draft. SUPERROC_MTP_PMIN
   // is clamped to [0, 1], matching common_speculative_effective_p_min.
   const float p_min = MtpPMinFromEnv();
 
@@ -414,10 +415,10 @@ void QwenMtpGpuDraftBackend::AcceptFeedback(
   // lqw:spec6. Verify already stored the committed trunk hiddens. Propose
   // wrote MTP KV for the drafted positions; the fork's accept() does not
   // re-decode them. Re-running that layer here is what inflated the host draft
-  // bucket. GUFO_MTP_REPLAY=1 keeps the old logits-off replay.
-  const char* replay_env = std::getenv("GUFO_MTP_REPLAY");
+  // bucket. SUPERROC_MTP_REPLAY=1 keeps the old logits-off replay.
+  const char* replay_env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_REPLAY");
   const bool replay = replay_env != nullptr && replay_env[0] == '1';
-  const char* prof_env = std::getenv("GUFO_MTP_REPLAY_PROFILE");
+  const char* prof_env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_REPLAY_PROFILE");
   const bool prof = prof_env != nullptr && prof_env[0] == '1';
   const auto t0 = std::chrono::steady_clock::now();
   std::size_t replay_forwards = 0;
@@ -766,5 +767,5 @@ void QwenMtpGpuDraftBackend::Reset() noexcept {
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

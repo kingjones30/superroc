@@ -22,8 +22,9 @@
 #include "src/models/qwen/hip/kernels/dflash_kernels.hpp"
 #include "src/models/qwen/hip/mtp/detail/allocation.hpp"
 #include "src/models/qwen/hip/ops.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::array<std::uint8_t, 8> kDFlashGpuPersistentMagic = {
@@ -32,18 +33,18 @@ constexpr std::uint32_t kDFlashGpuPersistentVersion = 2;
 constexpr std::size_t kDFlashGpuPersistentHeaderBytes = 64;
 
 [[nodiscard]] bool DsparkEnvOn(const char* name) {
-  const char* value = std::getenv(name);
+  const char* value = ::superroc::core::GetEnvCompat(name);
   return value != nullptr && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
 
 [[nodiscard]] bool DsparkEnvOff(const char* name) {
-  const char* value = std::getenv(name);
+  const char* value = ::superroc::core::GetEnvCompat(name);
   return value != nullptr && value[0] == '0' && value[1] == '\0';
 }
 
 [[nodiscard]] float DsparkEnvFloat(const char* name, float fallback) {
-  const char* value = std::getenv(name);
+  const char* value = ::superroc::core::GetEnvCompat(name);
   if (value == nullptr || value[0] == '\0') {
     return fallback;
   }
@@ -57,13 +58,13 @@ constexpr std::size_t kDFlashGpuPersistentHeaderBytes = 64;
 
 [[nodiscard]] bool DsparkAnchorLayout(const speculative::QwenDFlashConfig& df) {
   // 27B has_selector stays on the DFlash layout (block_size-1, skip slot 0).
-  // DSpark follows GGUF sample_from_anchor; GUFO_DSPARK_ANCHOR_LAYOUT=0
+  // DSpark follows GGUF sample_from_anchor; SUPERROC_DSPARK_ANCHOR_LAYOUT=0
   // reverts.
   return !df.has_selector && df.sample_from_anchor &&
-         !DsparkEnvOff("GUFO_DSPARK_ANCHOR_LAYOUT");
+         !DsparkEnvOff("SUPERROC_DSPARK_ANCHOR_LAYOUT");
 }
 
-// SPEC3: GPU spans inside one ForwardBlock, behind GUFO_DSPARK_STEP_PROF=1.
+// SPEC3: GPU spans inside one ForwardBlock, behind SUPERROC_DSPARK_STEP_PROF=1.
 // Events sit on the drafter stream; elapsed times are taken after the existing
 // hipStreamSynchronize so the default path (env unset) is unchanged.
 void DsparkProfAtexit();
@@ -84,7 +85,7 @@ struct DsparkStepProf {
       return;
     }
     inited = true;
-    on = DsparkEnvOn("GUFO_DSPARK_STEP_PROF");
+    on = DsparkEnvOn("SUPERROC_DSPARK_STEP_PROF");
     if (!on) {
       return;
     }
@@ -1377,7 +1378,7 @@ std::vector<tokenization::TokenId> QwenDFlashGpuExecutor::ForwardBlock(
         df_cfg.sample_from_anchor ? temperature : 0.0F;
     const float* markov_hidden =
         dspark_anchor ? d_block_normed_ : d_block_normed_ + hidden_size;
-    if (DsparkEnvOn("GUFO_DSPARK_FUSED")) {
+    if (DsparkEnvOn("SUPERROC_DSPARK_FUSED")) {
       kernels::LaunchDSparkMarkovChain(
           d_logits_, markov_hidden, weights.markov_w1.data,
           weights.markov_w2.data,
@@ -1399,7 +1400,7 @@ std::vector<tokenization::TokenId> QwenDFlashGpuExecutor::ForwardBlock(
           df_cfg.selector_top_k, slot_temperature, stream_);
     } else {
       const float p_min = df_cfg.has_confidence_head
-                              ? DsparkEnvFloat("GUFO_DSPARK_CONF_MIN", 0.5F)
+                              ? DsparkEnvFloat("SUPERROC_DSPARK_CONF_MIN", 0.5F)
                               : 0.0F;
       std::uint32_t kept = 0;
       for (std::uint32_t slot = 0; slot < draft_count; ++slot) {
@@ -1518,5 +1519,5 @@ std::vector<tokenization::TokenId> QwenDFlashGpuExecutor::ForwardBlock(
   return tokens;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

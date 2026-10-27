@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_DEEPSEEK_V4_FLASH_RUNTIME_NATIVE_INTERNAL_H_
-#define GUFO_MODELS_DEEPSEEK_V4_FLASH_RUNTIME_NATIVE_INTERNAL_H_
+#ifndef SUPERROC_MODELS_DEEPSEEK_V4_FLASH_RUNTIME_NATIVE_INTERNAL_H_
+#define SUPERROC_MODELS_DEEPSEEK_V4_FLASH_RUNTIME_NATIVE_INTERNAL_H_
 
 #include <cstddef>
 #include <cstdint>
@@ -231,4 +231,4 @@ int ds4_rocm_graph_load_snapshot(ds4_rocm_graph* graph, ds4_tokens* checkpoint,
                                  const ds4_session_snapshot* snapshot,
                                  char* error, size_t error_capacity);
 
-#endif  // GUFO_MODELS_DEEPSEEK_V4_FLASH_RUNTIME_NATIVE_INTERNAL_H_
+#endif  // SUPERROC_MODELS_DEEPSEEK_V4_FLASH_RUNTIME_NATIVE_INTERNAL_H_

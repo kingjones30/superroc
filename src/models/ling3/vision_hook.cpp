@@ -10,7 +10,7 @@
 #include "src/models/ling3/kernels/ling3_mla.hpp"
 #endif
 
-namespace gufo::models::ling3::vision {
+namespace superroc::models::ling3::vision {
 namespace {
 
 struct ArmedPlan {
@@ -144,4 +144,4 @@ void OnHidden(float* hidden, int pos0, int n, int width, void* stream) {
 #endif
 }
 
-}  // namespace gufo::models::ling3::vision
+}  // namespace superroc::models::ling3::vision

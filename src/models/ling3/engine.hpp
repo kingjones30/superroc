@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_ENGINE_HPP_
-#define GUFO_MODELS_LING3_ENGINE_HPP_
+#ifndef SUPERROC_MODELS_LING3_ENGINE_HPP_
+#define SUPERROC_MODELS_LING3_ENGINE_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +17,7 @@
 #include "src/models/ling3/tokenizer.hpp"
 #include "src/models/ling3/weights.hpp"
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 
 namespace vision {
 struct PreparedPrompt;
@@ -278,6 +278,6 @@ private:
   friend class Session;
 };
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3
 
-#endif  // GUFO_MODELS_LING3_ENGINE_HPP_
+#endif  // SUPERROC_MODELS_LING3_ENGINE_HPP_

@@ -13,7 +13,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"  // lqw:dequant-bf16-inc
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<std::uint32_t WavesPerBlock>
 __launch_bounds__(WavesPerBlock * 32, 4) __global__
@@ -93,7 +93,7 @@ void LaunchBatchedGEMM(const void* A, bool is_bf16, const float* X, float* Y,
                   static_cast<unsigned int>(batch_size));
   BatchedGEMMKernel<kWaves>
       <<<grid, kWaves * 32, 0, stream>>>(A, is_bf16, X, Y, batch_size, M, K);
-  GUFO_CHECK_LAUNCH("BatchedGEMMKernel<kWaves>");
+  SUPERROC_CHECK_LAUNCH("BatchedGEMMKernel<kWaves>");
 }
 void LaunchExactBf16GEMMFp32SmallBatch(const void* A, const float* X, float* Y,
                                        std::size_t batch_size, std::size_t M,
@@ -120,7 +120,7 @@ void LaunchExactBf16GEMMFp32SmallBatch(const void* A, const float* X, float* Y,
         BatchedExactBf16GEMMFp32VecKernel<16, Batch, 1>
             <<<(M + 15) / 16, 512, 0, stream>>>(
                 static_cast<const hip_bfloat16*>(A), X, Y, M, K);
-        GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<16, Batch, 1>");
+        SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<16, Batch, 1>");
       };
       switch (batch_size) {
         case 9:
@@ -180,14 +180,14 @@ void LaunchExactBf16GEMMFp32SmallBatch(const void* A, const float* X, float* Y,
   if (batch_size == 16 && M == 1024 && K == 5120) {
     BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 16, kVecRowsPerWave, false>
         <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-    GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 16, kVecRowsPerWave, false>");
+    SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 16, kVecRowsPerWave, false>");
     return;
   }
   if ((batch_size == 12 || batch_size == 16) && M == 5120 && K == 6144) {
     const auto launch = [&]<std::size_t Batch>() {
       BatchedExactBf16GEMMFp32VecKernel<16, Batch, 1>
           <<<(M + 15) / 16, 512, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<16, Batch, 1>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<16, Batch, 1>");
     };
     if (batch_size == 12)
       launch.template operator()<12>();
@@ -199,7 +199,7 @@ void LaunchExactBf16GEMMFp32SmallBatch(const void* A, const float* X, float* Y,
       (M == 12288 || M == 17408 || M == 248320)) {
     BatchedExactBf16GEMMFp32VecKernel<8, 12, 2>
         <<<(M + 15) / 16, 256, 0, stream>>>(a_vec, X, Y, M, K);
-    GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<8, 12, 2>");
+    SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<8, 12, 2>");
     return;
   }
   // One row per wave wins on DFlash2's attention output/FFN and the target's
@@ -209,59 +209,59 @@ void LaunchExactBf16GEMMFp32SmallBatch(const void* A, const float* X, float* Y,
     BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 8, 1>
         <<<(M + kVecWaves - 1) / kVecWaves, kVecWaves * 32, 0, stream>>>(
             a_vec, X, Y, M, K);
-    GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 8, 1>");
+    SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 8, 1>");
     return;
   }
   switch (batch_size) {
     case 12:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 12, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 12, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 12, kVecRowsPerWave>");
       return;
     case 16:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 16, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 16, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 16, kVecRowsPerWave>");
       return;
     case 1:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 1, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 1, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 1, kVecRowsPerWave>");
       return;
     case 2:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 2, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 2, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 2, kVecRowsPerWave>");
       return;
     case 3:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 3, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 3, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 3, kVecRowsPerWave>");
       return;
     case 4:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 4, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 4, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 4, kVecRowsPerWave>");
       return;
     case 5:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 5, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 5, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 5, kVecRowsPerWave>");
       return;
     case 6:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 6, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 6, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 6, kVecRowsPerWave>");
       return;
     case 7:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 7, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 7, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 7, kVecRowsPerWave>");
       return;
     default:
       BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 8, kVecRowsPerWave>
           <<<vec_blocks, kVecWaves * 32, 0, stream>>>(a_vec, X, Y, M, K);
-      GUFO_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 8, kVecRowsPerWave>");
+      SUPERROC_CHECK_LAUNCH("BatchedExactBf16GEMMFp32VecKernel<kVecWaves, 8, kVecRowsPerWave>");
       return;
   }
 }
@@ -285,7 +285,7 @@ void LaunchFloatToBfloat16(const float* in, void* out, std::size_t num_elements,
       static_cast<unsigned int>((num_elements + block_size - 1) / block_size);
   FloatToBfloat16Kernel<<<num_blocks, block_size, 0, stream>>>(
       in, static_cast<hip_bfloat16*>(out), num_elements);
-  GUFO_CHECK_LAUNCH("FloatToBfloat16Kernel");
+  SUPERROC_CHECK_LAUNCH("FloatToBfloat16Kernel");
 }
 
 // opt-c162-q8k-prefill-dequant: device Q8_K weight dequantization to BF16 for
@@ -334,7 +334,7 @@ void LaunchDequantizeQ8KToBf16(const void* w, hip_bfloat16* out,
   const std::size_t grid = (n_blocks + warps_per_block - 1U) / warps_per_block;
   DequantizeQ8KToBf16Kernel<<<static_cast<unsigned int>(grid), block_threads, 0,
                               stream>>>(w, out, n_blocks);
-  GUFO_CHECK_LAUNCH("DequantizeQ8KToBf16Kernel");
+  SUPERROC_CHECK_LAUNCH("DequantizeQ8KToBf16Kernel");
 }
 
 // Per-value dequant helpers (fp32), matching the CPU oracles
@@ -496,7 +496,7 @@ void LaunchDequantizeToBf16(core::GgmlType type, const void* w,
     const std::size_t grid = (n_blocks + blocks_per_tb - 1U) / blocks_per_tb;
     DequantizeQ8_0ToBf16Kernel<<<static_cast<unsigned int>(grid), block_threads,
                                  0, stream>>>(w, out, n_blocks);
-    GUFO_CHECK_LAUNCH("DequantizeQ8_0ToBf16Kernel");
+    SUPERROC_CHECK_LAUNCH("DequantizeQ8_0ToBf16Kernel");
     return;
   }
   if (type == core::GgmlType::kQ5_K || type == core::GgmlType::kQ6_K ||
@@ -510,11 +510,11 @@ void LaunchDequantizeToBf16(core::GgmlType type, const void* w,
     if (type == core::GgmlType::kQ5_K) {
       DequantizeQ5KToBf16Kernel<<<static_cast<unsigned int>(grid),
                                   block_threads, 0, stream>>>(w, out, n_blocks);
-      GUFO_CHECK_LAUNCH("DequantizeQ5KToBf16Kernel");
+      SUPERROC_CHECK_LAUNCH("DequantizeQ5KToBf16Kernel");
     } else if (type == core::GgmlType::kQ6_K) {
       DequantizeQ6KToBf16Kernel<<<static_cast<unsigned int>(grid),
                                   block_threads, 0, stream>>>(w, out, n_blocks);
-      GUFO_CHECK_LAUNCH("DequantizeQ6KToBf16Kernel");
+      SUPERROC_CHECK_LAUNCH("DequantizeQ6KToBf16Kernel");
     } else {
       LaunchDequantizeQ8KToBf16(w, out, n_elems, stream);
     }
@@ -530,11 +530,11 @@ void LaunchDequantizeToBf16(core::GgmlType type, const void* w,
         static_cast<unsigned int>((n_elems + threads - 1) / threads);
     DequantizeRocmFp4ToBf16Kernel<<<grid, threads, 0, stream>>>(type, w, out,
                                                                 n_elems);
-    GUFO_CHECK_LAUNCH("DequantizeRocmFp4ToBf16Kernel");
+    SUPERROC_CHECK_LAUNCH("DequantizeRocmFp4ToBf16Kernel");
     return;
   }
   // Unsupported quant type: no-op.
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN3_TTS_HIP_TALKER_OPS_HPP_
-#define GUFO_MODELS_QWEN3_TTS_HIP_TALKER_OPS_HPP_
+#ifndef SUPERROC_MODELS_QWEN3_TTS_HIP_TALKER_OPS_HPP_
+#define SUPERROC_MODELS_QWEN3_TTS_HIP_TALKER_OPS_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +7,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::models::qwen3_tts::hip {
+namespace superroc::models::qwen3_tts::hip {
 
 /// Causal attention with the eager checkpoint's BF16 QK, scaling, probability,
 /// and output boundaries; the softmax reduction itself remains FP32.
@@ -147,7 +147,7 @@ constexpr std::size_t kBfloat16GemvMaxGroups = 3;
                                              std::size_t columns,
                                              hipStream_t stream);
 
-}  // namespace gufo::models::qwen3_tts::hip
+}  // namespace superroc::models::qwen3_tts::hip
 #endif
 
-#endif  // GUFO_MODELS_QWEN3_TTS_HIP_TALKER_OPS_HPP_
+#endif  // SUPERROC_MODELS_QWEN3_TTS_HIP_TALKER_OPS_HPP_

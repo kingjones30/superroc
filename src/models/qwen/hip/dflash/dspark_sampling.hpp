@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_DFLASH_DSPARK_SAMPLING_HPP_
-#define GUFO_MODELS_QWEN_HIP_DFLASH_DSPARK_SAMPLING_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_DFLASH_DSPARK_SAMPLING_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_DFLASH_DSPARK_SAMPLING_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +7,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip::kernels {
+namespace superroc::hip::kernels {
 
 /// Adds the BF16 markov bonus `w1[prev] · w2[v]` into each proposal row of
 /// `logits`, then picks top-k (greedy or temperature-sampled) and writes
@@ -34,7 +34,7 @@ void LaunchDSparkMarkovChain(
     std::uint32_t markov_rank, std::uint32_t top_k, float temperature,
     hipStream_t stream);
 
-}  // namespace gufo::hip::kernels
+}  // namespace superroc::hip::kernels
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_QWEN_HIP_DFLASH_DSPARK_SAMPLING_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_DFLASH_DSPARK_SAMPLING_HPP_

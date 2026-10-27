@@ -9,11 +9,11 @@
 
 #include "src/core/model_family.hpp"
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 namespace {
 
 constexpr std::string_view kArchitecture =
-    gufo::core::ModelFamilyArch(gufo::core::ModelFamilyId::kQwen4Exp);
+    superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kQwen4Exp);
 
 struct Reader {
   const core::GgufReader& gguf;
@@ -299,4 +299,4 @@ std::optional<Config> Config::FromGguf(const core::GgufReader& gguf,
   return c;
 }
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next

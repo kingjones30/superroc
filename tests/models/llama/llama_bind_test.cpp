@@ -53,7 +53,7 @@ void AppendString(std::vector<std::uint8_t>& buf, std::string_view text) {
 
 void AppendTensor(std::vector<std::uint8_t>& header,
                   std::vector<std::uint8_t>& payload, std::string_view name,
-                  gufo::core::GgmlType type,
+                  superroc::core::GgmlType type,
                   std::initializer_list<std::uint64_t> dims,
                   std::uint64_t& offset) {
   AppendString(header, name);
@@ -65,9 +65,9 @@ void AppendTensor(std::vector<std::uint8_t>& header,
   }
   AppendPod(header, static_cast<std::uint32_t>(type));
   AppendPod(header, offset);
-  const std::size_t bytes = type == gufo::core::GgmlType::kF32
+  const std::size_t bytes = type == superroc::core::GgmlType::kF32
                                 ? elements * 4
-                                : gufo::quant::EncodedSizeBytes(type, elements);
+                                : superroc::quant::EncodedSizeBytes(type, elements);
   Expect(bytes > 0, "tensor payload size must be positive");
   payload.resize(payload.size() + bytes, 0);
   offset += bytes;
@@ -77,7 +77,7 @@ void AppendF32Tensor(std::vector<std::uint8_t>& header,
                      std::vector<std::uint8_t>& payload, std::string_view name,
                      std::initializer_list<std::uint64_t> dims,
                      std::uint64_t& offset) {
-  AppendTensor(header, payload, name, gufo::core::GgmlType::kF32, dims, offset);
+  AppendTensor(header, payload, name, superroc::core::GgmlType::kF32, dims, offset);
 }
 
 // F6: an F32 projection (output.weight) must be refused at bind time: the
@@ -100,7 +100,7 @@ void TestF32ProjectionRefused() {
   AppendPod(file, static_cast<std::uint64_t>(1));  // metadata count
   AppendString(file, "general.architecture");
   AppendPod(file,
-            static_cast<std::uint32_t>(gufo::core::GgufValueType::kString));
+            static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
   AppendString(file, "llama");
   file.insert(file.end(), header.begin(), header.end());
   while (file.size() % 32 != 0) {
@@ -109,9 +109,9 @@ void TestF32ProjectionRefused() {
   file.insert(file.end(), payload.begin(), payload.end());
   std::string error;
   const auto reader =
-      gufo::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
+      superroc::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
   Expect(reader != nullptr, "open synthetic GGUF: " + error);
-  gufo::core::ModelConfig config;
+  superroc::core::ModelConfig config;
   config.llama = true;
   config.num_layers = 1;
   config.hidden_size = static_cast<std::uint32_t>(kHidden);
@@ -122,7 +122,7 @@ void TestF32ProjectionRefused() {
   config.rotary_dim = 16;
   config.context_length = 128;
   config.vocab_size = static_cast<std::uint32_t>(kVocab);
-  const auto weights = gufo::models::BindLlamaWeights(*reader, config, &error);
+  const auto weights = superroc::models::BindLlamaWeights(*reader, config, &error);
   Expect(!weights.has_value(), "F32 output.weight must not bind");
   Expect(error.find("Unsupported llama tensor type") != std::string::npos,
          "F32 projection refused for its type, got: " + error);
@@ -135,22 +135,22 @@ void TestQuantFileBindsQuietly() {
   constexpr std::uint64_t kVocab = 64;
   constexpr std::uint64_t kInter = 64;
   constexpr std::uint64_t kAttn = 32;
-  constexpr auto kQ8 = gufo::core::GgmlType::kQ8_0;
+  constexpr auto kQ8 = superroc::core::GgmlType::kQ8_0;
   std::vector<std::uint8_t> header;
   std::vector<std::uint8_t> payload;
   std::uint64_t offset = 0;
   std::uint64_t tensor_count = 0;
-  const auto add = [&](std::string_view name, gufo::core::GgmlType type,
+  const auto add = [&](std::string_view name, superroc::core::GgmlType type,
                        std::initializer_list<std::uint64_t> dims) {
     AppendTensor(header, payload, name, type, dims, offset);
     ++tensor_count;
   };
-  add("token_embd.weight", gufo::core::GgmlType::kF32, {kHidden, kVocab});
-  add("output_norm.weight", gufo::core::GgmlType::kF32, {kHidden});
+  add("token_embd.weight", superroc::core::GgmlType::kF32, {kHidden, kVocab});
+  add("output_norm.weight", superroc::core::GgmlType::kF32, {kHidden});
   add("output.weight", kQ8, {kHidden, kVocab});
   const std::string prefix = "blk.0.";
-  add(prefix + "attn_norm.weight", gufo::core::GgmlType::kF32, {kHidden});
-  add(prefix + "ffn_norm.weight", gufo::core::GgmlType::kF32, {kHidden});
+  add(prefix + "attn_norm.weight", superroc::core::GgmlType::kF32, {kHidden});
+  add(prefix + "ffn_norm.weight", superroc::core::GgmlType::kF32, {kHidden});
   add(prefix + "attn_q.weight", kQ8, {kAttn, kHidden});
   add(prefix + "attn_k.weight", kQ8, {kAttn, kHidden});
   add(prefix + "attn_v.weight", kQ8, {kAttn, kHidden});
@@ -165,7 +165,7 @@ void TestQuantFileBindsQuietly() {
   AppendPod(file, static_cast<std::uint64_t>(1));  // metadata count
   AppendString(file, "general.architecture");
   AppendPod(file,
-            static_cast<std::uint32_t>(gufo::core::GgufValueType::kString));
+            static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
   AppendString(file, "llama");
   file.insert(file.end(), header.begin(), header.end());
   while (file.size() % 32 != 0) {
@@ -174,9 +174,9 @@ void TestQuantFileBindsQuietly() {
   file.insert(file.end(), payload.begin(), payload.end());
   std::string error;
   const auto reader =
-      gufo::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
+      superroc::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
   Expect(reader != nullptr, "open synthetic quant GGUF: " + error);
-  gufo::core::ModelConfig config;
+  superroc::core::ModelConfig config;
   config.llama = true;
   config.num_layers = 1;
   config.hidden_size = static_cast<std::uint32_t>(kHidden);
@@ -189,7 +189,7 @@ void TestQuantFileBindsQuietly() {
   config.vocab_size = static_cast<std::uint32_t>(kVocab);
   std::stringstream captured;
   auto* const old_cout = std::cout.rdbuf(captured.rdbuf());
-  const auto weights = gufo::models::BindLlamaWeights(*reader, config, &error);
+  const auto weights = superroc::models::BindLlamaWeights(*reader, config, &error);
   std::cout.rdbuf(old_cout);
   Expect(weights.has_value(), "quant llama file must bind: " + error);
   Expect(captured.str().empty(), "bind must not print on stdout");
@@ -212,7 +212,7 @@ int main() {
   }
 
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(gguf, &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(gguf, &error);
   Expect(reader != nullptr, "open GGUF: " + error);
   Expect(reader->GetTensorCount() == 471,
          "tensor count " + std::to_string(reader->GetTensorCount()));
@@ -220,7 +220,7 @@ int main() {
   std::map<std::string, std::uint64_t> count;
   std::uint64_t accounted = 0;
   for (const auto& tensor : reader->GetTensors()) {
-    count[std::string(gufo::core::ToString(tensor.type))] += 1;
+    count[std::string(superroc::core::ToString(tensor.type))] += 1;
     ++accounted;
   }
   Expect(accounted == 471, "accounted " + std::to_string(accounted));
@@ -231,7 +231,7 @@ int main() {
   std::cout << "\n";
 
   const auto weights =
-      gufo::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+      superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "LoadFromGguf: " + error);
   Expect(weights->config.llama, "config.llama");
   Expect(weights->layers.size() == 52, "52 layers");

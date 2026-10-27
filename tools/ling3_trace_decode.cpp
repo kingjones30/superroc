@@ -3,7 +3,7 @@
 // file, then runs EXACTLY `ntok` greedy Step tokens (the server's decode
 // path). A 2 s sleep after prefill puts an unambiguous gap in the kernel
 // trace so the analysis script can split prefill from decode kernels.
-// Usage: gufo_ling3_trace_decode <model.gguf> <prompt-file> [ntok=16]
+// Usage: superroc_ling3_trace_decode <model.gguf> <prompt-file> [ntok=16]
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -13,7 +13,7 @@
 
 #include "src/models/ling3/engine.hpp"
 
-namespace l3 = ::gufo::models::ling3;
+namespace l3 = ::superroc::models::ling3;
 
 int main(int argc, char** argv) {
   std::setbuf(stdout, nullptr);

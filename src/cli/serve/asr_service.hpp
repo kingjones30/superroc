@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_ASR_SERVICE_HPP_
-#define GUFO_SERVER_ASR_SERVICE_HPP_
+#ifndef SUPERROC_SERVER_ASR_SERVICE_HPP_
+#define SUPERROC_SERVER_ASR_SERVICE_HPP_
 
 #include <cstddef>
 #include <filesystem>
@@ -9,7 +9,7 @@
 
 #include "src/models/qwen3_asr/transcription.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 struct AsrServiceOptions {
   using Runner = std::function<bool(
@@ -51,6 +51,6 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_ASR_SERVICE_HPP_
+#endif  // SUPERROC_SERVER_ASR_SERVICE_HPP_

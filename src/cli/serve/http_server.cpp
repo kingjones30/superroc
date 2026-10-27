@@ -53,7 +53,7 @@
 #include "src/core/utf8.hpp"
 #include "src/models/qwen/chat_template.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 namespace {
 
 std::atomic<int> shutdown_signal{0};
@@ -852,7 +852,7 @@ std::optional<HttpResponse> ReadCompatibilityOptions(
           (field == "text" || field == "reasoning" || field == "tools" ||
            field == "tool_choice" || field == "parallel_tool_calls" ||
            // include is a standard Responses field (for example encrypted
-           // reasoning); gufo keeps no server-side conversation, so its value
+           // reasoning); superroc keeps no server-side conversation, so its value
            // is accepted and ignored.
            field == "include"))) {
       return InvalidCompatibilityRequest("request field '" + field +
@@ -1620,9 +1620,9 @@ double KvCacheUsageRatio(const TextGenerationBackend& b) {
 HttpResponse LlamaMetrics(const HttpRequest&, TextGenerationBackend& b) {
   std::ostringstream out;
   out << std::setprecision(std::numeric_limits<double>::max_digits10);
-  out << "# HELP gufo_device_lost_total Confirmed GPU context losses\n"
-      << "# TYPE gufo_device_lost_total counter\n"
-      << "gufo_device_lost_total "
+  out << "# HELP superroc_device_lost_total Confirmed GPU context losses\n"
+      << "# TYPE superroc_device_lost_total counter\n"
+      << "superroc_device_lost_total "
       << detail::DeviceLostTotal().load(std::memory_order_relaxed) << "\n";
   out << "# HELP llamacpp:prompt_tokens_total Total prompt tokens processed, "
          "excluding cache hits\n"
@@ -1668,15 +1668,15 @@ HttpResponse LlamaMetrics(const HttpRequest&, TextGenerationBackend& b) {
       << "llamacpp:spec_decode_num_accepted_tokens_total "
       << detail::TotalDraftAcceptedTokens().load(std::memory_order_relaxed)
       << "\n"
-      << "# HELP gufo_spec_lookup_tokens_total Total prompt-lookup copies "
+      << "# HELP superroc_spec_lookup_tokens_total Total prompt-lookup copies "
          "proposed\n"
-      << "# TYPE gufo_spec_lookup_tokens_total counter\n"
-      << "gufo_spec_lookup_tokens_total "
+      << "# TYPE superroc_spec_lookup_tokens_total counter\n"
+      << "superroc_spec_lookup_tokens_total "
       << detail::TotalLookupTokens().load(std::memory_order_relaxed) << "\n"
-      << "# HELP gufo_spec_lookup_accepted_tokens_total Total prompt-lookup "
+      << "# HELP superroc_spec_lookup_accepted_tokens_total Total prompt-lookup "
          "copies accepted\n"
-      << "# TYPE gufo_spec_lookup_accepted_tokens_total counter\n"
-      << "gufo_spec_lookup_accepted_tokens_total "
+      << "# TYPE superroc_spec_lookup_accepted_tokens_total counter\n"
+      << "superroc_spec_lookup_accepted_tokens_total "
       << detail::TotalLookupAcceptedTokens().load(std::memory_order_relaxed)
       << "\n"
       << "# HELP llamacpp:prompt_tokens_seconds Prompt processing speed in "
@@ -2666,4 +2666,4 @@ void HttpServer::handle_connection(int client_fd) {
   (void)device_lost();
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

@@ -28,16 +28,17 @@
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/lfn_launch.hpp"
 // FLASHNEXT: Ling's activation-quantised ROCmFP4 GEMV for narrow decode
-// (types 100/101). The kernels live in gufo_core (lqw cmake); call only.
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
+// (types 100/101). The kernels live in superroc_core (lqw cmake); call only.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 // FLASHNEXT: S8 -- the grouped FP4 prefill (device expert grouping, W8A8 WMMA
 // and float grouped GEMMs, deterministic slot gather). Same call-only rule.
-#include "src/core/rocm_fp4/gufo_fp4_gemm.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_moe_group.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_wmma.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemm.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_moe_group.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_wmma.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 namespace {
 
 using core::GgmlType;
@@ -47,7 +48,7 @@ using core::GgmlType;
 /// which is the fork graph_mtp behavior. LFN_MTP_HNORM_GROUPED=0 restores
 /// the pooled row. LFN_MTP_DENSE stays off unless set to 1.
 bool LfnEnvExact1(const char* name) {
-  const char* env = std::getenv(name);
+  const char* env = ::superroc::core::GetEnvCompat(name);
   return env != nullptr && env[0] == '1' && env[1] == '\0';
 }
 
@@ -193,9 +194,9 @@ std::size_t RoutedTileCapacity(std::size_t slots, const Config& c) {
          c.num_experts + 1;
 }
 
-// FLASHNEXT: S8 -- gufo_fp4's W8A8 activation tile is 16 tokens x 32 k-elements
+// FLASHNEXT: S8 -- superroc_fp4's W8A8 activation tile is 16 tokens x 32 k-elements
 // (576 bytes: two 16x16 int8 halves + 16 fp32 scales). Must match
-// `kActTileBytes` in src/core/rocm_fp4/gufo_fp4_wmma.hip, which is not
+// `kActTileBytes` in src/core/rocm_fp4/superroc_fp4_wmma.hip, which is not
 // exported.
 constexpr std::size_t kFp4ActTileBytes = 576;
 /// Tokens per group before the grouping kernel splits it into a sub-group.
@@ -210,7 +211,7 @@ std::size_t Fp4TileCapacity(std::size_t slots, const Config& c,
   return slots / 16 + slots / group_cap + c.num_experts + 2;
 }
 
-/// Bytes of gufo_fp4 Q8 tile staging for `tiles` token tiles of width `k`.
+/// Bytes of superroc_fp4 Q8 tile staging for `tiles` token tiles of width `k`.
 std::size_t Fp4Q8Bytes(std::size_t tiles, std::size_t k) {
   return std::max<std::size_t>(1, tiles) * std::max<std::size_t>(1, k / 32) *
          kFp4ActTileBytes;
@@ -342,7 +343,7 @@ public:
   /// A transfer on a stream of its own, reused across transfers: creating a
   /// stream can stall for milliseconds, and a shared stream would make a
   /// capture wait for a peer's bulk materialization.
-  [[nodiscard]] std::unique_ptr<gufo::hip::SnapshotTransfer> Transfer() {
+  [[nodiscard]] std::unique_ptr<superroc::hip::SnapshotTransfer> Transfer() {
     hipStream_t stream = nullptr;
     {
       std::lock_guard lock(streams_mutex_);
@@ -354,7 +355,7 @@ public:
     if (stream == nullptr)
       CheckStatus(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking),
                   "snapshot transfer stream");
-    return std::make_unique<gufo::hip::SnapshotTransfer>(
+    return std::make_unique<superroc::hip::SnapshotTransfer>(
         stream, [owner = shared_from_this()](hipStream_t done) {
           std::lock_guard lock(owner->streams_mutex_);
           owner->free_streams_.push_back(done);
@@ -486,7 +487,7 @@ struct SnapshotRegistry {
 void SnapshotState::Preserve(std::uint32_t position, std::uint32_t mtp_position,
                              std::uint32_t blocks, std::uint32_t mtp_blocks,
                              bool detach) const {
-  std::unique_ptr<gufo::hip::SnapshotTransfer> transfer;
+  std::unique_ptr<superroc::hip::SnapshotTransfer> transfer;
   for (auto& region : regions_) {
     auto rows = region.draft ? mtp_position : position;
     if (region.pooled)
@@ -694,7 +695,7 @@ void SnapshotRegistry::Preserve(std::uint32_t position,
     available.clear();
   }
   std::size_t block_index = 0;
-  std::unique_ptr<gufo::hip::SnapshotTransfer> transfer;
+  std::unique_ptr<superroc::hip::SnapshotTransfer> transfer;
   for (auto& copy : copies) {
     for (auto begin = copy.begin; begin < copy.end;) {
       if (block_index < available.size() &&
@@ -1028,7 +1029,7 @@ Executor::~Executor() {
   }
   // SQ10 SPEC2 (R3): release the lazily attached set before the stream dies.
   if (stream_ != nullptr) {
-    (void)gufo_fp4_slot_stream_detach(stream_);
+    (void)superroc_fp4_slot_stream_detach(stream_);
     (void)hipStreamDestroy(stream_);
   }
 }
@@ -1056,7 +1057,7 @@ std::unique_ptr<Executor> Executor::Create(const DeviceModel& model,
     return nullptr;
   // The first greedy verification otherwise resolves the shared argmax
   // module on the decode path. Preparation launches no trial kernels.
-  if (e->has_mtp() && !Check(gufo::hip::PrepareBatchedGPUArgmax(),
+  if (e->has_mtp() && !Check(superroc::hip::PrepareBatchedGPUArgmax(),
                              "MTP argmax preparation", error_msg))
     return nullptr;
   if (!Check(hipStreamCreate(&e->stream_), "hipStreamCreate", error_msg)) {
@@ -1879,7 +1880,7 @@ bool Executor::DenseF16Route(const DeviceTensor& w,
 }
 
 /// LFP: FP4 dense prefill route. Default (unset/empty/anything but
-/// "w8a8"): the F16 WMMA kernel; "w8a8" restores the gufo_fp4 W8A8 route
+/// "w8a8"): the F16 WMMA kernel; "w8a8" restores the superroc_fp4 W8A8 route
 /// exactly.
 bool Fp4PrefillF16() {
   static const bool enabled = [] {
@@ -1976,23 +1977,23 @@ bool Executor::Dense(const DeviceTensor& w, const float* x, float* out,
         const int m_chunk =
             static_cast<int>(std::min<std::uint32_t>(4, n_tokens - t0));
         launched =
-            gufo_fp4_gemv_m(static_cast<int>(w.type), w.data,
+            superroc_fp4_gemv_m(static_cast<int>(w.type), w.data,
                             x + static_cast<std::size_t>(t0) * w.cols,
                             out + static_cast<std::size_t>(t0) * w.rows,
                             static_cast<int>(w.cols), static_cast<int>(w.rows),
-                            m_chunk, stream_) == GUFO_FP4_OK;
+                            m_chunk, stream_) == SUPERROC_FP4_OK;
       }
       if (launched) {
         return true;
       }
     }
-    // FLASHNEXT: S8 -- wide/prefill batches take the gufo_fp4 W8A8 WMMA route
+    // FLASHNEXT: S8 -- wide/prefill batches take the superroc_fp4 W8A8 WMMA route
     // (float tiled GEMM behind LFN_FP4_PREFILL_W8A8=0). It fails loudly; the
     // float SmallGemm leg stays only for shapes the route declines.
     if (MatrixRows(n_tokens) && n_tokens > 0 && w.rows > 0 &&
         w.cols % 32 == 0) {
       // LFP: the F16 WMMA kernel by default; LFN_FP4_PREFILL=w8a8 restores
-      // the gufo_fp4 W8A8 route exactly.
+      // the superroc_fp4 W8A8 route exactly.
       if (Fp4PrefillF16()) {
         return Fp4DenseF16Prefill(w, x, out, n_tokens, error_msg);
       }
@@ -2037,7 +2038,7 @@ bool Executor::Dense(const DeviceTensor& w, const float* x, float* out,
   return blaslt_->Gemm(w.data, s_.x_half, out, type, m, n, k, error_msg);
 }
 
-// FLASHNEXT: S8. The gufo_fp4 grouped/WMMA entry points launch on the NULL
+// FLASHNEXT: S8. The superroc_fp4 grouped/WMMA entry points launch on the NULL
 // stream (they take no hipStream_t). This makes the ordering with `stream_`
 // explicit -- drain it, run the NULL-stream body, then make it wait on an
 // event -- without a device-wide sync. It also keeps these launches outside
@@ -2125,8 +2126,8 @@ bool Executor::Fp4DensePrefill(const DeviceTensor& w, const float* x,
     if (!Fp4PrefillW8A8()) {
       const bool ok = Fp4NullStream(
           [&] {
-            return gufo_fp4_gemm_fast(qtype, w.data, src, dst, k, n,
-                                      static_cast<int>(rows)) == GUFO_FP4_OK;
+            return superroc_fp4_gemm_fast(qtype, w.data, src, dst, k, n,
+                                      static_cast<int>(rows)) == SUPERROC_FP4_OK;
           },
           error_msg);
       if (!ok) {
@@ -2138,10 +2139,10 @@ bool Executor::Fp4DensePrefill(const DeviceTensor& w, const float* x,
     const int m = static_cast<int>(rows);
     const bool ok = Fp4NullStream(
         [&] {
-          return gufo_fp4_wmma_quant(src, nullptr, nullptr, s_.fp4_q8_act, m,
-                                     k) == GUFO_FP4_OK &&
-                 gufo_fp4_wmma_gemm_dense(qtype, w.data, s_.fp4_q8_act, dst, k,
-                                          n, m) == GUFO_FP4_OK;
+          return superroc_fp4_wmma_quant(src, nullptr, nullptr, s_.fp4_q8_act, m,
+                                     k) == SUPERROC_FP4_OK &&
+                 superroc_fp4_wmma_gemm_dense(qtype, w.data, s_.fp4_q8_act, dst, k,
+                                          n, m) == SUPERROC_FP4_OK;
         },
         error_msg);
     if (!ok) {
@@ -2153,7 +2154,7 @@ bool Executor::Fp4DensePrefill(const DeviceTensor& w, const float* x,
 }
 
 /// LFP: F16 WMMA prefill for FP4 weights (types 100/101). Per-shape
-/// policy, measured at 2048 tokens on amdaimax2 (F16 ms vs gufo_fp4 W8A8 ms;
+/// policy, measured at 2048 tokens on amdaimax2 (F16 ms vs superroc_fp4 W8A8 ms;
 /// bench ~/ls/lfp/out-round3.txt): 10240x2560 3.02 vs 4.89, 12288x2560 3.54
 /// vs 5.87, 6144x2560 1.87 vs 3.02, 2560x6144 1.66 vs 3.07, 640x2560 0.26 vs
 /// 0.41, 2560x640 0.24 vs 0.34, 2560x2560 0.70 vs 1.23, 512x2560 0.23 vs
@@ -2164,7 +2165,7 @@ bool Executor::Fp4DensePrefill(const DeviceTensor& w, const float* x,
 /// (b) the shallow-K 10240x320 mixer up, where the F16 decode stays exposed
 /// (0.84 vs 0.77 W8A8; a BK=4 narrow variant might fix it — future work).
 /// SPEC2 item 3: 2560x6144 takes the int8 kernel on explicitly quantized
-/// input (1.9 vs 2.9 at 2048 tokens); hc_down/inject stay on gufo_fp4 here
+/// input (1.9 vs 2.9 at 2048 tokens); hc_down/inject stay on superroc_fp4 here
 /// (their quant costs more than the GEMM saves — the wide mixer legs pass
 /// staged input and call the int8/F16 kernels directly).
 bool Executor::Fp4DenseF16Prefill(const DeviceTensor& w, const float* x,
@@ -2172,7 +2173,7 @@ bool Executor::Fp4DenseF16Prefill(const DeviceTensor& w, const float* x,
                                   std::string* error_msg) const {
   const bool fast = w.type == GgmlType::kQ4_0_ROCMFP4_FAST;
   // Shallow-K wide shapes (hc_up/output_hc_up 10240x320): the F16 decode
-  // stays exposed (0.84 vs 0.77 W8A8 per-shape), so they keep gufo_fp4.
+  // stays exposed (0.84 vs 0.77 W8A8 per-shape), so they keep superroc_fp4.
   if (w.cols > model_->max_half_cols() || (w.cols == 320 && w.rows >= 10240)) {
     // SPEC2 item 3: 2560x6144 (ssm_out/attn_output overflow shapes) takes
     // the int8 kernel on explicitly quantized input (bisection (d)
@@ -2237,8 +2238,8 @@ bool Executor::Fp4MoePrefill(const DeviceLayer& l, const float* x, float* out,
     AssignError(error_msg, "fp4 routed experts: k is not a multiple of 32");
     return false;
   }
-  const std::size_t rb_k = gufo_fp4_row_bytes(qtype, hidden);
-  const std::size_t rb_ff = gufo_fp4_row_bytes(qtype, n_ff);
+  const std::size_t rb_k = superroc_fp4_row_bytes(qtype, hidden);
+  const std::size_t rb_ff = superroc_fp4_row_bytes(qtype, n_ff);
   if (rb_k == 0 || rb_ff == 0) {
     AssignError(error_msg, "fp4 routed experts: unsupported weight layout");
     return false;
@@ -2252,30 +2253,30 @@ bool Executor::Fp4MoePrefill(const DeviceLayer& l, const float* x, float* out,
   // prefix the grouped GEMMs are built around). ids/weights are the router's
   // own token-major [n_tokens][used] arrays; the router status word is not
   // produced by RouterTopK, so it is passed as null.
-  int hdr[GUFO_FP4_LS1_HDR_WORDS] = {0, 0, 0, 0};
+  int hdr[SUPERROC_FP4_LS1_HDR_WORDS] = {0, 0, 0, 0};
   const int grp_capacity =
       slots / static_cast<int>(fp4_group_cap_) + n_expert + 2;
   const bool grouped = Fp4NullStream(
       [&] {
-        return gufo_fp4_moe_group_batch(
+        return superroc_fp4_moe_group_batch(
                    s_.ids, s_.weights, nullptr, n, used, used, n_expert,
                    static_cast<int>(fp4_group_cap_), s_.fp4_slot_tok,
                    s_.fp4_slot_w, s_.fp4_token_slots, s_.fp4_grp_e,
                    s_.fp4_grp_off, s_.fp4_grp_cnt, s_.fp4_grp_zp,
-                   s_.fp4_slot_dest, grp_capacity, slots, hdr) == GUFO_FP4_OK;
+                   s_.fp4_slot_dest, grp_capacity, slots, hdr) == SUPERROC_FP4_OK;
       },
       error_msg);
   if (!grouped) {
     AssignError(error_msg, "fp4 expert grouping failed");
     return false;
   }
-  if (hdr[GUFO_FP4_LS1_HDR_STATUS] != GUFO_FP4_OK) {
+  if (hdr[SUPERROC_FP4_LS1_HDR_STATUS] != SUPERROC_FP4_OK) {
     AssignError(error_msg, "fp4 expert grouping rejected the routing");
     return false;
   }
-  const int n_groups = hdr[GUFO_FP4_LS1_HDR_NGROUPS];
-  const int max_cnt = hdr[GUFO_FP4_LS1_HDR_MAXCNT];
-  const int total_tiles = hdr[GUFO_FP4_LS1_HDR_TILES];
+  const int n_groups = hdr[SUPERROC_FP4_LS1_HDR_NGROUPS];
+  const int max_cnt = hdr[SUPERROC_FP4_LS1_HDR_MAXCNT];
+  const int total_tiles = hdr[SUPERROC_FP4_LS1_HDR_TILES];
   if (n_groups <= 0 || total_tiles <= 0 || max_cnt <= 0 ||
       static_cast<std::uint32_t>(total_tiles) > fp4_tiles_cap_) {
     AssignError(error_msg, "fp4 expert grouping exceeded the tile capacity");
@@ -2289,30 +2290,30 @@ bool Executor::Fp4MoePrefill(const DeviceLayer& l, const float* x, float* out,
   const bool proj_ok = Fp4NullStream(
       [&] {
         if (w8a8) {
-          return gufo_fp4_wmma_quant(x, s_.fp4_slot_tok, s_.fp4_slot_dest,
+          return superroc_fp4_wmma_quant(x, s_.fp4_slot_tok, s_.fp4_slot_dest,
                                      s_.fp4_q8_e, slots,
-                                     hidden) == GUFO_FP4_OK &&
-                 gufo_fp4_wmma_gemm_grp(qtype, l.ffn_gate_exps.data, stride_k,
+                                     hidden) == SUPERROC_FP4_OK &&
+                 superroc_fp4_wmma_gemm_grp(qtype, l.ffn_gate_exps.data, stride_k,
                                         s_.fp4_grp_e, s_.fp4_grp_off,
                                         s_.fp4_grp_cnt, s_.fp4_grp_zp, n_groups,
                                         total_tiles, s_.fp4_q8_e, s_.gate_e,
-                                        nullptr, hidden, n_ff) == GUFO_FP4_OK &&
-                 gufo_fp4_wmma_gemm_grp(qtype, l.ffn_up_exps.data, stride_k,
+                                        nullptr, hidden, n_ff) == SUPERROC_FP4_OK &&
+                 superroc_fp4_wmma_gemm_grp(qtype, l.ffn_up_exps.data, stride_k,
                                         s_.fp4_grp_e, s_.fp4_grp_off,
                                         s_.fp4_grp_cnt, s_.fp4_grp_zp, n_groups,
                                         total_tiles, s_.fp4_q8_e, s_.up_e,
-                                        nullptr, hidden, n_ff) == GUFO_FP4_OK;
+                                        nullptr, hidden, n_ff) == SUPERROC_FP4_OK;
         }
-        return gufo_fp4_gemm_grp(
+        return superroc_fp4_gemm_grp(
                    qtype, l.ffn_gate_exps.data, stride_k, s_.fp4_grp_e,
                    s_.fp4_grp_off, s_.fp4_grp_cnt, n_groups, x, s_.fp4_slot_tok,
                    s_.gate_e, s_.fp4_ident, nullptr, 0, hidden, n_ff, max_cnt,
-                   s_.fp4_grp_zp, total_tiles) == GUFO_FP4_OK &&
-               gufo_fp4_gemm_grp(
+                   s_.fp4_grp_zp, total_tiles) == SUPERROC_FP4_OK &&
+               superroc_fp4_gemm_grp(
                    qtype, l.ffn_up_exps.data, stride_k, s_.fp4_grp_e,
                    s_.fp4_grp_off, s_.fp4_grp_cnt, n_groups, x, s_.fp4_slot_tok,
                    s_.up_e, s_.fp4_ident, nullptr, 0, hidden, n_ff, max_cnt,
-                   s_.fp4_grp_zp, total_tiles) == GUFO_FP4_OK;
+                   s_.fp4_grp_zp, total_tiles) == SUPERROC_FP4_OK;
       },
       error_msg);
   if (!proj_ok) {
@@ -2325,24 +2326,24 @@ bool Executor::Fp4MoePrefill(const DeviceLayer& l, const float* x, float* out,
   const bool down_ok = Fp4NullStream(
       [&] {
         if (w8a8) {
-          return gufo_fp4_wmma_quant(s_.gate_e, nullptr, s_.fp4_slot_dest,
-                                     s_.fp4_q8_h, slots, n_ff) == GUFO_FP4_OK &&
-                 gufo_fp4_wmma_gemm_grp(
+          return superroc_fp4_wmma_quant(s_.gate_e, nullptr, s_.fp4_slot_dest,
+                                     s_.fp4_q8_h, slots, n_ff) == SUPERROC_FP4_OK &&
+                 superroc_fp4_wmma_gemm_grp(
                      qtype, l.ffn_down_exps.data, stride_ff, s_.fp4_grp_e,
                      s_.fp4_grp_off, s_.fp4_grp_cnt, s_.fp4_grp_zp, n_groups,
                      total_tiles, s_.fp4_q8_h, s_.down_e, s_.fp4_slot_w, n_ff,
-                     hidden) == GUFO_FP4_OK &&
-                 gufo_fp4_slot_gather_sum(s_.down_e, s_.fp4_token_slots, out,
-                                          used, hidden, n) == GUFO_FP4_OK;
+                     hidden) == SUPERROC_FP4_OK &&
+                 superroc_fp4_slot_gather_sum(s_.down_e, s_.fp4_token_slots, out,
+                                          used, hidden, n) == SUPERROC_FP4_OK;
         }
-        return gufo_fp4_gemm_grp(qtype, l.ffn_down_exps.data, stride_ff,
+        return superroc_fp4_gemm_grp(qtype, l.ffn_down_exps.data, stride_ff,
                                  s_.fp4_grp_e, s_.fp4_grp_off, s_.fp4_grp_cnt,
                                  n_groups, s_.gate_e, s_.fp4_ident, s_.down_e,
                                  s_.fp4_ident, s_.fp4_slot_w, 0, n_ff, hidden,
                                  max_cnt, s_.fp4_grp_zp,
-                                 total_tiles) == GUFO_FP4_OK &&
-               gufo_fp4_slot_gather_sum(s_.down_e, s_.fp4_token_slots, out,
-                                        used, hidden, n) == GUFO_FP4_OK;
+                                 total_tiles) == SUPERROC_FP4_OK &&
+               superroc_fp4_slot_gather_sum(s_.down_e, s_.fp4_token_slots, out,
+                                        used, hidden, n) == SUPERROC_FP4_OK;
       },
       error_msg);
   if (!down_ok) {
@@ -3045,7 +3046,7 @@ bool Executor::LinearAttention(const DeviceLayer& l, Session::LinearState& s,
   // verdict: the F16-output arm cost +1.2% chunk-2 and was removed):
   // GatedDeltaNet stages Q8 into s_.x_q8t and the int8 kernel reads it (no
   // extra passes, no new bytes). Anything the int8 leg declines keeps the
-  // gufo_fp4 leg. LFN_FP4_PREFILL=w8a8 keeps the gufo_fp4 route.
+  // superroc_fp4 leg. LFN_FP4_PREFILL=w8a8 keeps the superroc_fp4 route.
   const bool ssm_out_fp4 = l.ssm_out.type == GgmlType::kQ4_0_ROCMFP4 ||
                            l.ssm_out.type == GgmlType::kQ4_0_ROCMFP4_FAST;
   const bool tiled =
@@ -3093,7 +3094,7 @@ bool Executor::LinearAttention(const DeviceLayer& l, Session::LinearState& s,
     q8t_src_ = nullptr;
     if (ssm_out_fp4) {
       // The int8 kernel on GatedDeltaNet's staged Q8 (no extra passes).
-      // Anything it declines (capacity, type 100) keeps the gufo_fp4 leg.
+      // Anything it declines (capacity, type 100) keeps the superroc_fp4 leg.
       if (l.ssm_out.cols <= model_->max_q8_cols() &&
           Fp4Int8Gemm(l.ssm_out.data, s_.x_q8t, out, n_tokens, l.ssm_out.rows,
                       l.ssm_out.cols,
@@ -3443,7 +3444,7 @@ bool Executor::MoeExperts(const DeviceLayer& l, const float* x, float* out,
   if (!RouteHints(n_tokens, error_msg)) {
     return false;
   }
-  // FLASHNEXT: S7 routed FP4 experts on the gufo_fp4 grouped kernel (decode).
+  // FLASHNEXT: S7 routed FP4 experts on the superroc_fp4 grouped kernel (decode).
   // One launch per <=4 tokens (kernel limit); narrow batches are <= kVecBatch.
   // limit=0 keeps every routed expert (QFN uses renormalised top-k); the
   // shared expert + sigmoid gate stay in the epilogue. Wide/prefill FP4
@@ -3491,7 +3492,7 @@ bool Executor::MoeExperts(const DeviceLayer& l, const float* x, float* out,
         prof_fp4_pending_ += 4;
       }
       launched =
-          gufo_fp4_expert_ffn_m(
+          superroc_fp4_expert_ffn_m(
               static_cast<int>(l.ffn_gate_exps.type), l.ffn_gate_exps.data,
               l.ffn_up_exps.data, l.ffn_down_exps.data,
               x + static_cast<std::size_t>(t0) * c.hidden_size,
@@ -3500,10 +3501,10 @@ bool Executor::MoeExperts(const DeviceLayer& l, const float* x, float* out,
               static_cast<int>(used), static_cast<int>(c.num_experts),
               static_cast<int>(c.hidden_size), static_cast<int>(c.expert_ff),
               0.0F, s_.down_e + static_cast<std::size_t>(t0) * c.hidden_size,
-              stream_) == GUFO_FP4_OK;
+              stream_) == SUPERROC_FP4_OK;
     }
     // The device status word is read once, after the forward's stream sync.
-    // gufo_fp4_expert_ffn_m_check is a synchronous D2H plus hipMemset, which
+    // superroc_fp4_expert_ffn_m_check is a synchronous D2H plus hipMemset, which
     // invalidates a captured decode graph ("previous error during capture").
     if (!launched) {
       AssignError(error_msg, "FP4 expert FFN failed");
@@ -3948,7 +3949,7 @@ bool Executor::Forward(Session& session, std::span<const std::int32_t> tokens,
   // Doing it inside MoeExperts captured the memcpy into the graph and the
   // second token failed hipStreamEndCapture.
   if (!prefill_phase && n <= kVecBatch &&
-      gufo_fp4_expert_ffn_m_check() != GUFO_FP4_OK) {
+      superroc_fp4_expert_ffn_m_check() != SUPERROC_FP4_OK) {
     AssignError(error_msg, "FP4 expert FFN failed");
     return false;
   }
@@ -4792,7 +4793,7 @@ bool Executor::RestoreSnapshot(Session& session,
   // recording them, just as they would in a fresh execution slot.
   std::erase_if(session.warmed_,
                 [&](const auto key) { return !session.graphs_.contains(key); });
-  std::unique_ptr<gufo::hip::SnapshotTransfer> fork_transfer;
+  std::unique_ptr<superroc::hip::SnapshotTransfer> fork_transfer;
   const auto upload = [&](void* device, const std::uint8_t* source,
                           std::uint64_t bytes, const char* what,
                           hipMemcpyKind kind = hipMemcpyHostToDevice) {
@@ -5009,7 +5010,7 @@ bool Executor::GreedyMtpPredictions(std::span<ArgmaxCandidate> predictions,
         reinterpret_cast<PenaltyArgmaxCandidate*>(s_.mtp_scratch_ids),
         s_.mtp_argmax, rows, vocab, stream_);
   } else {
-    gufo::hip::LaunchBatchedGPUArgmax(
+    superroc::hip::LaunchBatchedGPUArgmax(
         VerificationLogits(), s_.mtp_ids, rows, vocab,
         {reinterpret_cast<float*>(s_.mtp_scratch_ids),
          MtpCandidateWorkspaceSize(vocab)},
@@ -5087,7 +5088,7 @@ bool Executor::MtpForward(Session& session,
   control_host_->hidden_row = hidden_row;
   control_host_->mtp_blocks = session.mtp_.blocks;
   const auto& c = config();
-  // The fork draft attention is always dense. Gufo goes QSA-sparse once
+  // The fork draft attention is always dense. SuperROC goes QSA-sparse once
   // the MTP position passes indexer_top_k. The flag forces the fork's choice.
   const bool sparse = !LfnMtpForceDense() && pos + n > c.indexer_top_k;
   const auto complete = (pos + n) / c.compress_ratio;
@@ -5603,4 +5604,4 @@ void Executor::ProfAccumulate(std::uint32_t pos) const {
   std::fflush(stderr);
 }
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm

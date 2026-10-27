@@ -31,7 +31,7 @@ void Expect(bool ok, const std::string& msg) {
   }
 }
 
-const gufo::core::GgufTensorInfo* Require(const gufo::core::GgufReader& reader,
+const superroc::core::GgufTensorInfo* Require(const superroc::core::GgufReader& reader,
                                           const std::string& name) {
   const auto* t = reader.FindTensor(name);
   if (t == nullptr) {
@@ -40,7 +40,7 @@ const gufo::core::GgufTensorInfo* Require(const gufo::core::GgufReader& reader,
   return t;
 }
 
-void ExpectDims(const gufo::core::GgufTensorInfo& t,
+void ExpectDims(const superroc::core::GgufTensorInfo& t,
                 const std::vector<std::uint64_t>& dims) {
   if (t.dimensions != dims) {
     std::string got = t.name.data();
@@ -63,11 +63,11 @@ void ExpectDims(const gufo::core::GgufTensorInfo& t,
   }
 }
 
-void ExpectType(const gufo::core::GgufTensorInfo& t, gufo::core::GgmlType ty) {
+void ExpectType(const superroc::core::GgufTensorInfo& t, superroc::core::GgmlType ty) {
   if (t.type != ty) {
     Fail(std::string(t.name) + " type " +
-         std::string(gufo::core::ToString(t.type)) + " expected " +
-         std::string(gufo::core::ToString(ty)));
+         std::string(superroc::core::ToString(t.type)) + " expected " +
+         std::string(superroc::core::ToString(ty)));
   }
 }
 
@@ -92,7 +92,7 @@ int main() {
   }
 
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(gguf, &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(gguf, &error);
   Expect(reader != nullptr, "open GGUF: " + error);
   const auto cfg_opt = reader->ExtractModelConfig(&error);
   Expect(cfg_opt.has_value(), "ExtractModelConfig: " + error);
@@ -116,7 +116,7 @@ int main() {
   Expect(cfg.expert_feed_forward_length == 512, "expert ff 512");
   Expect(cfg.expert_shared_feed_forward_length == 1024, "shexp ff 1024");
   Expect(cfg.vocab_size == 150144, "vocab 150144");
-  Expect(cfg.rope_variant == gufo::core::RopeVariant::kNeox, "kNeox");
+  Expect(cfg.rope_variant == superroc::core::RopeVariant::kNeox, "kNeox");
   Expect(cfg.IsValidQwen(), "IsValidQwen");
 
   std::uint32_t n_full = 0;
@@ -136,7 +136,7 @@ int main() {
            "full layer " + std::to_string(layer) + " must be NoPE");
   }
 
-  using gufo::core::GgmlType;
+  using superroc::core::GgmlType;
   const auto* embd = Require(*reader, "token_embd.weight");
   ExpectDims(*embd, {2048, 150144});
   ExpectType(*embd, GgmlType::kQ8_0);
@@ -207,7 +207,7 @@ int main() {
   std::map<std::string, std::uint64_t> bytes;
   std::map<std::string, std::uint64_t> count;
   for (const auto& t : reader->GetTensors()) {
-    const std::string ty{gufo::core::ToString(t.type)};
+    const std::string ty{superroc::core::ToString(t.type)};
     bytes[ty] += t.size_bytes;
     count[ty] += 1;
   }
@@ -220,7 +220,7 @@ int main() {
   }
   std::string bind_error;
   const auto weights_opt =
-      gufo::models::QwenModelWeights::LoadFromGguf(*reader, &bind_error);
+      superroc::models::QwenModelWeights::LoadFromGguf(*reader, &bind_error);
   Expect(weights_opt.has_value(), "LoadFromGguf: " + bind_error);
   Expect(weights_opt->layers.size() == 49, "LoadFromGguf 49 layers");
   for (std::uint32_t i = 0; i < 49; ++i) {

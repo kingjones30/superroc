@@ -4,7 +4,7 @@
 #include "src/models/qwen/hip/kernels/prefill_quant_gemm.hpp"
 #include "src/models/qwen/hip/ops/prefill_fp16.hpp"
 #include "src/core/hip_launch_check.hpp"
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 __device__ __forceinline__ __half
 RoundActivation(float value) {  // Keep the FP32 rounding boundary before the
@@ -49,14 +49,14 @@ struct RawIqWeights {
   float scale;
 };
 
-template<gufo::core::GgmlType Type>
+template<superroc::core::GgmlType Type>
 __device__ __forceinline__ RawIqWeights LoadIqRaw(
     const void* row, unsigned sub, const uint2* header = nullptr) {
-  static_assert(Type == gufo::core::GgmlType::kIQ4_XS ||
-                Type == gufo::core::GgmlType::kIQ4_NL);
+  static_assert(Type == superroc::core::GgmlType::kIQ4_XS ||
+                Type == superroc::core::GgmlType::kIQ4_NL);
   RawIqWeights weights;
   weights.shift = (sub & 1) * 4;
-  if constexpr (Type == gufo::core::GgmlType::kIQ4_XS) {
+  if constexpr (Type == superroc::core::GgmlType::kIQ4_XS) {
     const auto& block = static_cast<const IQ4XSBlock*>(row)[sub / 16];
     const unsigned sb = (sub / 2) & 7;
     LoadQuantWords16(block.qs + sb * 16, weights.data);
@@ -116,7 +116,7 @@ __device__ __forceinline__ HalfWeights DecodeIqRaw(const RawIqWeights& weights) 
   return {result.u[0], result.u[1]};
 }
 
-template<gufo::core::GgmlType Type>
+template<superroc::core::GgmlType Type>
 __device__ __forceinline__ HalfWeights LoadIqHalf(const void* row,
                                                   unsigned sub) {
   return DecodeIqRaw(LoadIqRaw<Type>(row, sub));
@@ -172,12 +172,12 @@ __device__ inline float RocmFp4Ue4m3Select(std::uint8_t e) noexcept {
 // cells at 1.037-1.101 — on few-CTA grids the 16 parallel byte loads hide
 // latency better than 4 dword transactions). One load pattern for both
 // types now; the LUT below keeps the branchless decode in both rounds.
-template<gufo::core::GgmlType Type>
+template<superroc::core::GgmlType Type>
 __device__ __forceinline__ HalfWeights LoadFp4Half(const void* row,
                                                    unsigned sub) {
-  static_assert(Type == gufo::core::GgmlType::kQ4_0_ROCMFP4 ||
-                Type == gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST);
-  constexpr bool fast = Type == gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST;
+  static_assert(Type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ||
+                Type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST);
+  constexpr bool fast = Type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST;
   constexpr std::size_t block_bytes = fast ? 17 : 18;
   const auto* base = static_cast<const std::uint8_t*>(row);
   const std::uint8_t* blk = base + (sub / 2) * block_bytes;
@@ -211,26 +211,26 @@ __device__ __forceinline__ HalfWeights LoadFp4Half(const void* row,
   return {out.u[0], out.u[1]};
 }
 
-template<gufo::core::GgmlType Type>
+template<superroc::core::GgmlType Type>
 struct RawWeights {
-  static_assert(Type == gufo::core::GgmlType::kQ4_K ||
-                Type == gufo::core::GgmlType::kQ5_K ||
-                Type == gufo::core::GgmlType::kQ6_K ||
-                Type == gufo::core::GgmlType::kQ8_0);
-  std::uint32_t low[4], high[Type == gufo::core::GgmlType::kQ5_K ||
-                                     Type == gufo::core::GgmlType::kQ6_K
+  static_assert(Type == superroc::core::GgmlType::kQ4_K ||
+                Type == superroc::core::GgmlType::kQ5_K ||
+                Type == superroc::core::GgmlType::kQ6_K ||
+                Type == superroc::core::GgmlType::kQ8_0);
+  std::uint32_t low[4], high[Type == superroc::core::GgmlType::kQ5_K ||
+                                     Type == superroc::core::GgmlType::kQ6_K
                                  ? 4
                                  : 1];
   __half d, dmin;
   unsigned sc0, sc1, sc2, sub;
   int signed_scale;
 };
-template<gufo::core::GgmlType Type>
+template<superroc::core::GgmlType Type>
 __device__ __forceinline__ RawWeights<Type> LoadRaw(const void* row,
                                                     unsigned sub,
                                                     const uint4* header = nullptr) {
-  using namespace gufo::hip;
-  using gufo::core::GgmlType;
+  using namespace superroc::hip;
+  using superroc::core::GgmlType;
   RawWeights<Type> r{};
   r.sub = sub;
   const unsigned sb = (sub / 2) % 8, lane = (sub % 2) * 16;
@@ -269,11 +269,11 @@ __device__ __forceinline__ RawWeights<Type> LoadRaw(const void* row,
   }
   return r;
 }
-template<gufo::core::GgmlType Type>
-__device__ __forceinline__ gufo::hip::QuantSub16 DecodeRaw(
+template<superroc::core::GgmlType Type>
+__device__ __forceinline__ superroc::hip::QuantSub16 DecodeRaw(
     const RawWeights<Type>& r) {
-  using namespace gufo::hip;
-  using gufo::core::GgmlType;
+  using namespace superroc::hip;
+  using superroc::core::GgmlType;
   QuantSub16 q;
   q.offset = 0;
   unsigned sb = (r.sub / 2) % 8;
@@ -308,9 +308,9 @@ __device__ __forceinline__ gufo::hip::QuantSub16 DecodeRaw(
 enum class HalfEpilogue { kStore, kSwiGLU, kGateUp, kResidual };
 
 // Fully scaled FP16 weights and activations; FP32 accumulation in K16 order.
-template<int BM, int BN, int WM, int WN, gufo::core::GgmlType Type,
+template<int BM, int BN, int WM, int WN, superroc::core::GgmlType Type,
          HalfEpilogue Epilogue, bool Complete = false,
-         gufo::core::GgmlType UpType = Type>
+         superroc::core::GgmlType UpType = Type>
 __launch_bounds__(WM * WN * 32) __global__
     void HalfPrefillGemmKernel(const void* __restrict__ w,
                                const short* __restrict__ x,
@@ -319,32 +319,32 @@ __launch_bounds__(WM * WN * 32) __global__
                                const void* __restrict__ up = nullptr) {
   constexpr bool Paired = Epilogue == HalfEpilogue::kGateUp;
   constexpr bool Mixed = Paired && Type != UpType;
-  constexpr bool UpRaw = UpType == gufo::core::GgmlType::kQ4_K ||
-                         UpType == gufo::core::GgmlType::kQ5_K;
+  constexpr bool UpRaw = UpType == superroc::core::GgmlType::kQ4_K ||
+                         UpType == superroc::core::GgmlType::kQ5_K;
   constexpr int BK = 4, WaveSize = 32;
   // A 256-weight Q5 block spans four K64 iterations. Keep its header in
   // registers for the Q5 and Q4/Q5 kernels that benefit from this reuse.
   constexpr bool CacheQ5Header =
       BM == 256 && BN == 256 &&
-      (Type == gufo::core::GgmlType::kQ5_K ||
-       (Type == gufo::core::GgmlType::kQ4_K &&
-        UpType == gufo::core::GgmlType::kQ5_K));
+      (Type == superroc::core::GgmlType::kQ5_K ||
+       (Type == superroc::core::GgmlType::kQ4_K &&
+        UpType == superroc::core::GgmlType::kQ5_K));
   // These IQ4_XS projections benefit from keeping packed weights until
   // LDS commit and reusing the block header. Q3/IQ4_NL mixed pairs retain
   // immediate decoding.
   constexpr bool CacheIqHeader =
       BM == 256 && BN == 256 &&
-      ((Type == gufo::core::GgmlType::kIQ4_XS &&
-        (!Mixed || UpType == gufo::core::GgmlType::kQ4_K ||
-         UpType == gufo::core::GgmlType::kQ5_K)) ||
-       (Type == gufo::core::GgmlType::kQ4_K &&
-        UpType == gufo::core::GgmlType::kIQ4_XS));
+      ((Type == superroc::core::GgmlType::kIQ4_XS &&
+        (!Mixed || UpType == superroc::core::GgmlType::kQ4_K ||
+         UpType == superroc::core::GgmlType::kQ5_K)) ||
+       (Type == superroc::core::GgmlType::kQ4_K &&
+        UpType == superroc::core::GgmlType::kIQ4_XS));
   // The mixed Q6 gate is qualified with the fetch-stage decoder; deferring
   // its decode changes dot-product rounding in this kernel specialization.
-  constexpr int DecodeStage = (Type == gufo::core::GgmlType::kQ4_K ||
-                               Type == gufo::core::GgmlType::kQ5_K ||
-                               (Type == gufo::core::GgmlType::kQ6_K && !Mixed) ||
-                               Type == gufo::core::GgmlType::kQ8_0)
+  constexpr int DecodeStage = (Type == superroc::core::GgmlType::kQ4_K ||
+                               Type == superroc::core::GgmlType::kQ5_K ||
+                               (Type == superroc::core::GgmlType::kQ6_K && !Mixed) ||
+                               Type == superroc::core::GgmlType::kQ8_0)
                                   ? 2
                                   : 0;
   constexpr int kThreads = WM * WN * WaveSize;
@@ -374,9 +374,9 @@ __launch_bounds__(WM * WN * 32) __global__
     // Long Q5 reductions and mixed gate/up decoders retain smaller groups.
     unsigned group_shift = 3;
     if constexpr (BM == 256 && BN == 256 && !Mixed) {
-      if constexpr (Type == gufo::core::GgmlType::kIQ4_XS)
+      if constexpr (Type == superroc::core::GgmlType::kIQ4_XS)
         group_shift = 5;
-      else if constexpr (Type == gufo::core::GgmlType::kQ5_K)
+      else if constexpr (Type == superroc::core::GgmlType::kQ5_K)
         group_shift = k <= 8192 ? 5 : 3;
     }
     const unsigned group = 1U << group_shift;
@@ -395,8 +395,8 @@ __launch_bounds__(WM * WN * 32) __global__
   // Hoisted 64-bit row bases, clamped so an out-of-range row reads row m-1 and
   // is masked out at the store instead of branching in the K loop.
   const std::uint8_t* w_row[PFA];
-  const std::size_t row_bytes = gufo::hip::QuantRowBytes(Type, k);
-  const std::size_t up_row_bytes = gufo::hip::QuantRowBytes(UpType, k);
+  const std::size_t row_bytes = superroc::hip::QuantRowBytes(Type, k);
+  const std::size_t up_row_bytes = superroc::hip::QuantRowBytes(UpType, k);
 #pragma unroll
   for (int p = 0; p < PFA; ++p) {
     const int physical_row = ((p * kThreads) + tid) / BK;
@@ -430,14 +430,14 @@ __launch_bounds__(WM * WN * 32) __global__
           &iq_headers[p],
           reinterpret_cast<const IQ4XSBlock*>(w_row[p]) + unsigned(kk) / 16,
           8);
-    raw_iq[p] = LoadIqRaw<gufo::core::GgmlType::kIQ4_XS>(
+    raw_iq[p] = LoadIqRaw<superroc::core::GgmlType::kIQ4_XS>(
         w_row[p], unsigned(kk), &iq_headers[p]);
   };
   const auto fetch_up = [&](int p, int kk) {
     if constexpr (Mixed) {
       if constexpr (UpRaw) {
         if constexpr (CacheQ5Header &&
-                      UpType == gufo::core::GgmlType::kQ5_K) {
+                      UpType == superroc::core::GgmlType::kQ5_K) {
           if ((kk & 12) == 0)
             __builtin_memcpy(
                 &headers[p],
@@ -448,16 +448,16 @@ __launch_bounds__(WM * WN * 32) __global__
           raw_up[p] = LoadRaw<UpType>(w_row[p], kk);
         }
       } else if constexpr (CacheIqHeader &&
-                           UpType == gufo::core::GgmlType::kIQ4_XS) {
+                           UpType == superroc::core::GgmlType::kIQ4_XS) {
         fetch_iq(p, kk);
-      } else if constexpr (UpType == gufo::core::GgmlType::kIQ4_XS ||
-                           UpType == gufo::core::GgmlType::kIQ4_NL) {
+      } else if constexpr (UpType == superroc::core::GgmlType::kIQ4_XS ||
+                           UpType == superroc::core::GgmlType::kIQ4_NL) {
         const auto packed = LoadIqHalf<UpType>(w_row[p], unsigned(kk));
         ra[p][0] = packed.low;
         ra[p][1] = packed.high;
       } else {
-        gufo::hip::QuantSub16 q;
-        gufo::hip::DecodeQuantSub16<true>(UpType, w_row[p], kk, q);
+        superroc::hip::QuantSub16 q;
+        superroc::hip::DecodeQuantSub16<true>(UpType, w_row[p], kk, q);
         union { v16bf f; uint4 u[2]; } packed;
 #pragma unroll
         for (int j = 0; j < 16; ++j)
@@ -476,7 +476,7 @@ __launch_bounds__(WM * WN * 32) __global__
         if (Mixed && (idx / BK) % 32 >= 16)
           fetch_up(p, kk);
         else if constexpr (CacheQ5Header &&
-                           Type == gufo::core::GgmlType::kQ5_K) {
+                           Type == superroc::core::GgmlType::kQ5_K) {
           if ((ks0 & 15) == 0)
             __builtin_memcpy(
                 &headers[p],
@@ -486,16 +486,16 @@ __launch_bounds__(WM * WN * 32) __global__
         } else if constexpr (DecodeStage == 2)
           raw[p] = LoadRaw<Type>(w_row[p], kk);
         else if constexpr (CacheIqHeader &&
-                           Type == gufo::core::GgmlType::kIQ4_XS) {
+                           Type == superroc::core::GgmlType::kIQ4_XS) {
           fetch_iq(p, kk);
-        } else if constexpr (Type == gufo::core::GgmlType::kIQ4_XS ||
-                           Type == gufo::core::GgmlType::kIQ4_NL) {
+        } else if constexpr (Type == superroc::core::GgmlType::kIQ4_XS ||
+                           Type == superroc::core::GgmlType::kIQ4_NL) {
           const auto packed = LoadIqHalf<Type>(w_row[p], unsigned(kk));
           ra[p][0] = packed.low;
           ra[p][1] = packed.high;
-        } else if constexpr (Type == gufo::core::GgmlType::kQ4_0_ROCMFP4 ||
+        } else if constexpr (Type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ||
                              Type ==
-                             gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST) {
+                             superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST) {
           // SQ1 SPEC2 round 2: vectorized FP4 fetch (LoadFp4Half); the generic
           // DecodeQuantSub16 path below stays for the remaining formats.
           const auto packed = LoadFp4Half<Type>(w_row[p], unsigned(kk));
@@ -503,8 +503,8 @@ __launch_bounds__(WM * WN * 32) __global__
           ra[p][1] = packed.high;
         }
         else {
-          gufo::hip::QuantSub16 q;
-          gufo::hip::DecodeQuantSub16<true>(Type, w_row[p], kk, q);
+          superroc::hip::QuantSub16 q;
+          superroc::hip::DecodeQuantSub16<true>(Type, w_row[p], kk, q);
           union {
             v16bf f;
             uint4 u[2];
@@ -545,7 +545,7 @@ __launch_bounds__(WM * WN * 32) __global__
   const auto commit_up = [&](int p, short* dst, int row) {
     if constexpr (Mixed) {
       if constexpr (UpRaw) {
-        gufo::hip::QuantSub16 q = DecodeRaw<UpType>(raw_up[p]);
+        superroc::hip::QuantSub16 q = DecodeRaw<UpType>(raw_up[p]);
         union { v16bf f; uint4 u[2]; } packed;
 #pragma unroll
         for (int j = 0; j < 16; ++j)
@@ -553,7 +553,7 @@ __launch_bounds__(WM * WN * 32) __global__
               __fmul_rn(q.scale, static_cast<float>(q.q[j])), q.offset));
         StoreSwizzled(dst, packed.u[0], packed.u[1], row);
       } else if constexpr (CacheIqHeader &&
-                           UpType == gufo::core::GgmlType::kIQ4_XS) {
+                           UpType == superroc::core::GgmlType::kIQ4_XS) {
         const auto packed = DecodeIqRaw(raw_iq[p]);
         StoreSwizzled(dst, packed.low, packed.high, row);
       } else {
@@ -571,7 +571,7 @@ __launch_bounds__(WM * WN * 32) __global__
         if (Mixed && row % 32 >= 16) {
           commit_up(p, dst, row);
         } else if constexpr (DecodeStage != 0) {
-          gufo::hip::QuantSub16 q = DecodeRaw<Type>(raw[p]);
+          superroc::hip::QuantSub16 q = DecodeRaw<Type>(raw[p]);
           union {
             v16bf f;
             uint4 u[2];
@@ -582,7 +582,7 @@ __launch_bounds__(WM * WN * 32) __global__
                 __fmul_rn(q.scale, static_cast<float>(q.q[j])), q.offset));
           StoreSwizzled(dst, packed.u[0], packed.u[1], row);
         } else if constexpr (CacheIqHeader &&
-                             Type == gufo::core::GgmlType::kIQ4_XS) {
+                             Type == superroc::core::GgmlType::kIQ4_XS) {
           const auto packed = DecodeIqRaw(raw_iq[p]);
           StoreSwizzled(dst, packed.low, packed.high, row);
         } else
@@ -618,7 +618,7 @@ __launch_bounds__(WM * WN * 32) __global__
             LoadSwizzled(&s_b[ks][(wt * WTS) + j][sl ^ (ks & 3)][0]);
 #pragma unroll
         for (int i = 0; i < WRS; ++i) {
-          if constexpr (Type == gufo::core::GgmlType::kIQ3_S)
+          if constexpr (Type == superroc::core::GgmlType::kIQ3_S)
             acc[i][j] = WmmaHalf(a[i], b, acc[i][j]);
           else
             acc[i][j] = WmmaHalf(b, a[i], acc[i][j]);
@@ -626,10 +626,10 @@ __launch_bounds__(WM * WN * 32) __global__
       }
     }
     if constexpr (BM == 256 && BN == 256 &&
-                  ((Type == gufo::core::GgmlType::kIQ4_XS &&
-                    (!Mixed || UpType != gufo::core::GgmlType::kQ5_K)) ||
-                   (Type == gufo::core::GgmlType::kIQ4_NL &&
-                    UpType == gufo::core::GgmlType::kIQ4_XS))) {
+                  ((Type == superroc::core::GgmlType::kIQ4_XS &&
+                    (!Mixed || UpType != superroc::core::GgmlType::kQ5_K)) ||
+                   (Type == superroc::core::GgmlType::kIQ4_NL &&
+                    UpType == superroc::core::GgmlType::kIQ4_XS))) {
       // Interleave LDS reads with WMMA after IQ4 decoding. Mixed Q5
       // decoders retain the compiler's default instruction schedule.
       __builtin_amdgcn_iglp_opt(0);
@@ -654,7 +654,7 @@ __launch_bounds__(WM * WN * 32) __global__
   };
   const int hi = lane / 16;
   if constexpr (Paired) {
-    static_assert(WRS % 2 == 0 && Type != gufo::core::GgmlType::kIQ3_S);
+    static_assert(WRS % 2 == 0 && Type != superroc::core::GgmlType::kIQ3_S);
     // Adjacent 16-row fragments hold gate and up for the same logical rows.
     // One wave owns both accumulators, so no intermediate store or exchange
     // between waves is needed.
@@ -676,7 +676,7 @@ __launch_bounds__(WM * WN * 32) __global__
         }
       }
     }
-  } else if constexpr (Type != gufo::core::GgmlType::kIQ3_S) {
+  } else if constexpr (Type != superroc::core::GgmlType::kIQ3_S) {
 #pragma unroll
     for (int i = 0; i < WRS; ++i) {
 #pragma unroll
@@ -809,37 +809,37 @@ void LaunchBatchedRMSNormFp16(const float* x, const float* residual,
   if (dim == 5120 && residual == nullptr && sum_out == nullptr) {
     HalfNorm5120<<<batch, 256, 0, stream>>>(
         x, weight, static_cast<__half*>(out), eps);
-    GUFO_CHECK_LAUNCH("HalfNorm5120");
+    SUPERROC_CHECK_LAUNCH("HalfNorm5120");
     return;
   }
   HalfNorm<<<batch, 256, 0, stream>>>(x, residual, weight, sum_out,
                                       static_cast<__half*>(out), dim, eps);
-  GUFO_CHECK_LAUNCH("HalfNorm");
+  SUPERROC_CHECK_LAUNCH("HalfNorm");
 }
 void LaunchFloatToFp16(const float* x, void* y, std::size_t n,
                        hipStream_t stream) {
   HalfCast<<<(n + 255) / 256, 256, 0, stream>>>(x, static_cast<__half*>(y), n);
-  GUFO_CHECK_LAUNCH("HalfCast");
+  SUPERROC_CHECK_LAUNCH("HalfCast");
 }
 template<HalfEpilogue Epilogue>
-void DirectGemm(gufo::core::GgmlType type, const void* w, const void* x,
+void DirectGemm(superroc::core::GgmlType type, const void* w, const void* x,
                 float* y, std::size_t batch, std::size_t m, std::size_t k,
                 const float* gate, hipStream_t stream) {
-  const auto launch = [&]<gufo::core::GgmlType Type>() {
+  const auto launch = [&]<superroc::core::GgmlType Type>() {
     // SQ1 SPEC2 round 2: FP4 takes the large KV tile like Q4/Q5/Q6/Q8_0 (bench3:
     // the m=1024 cell misses even for IQ4_XS on the small tile, 1.13-1.27x).
-    constexpr bool LargeKvTile = Type == gufo::core::GgmlType::kQ4_K ||
-                                 Type == gufo::core::GgmlType::kQ5_K ||
-                                 Type == gufo::core::GgmlType::kQ6_K ||
-                                 Type == gufo::core::GgmlType::kQ8_0 ||
-                                 Type == gufo::core::GgmlType::kQ4_0_ROCMFP4 ||
+    constexpr bool LargeKvTile = Type == superroc::core::GgmlType::kQ4_K ||
+                                 Type == superroc::core::GgmlType::kQ5_K ||
+                                 Type == superroc::core::GgmlType::kQ6_K ||
+                                 Type == superroc::core::GgmlType::kQ8_0 ||
+                                 Type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ||
                                  Type ==
-                                 gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST;
+                                 superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST;
     const auto large = [&]<bool Full>() {
       HalfPrefillGemmKernel<256, 256, 8, 4, Type, Epilogue, Full>
           <<<dim3((batch + 255) / 256, (m + 255) / 256), 1024, 0, stream>>>(
               w, static_cast<const short*>(x), y, batch, m, k, gate);
-      GUFO_CHECK_LAUNCH("HalfPrefillGemmKernel<256, 256, 8, 4, Type, Epilogue, Full>");
+      SUPERROC_CHECK_LAUNCH("HalfPrefillGemmKernel<256, 256, 8, 4, Type, Epilogue, Full>");
     };
     if (Epilogue == HalfEpilogue::kSwiGLU || m >= 4096 ||
         (LargeKvTile && m >= 1024 && batch >= 1024)) {
@@ -847,10 +847,10 @@ void DirectGemm(gufo::core::GgmlType type, const void* w, const void* x,
       // Other formats retain the general kernel's better register schedule.
       // SQ1 SPEC2 round 2: FP4 joins the Complete specialization (same full-tile
       // guarantee; FP4-only constexpr, other formats unaffected).
-      if constexpr (Type == gufo::core::GgmlType::kQ4_K ||
-                    Type == gufo::core::GgmlType::kQ5_K ||
-                    Type == gufo::core::GgmlType::kQ4_0_ROCMFP4 ||
-                    Type == gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST) {
+      if constexpr (Type == superroc::core::GgmlType::kQ4_K ||
+                    Type == superroc::core::GgmlType::kQ5_K ||
+                    Type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ||
+                    Type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST) {
         if (m % 256 == 0 && batch % 256 == 0) {
           large.template operator()<true>();
           return;
@@ -862,16 +862,16 @@ void DirectGemm(gufo::core::GgmlType type, const void* w, const void* x,
         HalfPrefillGemmKernel<64, 128, 2, 4, Type, Epilogue>
             <<<dim3((batch + 127) / 128, (m + 63) / 64), 256, 0, stream>>>(
                 w, static_cast<const short*>(x), y, batch, m, k, nullptr);
-        GUFO_CHECK_LAUNCH("HalfPrefillGemmKernel<64, 128, 2, 4, Type, Epilogue>");
+        SUPERROC_CHECK_LAUNCH("HalfPrefillGemmKernel<64, 128, 2, 4, Type, Epilogue>");
       } else {
         HalfPrefillGemmKernel<32, 64, 2, 2, Type, Epilogue>
             <<<dim3((batch + 63) / 64, (m + 31) / 32), 128, 0, stream>>>(
                 w, static_cast<const short*>(x), y, batch, m, k, nullptr);
-        GUFO_CHECK_LAUNCH("HalfPrefillGemmKernel<32, 64, 2, 2, Type, Epilogue>");
+        SUPERROC_CHECK_LAUNCH("HalfPrefillGemmKernel<32, 64, 2, 2, Type, Epilogue>");
       }
     }
   };
-  using gufo::core::GgmlType;
+  using superroc::core::GgmlType;
   switch (type) {
     case GgmlType::kQ4_K:
       launch.template operator()<GgmlType::kQ4_K>();
@@ -913,13 +913,13 @@ void DirectGemm(gufo::core::GgmlType type, const void* w, const void* x,
       throw std::runtime_error("unexpected half prefill weight format");
   }
 }
-void LaunchBatchedQuantGEMMFp16(gufo::core::GgmlType type, const void* w,
+void LaunchBatchedQuantGEMMFp16(superroc::core::GgmlType type, const void* w,
                                 const void* x, float* y, std::size_t batch,
                                 std::size_t m, std::size_t k,
                                 hipStream_t stream) {
   DirectGemm<HalfEpilogue::kStore>(type, w, x, y, batch, m, k, nullptr, stream);
 }
-void LaunchBatchedQuantGEMMSwiGLUFp16(gufo::core::GgmlType type, const void* w,
+void LaunchBatchedQuantGEMMSwiGLUFp16(superroc::core::GgmlType type, const void* w,
                                       const void* x, const float* gate, void* y,
                                       std::size_t batch, std::size_t m,
                                       std::size_t k, hipStream_t stream) {
@@ -927,7 +927,7 @@ void LaunchBatchedQuantGEMMSwiGLUFp16(gufo::core::GgmlType type, const void* w,
                                     m, k, gate, stream);
 }
 
-void LaunchBatchedQuantGEMMResidualFp16(gufo::core::GgmlType type,
+void LaunchBatchedQuantGEMMResidualFp16(superroc::core::GgmlType type,
                                         const void* w, const void* x,
                                         float* residual, std::size_t batch,
                                         std::size_t m, std::size_t k,
@@ -937,23 +937,23 @@ void LaunchBatchedQuantGEMMResidualFp16(gufo::core::GgmlType type,
 }
 
 bool TryLaunchBatchedDualQuantGEMMSwiGLUFp16(
-    gufo::core::GgmlType gate_type, gufo::core::GgmlType up_type,
+    superroc::core::GgmlType gate_type, superroc::core::GgmlType up_type,
     const void* gate_weights, const void* up_weights, const void* x, void* y,
     std::size_t batch, std::size_t m, std::size_t k, hipStream_t stream) {
-  const auto launch = [&]<gufo::core::GgmlType Type,
-                          gufo::core::GgmlType UpType = Type>() {
+  const auto launch = [&]<superroc::core::GgmlType Type,
+                          superroc::core::GgmlType UpType = Type>() {
     const auto tile = [&]<bool Full>() {
       HalfPrefillGemmKernel<256, 256, 8, 4, Type, HalfEpilogue::kGateUp, Full,
                             UpType>
           <<<dim3((batch + 255) / 256, (m + 127) / 128), 1024, 0, stream>>>(
               gate_weights, static_cast<const short*>(x),
               static_cast<float*>(y), batch, m, k, nullptr, up_weights);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     };
-    if constexpr ((Type == gufo::core::GgmlType::kQ4_K ||
-                   Type == gufo::core::GgmlType::kQ5_K) &&
-                  (UpType == gufo::core::GgmlType::kQ4_K ||
-                   UpType == gufo::core::GgmlType::kQ5_K)) {
+    if constexpr ((Type == superroc::core::GgmlType::kQ4_K ||
+                   Type == superroc::core::GgmlType::kQ5_K) &&
+                  (UpType == superroc::core::GgmlType::kQ4_K ||
+                   UpType == superroc::core::GgmlType::kQ5_K)) {
       if (m % 128 == 0 && batch % 256 == 0) {
         tile.template operator()<true>();
         return;
@@ -961,7 +961,7 @@ bool TryLaunchBatchedDualQuantGEMMSwiGLUFp16(
     }
     tile.template operator()<false>();
   };
-  using gufo::core::GgmlType;
+  using superroc::core::GgmlType;
   // Mixed pairs keep independent row strides and decoders. Qualify each
   // pairing: a shared input alone does not guarantee a faster kernel.
   if (gate_type != up_type) {
@@ -1017,5 +1017,5 @@ bool TryLaunchBatchedDualQuantGEMMSwiGLUFp16(
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

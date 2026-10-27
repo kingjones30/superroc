@@ -15,8 +15,9 @@
 #include "src/models/qwen/hip/mtp.hpp"
 #include "src/models/qwen/hip/mtp/detail/allocation.hpp"
 #include "src/models/qwen/hip/mtp/kat_mtp_types.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::size_t kPackChunkRows = 32;
@@ -318,7 +319,7 @@ std::shared_ptr<const QwenMtpGpuModel> QwenMtpGpuModel::Create(
   // (the BF16 expansion was a bandwidth tax and did not move acceptance).
   // A sidecar without either tensor still borrows the target's.
   const bool borrow_head = [] {
-    const char* borrow = std::getenv("GUFO_MTP_BORROW_HEAD");
+    const char* borrow = ::superroc::core::GetEnvCompat("SUPERROC_MTP_BORROW_HEAD");
     return borrow != nullptr && *borrow != '\0' && std::atoi(borrow) != 0;
   }();
   if (borrow_head) {
@@ -429,5 +430,5 @@ std::shared_ptr<const QwenMtpGpuModel> QwenMtpGpuModel::CreateFromEmbedded(
                           {}, 0, 0.0, std::move(target_output_norm)));
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

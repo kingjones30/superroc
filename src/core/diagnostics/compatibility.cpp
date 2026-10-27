@@ -2,7 +2,7 @@
 
 #include <sstream>
 
-namespace gufo::diagnostics {
+namespace superroc::diagnostics {
 
 namespace {
 
@@ -153,4 +153,4 @@ std::string CompatibilityReport::ToHuman() const {
   return oss.str();
 }
 
-}  // namespace gufo::diagnostics
+}  // namespace superroc::diagnostics

@@ -27,19 +27,19 @@ namespace {
 
 struct Case {
   std::string name;
-  std::vector<gufo::tokenization::TokenId> prompt;
-  std::vector<gufo::tokenization::TokenId> generated;
+  std::vector<superroc::tokenization::TokenId> prompt;
+  std::vector<superroc::tokenization::TokenId> generated;
 };
 
-std::vector<gufo::tokenization::TokenId> ParseIds(const std::string& s) {
-  std::vector<gufo::tokenization::TokenId> ids;
+std::vector<superroc::tokenization::TokenId> ParseIds(const std::string& s) {
+  std::vector<superroc::tokenization::TokenId> ids;
   std::stringstream ss(s);
   std::string tok;
   while (std::getline(ss, tok, ',')) {
     if (tok.empty()) {
       continue;
     }
-    ids.push_back(static_cast<gufo::tokenization::TokenId>(std::stoul(tok)));
+    ids.push_back(static_cast<superroc::tokenization::TokenId>(std::stoul(tok)));
   }
   return ids;
 }
@@ -72,23 +72,23 @@ std::vector<Case> LoadCases(const std::string& path) {
   return cases;
 }
 
-gufo::hip::QwenExecutionPolicy FlintPolicy() {
-  gufo::hip::QwenExecutionPolicy policy;
-  policy.kv_cache_storage = gufo::hip::QwenKvCacheStorage::kFp32;
+superroc::hip::QwenExecutionPolicy FlintPolicy() {
+  superroc::hip::QwenExecutionPolicy policy;
+  policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
   policy.fuse_qk_norm_rope_kv = false;
   policy.glimmer_fp16_kv = true;
   return policy;
 }
 
-std::unique_ptr<gufo::hip::QwenGpuExecutor> MakeExecutor(
+std::unique_ptr<superroc::hip::QwenGpuExecutor> MakeExecutor(
     const char* gguf, std::uint32_t n_ctx) {
   std::string error;
-  auto owner = gufo::core::GgufReader::OpenFile(gguf, &error);
+  auto owner = superroc::core::GgufReader::OpenFile(gguf, &error);
   if (owner == nullptr) {
     throw std::runtime_error(error);
   }
-  auto executor = gufo::hip::QwenGpuExecutor::CreateFromGguf(
-      std::shared_ptr<const gufo::core::GgufReader>(std::move(owner)), &error,
+  auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
+      std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)), &error,
       n_ctx, FlintPolicy());
   if (executor == nullptr) {
     throw std::runtime_error(error);
@@ -96,7 +96,7 @@ std::unique_ptr<gufo::hip::QwenGpuExecutor> MakeExecutor(
   return executor;
 }
 
-gufo::tokenization::TokenId Argmax(std::span<const float> logits) {
+superroc::tokenization::TokenId Argmax(std::span<const float> logits) {
   if (logits.empty()) {
     throw std::runtime_error("empty logits");
   }
@@ -108,7 +108,7 @@ gufo::tokenization::TokenId Argmax(std::span<const float> logits) {
       best = i;
     }
   }
-  return static_cast<gufo::tokenization::TokenId>(best);
+  return static_cast<superroc::tokenization::TokenId>(best);
 }
 
 double TokPerSec(std::size_t n, double seconds) {
@@ -125,7 +125,7 @@ int RunParity(const char* gguf, const char* fixture) {
     const std::size_t n = c.generated.size();
     executor->Reset();
     const auto t0 = std::chrono::steady_clock::now();
-    std::vector<gufo::tokenization::TokenId> got;
+    std::vector<superroc::tokenization::TokenId> got;
     got.reserve(n);
     got.push_back(executor->ForwardPromptBatch(c.prompt, 0, true));
     const auto t1 = std::chrono::steady_clock::now();
@@ -159,7 +159,7 @@ int RunParity(const char* gguf, const char* fixture) {
                 TokPerSec(n > 1 ? n - 1 : 0, decode_s));
 
     executor->Reset();
-    std::vector<gufo::tokenization::TokenId> ids = c.prompt;
+    std::vector<superroc::tokenization::TokenId> ids = c.prompt;
     if (n >= 2) {
       ids.insert(ids.end(), c.generated.begin(),
                  c.generated.begin() + static_cast<std::ptrdiff_t>(n - 1));
@@ -197,7 +197,7 @@ int RunSpeed(const char* gguf, const char* corpus, int n_prompt,
   std::ostringstream ss;
   ss << in.rdbuf();
   const auto& tokenizer = executor->GetTokenizer();
-  gufo::tokenization::TokenizerOptions options;
+  superroc::tokenization::TokenizerOptions options;
   options.add_bos = tokenizer.AddBosToken();
   const auto tokens = tokenizer.Encode(ss.str(), options);
   if (static_cast<int>(tokens.size()) < n_prompt) {
@@ -205,7 +205,7 @@ int RunSpeed(const char* gguf, const char* corpus, int n_prompt,
   }
 
   auto run = [&](int np, int nd) {
-    std::vector<gufo::tokenization::TokenId> prompt(
+    std::vector<superroc::tokenization::TokenId> prompt(
         tokens.begin(), tokens.begin() + np);
     executor->Reset();
     const auto t0 = std::chrono::steady_clock::now();
@@ -236,10 +236,10 @@ int RunSpeed(const char* gguf, const char* corpus, int n_prompt,
 // Jay: per-position argmax + last-row top-5 of the batched prefill and of the
 // token loop on the same ids (compare with tools/flint_ref.py --ids).
 int RunDiag(const char* gguf, const std::string& csv) {
-  std::vector<gufo::tokenization::TokenId> ids;
+  std::vector<superroc::tokenization::TokenId> ids;
   std::stringstream ss(csv);
   for (std::string item; std::getline(ss, item, ',');) {
-    ids.push_back(static_cast<gufo::tokenization::TokenId>(std::stoul(item)));
+    ids.push_back(static_cast<superroc::tokenization::TokenId>(std::stoul(item)));
   }
   auto executor = MakeExecutor(gguf, 4096);
   auto top5 = [](std::span<const float> logits) {
@@ -312,7 +312,7 @@ int main(int argc, char** argv) {
     // Jay: --hidden <gguf> <ids csv> <layers csv> <out.bin>: the batched
     // prefill's layer outputs, float32 [token][layer][hidden].
     if (argc == 6 && std::string(argv[1]) == "--hidden") {
-      std::vector<gufo::tokenization::TokenId> ids;
+      std::vector<superroc::tokenization::TokenId> ids;
       std::vector<std::uint32_t> layers;
       std::stringstream a(argv[3]);
       for (std::string t; std::getline(a, t, ',');) ids.push_back(std::stoul(t));

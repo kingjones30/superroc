@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_QWEN_FP4_F16_GATE_HPP_
-#define GUFO_MODELS_QWEN_QWEN_FP4_F16_GATE_HPP_
+#ifndef SUPERROC_MODELS_QWEN_QWEN_FP4_F16_GATE_HPP_
+#define SUPERROC_MODELS_QWEN_QWEN_FP4_F16_GATE_HPP_
 
 // FRZA SPEC2 (fail closed): a kernel cell that has never run on hardware is
 // not taken by default. Type-100 (kQ4_0_ROCMFP4) tensors on the fused-epilogue
@@ -13,9 +13,9 @@
 
 #include "src/core/gguf_reader.hpp"
 
-namespace gufo::models::qwen {
+namespace superroc::models::qwen {
 
-// Values of GUFO_QWEN_FP4_F16_PREFILL.
+// Values of SUPERROC_QWEN_FP4_F16_PREFILL.
 constexpr int kQwenFp4F16PrefillOff = 0;    // kill switch: pre-f85008b dispatch
 constexpr int kQwenFp4F16PrefillGated = 1;  // fail-closed gate (default)
 constexpr int kQwenFp4F16PrefillForce = 2;  // tag behaviour: F16 for every FP4
@@ -130,6 +130,6 @@ constexpr QwenFp4F16Decision DecideQwenFp4F16Prefill(
   return decision;
 }
 
-}  // namespace gufo::models::qwen
+}  // namespace superroc::models::qwen
 
-#endif  // GUFO_MODELS_QWEN_QWEN_FP4_F16_GATE_HPP_
+#endif  // SUPERROC_MODELS_QWEN_QWEN_FP4_F16_GATE_HPP_

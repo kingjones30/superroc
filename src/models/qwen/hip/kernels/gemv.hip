@@ -16,7 +16,7 @@
 #include "src/models/qwen/hip/kernels/q4_0_gemv.hip"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<std::uint32_t WavesPerBlock>
 __launch_bounds__(WavesPerBlock * 32, 4) __global__
@@ -161,7 +161,7 @@ void ExecuteDenseGemv(models::qwen::QwenGemmRoute route, const void* A,
     const std::size_t grid = (M + kWavesPerBlock - 1) / kWavesPerBlock;
     Wave32GEMVKernel_1Row<kWavesPerBlock>
         <<<grid, kBlockThreads, 0, stream>>>(A_bf16, x, y, M, K);
-    GUFO_CHECK_LAUNCH("Wave32GEMVKernel_1Row<kWavesPerBlock>");
+    SUPERROC_CHECK_LAUNCH("Wave32GEMVKernel_1Row<kWavesPerBlock>");
     return;
   }
 
@@ -173,7 +173,7 @@ void ExecuteDenseGemv(models::qwen::QwenGemmRoute route, const void* A,
           ? 512
           : 256;
   FastGEMVBlockKernel<<<M, block_size, 0, stream>>>(A, a_type, x, y, M, K);
-  GUFO_CHECK_LAUNCH("FastGEMVBlockKernel");
+  SUPERROC_CHECK_LAUNCH("FastGEMVBlockKernel");
 }
 
 }  // namespace
@@ -209,5 +209,5 @@ void LaunchGEMV(const void* A, core::GgmlType a_type, const float* x, float* y,
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

@@ -1,6 +1,6 @@
 #include "src/models/ling3/vision_tower.hpp"
 
-namespace gufo::models::ling3::vision {
+namespace superroc::models::ling3::vision {
 
 struct VisionTower::Impl {};
 
@@ -30,4 +30,4 @@ std::size_t VisionTower::ScratchBytes() const noexcept {
   return 0;
 }
 
-}  // namespace gufo::models::ling3::vision
+}  // namespace superroc::models::ling3::vision

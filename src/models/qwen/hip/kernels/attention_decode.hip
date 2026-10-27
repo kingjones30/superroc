@@ -14,7 +14,7 @@
 #include "src/models/qwen/hip/ops/attention.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void WriteKVCacheKernel(
     const float* __restrict__ k, const float* __restrict__ v,
@@ -890,13 +890,13 @@ static void LaunchSplitKAttentionHalfPartials(
           <<<dim3(num_kv_heads, rows, splits), 96, 0, stream>>>(
               q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
               num_heads, num_kv_heads, splits);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16>");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16>");
     } else {
       QwenDecodeSplitKAttentionHalfPartialsKernel<true>
           <<<dim3(num_kv_heads, rows, splits), 192, 0, stream>>>(
               q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
               num_heads, num_kv_heads, splits);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true>");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true>");
     }
   } else if (num_heads == 16 && num_kv_heads == 2 &&
              static_cast<std::size_t>(start_pos) + 1 >= 512) {
@@ -907,21 +907,21 @@ static void LaunchSplitKAttentionHalfPartials(
           <<<dim3(num_kv_heads, rows, splits), 128, 0, stream>>>(
               q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
               num_heads, num_kv_heads, splits);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16, 8, detail::kKatGqa8MaxSplits>");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16, 8, detail::kKatGqa8MaxSplits>");
     } else {
       QwenDecodeSplitKAttentionHalfPartialsKernel<true, 32, 8,
                                                     detail::kKatGqa8MaxSplits>
           <<<dim3(num_kv_heads, rows, splits), 256, 0, stream>>>(
               q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
               num_heads, num_kv_heads, splits);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 32, 8, detail::kKatGqa8MaxSplits>");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 32, 8, detail::kKatGqa8MaxSplits>");
     }
   } else {
     QwenDecodeSplitKAttentionHalfPartialsKernel<>
         <<<dim3(num_heads, rows, splits), 32, 0, stream>>>(
             q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
             num_heads, num_kv_heads, splits);
-    GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<>");
+    SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<>");
   }
 }
 
@@ -941,7 +941,7 @@ void LaunchAttention(const float* q, const float* k, const float* v,
         k, v, k_cache, v_cache, static_cast<__half*>(k_cache_f16),
         static_cast<__half*>(v_cache_f16), layer_idx, pos, max_context,
         num_kv_heads, head_dim);
-    GUFO_CHECK_LAUNCH("WriteKVCacheKernel");
+    SUPERROC_CHECK_LAUNCH("WriteKVCacheKernel");
   }
 
   const std::size_t sequence_length = static_cast<std::size_t>(pos) + 1;
@@ -962,7 +962,7 @@ void LaunchAttention(const float* q, const float* k, const float* v,
       QwenDecodeSplitKAttentionPartialsKernel<<<partial_grid, 32, 0, stream>>>(
           q, k_cache, v_cache, split_k_scratch, layer_idx, pos, max_context,
           num_heads, num_kv_heads, split_count);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionPartialsKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionPartialsKernel");
     } else {
       detail::EmitAttentionDispatch("decode_split_k_fp16", "");
       LaunchSplitKAttentionHalfPartials(
@@ -974,11 +974,11 @@ void LaunchAttention(const float* q, const float* k, const float* v,
       QwenDecodeSplitKAttentionReduceKernel<detail::kKatGqa8MaxSplits>
           <<<num_heads, 32, 0, stream>>>(
               gate, split_k_scratch, out_context, num_heads, split_count);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionReduceKernel<detail::kKatGqa8MaxSplits>");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionReduceKernel<detail::kKatGqa8MaxSplits>");
     } else {
       QwenDecodeSplitKAttentionReduceKernel<<<num_heads, 32, 0, stream>>>(
           gate, split_k_scratch, out_context, num_heads, split_count);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionReduceKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionReduceKernel");
     }
   } else if (head_dim == 256 && num_kv_heads > 0 &&
              (num_heads % num_kv_heads) == 0) {
@@ -990,7 +990,7 @@ void LaunchAttention(const float* q, const float* k, const float* v,
       QwenDecodeOnlineAttentionKernel<<<num_heads, 32, 0, stream>>>(
           q, gate, k_cache, v_cache, out_context, layer_idx, pos, max_context,
           num_heads, num_kv_heads);
-      GUFO_CHECK_LAUNCH("QwenDecodeOnlineAttentionKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeOnlineAttentionKernel");
     } else {
       detail::EmitAttentionDispatch(
           "decode_online_fp16", split_k_supported
@@ -1000,7 +1000,7 @@ void LaunchAttention(const float* q, const float* k, const float* v,
           q, gate, static_cast<const __half*>(k_cache_f16),
           static_cast<const __half*>(v_cache_f16), out_context, layer_idx, pos,
           max_context, num_heads, num_kv_heads);
-      GUFO_CHECK_LAUNCH("QwenDecodeOnlineAttentionHalfKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeOnlineAttentionHalfKernel");
     }
   } else {
     const std::size_t seq_len = static_cast<std::size_t>(pos) + 1;
@@ -1013,7 +1013,7 @@ void LaunchAttention(const float* q, const float* k, const float* v,
       AttentionKernel<<<num_heads, 256, shared_scores_bytes, stream>>>(
           q, gate, k_cache, v_cache, out_context, layer_idx, pos, max_context,
           num_heads, num_kv_heads, head_dim);
-      GUFO_CHECK_LAUNCH("AttentionKernel");
+      SUPERROC_CHECK_LAUNCH("AttentionKernel");
     } else {
       detail::EmitAttentionDispatch(
           "decode_baseline_fp16",
@@ -1023,7 +1023,7 @@ void LaunchAttention(const float* q, const float* k, const float* v,
           q, gate, static_cast<const __half*>(k_cache_f16),
           static_cast<const __half*>(v_cache_f16), out_context, layer_idx, pos,
           max_context, num_heads, num_kv_heads, head_dim);
-      GUFO_CHECK_LAUNCH("AttentionHalfKernel");
+      SUPERROC_CHECK_LAUNCH("AttentionHalfKernel");
     }
   }
 }
@@ -1057,7 +1057,7 @@ void LaunchCausalDecodeAttention(
       QwenDecodeSplitKAttentionPartialsKernel<<<grid, 32, 0, stream>>>(
           q, k_cache, v_cache, split_k_scratch, layer_idx, start_pos,
           max_context, num_heads, num_kv_heads, splits);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionPartialsKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionPartialsKernel");
     } else {
       LaunchSplitKAttentionHalfPartials(
           q, static_cast<const __half*>(k_cache_f16),
@@ -1069,12 +1069,12 @@ void LaunchCausalDecodeAttention(
       QwenDecodeSplitKAttentionReduceKernel<detail::kKatGqa8MaxSplits><<<
           dim3(num_heads, static_cast<unsigned>(batch_size)), 32, 0, stream>>>(
           gate, split_k_scratch, out_context, num_heads, splits);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionReduceKernel<detail::kKatGqa8MaxSplits>");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionReduceKernel<detail::kKatGqa8MaxSplits>");
     } else {
       QwenDecodeSplitKAttentionReduceKernel<<<
           dim3(num_heads, static_cast<unsigned>(batch_size)), 32, 0, stream>>>(
           gate, split_k_scratch, out_context, num_heads, splits);
-      GUFO_CHECK_LAUNCH("QwenDecodeSplitKAttentionReduceKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionReduceKernel");
     }
     return;
   }
@@ -1089,13 +1089,13 @@ void LaunchCausalDecodeAttention(
       QwenDecodeOnlineAttentionKernel<<<grid, 32, 0, stream>>>(
           q, gate, k_cache, v_cache, out_context, layer_idx, start_pos,
           max_context, num_heads, num_kv_heads);
-      GUFO_CHECK_LAUNCH("QwenDecodeOnlineAttentionKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeOnlineAttentionKernel");
     } else {
       QwenDecodeOnlineAttentionHalfKernel<<<grid, 32, 0, stream>>>(
           q, gate, static_cast<const __half*>(k_cache_f16),
           static_cast<const __half*>(v_cache_f16), out_context, layer_idx,
           start_pos, max_context, num_heads, num_kv_heads);
-      GUFO_CHECK_LAUNCH("QwenDecodeOnlineAttentionHalfKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeOnlineAttentionHalfKernel");
     }
     return;
   }
@@ -1110,5 +1110,5 @@ void LaunchCausalDecodeAttention(
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

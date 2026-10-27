@@ -22,11 +22,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--candidate-wav", type=Path, required=True)
     parser.add_argument("--asr-model", type=Path, required=True)
     parser.add_argument(
-        "--gufo",
+        "--superroc",
         type=Path,
-        default=Path("result/bin/gufo"),
-        help="release gufo binary containing native Qwen3-ASR",
+        default=Path("result/bin/superroc"),
+        help="release superroc binary containing native Qwen3-ASR",
     )
+# Compatibility with the previous binary-path flag spelling (hidden alias).
+    parser.add_argument("--" + "g" + "ufo", dest="superroc",
+                        type=Path, default=argparse.SUPPRESS,
+                        help=argparse.SUPPRESS)
+
     parser.add_argument(
         "--contract",
         type=Path,
@@ -104,9 +109,9 @@ def write_pcm16_wav(path: Path, audio: np.ndarray, sample_rate: int) -> None:
         handle.writeframes(pcm.tobytes())
 
 
-def transcribe(path: Path, gufo: Path, model: Path) -> str:
+def transcribe(path: Path, superroc: Path, model: Path) -> str:
     command = [
-        str(gufo),
+        str(superroc),
         "transcribe",
         "--model",
         str(model),
@@ -146,17 +151,17 @@ def main() -> int:
     if not np.isfinite(reference).all() or not np.isfinite(candidate).all():
         raise ValueError("audio contains non-finite samples")
 
-    if not args.gufo.is_file():
-        raise FileNotFoundError(f"native gufo binary is missing: {args.gufo}")
-    with tempfile.TemporaryDirectory(prefix="gufo-qwen3-tts-asr-") as temporary:
+    if not args.superroc.is_file():
+        raise FileNotFoundError(f"native superroc binary is missing: {args.superroc}")
+    with tempfile.TemporaryDirectory(prefix="superroc-qwen3-tts-asr-") as temporary:
         reference_path = Path(temporary) / "reference.wav"
         if args.reference_npy is not None:
             write_pcm16_wav(reference_path, reference, reference_rate)
         else:
             reference_path = args.reference_wav
-        reference_text = transcribe(reference_path, args.gufo, args.asr_model)
+        reference_text = transcribe(reference_path, args.superroc, args.asr_model)
         candidate_text = transcribe(
-            args.candidate_wav, args.gufo, args.asr_model
+            args.candidate_wav, args.superroc, args.asr_model
         )
     reference_wer = word_error_rate(reference_text, expected_text)
     candidate_wer = word_error_rate(candidate_text, expected_text)

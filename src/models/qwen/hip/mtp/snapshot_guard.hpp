@@ -1,12 +1,12 @@
-#ifndef GUFO_MODELS_QWEN_HIP_MTP_SNAPSHOT_GUARD_HPP_
-#define GUFO_MODELS_QWEN_HIP_MTP_SNAPSHOT_GUARD_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_MTP_SNAPSHOT_GUARD_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_MTP_SNAPSHOT_GUARD_HPP_
 
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // F7: the MTP draft KV prefix must cover exactly the target's committed
 // context at capture. Draft and target advance in lockstep at every commit
@@ -28,6 +28,6 @@ inline void CheckMtpSnapshotPosition(std::uint32_t draft_position,
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
-#endif  // GUFO_MODELS_QWEN_HIP_MTP_SNAPSHOT_GUARD_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_MTP_SNAPSHOT_GUARD_HPP_

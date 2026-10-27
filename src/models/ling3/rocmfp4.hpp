@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_ROCMFP4_HPP_
-#define GUFO_MODELS_LING3_ROCMFP4_HPP_
+#ifndef SUPERROC_MODELS_LING3_ROCMFP4_HPP_
+#define SUPERROC_MODELS_LING3_ROCMFP4_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -21,7 +21,7 @@
 ///
 /// Transcribed from the fork's ggml/rocmfp4/rocmfp4.{h,c}; S2 verified these
 /// decoders bit-exact against types 100 and 101 (0 mismatches).
-namespace gufo::models::ling3::rocmfp4 {
+namespace superroc::models::ling3::rocmfp4 {
 
 /// Logical elements in one ROCmFP4 block.
 inline constexpr std::size_t kBlockElements = 32;
@@ -46,6 +46,6 @@ void DequantizeRow(core::GgmlType type, const void* src, float* dst,
 /// Unsigned E4M3 scale byte -> half-scale. Bytes above 0x7e decode to 0.
 [[nodiscard]] float ScaleFromByte(std::uint8_t e) noexcept;
 
-}  // namespace gufo::models::ling3::rocmfp4
+}  // namespace superroc::models::ling3::rocmfp4
 
-#endif  // GUFO_MODELS_LING3_ROCMFP4_HPP_
+#endif  // SUPERROC_MODELS_LING3_ROCMFP4_HPP_

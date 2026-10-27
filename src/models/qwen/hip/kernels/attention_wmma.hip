@@ -70,7 +70,7 @@
 #include "src/models/qwen/hip/ops/attention.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // Defined in kernels/attention_tile.hip; the WMMA route reuses the same FP16
 // cache and the same pack/sync pair unchanged.
@@ -1021,7 +1021,7 @@ bool LaunchQwenWmmaAttentionImpl(
           k_cache, v_cache, static_cast<__half*>(k_cache_f16),
           static_cast<__half*>(v_cache_f16), layer_idx, start_pos, max_context,
           num_kv_heads, head_dim);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     }
     const dim3 pack_grid(
         static_cast<unsigned int>((kKvWidth + block_size - 1) / block_size),
@@ -1031,7 +1031,7 @@ bool LaunchQwenWmmaAttentionImpl(
             k, v, static_cast<__half*>(k_cache_f16),
             static_cast<__half*>(v_cache_f16), k_cache, v_cache, layer_idx,
             start_pos, batch_size, max_context);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   }
 
   const dim3 grid(
@@ -1067,7 +1067,7 @@ bool LaunchQwenWmmaAttentionImpl(
           <<<dim3(heads, (length + 15u) / 16u), block_size, 0, stream>>>(
               layer_k + first * kHeadDimT, layer_v + first * kHeadDimT,
               packed_k, packed_v, length);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
       const dim3 group_grid(grid.x, heads * (kGqa / kHeadsPerBlock));
       WmmaCausalAttention<kQueryRowsT, kWmmaKeys, true, kHq, kHkv, kHeadDimT,
                           kWindowed, kHeadsPerBlock>
@@ -1076,7 +1076,7 @@ bool LaunchQwenWmmaAttentionImpl(
               packed_v, out_context + query_offset, start_pos, batch_size,
               lse_out ? lse_out + first * kGqa * batch_size : nullptr,
               key_begin, window, sinks, key_limit);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     }
     return true;
     }
@@ -1086,7 +1086,7 @@ bool LaunchQwenWmmaAttentionImpl(
       <<<grid, block_size, 0, stream>>>(
           q, gate, layer_k, layer_v, out_context, start_pos, batch_size,
           lse_out, key_begin, window, sinks, key_limit, splits);
-  if (::gufo::hip_check::LaunchFailed()) return false;
+  if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
 
@@ -1249,7 +1249,7 @@ bool LaunchQwenWmmaAttention(
               split_lse, partials, out_context, splits, partial_stride,
               static_cast<std::uint32_t>(batch_size), detail::kLlamaQueryHeads,
               detail::kLlamaHeadDim, attn_width);
-          if (::gufo::hip_check::LaunchFailed()) return false;
+          if (::superroc::hip_check::LaunchFailed()) return false;
           return true;
         }
         return LaunchQwenWmmaAttentionImpl<detail::kLlamaQueryHeads,
@@ -1275,5 +1275,5 @@ bool LaunchQwenWmmaAttention(
   return false;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

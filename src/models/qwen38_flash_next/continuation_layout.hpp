@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_CONTINUATION_LAYOUT_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_CONTINUATION_LAYOUT_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_CONTINUATION_LAYOUT_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_CONTINUATION_LAYOUT_HPP_
 
 #include <cstdint>
 #include <span>
@@ -8,7 +8,7 @@
 #include "src/cache/types.hpp"
 #include "src/models/qwen38_flash_next/config.hpp"
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 
 // State inventory shared by the adapter and its model-local capacity checks.
 // IDs refer to this representation, never to an allocation or serving slot.
@@ -78,5 +78,5 @@ private:
   std::vector<ContinuationComponent> components_;
 };
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next
 #endif

@@ -1,11 +1,11 @@
-#ifndef GUFO_MODELS_QWEN_MODULES_RESIDUAL_HPP_
-#define GUFO_MODELS_QWEN_MODULES_RESIDUAL_HPP_
+#ifndef SUPERROC_MODELS_QWEN_MODULES_RESIDUAL_HPP_
+#define SUPERROC_MODELS_QWEN_MODULES_RESIDUAL_HPP_
 
 #include <span>
 
 #include "src/models/qwen/modules/module_ctx.hpp"
 
-namespace gufo::models::qwen {
+namespace superroc::models::qwen {
 
 /// Residual add: dst = dst + src (element-wise). In-place on `dst`.
 ///
@@ -17,6 +17,6 @@ void ResidualAdd(const CpuModuleContext& ctx, std::span<float> dst,
 void ResidualAdd(const HipModuleContext& ctx, std::span<float> dst,
                  std::span<const float> src) noexcept;
 
-}  // namespace gufo::models::qwen
+}  // namespace superroc::models::qwen
 
-#endif  // GUFO_MODELS_QWEN_MODULES_RESIDUAL_HPP_
+#endif  // SUPERROC_MODELS_QWEN_MODULES_RESIDUAL_HPP_

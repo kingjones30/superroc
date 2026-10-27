@@ -16,7 +16,7 @@
 // more likely to encode my own misunderstanding than to catch one in the
 // reference, and the real bisect gives a sharper answer in minutes.
 //
-// Runs on the Mac. No model file, no GPU, all tensors F32, and no gufo_core at
+// Runs on the Mac. No model file, no GPU, all tensors F32, and no superroc_core at
 // runtime (the few quant entry points are stubbed because F32 never reaches
 // them).
 
@@ -30,11 +30,11 @@
 #include "src/models/ling3/reference.hpp"
 
 // ---------------------------------------------------------------------------
-// Stubs for gufo::quant entry points that cpu_ops.cpp references. The synthetic
+// Stubs for superroc::quant entry points that cpu_ops.cpp references. The synthetic
 // model is entirely F32, so none of these is ever called; they exist only to
 // satisfy the linker.
 // ---------------------------------------------------------------------------
-namespace gufo::quant {
+namespace superroc::quant {
 float Fp16ToFloat(std::uint16_t h) noexcept {
   const int s = (h >> 15) & 1, e = (h >> 10) & 0x1f, m = h & 0x3ff;
   float v;
@@ -46,18 +46,18 @@ void DequantizeQ6_K(const void*, float*, std::size_t) {}
 void DequantizeQ8_0(const void*, float*, std::size_t) {}
 float DotProductQ6_K(const void*, std::span<const float>, std::size_t) { return 0; }
 float DotProductQ8_0(const void*, std::span<const float>, std::size_t) { return 0; }
-}  // namespace gufo::quant
+}  // namespace superroc::quant
 
-namespace lg = gufo::models::ling3;
+namespace lg = superroc::models::ling3;
 
 // TensorRef::RowBytes lives in weights.cpp, which would drag in the whole
 // GgufReader. This test only ever uses F32 tensors, so the one function the
 // scalar ops need is defined here instead of linking it.
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 std::size_t TensorRef::RowBytes() const noexcept {
   return static_cast<std::size_t>(cols) * sizeof(float);
 }
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3
 
 // ---------------------------------------------------------------------------
 // A tiny synthetic model.
@@ -79,7 +79,7 @@ constexpr std::size_t kFfn = 10, kE = 8, kEused = 2, kG = 4, kGu = 2, kEff = 5;
 lg::TensorRef Vec(std::vector<float>& data) {
   lg::TensorRef t;
   t.data = data.data();
-  t.type = gufo::core::GgmlType::kF32;
+  t.type = superroc::core::GgmlType::kF32;
   t.cols = data.size();
   t.rows = 1;
   t.experts = 1;
@@ -89,7 +89,7 @@ lg::TensorRef Vec(std::vector<float>& data) {
 lg::TensorRef Mat(std::vector<float>& data, std::size_t rows, std::size_t cols) {
   lg::TensorRef t;
   t.data = data.data();
-  t.type = gufo::core::GgmlType::kF32;
+  t.type = superroc::core::GgmlType::kF32;
   t.cols = cols;
   t.rows = rows;
   t.experts = 1;
@@ -101,7 +101,7 @@ lg::TensorRef Stacked(std::vector<float>& data, std::size_t rows, std::size_t co
                       std::size_t experts) {
   lg::TensorRef t;
   t.data = data.data();
-  t.type = gufo::core::GgmlType::kF32;
+  t.type = superroc::core::GgmlType::kF32;
   t.cols = cols;
   t.rows = rows;
   t.experts = experts;

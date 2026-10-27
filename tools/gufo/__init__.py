@@ -1,6 +1,11 @@
-"""Shared helpers for Gufo benchmarks and independent model validation.
+"""Import-compat shim: `gufo` moved to the new engine name.
 
-See tools/README.md for command entry points.
-Production serving uses the native engine.
+Kept so out-of-tree code importing the previous top-level package keeps
+working. New code must import `superroc` directly.
 """
-__version__ = "0.1.0"
+import warnings as _warnings
+
+_warnings.warn(
+    "the gufo module moved to superroc; import superroc instead",
+    DeprecationWarning, stacklevel=2)
+from superroc import *

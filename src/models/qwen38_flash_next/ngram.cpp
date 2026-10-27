@@ -12,7 +12,7 @@
 
 #include "src/core/quant/ggml_dequant.hpp"
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 namespace {
 
 constexpr std::size_t kPage = 4096;
@@ -39,8 +39,8 @@ void DequantizeQ5_1Row(const std::uint8_t* src, float* dst, std::size_t k) {
   for (std::size_t b = 0; b < k / 32; ++b) {
     BlockQ5_1 blk;
     std::memcpy(&blk, src + b * sizeof(BlockQ5_1), sizeof(BlockQ5_1));
-    const float d = gufo::quant::Fp16ToFloat(blk.d);
-    const float m = gufo::quant::Fp16ToFloat(blk.m);
+    const float d = superroc::quant::Fp16ToFloat(blk.d);
+    const float m = superroc::quant::Fp16ToFloat(blk.m);
     float* y = dst + b * 32;
     for (int j = 0; j < 16; ++j) {
       const int xh0 = ((blk.qh >> j) & 1U) << 4;
@@ -151,7 +151,7 @@ std::unique_ptr<NgramTable> NgramTable::Open(
 
 void NgramTable::DecodeRow(const std::uint8_t* src, float* dst) const {
   if (type_ == core::GgmlType::kIQ4_NL) {
-    gufo::quant::DequantizeIQ4_NL(src, dst, row_dim_);
+    superroc::quant::DequantizeIQ4_NL(src, dst, row_dim_);
   } else if (type_ == core::GgmlType::kQ5_1) {
     DequantizeQ5_1Row(src, dst, row_dim_);
   } else {
@@ -394,4 +394,4 @@ bool NgramTable::WaitRead() {
   return !failed_;
 }
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next

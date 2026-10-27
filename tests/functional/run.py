@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run SDK and continuation checks against an isolated Gufo text server.
+"""Run SDK and continuation checks against an isolated SuperROC text server.
 
 Pass the production server command after --. Only loopback requests are made.
 The runner owns its process and cache directory, and restarts it for disk checks.
@@ -264,7 +264,7 @@ def main():
     parser.add_argument("--allow-missing-progress", action="store_true",
                         help="Baseline only: older revisions without progress events")
     parser.add_argument("command", nargs=argparse.REMAINDER,
-                        help="-- ./result/bin/gufo serve llm --model PATH [server options]")
+                        help="-- ./result/bin/superroc serve llm --model PATH [server options]")
     args = parser.parse_args()
     if set(args.suite) & {"discovery", "messages-image-counts", "all"} and args.expected_input_modalities is None:
         parser.error("discovery and messages-image-counts require --expected-input-modalities text or text,image")
@@ -272,7 +272,7 @@ def main():
         parser.error("--allow-missing-progress is only for --record-baseline")
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if len(command) < 3 or command[1] != "serve" or "llm" not in command:
-        parser.error("pass a gufo serve llm command after --")
+        parser.error("pass a superroc serve llm command after --")
     for reserved in ("--host", "--port", "--cache-disk", "--cache-disk-bytes",
                      "--cache-disk-staging-bytes"):
         if option(command, reserved) is not None:
@@ -311,7 +311,7 @@ def main():
         parser.error(str(error))
     output = args.output.resolve()
     # Every suite process inherits the tier; see tier.py.
-    os.environ["GUFO_FUNCTIONAL_TIER"] = args.tier
+    os.environ["SUPERROC_FUNCTIONAL_TIER"] = args.tier
     with socket.socket() as reserve:
         reserve.bind(("127.0.0.1", 0))
         port = reserve.getsockname()[1]

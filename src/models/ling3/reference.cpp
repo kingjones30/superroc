@@ -7,7 +7,7 @@
 
 #include "src/models/ling3/cpu_ops.hpp"
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 
 ReferenceModel::ReferenceModel(const ModelWeights& weights,
                                std::uint32_t max_context)
@@ -712,4 +712,4 @@ bool ReferenceModel::Step(std::int32_t token, std::vector<float>& logits,
   return true;
 }
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3

@@ -7,7 +7,7 @@
 
 #include "src/models/ling3/mtp_gpu.hpp"
 
-namespace gufo::models::ling3::mtp {
+namespace superroc::models::ling3::mtp {
 
 bool SpeculativeEnabled() noexcept {
   return {};
@@ -115,4 +115,4 @@ bool DepthDraftOk([[maybe_unused]] int pos,
   return {};
 }
 
-}  // namespace gufo::models::ling3::mtp
+}  // namespace superroc::models::ling3::mtp

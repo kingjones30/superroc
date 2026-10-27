@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "src/core/gguf_reader.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -124,7 +125,7 @@ void TestQ4() {
   const std::array<std::uint8_t, 8> minima{0, 1, 2, 3, 4, 5, 6, 7};
   const auto block = MakeQ4Block(scales, minima);
   std::array<float, kBlockElements> actual{};
-  gufo::quant::DequantizeQ4_K(block.data(), actual.data(), actual.size());
+  superroc::quant::DequantizeQ4_K(block.data(), actual.data(), actual.size());
 
   std::array<float, kBlockElements> expected{};
   for (std::size_t index = 0; index < expected.size(); ++index) {
@@ -143,7 +144,7 @@ void TestQ4() {
   std::iota(vector.begin(), vector.end(), -0.5F);
   const float expected_dot = std::inner_product(
       expected.begin(), expected.end(), vector.begin(), 0.0F);
-  ExpectNear(gufo::quant::DotProductQ4_K(block.data(), vector, vector.size()),
+  ExpectNear(superroc::quant::DotProductQ4_K(block.data(), vector, vector.size()),
              expected_dot, "Q4_K dot product");
 }
 
@@ -152,7 +153,7 @@ void TestQ6() {
                                            1,  2,  3,  4,  5,  6,  7,  8};
   const auto block = MakeQ6Block(scales);
   std::array<float, kBlockElements> actual{};
-  gufo::quant::DequantizeQ6_K(block.data(), actual.data(), actual.size());
+  superroc::quant::DequantizeQ6_K(block.data(), actual.data(), actual.size());
 
   std::array<float, kBlockElements> expected{};
   for (std::size_t index = 0; index < expected.size(); ++index) {
@@ -172,7 +173,7 @@ void TestQ6() {
   std::iota(vector.begin(), vector.end(), -0.25F);
   const float expected_dot = std::inner_product(
       expected.begin(), expected.end(), vector.begin(), 0.0F);
-  ExpectNear(gufo::quant::DotProductQ6_K(block.data(), vector, vector.size()),
+  ExpectNear(superroc::quant::DotProductQ6_K(block.data(), vector, vector.size()),
              expected_dot, "Q6_K dot product");
 }
 
@@ -181,7 +182,7 @@ void TestQ3() {
                                            12,  18,  23,  27, 29, 30, 31, -16};
   const auto block = MakeQ3Block(scales);
   std::array<float, kBlockElements> actual{};
-  gufo::quant::DequantizeQ3_K(block.data(), actual.data(), actual.size());
+  superroc::quant::DequantizeQ3_K(block.data(), actual.data(), actual.size());
 
   std::array<float, kBlockElements> expected{};
   for (std::size_t index = 0; index < expected.size(); ++index) {
@@ -200,7 +201,7 @@ void TestQ3() {
   std::iota(vector.begin(), vector.end(), 0.125F);
   const float expected_dot = std::inner_product(
       expected.begin(), expected.end(), vector.begin(), 0.0F);
-  ExpectNear(gufo::quant::DotProductQ3_K(block.data(), vector, vector.size()),
+  ExpectNear(superroc::quant::DotProductQ3_K(block.data(), vector, vector.size()),
              expected_dot, "Q3_K dot product");
 }
 
@@ -218,7 +219,7 @@ void TestQ8() {
   }
 
   std::array<float, kBlockElements> actual{};
-  gufo::quant::DequantizeQ8_K(&block, actual.data(), actual.size());
+  superroc::quant::DequantizeQ8_K(&block, actual.data(), actual.size());
 
   std::array<float, kBlockElements> expected{};
   for (std::size_t index = 0; index < kBlockElements; ++index) {
@@ -230,7 +231,7 @@ void TestQ8() {
   std::iota(vector.begin(), vector.end(), -0.75F);
   const float expected_dot = std::inner_product(
       expected.begin(), expected.end(), vector.begin(), 0.0F);
-  ExpectNear(gufo::quant::DotProductQ8_K(&block, vector, vector.size()),
+  ExpectNear(superroc::quant::DotProductQ8_K(&block, vector, vector.size()),
              expected_dot, "Q8_K dot product");
 }
 
@@ -248,12 +249,12 @@ void TestQ8_0() {
   }
 
   std::array<float, kQ8_0Elements> actual{};
-  gufo::quant::DequantizeQ8_0(&block, actual.data(), actual.size());
+  superroc::quant::DequantizeQ8_0(&block, actual.data(), actual.size());
 
   std::array<float, kQ8_0Elements> expected{};
   for (std::size_t index = 0; index < kQ8_0Elements; ++index) {
     expected[index] =
-        gufo::quant::Fp16ToFloat(block.d) * static_cast<float>(block.qs[index]);
+        superroc::quant::Fp16ToFloat(block.d) * static_cast<float>(block.qs[index]);
     ExpectNear(actual[index], expected[index], "Q8_0 dequant value");
   }
 
@@ -261,7 +262,7 @@ void TestQ8_0() {
   std::iota(vector.begin(), vector.end(), -0.75F);
   const float expected_dot = std::inner_product(
       expected.begin(), expected.end(), vector.begin(), 0.0F);
-  ExpectNear(gufo::quant::DotProductQ8_0(&block, vector, vector.size()),
+  ExpectNear(superroc::quant::DotProductQ8_0(&block, vector, vector.size()),
              expected_dot, "Q8_0 dot product");
 }
 
@@ -269,8 +270,8 @@ void TestQ4_0() {
   constexpr std::size_t kQ4_0Elements = 32;
   // Same 18-byte layout the header declares; asserted so a packing change on
   // either side of the test is a compile error rather than a silent mismatch.
-  gufo::quant::block_q4_0 block{};
-  static_assert(sizeof(gufo::quant::block_q4_0) == 18);
+  superroc::quant::block_q4_0 block{};
+  static_assert(sizeof(superroc::quant::block_q4_0) == 18);
   block.d = 0x3C00;  // fp16 1.0
   for (std::size_t j = 0; j < 16; ++j) {
     const auto low = static_cast<std::uint8_t>((j * 3U) & 0x0FU);
@@ -279,9 +280,9 @@ void TestQ4_0() {
   }
 
   std::array<float, kQ4_0Elements> actual{};
-  gufo::quant::DequantizeQ4_0(&block, actual.data(), actual.size());
+  superroc::quant::DequantizeQ4_0(&block, actual.data(), actual.size());
 
-  const float scale = gufo::quant::Fp16ToFloat(block.d);
+  const float scale = superroc::quant::Fp16ToFloat(block.d);
   for (std::size_t j = 0; j < 16; ++j) {
     const int low = static_cast<int>(block.qs[j] & 0x0FU) - 8;
     const int high = static_cast<int>(block.qs[j] >> 4U) - 8;
@@ -293,27 +294,27 @@ void TestQ4_0() {
   // The unbiased range is [-8, +7] and both ends must be reachable. qs[j]
   // carries element j in its low nibble and element j+16 in its high nibble,
   // so qs[0] alone moves elements 0 and 16.
-  gufo::quant::block_q4_0 extremes{};
+  superroc::quant::block_q4_0 extremes{};
   extremes.d = 0x3C00;
   for (std::size_t j = 0; j < 16; ++j) {
     extremes.qs[j] = 0x00;  // -8 in both nibbles
   }
   std::array<float, kQ4_0Elements> low_values{};
-  gufo::quant::DequantizeQ4_0(&extremes, low_values.data(), low_values.size());
+  superroc::quant::DequantizeQ4_0(&extremes, low_values.data(), low_values.size());
   for (std::size_t index = 0; index < kQ4_0Elements; ++index) {
     ExpectNear(low_values[index], -8.0F, "Q4_0 minimum");
   }
 
   extremes.qs[0] = 0xFF;  // +7 in both nibbles
   std::array<float, kQ4_0Elements> high_values{};
-  gufo::quant::DequantizeQ4_0(&extremes, high_values.data(),
+  superroc::quant::DequantizeQ4_0(&extremes, high_values.data(),
                               high_values.size());
   ExpectNear(high_values[0], 7.0F, "Q4_0 maximum (low nibble)");
   ExpectNear(high_values[16], 7.0F, "Q4_0 maximum (high nibble)");
   ExpectNear(high_values[1], -8.0F, "Q4_0 untouched neighbour");
 
-  if (gufo::quant::QuantizedRowBytes(gufo::core::GgmlType::kQ4_0, 32) != 18 ||
-      gufo::quant::QuantizedBlockElements(gufo::core::GgmlType::kQ4_0) != 32) {
+  if (superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ4_0, 32) != 18 ||
+      superroc::quant::QuantizedBlockElements(superroc::core::GgmlType::kQ4_0) != 32) {
     std::cerr << "Assertion failed: Q4_0 stride contract\n";
     std::exit(1);
   }
@@ -332,13 +333,13 @@ void TestQ5_K() {
 
   // QuantizedRowBytes covers every packed projection/embedding format used by
   // Qwen, including both Q8 layouts.
-  if (gufo::quant::QuantizedRowBytes(gufo::core::GgmlType::kQ5_K,
+  if (superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ5_K,
                                      kQ5Elements) != 176 ||
-      gufo::quant::QuantizedRowBytes(gufo::core::GgmlType::kQ8_K, 256) != 292 ||
-      gufo::quant::QuantizedRowBytes(gufo::core::GgmlType::kQ8_0, 32) != 34 ||
-      gufo::quant::EncodedSizeBytes(gufo::core::GgmlType::kF32, 8) != 32 ||
-      gufo::quant::EncodedSizeBytes(gufo::core::GgmlType::kBF16, 8) != 16 ||
-      gufo::quant::EncodedSizeBytes(gufo::core::GgmlType::kQ8_K, 256) != 292) {
+      superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ8_K, 256) != 292 ||
+      superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ8_0, 32) != 34 ||
+      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kF32, 8) != 32 ||
+      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kBF16, 8) != 16 ||
+      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kQ8_K, 256) != 292) {
     std::cerr << "Assertion failed: QuantizedRowBytes contract\n";
     std::exit(1);
   }
@@ -373,7 +374,7 @@ void TestQ5_K() {
 
   const auto check_block = [](const Q5Block& block, bool high_bits) {
     std::array<float, kQ5Elements> actual{};
-    gufo::quant::DequantizeQ5_K(&block, actual.data(), actual.size());
+    superroc::quant::DequantizeQ5_K(&block, actual.data(), actual.size());
 
     std::array<float, kQ5Elements> expected{};
     for (std::size_t index = 0; index < kQ5Elements; ++index) {
@@ -389,7 +390,7 @@ void TestQ5_K() {
     unit.fill(1.0F);
     const float expected_dot =
         std::accumulate(expected.begin(), expected.end(), 0.0F);
-    ExpectNear(gufo::quant::DotProductQ5_K(&block, unit, unit.size()),
+    ExpectNear(superroc::quant::DotProductQ5_K(&block, unit, unit.size()),
                expected_dot, "Q5_K dot product");
   };
 
@@ -402,8 +403,8 @@ struct ModelSample {
   float value;
 };
 
-void TestModelRow(const gufo::core::GgufReader& reader, std::string_view name,
-                  gufo::core::GgmlType expected_type, std::size_t expected_k,
+void TestModelRow(const superroc::core::GgufReader& reader, std::string_view name,
+                  superroc::core::GgmlType expected_type, std::size_t expected_k,
                   std::span<const ModelSample> samples, double expected_dot) {
   const auto* tensor = reader.FindTensor(name);
   if (tensor == nullptr || tensor->data == nullptr ||
@@ -419,11 +420,11 @@ void TestModelRow(const gufo::core::GgufReader& reader, std::string_view name,
 
   std::vector<float> row(expected_k);
   switch (tensor->type) {
-    case gufo::core::GgmlType::kQ4_K:
-      gufo::quant::DequantizeQ4_K(tensor->data, row.data(), row.size());
+    case superroc::core::GgmlType::kQ4_K:
+      superroc::quant::DequantizeQ4_K(tensor->data, row.data(), row.size());
       break;
-    case gufo::core::GgmlType::kQ6_K:
-      gufo::quant::DequantizeQ6_K(tensor->data, row.data(), row.size());
+    case superroc::core::GgmlType::kQ6_K:
+      superroc::quant::DequantizeQ6_K(tensor->data, row.data(), row.size());
       break;
     default:
       std::cerr << "Assertion failed: unsupported model tensor type " << name
@@ -442,16 +443,16 @@ void TestModelRow(const gufo::core::GgufReader& reader, std::string_view name,
         static_cast<float>(static_cast<int>(index % 257) - 128) / 64.0F;
   }
   const float actual_dot =
-      tensor->type == gufo::core::GgmlType::kQ4_K
-          ? gufo::quant::DotProductQ4_K(tensor->data, input, input.size())
-          : gufo::quant::DotProductQ6_K(tensor->data, input, input.size());
+      tensor->type == superroc::core::GgmlType::kQ4_K
+          ? superroc::quant::DotProductQ4_K(tensor->data, input, input.size())
+          : superroc::quant::DotProductQ6_K(tensor->data, input, input.size());
   ExpectNear(actual_dot, static_cast<float>(expected_dot),
              "real GGUF dot product", 5.0e-4F);
 }
 
 void TestModelRows(const std::filesystem::path& model_path) {
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(model_path, &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(model_path, &error);
   if (reader == nullptr) {
     std::cerr << "Assertion failed: MTP GGUF opens: " << error << '\n';
     std::exit(1);
@@ -476,7 +477,7 @@ void TestModelRows(const std::filesystem::path& model_path) {
       {5119, -0.0033974647521972656F},
   }};
   TestModelRow(*reader, "blk.64.nextn.eh_proj.weight",
-               gufo::core::GgmlType::kQ4_K, 10240, kQ4Samples,
+               superroc::core::GgmlType::kQ4_K, 10240, kQ4Samples,
                1.1511284159496427);
 
   constexpr std::array<ModelSample, 16> kQ6Samples{{
@@ -497,7 +498,7 @@ void TestModelRows(const std::filesystem::path& model_path) {
       {4095, 0.02767181396484375F},
       {5119, -0.012220144271850586F},
   }};
-  TestModelRow(*reader, "blk.64.attn_q.weight", gufo::core::GgmlType::kQ6_K,
+  TestModelRow(*reader, "blk.64.attn_q.weight", superroc::core::GgmlType::kQ6_K,
                5120, kQ6Samples, 0.5780322588980198);
 }
 
@@ -511,7 +512,7 @@ int main() {
   TestQ8_0();
   TestQ4_0();
   TestQ5_K();
-  if (const char* model = std::getenv("GUFO_MTP_MODEL");
+  if (const char* model = ::superroc::core::GetEnvCompat("SUPERROC_MTP_MODEL");
       model != nullptr && std::string_view(model).size() > 0) {
     TestModelRows(model);
   }

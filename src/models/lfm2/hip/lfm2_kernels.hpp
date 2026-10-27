@@ -1,13 +1,13 @@
 // LFM2 short-conv + MoE-router GPU kernels (decode/prefill/router).
-#ifndef GUFO_MODELS_LFM2_HIP_LFM2_KERNELS_HPP_
-#define GUFO_MODELS_LFM2_HIP_LFM2_KERNELS_HPP_
+#ifndef SUPERROC_MODELS_LFM2_HIP_LFM2_KERNELS_HPP_
+#define SUPERROC_MODELS_LFM2_HIP_LFM2_KERNELS_HPP_
 
 #include <cstdint>
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // LFM2: host launch result. `error` is a static string when ok is false.
 struct Lfm2LaunchStatus {
@@ -102,8 +102,8 @@ Lfm2LaunchStatus LaunchLfm2AddRMSNorm(float* hidden, const float* add,
                                       std::uint32_t dim, float eps,
                                       hipStream_t stream);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_LFM2_HIP_LFM2_KERNELS_HPP_
+#endif  // SUPERROC_MODELS_LFM2_HIP_LFM2_KERNELS_HPP_

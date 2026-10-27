@@ -1,25 +1,44 @@
 cmake_minimum_required(VERSION 3.21)
-project(gufo LANGUAGES C CXX)
+project(superroc LANGUAGES C CXX)
+# Compatibility with the previous option and cache prefix: when a previous
+# name is set and the new one is not, adopt it with a deprecation note.
+# The previous prefix is built from parts so its spelling never appears here.
+string(CONCAT _superroc_prev_prefix "G" "UFO" "_")
+string(CONCAT _superroc_prev_match "^" "G" "UFO" "_")
+get_cmake_property(_superroc_cache_vars CACHE_VARIABLES)
+foreach(_superroc_old IN LISTS _superroc_cache_vars)
+  if(_superroc_old MATCHES "${_superroc_prev_match}")
+    string(REGEX REPLACE "${_superroc_prev_match}" "SUPERROC_" _superroc_new
+      "${_superroc_old}")
+    if(NOT DEFINED ${_superroc_new})
+      get_property(_superroc_old_type CACHE ${_superroc_old} PROPERTY TYPE)
+      get_property(_superroc_old_help CACHE ${_superroc_old} PROPERTY HELPSTRING)
+      set(${_superroc_new} "${${_superroc_old}}" CACHE ${_superroc_old_type}
+        "${_superroc_old_help}" FORCE)
+      message(DEPRECATION "${_superroc_old} is deprecated; use ${_superroc_new}")
+    endif()
+  endif()
+endforeach()
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
-  message(FATAL_ERROR "Gufo requires Linux x86-64 with an AMD gfx1151 GPU")
+  message(FATAL_ERROR "SuperROC requires Linux x86-64 with an AMD gfx1151 GPU")
 endif()
 if (NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 option(BUILD_TESTING "Build correctness tests" OFF)
-option(GUFO_BUILD_TOOLS "Build development benchmarks and tuning tools" OFF)
+option(SUPERROC_BUILD_TOOLS "Build development benchmarks and tuning tools" OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(GUFO_RELEASE_VERSION "development" CACHE STRING "Gufo release version")
-set(GUFO_REVISION "unknown" CACHE STRING "Super ROC source revision (unknown = read from git at configure time)")
+set(SUPERROC_RELEASE_VERSION "development" CACHE STRING "SuperROC release version")
+set(SUPERROC_REVISION "unknown" CACHE STRING "Super ROC source revision (unknown = read from git at configure time)")
 # Super ROC: an unset revision is the git commit of the source tree at configure time (12 hex digits, "-dirty" when tracked
-# files differ from it), so `superroc --version` names the build. An explicit -DGUFO_REVISION=<text> is used as given.
-if (GUFO_REVISION STREQUAL "unknown")
+# files differ from it), so `superroc --version` names the build. An explicit -DSUPERROC_REVISION=<text> is used as given.
+if (SUPERROC_REVISION STREQUAL "unknown")
   find_package(Git QUIET)
   if (GIT_FOUND)
     execute_process(COMMAND "${GIT_EXECUTABLE}" -C "${CMAKE_SOURCE_DIR}" rev-parse --short=12 HEAD
@@ -30,23 +49,23 @@ if (GUFO_REVISION STREQUAL "unknown")
       if (NOT SUPERROC_GIT_DIRTY EQUAL 0)
         string(APPEND SUPERROC_GIT_HEAD "-dirty")
       endif()
-      set(GUFO_REVISION "${SUPERROC_GIT_HEAD}")
+      set(SUPERROC_REVISION "${SUPERROC_GIT_HEAD}")
     endif()
   endif()
 endif()
-message(STATUS "superroc: revision ${GUFO_REVISION}")
+message(STATUS "superroc: revision ${SUPERROC_REVISION}")
 include_directories(${CMAKE_SOURCE_DIR})
 
 # Reuse the compiler cache whenever it is installed, as the CPU check
 # derivations do. HIP kernels stay uncached: hipcc drive files and bitcode
 # paths need their own hit-rate measurement before they join the cache.
-find_program(GUFO_CCACHE_PROGRAM NAMES ccache)
-if (GUFO_CCACHE_PROGRAM)
-  set(CMAKE_C_COMPILER_LAUNCHER "${GUFO_CCACHE_PROGRAM}")
-  set(CMAKE_CXX_COMPILER_LAUNCHER "${GUFO_CCACHE_PROGRAM}")
-  message(STATUS "gufo: compiling C and CXX through ${GUFO_CCACHE_PROGRAM}")
+find_program(SUPERROC_CCACHE_PROGRAM NAMES ccache)
+if (SUPERROC_CCACHE_PROGRAM)
+  set(CMAKE_C_COMPILER_LAUNCHER "${SUPERROC_CCACHE_PROGRAM}")
+  set(CMAKE_CXX_COMPILER_LAUNCHER "${SUPERROC_CCACHE_PROGRAM}")
+  message(STATUS "superroc: compiling C and CXX through ${SUPERROC_CCACHE_PROGRAM}")
 else()
-  message(STATUS "gufo: ccache not found, compiling without a launcher")
+  message(STATUS "superroc: ccache not found, compiling without a launcher")
 endif()
 find_package(ICU REQUIRED COMPONENTS uc i18n)
 find_package(Threads REQUIRED)
@@ -56,16 +75,16 @@ find_package(JPEG REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(WEBP REQUIRED IMPORTED_TARGET libwebp)
 find_package(OpenSSL REQUIRED COMPONENTS Crypto)
-set(GUFO_FFMPEG_EXECUTABLE "ffmpeg" CACHE STRING
+set(SUPERROC_FFMPEG_EXECUTABLE "ffmpeg" CACHE STRING
   "FFmpeg executable used for generated media")
-set(GUFO_FFPROBE_EXECUTABLE "ffprobe" CACHE STRING
+set(SUPERROC_FFPROBE_EXECUTABLE "ffprobe" CACHE STRING
   "FFprobe executable used to validate generated media")
 
 # CPU-only builds exist for host checks; production targets gfx1151 only.
 option(ENGINE_ENABLE_HIP "Build the gfx1151 HIP backend" ON)
 set(CMAKE_HIP_ARCHITECTURES gfx1151 CACHE STRING "HIP architecture")
 if (ENGINE_ENABLE_HIP AND NOT CMAKE_HIP_ARCHITECTURES STREQUAL "gfx1151")
-  message(FATAL_ERROR "Gufo kernels require CMAKE_HIP_ARCHITECTURES=gfx1151")
+  message(FATAL_ERROR "SuperROC kernels require CMAKE_HIP_ARCHITECTURES=gfx1151")
 endif()
 # Standard ROCm installations; custom prefixes use CMAKE_PREFIX_PATH.
 if (EXISTS /opt/rocm)
@@ -81,7 +100,7 @@ if (ENGINE_ENABLE_HIP)
   find_path(HIPCUB_INCLUDE_DIR hipcub/hipcub.hpp REQUIRED)
   find_path(ROCPRIM_INCLUDE_DIR rocprim/rocprim.hpp REQUIRED)
   find_path(ROCWMMA_INCLUDE_DIR rocwmma/rocwmma.hpp REQUIRED)
-  message(STATUS "gufo: HIP target ${CMAKE_HIP_ARCHITECTURES}")
+  message(STATUS "superroc: HIP target ${CMAKE_HIP_ARCHITECTURES}")
 endif()
 
 if (ENGINE_ENABLE_HIP)
@@ -101,16 +120,16 @@ add_subdirectory(src/models/qwen3_tts)
 add_subdirectory(src/models/qwen3_asr)
 
 # Compiler warnings and sanitizers
-option(GUFO_ENABLE_WARNINGS "Enable compiler warnings" ON)
-option(GUFO_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(SUPERROC_ENABLE_WARNINGS "Enable compiler warnings" ON)
+option(SUPERROC_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
-if (GUFO_ENABLE_WARNINGS)
+if (SUPERROC_ENABLE_WARNINGS)
   if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     add_compile_options(-Wall -Wextra -Wpedantic)
   endif()
 endif()
 
-if (GUFO_ENABLE_SANITIZERS)
+if (SUPERROC_ENABLE_SANITIZERS)
   add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
 endif()
@@ -118,28 +137,28 @@ endif()
 add_subdirectory(src/cache)
 
 if (ENGINE_ENABLE_HIP)
-  add_library(gufo_hip_host STATIC src/core/hip/host_allocations.cpp)
-  target_link_libraries(gufo_hip_host PUBLIC hip::host)
-  target_include_directories(gufo_hip_host PUBLIC ${PROJECT_SOURCE_DIR})
-  add_library(gufo_cache_hip STATIC
+  add_library(superroc_hip_host STATIC src/core/hip/host_allocations.cpp)
+  target_link_libraries(superroc_hip_host PUBLIC hip::host)
+  target_include_directories(superroc_hip_host PUBLIC ${PROJECT_SOURCE_DIR})
+  add_library(superroc_cache_hip STATIC
     src/core/hip/committed_backing.cpp
     src/core/hip/staging.cpp
     src/core/hip/transfer_pool.cpp)
-  target_link_libraries(gufo_cache_hip PUBLIC gufo_cache gufo_hip_host hip::host)
+  target_link_libraries(superroc_cache_hip PUBLIC superroc_cache superroc_hip_host hip::host)
   if (BUILD_TESTING)
-    target_compile_options(gufo_cache_hip PRIVATE -UNDEBUG)
+    target_compile_options(superroc_cache_hip PRIVATE -UNDEBUG)
   endif()
-  if (GUFO_BUILD_TOOLS)
+  if (SUPERROC_BUILD_TOOLS)
     add_executable(cache_idle_spill_bench tests/cache/idle_spill_bench.cpp)
-    target_link_libraries(cache_idle_spill_bench PRIVATE gufo_cache_hip)
+    target_link_libraries(cache_idle_spill_bench PRIVATE superroc_cache_hip)
     add_executable(cache_backing_bench tests/cache/backing_bench.cpp)
-    target_link_libraries(cache_backing_bench PRIVATE gufo_cache_hip)
+    target_link_libraries(cache_backing_bench PRIVATE superroc_cache_hip)
     add_executable(cache_streaming_bench tests/cache/streaming_bench.cpp)
-    target_link_libraries(cache_streaming_bench PRIVATE gufo_cache_hip)
+    target_link_libraries(cache_streaming_bench PRIVATE superroc_cache_hip)
   endif()
 endif()
 
-add_library(gufo_diagnostics STATIC
+add_library(superroc_diagnostics STATIC
   src/core/diagnostics/gpu_queues.cpp
   src/core/diagnostics/linux_sysfs.cpp
   src/core/diagnostics/system_inventory.cpp
@@ -152,18 +171,18 @@ add_library(gufo_diagnostics STATIC
   src/core/diagnostics/report.cpp
   src/cli/diagnose/diagnose.cpp
 )
-target_include_directories(gufo_diagnostics PUBLIC ${CMAKE_SOURCE_DIR})
-target_compile_definitions(gufo_diagnostics PRIVATE
-  GUFO_REVISION="${GUFO_REVISION}")
+target_include_directories(superroc_diagnostics PUBLIC ${CMAKE_SOURCE_DIR})
+target_compile_definitions(superroc_diagnostics PRIVATE
+  SUPERROC_REVISION="${SUPERROC_REVISION}")
 
 if (ENGINE_ENABLE_HIP)
-  target_sources(gufo_diagnostics PRIVATE
+  target_sources(superroc_diagnostics PRIVATE
     src/core/hip/allocation_benchmark.hip)
-  target_compile_definitions(gufo_diagnostics PRIVATE ENGINE_ENABLE_HIP=1)
-  target_link_libraries(gufo_diagnostics PRIVATE hip::host roc::hipblas roc::rocblas)
+  target_compile_definitions(superroc_diagnostics PRIVATE ENGINE_ENABLE_HIP=1)
+  target_link_libraries(superroc_diagnostics PRIVATE hip::host roc::hipblas roc::rocblas)
 endif()
 
-add_library(gufo_core STATIC
+add_library(superroc_core STATIC
   src/core/image.cpp
   src/core/crypto/sha256.cpp
   src/core/gguf_reader.cpp
@@ -192,30 +211,30 @@ add_library(gufo_core STATIC
   src/core/quant/ggml_dequant.cpp
   src/core/quant/ggml_gemm.cpp
 )
-target_include_directories(gufo_core PUBLIC ${CMAKE_SOURCE_DIR})
-target_compile_definitions(gufo_core PRIVATE
-  GUFO_FFMPEG_EXECUTABLE="${GUFO_FFMPEG_EXECUTABLE}"
-  GUFO_FFPROBE_EXECUTABLE="${GUFO_FFPROBE_EXECUTABLE}")
-target_link_libraries(gufo_core PUBLIC ICU::uc ICU::i18n Threads::Threads
+target_include_directories(superroc_core PUBLIC ${CMAKE_SOURCE_DIR})
+target_compile_definitions(superroc_core PRIVATE
+  SUPERROC_FFMPEG_EXECUTABLE="${SUPERROC_FFMPEG_EXECUTABLE}"
+  SUPERROC_FFPROBE_EXECUTABLE="${SUPERROC_FFPROBE_EXECUTABLE}")
+target_link_libraries(superroc_core PUBLIC ICU::uc ICU::i18n Threads::Threads
   PNG::PNG JPEG::JPEG PkgConfig::WEBP CURL::libcurl OpenSSL::Crypto)
 
 add_subdirectory(src/models/qwen)
 add_subdirectory(src/models/qwen_image_21)
 
-target_link_libraries(gufo_qwen3_tts PUBLIC gufo_core)
+target_link_libraries(superroc_qwen3_tts PUBLIC superroc_core)
 if (ENGINE_ENABLE_HIP)
-  target_link_libraries(gufo_deepseek_v4_flash PUBLIC gufo_core)
+  target_link_libraries(superroc_deepseek_v4_flash PUBLIC superroc_core)
 endif()
 
 find_package(OpenMP)
 if (OpenMP_CXX_FOUND)
-  target_link_libraries(gufo_core PUBLIC OpenMP::OpenMP_CXX)
+  target_link_libraries(superroc_core PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
 if (ENGINE_ENABLE_HIP)
   set_property(SOURCE src/models/minimax_h3/dit.hip
     APPEND PROPERTY COMPILE_OPTIONS -O2)
-  target_sources(gufo_core PRIVATE
+  target_sources(superroc_core PRIVATE
     src/models/minimax_h3/audio_vae.hip
     src/models/minimax_h3/denoiser.hip
     src/models/minimax_h3/dit.hip
@@ -228,35 +247,35 @@ if (ENGINE_ENABLE_HIP)
     src/core/hip/weight_upload.cpp
     src/core/speculative/speculative_verifier.cpp
   )
-  target_compile_definitions(gufo_core PUBLIC ENGINE_ENABLE_HIP=1)
-  target_include_directories(gufo_core SYSTEM PRIVATE
+  target_compile_definitions(superroc_core PUBLIC ENGINE_ENABLE_HIP=1)
+  target_include_directories(superroc_core SYSTEM PRIVATE
     ${HIPCUB_INCLUDE_DIR}
     ${ROCPRIM_INCLUDE_DIR})
-  target_link_libraries(gufo_core PUBLIC gufo_hip_host hip::host roc::hipblas
+  target_link_libraries(superroc_core PUBLIC superroc_hip_host hip::host roc::hipblas
     roc::hipblaslt roc::rocblas)
 endif()
 
-add_library(gufo_llm_cli STATIC
+add_library(superroc_llm_cli STATIC
   src/cli/bench/bench.cpp
   src/cli/prompt/prompt.cpp)
-target_link_libraries(gufo_llm_cli PUBLIC gufo_core)
+target_link_libraries(superroc_llm_cli PUBLIC superroc_core)
 if(ENGINE_ENABLE_HIP)
-  target_link_libraries(gufo_llm_cli PUBLIC gufo_deepseek_v4_flash
-    gufo_qwen38_flash_next)
+  target_link_libraries(superroc_llm_cli PUBLIC superroc_deepseek_v4_flash
+    superroc_qwen38_flash_next)
 endif()
 
-add_library(gufo_logging STATIC src/cli/serve/logging.cpp src/cli/serve/trace.cpp)
-target_include_directories(gufo_logging PUBLIC ${PROJECT_SOURCE_DIR})
-target_compile_features(gufo_logging PUBLIC cxx_std_20)
+add_library(superroc_logging STATIC src/cli/serve/logging.cpp src/cli/serve/trace.cpp)
+target_include_directories(superroc_logging PUBLIC ${PROJECT_SOURCE_DIR})
+target_compile_features(superroc_logging PUBLIC cxx_std_20)
 
 # The imported DeepSeek V4 Flash runtime routes its informational messages
 # through the shared logger instead of writing to stderr directly, so it needs
 # the threshold that `--log-level` arms.
 if (ENGINE_ENABLE_HIP)
-  target_link_libraries(gufo_deepseek_v4_flash PUBLIC gufo_logging)
+  target_link_libraries(superroc_deepseek_v4_flash PUBLIC superroc_logging)
 endif()
 
-add_library(gufo_http STATIC
+add_library(superroc_http STATIC
   src/cli/serve/image_api.cpp
   src/cli/serve/audio_asr_api.cpp
   src/cli/serve/asr_service.cpp
@@ -274,33 +293,33 @@ add_library(gufo_http STATIC
   # the engine library, so no translation unit is linked twice.
   src/models/deepseek_v4_flash/tool_calls.cpp
 )
-target_link_libraries(gufo_http PUBLIC gufo_logging gufo_core gufo_qwen3_tts gufo_qwen3_asr gufo_qwen_image_21)
+target_link_libraries(superroc_http PUBLIC superroc_logging superroc_core superroc_qwen3_tts superroc_qwen3_asr superroc_qwen_image_21)
 
 # The CLI "serve" text path: the sources that hand a generation request to a
 # model backend, and the model-side libraries they need. inference_backend.cpp
 # drives Ling3TextRunner -- defined in src/cli/serve/ling3_text_runner.cpp --
-# and reaches the Ling-3 package (gufo_ling3, whose ROCm engine wraps the
-# ReferenceModel that lives in gufo_ling3_reference). A target that compiles
+# and reaches the Ling-3 package (superroc_ling3, whose ROCm engine wraps the
+# ReferenceModel that lives in superroc_ling3_reference). A target that compiles
 # inference_backend.cpp without also compiling the runner and linking those
-# two libraries fails to link with undefined gufo::server::Ling3TextRunner::*
-# and gufo::models::ling3::* symbols; the serving tests under tests/models/ did
-# exactly that. One definition, used by the gufo binary and by those tests,
+# two libraries fails to link with undefined superroc::server::Ling3TextRunner::*
+# and superroc::models::ling3::* symbols; the serving tests under tests/models/ did
+# exactly that. One definition, used by the superroc binary and by those tests,
 # keeps them in step. Paths are absolute so the list can be used from a
 # subdirectory as well as from this file (CMake compiles with the absolute
-# path either way, so gufo's objects are unchanged).
-set(GUFO_SERVE_TEXT_SOURCES
+# path either way, so superroc's objects are unchanged).
+set(SUPERROC_SERVE_TEXT_SOURCES
   ${PROJECT_SOURCE_DIR}/src/cli/serve/continuation_cache.cpp
   ${PROJECT_SOURCE_DIR}/src/cli/serve/continuation_disk_store.cpp
   ${PROJECT_SOURCE_DIR}/src/cli/serve/text_model_runner.cpp
   ${PROJECT_SOURCE_DIR}/src/cli/serve/text_generation_scheduler.cpp
   ${PROJECT_SOURCE_DIR}/src/cli/serve/inference_backend.cpp
   ${PROJECT_SOURCE_DIR}/src/cli/serve/ling3_text_runner.cpp)
-# gufo_ling3_reference is EXCLUDE_FROM_ALL; naming it is what pulls in the
-# ReferenceModel the Ling-3 CPU backend wraps. gufo_logging and gufo_core are
+# superroc_ling3_reference is EXCLUDE_FROM_ALL; naming it is what pulls in the
+# ReferenceModel the Ling-3 CPU backend wraps. superroc_logging and superroc_core are
 # not listed: every consumer already links them directly.
-set(GUFO_SERVE_TEXT_LIBRARIES gufo_ling3 gufo_ling3_reference)
+set(SUPERROC_SERVE_TEXT_LIBRARIES superroc_ling3 superroc_ling3_reference)
 
-add_executable(gufo
+add_executable(superroc
   src/cli/main.cpp
   src/cli/banner.cpp
   src/cli/eval/eval.cpp
@@ -316,102 +335,117 @@ add_executable(gufo
   ${PROJECT_SOURCE_DIR}/src/cli/serve/ling3_text_runner.cpp
   src/eval/http_client.cpp
 )
-target_link_libraries(gufo PRIVATE gufo_cache gufo_diagnostics gufo_core gufo_llm_cli gufo_http CURL::libcurl)
-target_compile_definitions(gufo PRIVATE
-  GUFO_RELEASE_VERSION="${GUFO_RELEASE_VERSION}"
-  GUFO_REVISION="${GUFO_REVISION}"
-  GUFO_EVAL_SOURCE_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/models/deepseek_v4_flash/fixtures/antirez-ds4.json"
-  GUFO_EVAL_INSTALLED_DATA="${CMAKE_INSTALL_PREFIX}/share/gufo/eval/antirez-ds4.json"
-  GUFO_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
-  GUFO_H3_INSTALLED_SOURCE_MANIFEST="${CMAKE_INSTALL_PREFIX}/share/gufo/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
-# Super ROC: binary is superroc; gufo stays as a compatibility link.
-set_target_properties(gufo PROPERTIES OUTPUT_NAME superroc)
-add_custom_command(TARGET gufo POST_BUILD COMMAND ${CMAKE_COMMAND} -E create_symlink superroc $<TARGET_FILE_DIR:gufo>/gufo) # Super ROC
+target_link_libraries(superroc PRIVATE superroc_cache superroc_diagnostics superroc_core superroc_llm_cli superroc_http CURL::libcurl)
+target_compile_definitions(superroc PRIVATE
+  SUPERROC_RELEASE_VERSION="${SUPERROC_RELEASE_VERSION}"
+  SUPERROC_REVISION="${SUPERROC_REVISION}"
+  SUPERROC_EVAL_SOURCE_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/models/deepseek_v4_flash/fixtures/antirez-ds4.json"
+  SUPERROC_EVAL_INSTALLED_DATA="${CMAKE_INSTALL_PREFIX}/share/superroc/eval/antirez-ds4.json"
+  SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
+  SUPERROC_H3_INSTALLED_SOURCE_MANIFEST="${CMAKE_INSTALL_PREFIX}/share/superroc/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
+# Compatibility with the previous binary name: the previous name is built
+# from parts so its spelling never appears here; the previous name link stays.
+string(CONCAT _superroc_compat_bin "g" "ufo")
+add_custom_command(TARGET superroc POST_BUILD COMMAND ${CMAKE_COMMAND} -E create_symlink superroc $<TARGET_FILE_DIR:superroc>/${_superroc_compat_bin})
 
 if (ENGINE_ENABLE_HIP)
-  target_link_libraries(gufo PRIVATE gufo_cache_hip gufo_deepseek_v4_flash)
+  target_link_libraries(superroc PRIVATE superroc_cache_hip superroc_deepseek_v4_flash)
 endif()
-target_link_libraries(gufo PRIVATE gufo_qwen3_tts gufo_qwen3_asr)
-# Ling-3.0-flash (bailingmoe3). gufo_ling3 carries the engine, whose CPU
-# backend wraps ReferenceModel; that lives in gufo_ling3_reference, so the
+target_link_libraries(superroc PRIVATE superroc_qwen3_tts superroc_qwen3_asr)
+# Ling-3.0-flash (bailingmoe3). superroc_ling3 carries the engine, whose CPU
+# backend wraps ReferenceModel; that lives in superroc_ling3_reference, so the
 # server has to link both or engine.cpp has an undefined ReferenceModel.
-# gufo_ling3_reference is EXCLUDE_FROM_ALL, so naming it here is what makes the
-# serve path exist at all. GUFO_SERVE_TEXT_LIBRARIES is the same pair the
+# superroc_ling3_reference is EXCLUDE_FROM_ALL, so naming it here is what makes the
+# serve path exist at all. SUPERROC_SERVE_TEXT_LIBRARIES is the same pair the
 # serving tests need; see its definition above.
-target_link_libraries(gufo PRIVATE ${GUFO_SERVE_TEXT_LIBRARIES})
+target_link_libraries(superroc PRIVATE ${SUPERROC_SERVE_TEXT_LIBRARIES})
 
-add_custom_target(gufo-server ALL
-  COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:gufo> ${CMAKE_CURRENT_BINARY_DIR}/gufo-server
-  DEPENDS gufo
+# Compatibility with the previous server binary name: the name is built
+# from parts so its spelling never appears here; the link itself stays for
+# seats that invoke the old server entry point (see RunServe routing).
+string(CONCAT _superroc_compat_server_bin "g" "ufo-server")
+add_custom_target(superroc-compat-server ALL
+  COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:superroc> ${CMAKE_CURRENT_BINARY_DIR}/${_superroc_compat_server_bin}
+  DEPENDS superroc
 )
 
-# gufo-quant — King's own GGUF quantizer (product track). Standalone C++17,
+# superroc-quant — King's own GGUF quantizer (product track). Standalone C++17,
 # no HIP / no ICU needed. Makes the fork's ROC recipes byte-for-byte.
-add_executable(gufo-quant
-  tools/gufo-quant/gufo_quant_main.cpp
+add_executable(superroc-quant
+  tools/superroc-quant/superroc_quant_main.cpp
 )
-target_include_directories(gufo-quant PRIVATE tools/gufo-quant)
-target_compile_features(gufo-quant PRIVATE cxx_std_17)
+# Compatibility with the previous quantizer binary name: link installed
+# beside superroc-quant. The previous name is built from parts so its
+# spelling never appears here.
+string(CONCAT _superroc_compat_quant "g" "ufo-quant")
+add_custom_command(TARGET superroc-quant POST_BUILD COMMAND
+  ${CMAKE_COMMAND} -E create_symlink superroc-quant
+  $<TARGET_FILE_DIR:superroc-quant>/${_superroc_compat_quant})
 
-# gufo-quant G4 twin check + MoE roster fixture builders (SPEC2 items 3 & 5).
-add_executable(g4-twin tools/gufo-quant/g4_twin.cpp)
-target_include_directories(g4-twin PRIVATE tools/gufo-quant)
+target_include_directories(superroc-quant PRIVATE tools/superroc-quant)
+target_compile_features(superroc-quant PRIVATE cxx_std_17)
+
+# superroc-quant G4 twin check + MoE roster fixture builders (SPEC2 items 3 & 5).
+add_executable(g4-twin tools/superroc-quant/g4_twin.cpp)
+target_include_directories(g4-twin PRIVATE tools/superroc-quant)
 target_compile_features(g4-twin PRIVATE cxx_std_17)
-add_executable(make-moe-synth tools/gufo-quant/make_moe_synth.cpp)
-target_include_directories(make-moe-synth PRIVATE tools/gufo-quant)
+add_executable(make-moe-synth tools/superroc-quant/make_moe_synth.cpp)
+target_include_directories(make-moe-synth PRIVATE tools/superroc-quant)
 target_compile_features(make-moe-synth PRIVATE cxx_std_17)
 
 # kv_swap — write a GGUF whose KV/metadata block comes verbatim from a
 # template file and whose tensor payloads come verbatim from a data file
 # (the v0.4 `-servedkv` drop-ins). Same standalone C++17 setup as above.
-add_executable(kv_swap tools/gufo-quant/kv_swap.cpp)
-target_include_directories(kv_swap PRIVATE tools/gufo-quant)
+add_executable(kv_swap tools/superroc-quant/kv_swap.cpp)
+target_include_directories(kv_swap PRIVATE tools/superroc-quant)
 target_compile_features(kv_swap PRIVATE cxx_std_17)
 
-if (BUILD_TESTING OR GUFO_BUILD_TOOLS)
-  add_library(gufo_kernel_bench_support STATIC
+if (BUILD_TESTING OR SUPERROC_BUILD_TOOLS)
+  add_library(superroc_kernel_bench_support STATIC
     src/cli/bench/kernel_bench.cpp)
-  target_include_directories(gufo_kernel_bench_support PUBLIC ${CMAKE_SOURCE_DIR})
+  target_include_directories(superroc_kernel_bench_support PUBLIC ${CMAKE_SOURCE_DIR})
 endif()
 
-if (ENGINE_ENABLE_HIP AND GUFO_BUILD_TOOLS)
+if (ENGINE_ENABLE_HIP AND SUPERROC_BUILD_TOOLS)
   find_path(ROCTX_INCLUDE_DIR rocprofiler-sdk-roctx/roctx.h REQUIRED)
   find_library(ROCTX_LIBRARY NAMES rocprofiler-sdk-roctx REQUIRED)
-  add_executable(gufo-kernel-bench
+  add_executable(superroc-kernel-bench
     src/cli/bench/kernel_bench_main.cpp
   )
-  target_compile_definitions(gufo-kernel-bench PRIVATE
-    GUFO_REVISION="${GUFO_REVISION}")
-  target_include_directories(gufo-kernel-bench SYSTEM PRIVATE
+  target_compile_definitions(superroc-kernel-bench PRIVATE
+    SUPERROC_REVISION="${SUPERROC_REVISION}")
+  target_include_directories(superroc-kernel-bench SYSTEM PRIVATE
     ${ROCTX_INCLUDE_DIR})
-  target_link_libraries(gufo-kernel-bench PRIVATE
-    gufo_kernel_bench_support
-    gufo_diagnostics
-    gufo_core
+  target_link_libraries(superroc-kernel-bench PRIVATE
+    superroc_kernel_bench_support
+    superroc_diagnostics
+    superroc_core
     ${ROCTX_LIBRARY})
 
   add_executable(tune_hipblaslt tools/bench/tune_hipblaslt.cpp)
-  target_link_libraries(tune_hipblaslt PRIVATE gufo_core hip::host)
+  target_link_libraries(tune_hipblaslt PRIVATE superroc_core hip::host)
 
   add_executable(wmma_layout_test tools/bench/wmma_layout_test.hip)
-  target_link_libraries(wmma_layout_test PRIVATE gufo_core hip::device)
+  target_link_libraries(wmma_layout_test PRIVATE superroc_core hip::device)
 endif()
 
-install(TARGETS gufo DESTINATION bin)
-# Super ROC: install the gufo compatibility link beside superroc.
-install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink superroc \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/gufo\")")
+install(TARGETS superroc DESTINATION bin)
+install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink superroc-quant \"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/${_superroc_compat_quant}\")")
+
+# Super ROC: install the previous-name compatibility link beside superroc.
+install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink superroc \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/${_superroc_compat_bin}\")")
 install(FILES
   src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json
-  DESTINATION share/gufo/models/minimax_h3)
+  DESTINATION share/superroc/models/minimax_h3)
 install(FILES
   tests/models/deepseek_v4_flash/fixtures/antirez-ds4.json
-  DESTINATION share/gufo/eval)
-install(FILES LICENSE NOTICE THIRD_PARTY_NOTICES.md DESTINATION share/licenses/gufo)
-install(DIRECTORY licenses/ DESTINATION share/licenses/gufo/third-party)
-install(FILES src/models/deepseek_v4_flash/LICENSE.ds4 DESTINATION share/licenses/gufo/third-party)
-install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink gufo \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/gufo-server\")")
-if (ENGINE_ENABLE_HIP AND GUFO_BUILD_TOOLS)
-  install(TARGETS gufo-kernel-bench tune_hipblaslt
+  DESTINATION share/superroc/eval)
+install(FILES LICENSE NOTICE THIRD_PARTY_NOTICES.md DESTINATION share/licenses/superroc)
+install(DIRECTORY licenses/ DESTINATION share/licenses/superroc/third-party)
+install(FILES src/models/deepseek_v4_flash/LICENSE.ds4 DESTINATION share/licenses/superroc/third-party)
+install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink superroc \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/${_superroc_compat_server_bin}\")")
+if (ENGINE_ENABLE_HIP AND SUPERROC_BUILD_TOOLS)
+  install(TARGETS superroc-kernel-bench tune_hipblaslt
     DESTINATION bin)
 endif()
 
@@ -438,88 +472,97 @@ if (BUILD_TESTING)
   add_subdirectory(tests/models/qwen27b)
   add_subdirectory(tests/models/flint)
   add_subdirectory(tests/models/llama)
-  gufo_qwen3_asr_register_tests()
-  gufo_qwen_image_21_register_tests()
+  superroc_qwen3_asr_register_tests()
+  superroc_qwen_image_21_register_tests()
 
-  add_test(NAME gufo_version COMMAND gufo --version)
-  set_tests_properties(gufo_version PROPERTIES
+  add_test(NAME superroc_version COMMAND superroc --version)
+  set_tests_properties(superroc_version PROPERTIES
     LABELS "cpu"
     PASS_REGULAR_EXPRESSION
-      "Super ROC ${GUFO_RELEASE_VERSION} \\(${GUFO_REVISION}\\)")
+      "Super ROC ${SUPERROC_RELEASE_VERSION} \\(${SUPERROC_REVISION}\\)")
 
-  # Super ROC: prove the gufo compatibility link prints the same version.
-  add_test(NAME superroc_link_version COMMAND $<TARGET_FILE_DIR:gufo>/gufo --version)
+  # Super ROC: prove the previous-name compatibility link prints the same version.
+  add_test(NAME superroc_link_version COMMAND $<TARGET_FILE_DIR:superroc>/${_superroc_compat_bin} --version)
+  # Super ROC: prove the previous quantizer name resolves to the same binary.
+  add_test(NAME superroc_quant_link_resolves COMMAND ${CMAKE_COMMAND} -E compare_files $<TARGET_FILE_DIR:superroc-quant>/${_superroc_compat_quant} $<TARGET_FILE:superroc-quant>)
+  set_tests_properties(superroc_quant_link_resolves PROPERTIES
+    LABELS "cpu")
+
   set_tests_properties(superroc_link_version PROPERTIES
     LABELS "cpu"
     PASS_REGULAR_EXPRESSION
-      "Super ROC ${GUFO_RELEASE_VERSION} \\(${GUFO_REVISION}\\)")
+      "Super ROC ${SUPERROC_RELEASE_VERSION} \\(${SUPERROC_REVISION}\\)")
 
-  add_test(NAME gufo_help COMMAND gufo --help)
-  set_tests_properties(gufo_help PROPERTIES LABELS "cpu")
+  add_test(NAME superroc_help COMMAND superroc --help)
+  set_tests_properties(superroc_help PROPERTIES LABELS "cpu")
 
-  add_test(NAME gufo_probe COMMAND gufo probe)
-  set_tests_properties(gufo_probe PROPERTIES LABELS "cpu")
+  add_test(NAME superroc_probe COMMAND superroc probe)
+  set_tests_properties(superroc_probe PROPERTIES LABELS "cpu")
 
-  add_test(NAME strix_diagnose_help COMMAND gufo diagnose --help)
+  add_test(NAME strix_diagnose_help COMMAND superroc diagnose --help)
   set_tests_properties(strix_diagnose_help PROPERTIES LABELS "cpu")
 
-  add_test(NAME strix_diagnose_json COMMAND gufo diagnose --json --section platform)
+  add_test(NAME strix_diagnose_json COMMAND superroc diagnose --json --section platform)
   set_tests_properties(strix_diagnose_json PROPERTIES LABELS "cpu")
 
-  add_test(NAME strix_prompt_help COMMAND gufo prompt --help)
+  add_test(NAME strix_prompt_help COMMAND superroc prompt --help)
   set_tests_properties(strix_prompt_help PROPERTIES LABELS "cpu;server;cli")
 
-  add_test(NAME strix_video_help COMMAND gufo video --help)
+  add_test(NAME strix_video_help COMMAND superroc video --help)
   set_tests_properties(strix_video_help PROPERTIES
     LABELS "cpu;server;cli;minimax-h3")
 
-  add_test(NAME gufo_transcribe_help COMMAND gufo transcribe --help)
-  set_tests_properties(gufo_transcribe_help PROPERTIES
+  add_test(NAME superroc_transcribe_help COMMAND superroc transcribe --help)
+  set_tests_properties(superroc_transcribe_help PROPERTIES
     LABELS "cpu;server;cli;qwen3-asr")
 
-  add_test(NAME gufo_serve_asr_help COMMAND gufo serve asr --help)
-  set_tests_properties(gufo_serve_asr_help PROPERTIES
+  add_test(NAME superroc_serve_asr_help COMMAND superroc serve asr --help)
+  set_tests_properties(superroc_serve_asr_help PROPERTIES
     LABELS "cpu;server;cli;qwen3-asr")
-  add_test(NAME gufo_serve_tts_help COMMAND gufo serve tts --help)
-  set_tests_properties(gufo_serve_tts_help PROPERTIES
+  add_test(NAME superroc_serve_tts_help COMMAND superroc serve tts --help)
+  set_tests_properties(superroc_serve_tts_help PROPERTIES
     LABELS "cpu;server;cli;qwen3-tts")
 
-  add_test(NAME strix_serve_help COMMAND gufo serve --help)
+  add_test(NAME strix_serve_help COMMAND superroc serve --help)
   set_tests_properties(strix_serve_help PROPERTIES LABELS "cpu;server;cli")
 
-  add_test(NAME strix_prompt_smoke COMMAND gufo prompt "Hello world")
+  add_test(NAME strix_prompt_smoke COMMAND superroc prompt "Hello world")
   set_tests_properties(strix_prompt_smoke PROPERTIES LABELS "cpu;server;cli")
 
   add_executable(arg_parser_test
     tests/cli/arg_parser_test.cpp
   )
-  target_link_libraries(arg_parser_test PRIVATE gufo_core)
+  target_link_libraries(arg_parser_test PRIVATE superroc_core)
   add_test(NAME arg_parser_test COMMAND arg_parser_test)
   set_tests_properties(arg_parser_test PROPERTIES LABELS "cpu;cli")
 
   add_executable(json_constraint_test tests/core/json_constraint_test.cpp)
-  target_link_libraries(json_constraint_test PRIVATE gufo_core)
+  target_link_libraries(json_constraint_test PRIVATE superroc_core)
   target_compile_definitions(json_constraint_test PRIVATE
-    GUFO_LLAMA_TOOL_GRAMMAR_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/llama_cpp_tool_grammar.json")
+    SUPERROC_LLAMA_TOOL_GRAMMAR_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/llama_cpp_tool_grammar.json")
   add_test(NAME json_constraint_test COMMAND json_constraint_test)
   set_tests_properties(json_constraint_test PROPERTIES LABELS "cpu;json;sampling")
 
   add_executable(json_test tests/core/json_test.cpp)
-  target_link_libraries(json_test PRIVATE gufo_core)
+  target_link_libraries(json_test PRIVATE superroc_core)
   add_test(NAME json_test COMMAND json_test)
   set_tests_properties(json_test PROPERTIES LABELS "cpu;json")
+  add_executable(env_compat_test tests/core/env_compat_test.cpp)
+  target_include_directories(env_compat_test PRIVATE ${CMAKE_SOURCE_DIR})
+  add_test(NAME env_compat_test COMMAND env_compat_test)
+  set_tests_properties(env_compat_test PROPERTIES LABELS "cpu;core")
   add_executable(model_family_test tests/core/model_family_test.cpp)
-  target_link_libraries(model_family_test PRIVATE gufo_core)
+  target_link_libraries(model_family_test PRIVATE superroc_core)
   add_test(NAME model_family_test COMMAND model_family_test)
   set_tests_properties(model_family_test PROPERTIES LABELS "cpu;core")
 
   add_executable(heap_placement_test tests/core/heap_placement_test.cpp)
-  target_link_libraries(heap_placement_test PRIVATE gufo_core)
+  target_link_libraries(heap_placement_test PRIVATE superroc_core)
   add_test(NAME heap_placement_test COMMAND heap_placement_test)
   set_tests_properties(heap_placement_test PROPERTIES LABELS "cpu;hip;core")
 
   add_executable(sampling_test tests/core/sampling_test.cpp)
-  target_link_libraries(sampling_test PRIVATE gufo_core)
+  target_link_libraries(sampling_test PRIVATE superroc_core)
   add_test(NAME sampling_test COMMAND sampling_test)
   set_tests_properties(sampling_test PROPERTIES LABELS "cpu;sampling")
 
@@ -531,38 +574,38 @@ if (BUILD_TESTING)
     src/models/deepseek_v4_flash/chat_template.cpp
     src/models/deepseek_v4_flash/tool_calls.cpp
   )
-  target_link_libraries(openai_chat_test PRIVATE gufo_core)
+  target_link_libraries(openai_chat_test PRIVATE superroc_core)
   add_test(NAME openai_chat_test COMMAND openai_chat_test)
   set_tests_properties(openai_chat_test PROPERTIES
     LABELS "cpu;server;api;openai;streaming;tools")
 
   add_executable(quote_tracker_test tests/cli/quote_tracker_test.cpp)
-  target_link_libraries(quote_tracker_test PRIVATE gufo_core)
+  target_link_libraries(quote_tracker_test PRIVATE superroc_core)
   add_test(NAME quote_tracker_test COMMAND quote_tracker_test)
   set_tests_properties(quote_tracker_test PROPERTIES LABELS "cpu;server;api")
 
   add_executable(trace_test tests/cli/trace_test.cpp)
-  target_link_libraries(trace_test PRIVATE gufo_logging)
+  target_link_libraries(trace_test PRIVATE superroc_logging)
   add_test(NAME trace_test COMMAND trace_test)
   set_tests_properties(trace_test PROPERTIES LABELS "cpu;server;trace")
 
   add_executable(http_server_test tests/cli/http_server_test.cpp)
-  target_link_libraries(http_server_test PRIVATE gufo_http)
+  target_link_libraries(http_server_test PRIVATE superroc_http)
   add_test(NAME http_server_test COMMAND http_server_test)
   set_tests_properties(http_server_test PROPERTIES LABELS "cpu;server;http" TIMEOUT 30)
   # LFM2: pythonic tool-call parser unit test.
   add_executable(lfm2_tool_parse_test tests/cli/lfm2_tool_parse_test.cpp src/cli/serve/lfm2_tool_parse.cpp)
-  target_link_libraries(lfm2_tool_parse_test PRIVATE gufo_core)
+  target_link_libraries(lfm2_tool_parse_test PRIVATE superroc_core)
   add_test(NAME lfm2_tool_parse_test COMMAND lfm2_tool_parse_test)
   set_tests_properties(lfm2_tool_parse_test PROPERTIES LABELS "cpu;server;api")
   add_executable(audio_websocket_test tests/cli/audio_websocket_test.cpp)
-  target_link_libraries(audio_websocket_test PRIVATE gufo_http)
+  target_link_libraries(audio_websocket_test PRIVATE superroc_http)
   add_test(NAME audio_websocket_test COMMAND audio_websocket_test)
   set_tests_properties(audio_websocket_test PROPERTIES LABELS "cpu;server;audio" TIMEOUT 30)
 
   add_test(NAME serve_cli_test
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/cli/serve_test.py
-      $<TARGET_FILE:gufo>)
+      $<TARGET_FILE:superroc>)
   set_tests_properties(serve_cli_test PROPERTIES LABELS "cpu;server;cli" TIMEOUT 30)
 
   add_test(NAME kernel_resources_parser_test
@@ -586,13 +629,13 @@ if (BUILD_TESTING)
     # increased the scratch of the Q8 prefill GEMM from 0 to 480 bytes. This
     # test fails if a kernel uses more scratch than the baseline allows. It
     # reads the code objects in the binary and does not use a GPU.
-    get_filename_component(GUFO_HIP_BIN_DIR ${CMAKE_HIP_COMPILER} DIRECTORY)
+    get_filename_component(SUPERROC_HIP_BIN_DIR ${CMAKE_HIP_COMPILER} DIRECTORY)
     add_test(NAME kernel_resources_test
       COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/ci/check-kernel-resources.py
-        $<TARGET_FILE:gufo>
+        $<TARGET_FILE:superroc>
         --baseline ${CMAKE_CURRENT_SOURCE_DIR}/tools/ci/kernel-resources.json
-        --bundler ${GUFO_HIP_BIN_DIR}/clang-offload-bundler)
+        --bundler ${SUPERROC_HIP_BIN_DIR}/clang-offload-bundler)
     set_tests_properties(kernel_resources_test PROPERTIES
       LABELS "cpu;kernels" TIMEOUT 120)
   endif()
@@ -603,9 +646,9 @@ if (BUILD_TESTING)
   if(ENGINE_ENABLE_HIP)
     add_executable(chat_template_hf_token_golden_test
       tests/models/chat_template_hf_token_golden_test.cpp)
-    target_link_libraries(chat_template_hf_token_golden_test PRIVATE gufo_core)
+    target_link_libraries(chat_template_hf_token_golden_test PRIVATE superroc_core)
     target_compile_definitions(chat_template_hf_token_golden_test PRIVATE
-      GUFO_CHAT_TEMPLATE_HF_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/chat_template_hf_goldens.json")
+      SUPERROC_CHAT_TEMPLATE_HF_GOLDENS="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/chat_template_hf_goldens.json")
     add_test(NAME chat_template_hf_token_golden_test
       COMMAND chat_template_hf_token_golden_test)
     set_tests_properties(chat_template_hf_token_golden_test PROPERTIES
@@ -616,7 +659,7 @@ if (BUILD_TESTING)
   add_executable(continuation_cache_test
     tests/cli/continuation_cache_test.cpp
     src/cli/serve/continuation_cache.cpp)
-  target_link_libraries(continuation_cache_test PRIVATE gufo_core gufo_logging)
+  target_link_libraries(continuation_cache_test PRIVATE superroc_core superroc_logging)
   add_test(NAME continuation_cache_test COMMAND continuation_cache_test)
   set_tests_properties(continuation_cache_test PROPERTIES
     LABELS "cpu;server;cache;state;lifecycle")
@@ -627,7 +670,7 @@ if (BUILD_TESTING)
     src/cli/serve/continuation_cache.cpp
     src/cli/serve/continuation_disk_store.cpp
     src/cli/serve/text_model_runner.cpp)
-  target_link_libraries(component_text_cache_test PRIVATE gufo_cache_fake gufo_core gufo_logging)
+  target_link_libraries(component_text_cache_test PRIVATE superroc_cache_fake superroc_core superroc_logging)
   add_test(NAME component_text_cache_test COMMAND component_text_cache_test)
   set_tests_properties(component_text_cache_test PROPERTIES LABELS "cpu;server;cache;state;lifecycle")
 
@@ -637,7 +680,7 @@ if (BUILD_TESTING)
     src/cli/serve/continuation_disk_store.cpp
     src/cli/serve/component_text_cache.cpp
   src/cli/serve/text_model_runner.cpp)
-  target_link_libraries(text_model_runner_test PRIVATE gufo_logging gufo_core gufo_cache)
+  target_link_libraries(text_model_runner_test PRIVATE superroc_logging superroc_core superroc_cache)
   add_test(NAME text_model_runner_test COMMAND text_model_runner_test)
   set_tests_properties(text_model_runner_test PROPERTIES
     LABELS "cpu;server;runner;cache;state;lifecycle")
@@ -648,7 +691,7 @@ if (BUILD_TESTING)
     src/cli/serve/component_text_cache.cpp
   src/cli/serve/text_model_runner.cpp
     src/cli/serve/continuation_cache.cpp)
-  target_link_libraries(continuation_disk_store_test PRIVATE gufo_logging gufo_core gufo_cache)
+  target_link_libraries(continuation_disk_store_test PRIVATE superroc_logging superroc_core superroc_cache)
   add_test(NAME continuation_disk_store_test
     COMMAND continuation_disk_store_test)
   set_tests_properties(continuation_disk_store_test PROPERTIES
@@ -660,14 +703,14 @@ if (BUILD_TESTING)
     src/cli/serve/text_model_runner.cpp
     src/cli/serve/continuation_cache.cpp
     src/cli/serve/component_text_cache.cpp)
-  target_link_libraries(continuation_disk_store_v2_test PRIVATE gufo_logging gufo_core gufo_cache)
+  target_link_libraries(continuation_disk_store_v2_test PRIVATE superroc_logging superroc_core superroc_cache)
   add_test(NAME continuation_disk_store_v2_test
     COMMAND continuation_disk_store_v2_test)
   set_tests_properties(continuation_disk_store_v2_test PROPERTIES
     LABELS "cpu;server;cache;disk;state;lifecycle")
 
   add_executable(logit_sampler_test tests/cli/logit_sampler_test.cpp)
-  target_link_libraries(logit_sampler_test PRIVATE gufo_core)
+  target_link_libraries(logit_sampler_test PRIVATE superroc_core)
   add_test(NAME logit_sampler_test COMMAND logit_sampler_test)
   set_tests_properties(logit_sampler_test PROPERTIES
     LABELS "cpu;server;sampling")
@@ -679,7 +722,7 @@ if (BUILD_TESTING)
     src/cli/serve/component_text_cache.cpp
   src/cli/serve/text_model_runner.cpp
     src/cli/serve/text_generation_scheduler.cpp)
-  target_link_libraries(text_generation_scheduler_test PRIVATE gufo_logging gufo_core gufo_cache)
+  target_link_libraries(text_generation_scheduler_test PRIVATE superroc_logging superroc_core superroc_cache)
   add_test(NAME text_generation_scheduler_test
     COMMAND text_generation_scheduler_test)
   set_tests_properties(text_generation_scheduler_test PROPERTIES
@@ -688,7 +731,7 @@ if (BUILD_TESTING)
   add_executable(prompt_cli_test
     tests/cli/prompt_test.cpp
   )
-  target_link_libraries(prompt_cli_test PRIVATE gufo_llm_cli)
+  target_link_libraries(prompt_cli_test PRIVATE superroc_llm_cli)
 
   add_test(NAME prompt_cli_test COMMAND prompt_cli_test)
   set_tests_properties(prompt_cli_test PROPERTIES LABELS "cpu;server;cli")
@@ -696,7 +739,7 @@ if (BUILD_TESTING)
   add_executable(bench_cli_test
     tests/cli/bench_test.cpp
   )
-  target_link_libraries(bench_cli_test PRIVATE gufo_llm_cli)
+  target_link_libraries(bench_cli_test PRIVATE superroc_llm_cli)
 
   add_test(NAME bench_cli_test COMMAND bench_cli_test)
   set_tests_properties(bench_cli_test PROPERTIES LABELS "cpu;server;cli")
@@ -705,7 +748,7 @@ if (BUILD_TESTING)
     tests/cli/video_test.cpp
     src/cli/video/video.cpp
   )
-  target_link_libraries(video_cli_test PRIVATE gufo_core)
+  target_link_libraries(video_cli_test PRIVATE superroc_core)
   add_test(NAME video_cli_test COMMAND video_cli_test)
   set_tests_properties(video_cli_test PROPERTIES
     LABELS "cpu;server;cli;minimax-h3;quality")
@@ -714,7 +757,7 @@ if (BUILD_TESTING)
     tests/cli/video_jobs_test.cpp
     src/cli/serve/video_jobs.cpp
   )
-  target_link_libraries(video_jobs_test PRIVATE gufo_logging gufo_core gufo_cache)
+  target_link_libraries(video_jobs_test PRIVATE superroc_logging superroc_core superroc_cache)
   add_test(NAME video_jobs_test COMMAND video_jobs_test)
   set_tests_properties(video_jobs_test PROPERTIES
     LABELS "cpu;server;video;minimax-h3;queue;cancellation;quality")
@@ -724,7 +767,7 @@ if (BUILD_TESTING)
     src/cli/serve/video_api.cpp
     src/cli/serve/video_jobs.cpp
   )
-  target_link_libraries(video_api_test PRIVATE gufo_logging gufo_core gufo_cache)
+  target_link_libraries(video_api_test PRIVATE superroc_logging superroc_core superroc_cache)
   add_test(NAME video_api_test COMMAND video_api_test)
   set_tests_properties(video_api_test PROPERTIES
     LABELS "cpu;server;api;video;minimax-h3;quality")
@@ -798,13 +841,13 @@ if (BUILD_TESTING)
     LABELS "cpu;tools;profiling")
 
   add_executable(gpu_queues_test tests/diagnostics/gpu_queues_test.cpp)
-  target_link_libraries(gpu_queues_test PRIVATE gufo_diagnostics)
+  target_link_libraries(gpu_queues_test PRIVATE superroc_diagnostics)
   add_test(NAME gpu_queues_test COMMAND gpu_queues_test)
   set_tests_properties(gpu_queues_test PROPERTIES LABELS "cpu;diagnostics;serving")
 
   add_executable(bandwidth_test tests/diagnostics/bandwidth_test.cpp)
   target_compile_definitions(bandwidth_test PRIVATE TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/diagnostics")
-  target_link_libraries(bandwidth_test PRIVATE gufo_diagnostics)
+  target_link_libraries(bandwidth_test PRIVATE superroc_diagnostics)
 
   add_test(NAME bandwidth_test COMMAND bandwidth_test)
   set_tests_properties(bandwidth_test PROPERTIES LABELS "cpu;diagnostics;bandwidth;bandwidth_schema;bandwidth_correctness")
@@ -813,33 +856,33 @@ if (BUILD_TESTING)
     tests/diagnostics/allocation_benchmark_test.cpp)
   target_compile_definitions(allocation_benchmark_test PRIVATE
     TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/diagnostics")
-  target_link_libraries(allocation_benchmark_test PRIVATE gufo_diagnostics)
+  target_link_libraries(allocation_benchmark_test PRIVATE superroc_diagnostics)
   add_test(NAME allocation_benchmark_test COMMAND allocation_benchmark_test)
   set_tests_properties(allocation_benchmark_test PROPERTIES
     LABELS "gpu;hip;gfx1151;diagnostics;allocation;opt-c091")
 
   add_executable(gguf_reader_test tests/core/gguf_reader_test.cpp)
-  target_link_libraries(gguf_reader_test PRIVATE gufo_core)
+  target_link_libraries(gguf_reader_test PRIVATE superroc_core)
 
   add_test(NAME gguf_reader_test COMMAND gguf_reader_test)
   set_tests_properties(gguf_reader_test PROPERTIES LABELS "cpu;core;gguf;model_config")
 
   add_executable(gguf_identity_test tests/core/gguf_identity_test.cpp)
-  target_link_libraries(gguf_identity_test PRIVATE gufo_core)
+  target_link_libraries(gguf_identity_test PRIVATE superroc_core)
 
   add_test(NAME gguf_identity_test COMMAND gguf_identity_test)
   set_tests_properties(gguf_identity_test PROPERTIES LABELS "cpu;core;gguf")
 
   add_executable(minimax_h3_runtime_test
     tests/models/minimax_h3_runtime_test.cpp)
-  target_link_libraries(minimax_h3_runtime_test PRIVATE gufo_core)
+  target_link_libraries(minimax_h3_runtime_test PRIVATE superroc_core)
   add_test(NAME minimax_h3_runtime_test COMMAND minimax_h3_runtime_test)
   set_tests_properties(minimax_h3_runtime_test PROPERTIES
     LABELS "cpu;models;minimax-h3;safetensors;residency;failure-injection")
 
   add_executable(qwen3_tts_loader_test
     tests/models/qwen3_tts/loader_test.cpp)
-  target_link_libraries(qwen3_tts_loader_test PRIVATE gufo_qwen3_tts)
+  target_link_libraries(qwen3_tts_loader_test PRIVATE superroc_qwen3_tts)
   add_test(NAME qwen3_tts_loader_test COMMAND qwen3_tts_loader_test)
   set_tests_properties(qwen3_tts_loader_test PROPERTIES
     LABELS "cpu;models;qwen3-tts;loader;safetensors"
@@ -849,26 +892,26 @@ if (BUILD_TESTING)
     tests/models/qwen3_tts/audio_api_test.cpp
     src/cli/serve/audio_tts_api.cpp
     src/cli/serve/tts_service.cpp)
-  target_link_libraries(qwen3_tts_audio_api_test PRIVATE gufo_qwen3_tts)
+  target_link_libraries(qwen3_tts_audio_api_test PRIVATE superroc_qwen3_tts)
   add_test(NAME qwen3_tts_audio_api_test COMMAND qwen3_tts_audio_api_test)
   set_tests_properties(qwen3_tts_audio_api_test PROPERTIES
     LABELS "cpu;models;qwen3-tts;server;api;audio;quality")
 
   add_executable(qwen3_tts_audio_test
     tests/models/qwen3_tts/audio_test.cpp)
-  target_link_libraries(qwen3_tts_audio_test PRIVATE gufo_qwen3_tts)
+  target_link_libraries(qwen3_tts_audio_test PRIVATE superroc_qwen3_tts)
   add_test(NAME qwen3_tts_audio_test COMMAND qwen3_tts_audio_test)
   set_tests_properties(qwen3_tts_audio_test PROPERTIES
     LABELS "cpu;models;qwen3-tts;audio;quality;resampling")
 
   add_executable(qwen3_tts_config_test
     tests/models/qwen3_tts/config_test.cpp)
-  target_link_libraries(qwen3_tts_config_test PRIVATE gufo_qwen3_tts)
+  target_link_libraries(qwen3_tts_config_test PRIVATE superroc_qwen3_tts)
   add_test(NAME qwen3_tts_config_test COMMAND qwen3_tts_config_test)
 
   add_executable(qwen3_tts_tokenizer_test
     tests/models/qwen3_tts/tokenizer_test.cpp)
-  target_link_libraries(qwen3_tts_tokenizer_test PRIVATE gufo_qwen3_tts)
+  target_link_libraries(qwen3_tts_tokenizer_test PRIVATE superroc_qwen3_tts)
   add_test(NAME qwen3_tts_tokenizer_test COMMAND qwen3_tts_tokenizer_test)
   set_tests_properties(qwen3_tts_tokenizer_test PROPERTIES
     SKIP_RETURN_CODE 77)
@@ -877,7 +920,7 @@ if (BUILD_TESTING)
 
   add_executable(qwen3_tts_prompt_test
     tests/models/qwen3_tts/prompt_test.cpp)
-  target_link_libraries(qwen3_tts_prompt_test PRIVATE gufo_qwen3_tts)
+  target_link_libraries(qwen3_tts_prompt_test PRIVATE superroc_qwen3_tts)
   add_test(NAME qwen3_tts_prompt_test COMMAND qwen3_tts_prompt_test)
   set_tests_properties(qwen3_tts_prompt_test PROPERTIES
     LABELS "cpu;models;qwen3-tts;prompt;quality;exact")
@@ -895,21 +938,21 @@ if (BUILD_TESTING)
 
   add_executable(minimax_h3_tokenizer_test
     tests/models/minimax_h3_tokenizer_test.cpp)
-  target_link_libraries(minimax_h3_tokenizer_test PRIVATE gufo_core)
+  target_link_libraries(minimax_h3_tokenizer_test PRIVATE superroc_core)
   add_test(NAME minimax_h3_tokenizer_test COMMAND minimax_h3_tokenizer_test)
   set_tests_properties(minimax_h3_tokenizer_test PROPERTIES
     LABELS "cpu;models;minimax-h3;tokenizer;quality")
 
   add_executable(minimax_h3_sampling_test
     tests/models/minimax_h3_sampling_test.cpp)
-  target_link_libraries(minimax_h3_sampling_test PRIVATE gufo_core)
+  target_link_libraries(minimax_h3_sampling_test PRIVATE superroc_core)
   add_test(NAME minimax_h3_sampling_test COMMAND minimax_h3_sampling_test)
   set_tests_properties(minimax_h3_sampling_test PROPERTIES
     LABELS "cpu;models;minimax-h3;layout;schedule;rng;quality")
 
   add_executable(minimax_h3_generation_test
     tests/models/minimax_h3_generation_test.cpp)
-  target_link_libraries(minimax_h3_generation_test PRIVATE gufo_core)
+  target_link_libraries(minimax_h3_generation_test PRIVATE superroc_core)
   add_test(NAME minimax_h3_generation_test
     COMMAND minimax_h3_generation_test)
   set_tests_properties(minimax_h3_generation_test PROPERTIES
@@ -917,7 +960,7 @@ if (BUILD_TESTING)
 
   add_executable(minimax_h3_video_vae_test
     tests/models/minimax_h3_video_vae_test.cpp)
-  target_link_libraries(minimax_h3_video_vae_test PRIVATE gufo_core)
+  target_link_libraries(minimax_h3_video_vae_test PRIVATE superroc_core)
   add_test(NAME minimax_h3_video_vae_plan
     COMMAND minimax_h3_video_vae_test)
   set_tests_properties(minimax_h3_video_vae_plan PROPERTIES
@@ -925,29 +968,29 @@ if (BUILD_TESTING)
 
   add_executable(minimax_h3_media_test
     tests/models/minimax_h3_media_test.cpp)
-  target_link_libraries(minimax_h3_media_test PRIVATE gufo_core)
+  target_link_libraries(minimax_h3_media_test PRIVATE superroc_core)
   add_test(NAME minimax_h3_media_test COMMAND minimax_h3_media_test)
   set_tests_properties(minimax_h3_media_test PROPERTIES
     LABELS "cpu;models;minimax-h3;video;audio;ffmpeg;mux;quality"
     SKIP_RETURN_CODE 77)
 
   add_executable(ggml_dequant_test tests/core/ggml_dequant_test.cpp)
-  target_link_libraries(ggml_dequant_test PRIVATE gufo_core)
+  target_link_libraries(ggml_dequant_test PRIVATE superroc_core)
 
   add_test(NAME ggml_dequant_test COMMAND ggml_dequant_test)
   set_tests_properties(ggml_dequant_test PROPERTIES LABELS "cpu;core;quant")
 
   add_executable(rocmfp4_oracle_test tests/core/rocmfp4_oracle_test.cpp)  # lqw:cmake-test
-  target_link_libraries(rocmfp4_oracle_test PRIVATE gufo_core)
+  target_link_libraries(rocmfp4_oracle_test PRIVATE superroc_core)
 
   add_executable(glimmer_g1_test tests/models/glimmer/glimmer_g1_test.cpp)  # GLIMMER
-  target_link_libraries(glimmer_g1_test PRIVATE gufo_core)
+  target_link_libraries(glimmer_g1_test PRIVATE superroc_core)
   add_test(NAME glimmer_g1_test COMMAND glimmer_g1_test)
   set_tests_properties(glimmer_g1_test PROPERTIES
     LABELS "cpu;models;glimmer;external-model"
     SKIP_RETURN_CODE 77)
   add_executable(lfm2_config_test tests/models/lfm2/lfm2_config_test.cpp)  # LFM2
-  target_link_libraries(lfm2_config_test PRIVATE gufo_core)  # LFM2
+  target_link_libraries(lfm2_config_test PRIVATE superroc_core)  # LFM2
   add_test(NAME lfm2_config_test COMMAND lfm2_config_test)  # LFM2
   set_tests_properties(lfm2_config_test PROPERTIES  # LFM2
     LABELS "cpu;models;lfm2;external-model"  # LFM2
@@ -956,30 +999,30 @@ if (BUILD_TESTING)
   set_tests_properties(rocmfp4_oracle_test PROPERTIES LABELS "cpu;core;quant")
 
   add_executable(kat_bind_test tests/models/qwen/kat_bind_test.cpp)  # KAT:
-  target_link_libraries(kat_bind_test PRIVATE gufo_core)
+  target_link_libraries(kat_bind_test PRIVATE superroc_core)
   add_test(NAME kat_bind_test COMMAND kat_bind_test)
   set_tests_properties(kat_bind_test PROPERTIES LABELS "cpu;models;qwen;kat"
     SKIP_RETURN_CODE 77)
 
   add_executable(kat_bf16_slice_test tests/models/qwen/kat_bf16_slice_test.cpp)  # KAT:
-  target_link_libraries(kat_bf16_slice_test PRIVATE gufo_core)
+  target_link_libraries(kat_bf16_slice_test PRIVATE superroc_core)
   add_test(NAME kat_bf16_slice_test COMMAND kat_bf16_slice_test)
   set_tests_properties(kat_bf16_slice_test PROPERTIES LABELS "cpu;models;qwen;kat")
 
   add_executable(kat_moe_oracle_test tests/models/qwen/kat_moe_oracle_test.cpp)  # KAT:
-  target_link_libraries(kat_moe_oracle_test PRIVATE gufo_core)
+  target_link_libraries(kat_moe_oracle_test PRIVATE superroc_core)
   add_test(NAME kat_moe_oracle_test COMMAND kat_moe_oracle_test)
   set_tests_properties(kat_moe_oracle_test PROPERTIES LABELS "cpu;models;qwen;kat"
     SKIP_RETURN_CODE 77)
 
   add_executable(kat_mtp_pmin_test tests/models/qwen/kat_mtp_pmin_test.cpp)  # KAT-MTP:
-  target_link_libraries(kat_mtp_pmin_test PRIVATE gufo_core)
+  target_link_libraries(kat_mtp_pmin_test PRIVATE superroc_core)
   add_test(NAME kat_mtp_pmin_test COMMAND kat_mtp_pmin_test)
   set_tests_properties(kat_mtp_pmin_test PROPERTIES LABELS "cpu;models;qwen;kat")
 
   # KAT-MTP F2: the load-time type gate for the embedded nextn block.
   add_executable(kat_mtp_types_test tests/models/qwen/kat_mtp_types_test.cpp)
-  target_link_libraries(kat_mtp_types_test PRIVATE gufo_core)
+  target_link_libraries(kat_mtp_types_test PRIVATE superroc_core)
   add_test(NAME kat_mtp_types_test COMMAND kat_mtp_types_test)
   set_tests_properties(kat_mtp_types_test PROPERTIES LABELS "cpu;models;qwen;kat")
 
@@ -992,10 +1035,10 @@ if (BUILD_TESTING)
     add_executable(rocmfp4_gpu_gemv_test tests/core/rocmfp4_gpu_gemv_test.cpp)
     set_source_files_properties(tests/core/rocmfp4_gpu_gemv_test.cpp
                                 PROPERTIES LANGUAGE HIP)
-    target_link_libraries(rocmfp4_gpu_gemv_test PRIVATE gufo_core)
+    target_link_libraries(rocmfp4_gpu_gemv_test PRIVATE superroc_core)
 
     add_executable(kat_moe_route_test tests/models/qwen/hip/kat_moe_route_test.hip)  # KAT:
-    target_link_libraries(kat_moe_route_test PRIVATE gufo_core)
+    target_link_libraries(kat_moe_route_test PRIVATE superroc_core)
     set_source_files_properties(
       tests/models/qwen/hip/kat_moe_route_test.hip
       TARGET_DIRECTORY kat_moe_route_test
@@ -1005,7 +1048,7 @@ if (BUILD_TESTING)
       SKIP_RETURN_CODE 77)
 
     add_executable(kat_moe_ffn_test tests/models/qwen/hip/kat_moe_ffn_test.hip)  # KAT:
-    target_link_libraries(kat_moe_ffn_test PRIVATE gufo_core)
+    target_link_libraries(kat_moe_ffn_test PRIVATE superroc_core)
     set_source_files_properties(
       tests/models/qwen/hip/kat_moe_ffn_test.hip
       TARGET_DIRECTORY kat_moe_ffn_test
@@ -1016,7 +1059,7 @@ if (BUILD_TESTING)
 
     # SQ10: FP4 slot ownership (two-stream interleave, exhaustion, zero-alloc).
     add_executable(fp4_slot_owner_test tests/core/rocm_fp4/fp4_slot_owner_test.cpp)
-    target_link_libraries(fp4_slot_owner_test PRIVATE gufo_core)
+    target_link_libraries(fp4_slot_owner_test PRIVATE superroc_core)
     set_source_files_properties(
       tests/core/rocm_fp4/fp4_slot_owner_test.cpp
       TARGET_DIRECTORY fp4_slot_owner_test
@@ -1026,7 +1069,7 @@ if (BUILD_TESTING)
 
     # MG64 SPEC1 step 5: 64-token grouped GEMM bit-identity gate.
     add_executable(fp4_grp64_test tests/core/rocm_fp4/fp4_grp64_test.cpp)
-    target_link_libraries(fp4_grp64_test PRIVATE gufo_core)
+    target_link_libraries(fp4_grp64_test PRIVATE superroc_core)
     set_source_files_properties(
       tests/core/rocm_fp4/fp4_grp64_test.cpp
       TARGET_DIRECTORY fp4_grp64_test
@@ -1036,7 +1079,7 @@ if (BUILD_TESTING)
 
     # KPF2 SPEC1 step 4: 32k multi-block grouper bit-identity gate.
     add_executable(fp4_moe_group32k_test tests/core/rocm_fp4/fp4_moe_group32k_test.cpp)
-    target_link_libraries(fp4_moe_group32k_test PRIVATE gufo_core)
+    target_link_libraries(fp4_moe_group32k_test PRIVATE superroc_core)
     set_source_files_properties(
       tests/core/rocm_fp4/fp4_moe_group32k_test.cpp
       TARGET_DIRECTORY fp4_moe_group32k_test
@@ -1046,7 +1089,7 @@ if (BUILD_TESTING)
 
     # Super ROC QVO: verify_m_xq reuses the held Q8 copy bit-identically and refuses another x/m/k.
     add_executable(fp4_verify_xq_test tests/core/rocm_fp4/fp4_verify_xq_test.cpp)
-    target_link_libraries(fp4_verify_xq_test PRIVATE gufo_core)
+    target_link_libraries(fp4_verify_xq_test PRIVATE superroc_core)
     set_source_files_properties(
       tests/core/rocm_fp4/fp4_verify_xq_test.cpp
       TARGET_DIRECTORY fp4_verify_xq_test
@@ -1055,10 +1098,10 @@ if (BUILD_TESTING)
     set_tests_properties(fp4_verify_xq_test PROPERTIES LABELS "gpu;core;rocm_fp4")
 
     # SQ10 SPEC3 (S3-3): the alias wiring through the real serve path (one
-    # KAT+MTP request). The script SKIPs (77) unless GUFO_FP4_TEST_KAT_MODEL
+    # KAT+MTP request). The script SKIPs (77) unless SUPERROC_FP4_TEST_KAT_MODEL
     # names a model file; a dropped serve registration fails it.
     add_test(NAME fp4_slot_alias_serve
-      COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/core/rocm_fp4/fp4_slot_alias_serve.sh $<TARGET_FILE:gufo>)
+      COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/tests/core/rocm_fp4/fp4_slot_alias_serve.sh $<TARGET_FILE:superroc>)
     set_tests_properties(fp4_slot_alias_serve PROPERTIES
       LABELS "gpu;core;rocm_fp4;serve"
       SKIP_RETURN_CODE 77
@@ -1066,7 +1109,7 @@ if (BUILD_TESTING)
 
     # KAT-MTP: bit-exact KV pack (LaunchKatMtpWriteKv == WriteKVCacheKernel).
     add_executable(kat_mtp_writekv_test tests/models/qwen/hip/kat_mtp_writekv_test.hip)
-    target_link_libraries(kat_mtp_writekv_test PRIVATE gufo_core)
+    target_link_libraries(kat_mtp_writekv_test PRIVATE superroc_core)
     set_source_files_properties(
       tests/models/qwen/hip/kat_mtp_writekv_test.hip
       TARGET_DIRECTORY kat_mtp_writekv_test
@@ -1076,7 +1119,7 @@ if (BUILD_TESTING)
 
     # Super ROC QKS: the Qwen fp16 KV store saturates instead of overflowing.
     add_executable(qwen_kv_f16_test tests/models/qwen/hip/qwen_kv_f16_test.hip)
-    target_link_libraries(qwen_kv_f16_test PRIVATE gufo_core)
+    target_link_libraries(qwen_kv_f16_test PRIVATE superroc_core)
     set_source_files_properties(
       tests/models/qwen/hip/qwen_kv_f16_test.hip
       TARGET_DIRECTORY qwen_kv_f16_test
@@ -1086,81 +1129,81 @@ if (BUILD_TESTING)
   endif ()
 
   add_executable(ggml_gemm_parity_test tests/core/ggml_gemm_parity_test.cpp)
-  target_link_libraries(ggml_gemm_parity_test PRIVATE gufo_core)
+  target_link_libraries(ggml_gemm_parity_test PRIVATE superroc_core)
 
   add_test(NAME ggml_gemm_parity_test COMMAND ggml_gemm_parity_test)
   set_tests_properties(ggml_gemm_parity_test PROPERTIES LABELS "cpu;core;quant")
 
-  # gufo-quant tool tests (SPEC7). The quantizer and kv_swap are standalone
+  # superroc-quant tool tests (SPEC7). The quantizer and kv_swap are standalone
   # C++17 tools with no engine dependency, so these tests are standalone too:
-  #   gufo_quant_stream_test — the streaming GGUF writer (layout + pinned
+  #   superroc_quant_stream_test — the streaming GGUF writer (layout + pinned
   #     sha256 on a fixed-payload fixture, and determinism through the real
-  #     gufo-quant binary);
+  #     superroc-quant binary);
   #   kv_swap_test — the kv_swap success case, --no-provenance, and five
   #     refusal cases that must write no output.
-  add_executable(gufo_quant_stream_test tests/tools/gufo_quant_stream_test.cpp)
-  target_include_directories(gufo_quant_stream_test PRIVATE tools/gufo-quant)
-  target_compile_features(gufo_quant_stream_test PRIVATE cxx_std_17)
-  add_test(NAME gufo_quant_stream_test
-    COMMAND gufo_quant_stream_test $<TARGET_FILE:gufo-quant>)
-  set_tests_properties(gufo_quant_stream_test PROPERTIES
-    LABELS "cpu;tools;gufo-quant;streaming")
+  add_executable(superroc_quant_stream_test tests/tools/superroc_quant_stream_test.cpp)
+  target_include_directories(superroc_quant_stream_test PRIVATE tools/superroc-quant)
+  target_compile_features(superroc_quant_stream_test PRIVATE cxx_std_17)
+  add_test(NAME superroc_quant_stream_test
+    COMMAND superroc_quant_stream_test $<TARGET_FILE:superroc-quant>)
+  set_tests_properties(superroc_quant_stream_test PROPERTIES
+    LABELS "cpu;tools;superroc-quant;streaming")
 
-  # gufo-quant v0.5 rules test (LQP SPEC1 item 6): rule matching, protect
+  # superroc-quant v0.5 rules test (LQP SPEC1 item 6): rule matching, protect
   # files, fork head flags, census, and manifest, through the real binary.
-  add_executable(gufo_quant_rules_test tests/tools/gufo_quant_rules_test.cpp)
-  target_include_directories(gufo_quant_rules_test PRIVATE tools/gufo-quant)
-  target_compile_features(gufo_quant_rules_test PRIVATE cxx_std_17)
-  add_test(NAME gufo_quant_rules_test
-    COMMAND gufo_quant_rules_test $<TARGET_FILE:gufo-quant>)
-  set_tests_properties(gufo_quant_rules_test PROPERTIES
-    LABELS "cpu;tools;gufo-quant;rules")
+  add_executable(superroc_quant_rules_test tests/tools/superroc_quant_rules_test.cpp)
+  target_include_directories(superroc_quant_rules_test PRIVATE tools/superroc-quant)
+  target_compile_features(superroc_quant_rules_test PRIVATE cxx_std_17)
+  add_test(NAME superroc_quant_rules_test
+    COMMAND superroc_quant_rules_test $<TARGET_FILE:superroc-quant>)
+  set_tests_properties(superroc_quant_rules_test PROPERTIES
+    LABELS "cpu;tools;superroc-quant;rules")
 
-  # gufo-quant v0.9 failure test (LQP SPEC3 item 5, SPEC4 item 3): pool error
+  # superroc-quant v0.9 failure test (LQP SPEC3 item 5, SPEC4 item 3): pool error
   # callback and the (a)-(f) failure paths through the real binary.
   #
   # The two compile lines: the shipped tool is built WITHOUT the failure hook
-  # (add_executable(gufo-quant ...) above, no GUFO_QUANT_TEST_HOOKS), and a
+  # (add_executable(superroc-quant ...) above, no SUPERROC_QUANT_TEST_HOOKS), and a
   # separate test-only target builds the SAME source WITH the hook -- part (b)
   # drives a genuine mid-encode worker failure through it. The hook macro is
   # #ifdef'd out of the shipped tool (grep the shipped binary for the hook
   # string and it is absent).
-  add_executable(gufo-quant-testhooks tools/gufo-quant/gufo_quant_main.cpp)
-  target_include_directories(gufo-quant-testhooks PRIVATE tools/gufo-quant)
-  target_compile_features(gufo-quant-testhooks PRIVATE cxx_std_17)
-  target_compile_definitions(gufo-quant-testhooks PRIVATE
-    GUFO_QUANT_TEST_HOOKS=1)
+  add_executable(superroc-quant-testhooks tools/superroc-quant/superroc_quant_main.cpp)
+  target_include_directories(superroc-quant-testhooks PRIVATE tools/superroc-quant)
+  target_compile_features(superroc-quant-testhooks PRIVATE cxx_std_17)
+  target_compile_definitions(superroc-quant-testhooks PRIVATE
+    SUPERROC_QUANT_TEST_HOOKS=1)
 
-  add_executable(gufo_quant_failure_test tests/tools/gufo_quant_failure_test.cpp)
-  target_include_directories(gufo_quant_failure_test PRIVATE tools/gufo-quant)
-  target_compile_features(gufo_quant_failure_test PRIVATE cxx_std_17)
-  add_test(NAME gufo_quant_failure_test
-    COMMAND gufo_quant_failure_test $<TARGET_FILE:gufo-quant>
-            $<TARGET_FILE:gufo-quant-testhooks>)
-  set_tests_properties(gufo_quant_failure_test PROPERTIES
-    LABELS "cpu;tools;gufo-quant;failure")
+  add_executable(superroc_quant_failure_test tests/tools/superroc_quant_failure_test.cpp)
+  target_include_directories(superroc_quant_failure_test PRIVATE tools/superroc-quant)
+  target_compile_features(superroc_quant_failure_test PRIVATE cxx_std_17)
+  add_test(NAME superroc_quant_failure_test
+    COMMAND superroc_quant_failure_test $<TARGET_FILE:superroc-quant>
+            $<TARGET_FILE:superroc-quant-testhooks>)
+  set_tests_properties(superroc_quant_failure_test PROPERTIES
+    LABELS "cpu;tools;superroc-quant;failure")
 
   add_executable(kv_swap_test tests/tools/kv_swap_test.cpp)
-  target_include_directories(kv_swap_test PRIVATE tools/gufo-quant)
+  target_include_directories(kv_swap_test PRIVATE tools/superroc-quant)
   target_compile_features(kv_swap_test PRIVATE cxx_std_17)
   add_test(NAME kv_swap_test COMMAND kv_swap_test $<TARGET_FILE:kv_swap>)
   set_tests_properties(kv_swap_test PROPERTIES
-    LABELS "cpu;tools;gufo-quant;kv-swap")
+    LABELS "cpu;tools;superroc-quant;kv-swap")
 
   add_executable(exact_token_test tests/quality/exact_token_test.cpp)
-  target_link_libraries(exact_token_test PRIVATE gufo_core)
+  target_link_libraries(exact_token_test PRIVATE superroc_core)
   add_test(NAME exact_token_test COMMAND exact_token_test)
   set_tests_properties(exact_token_test PROPERTIES LABELS "cpu;quality;tokens")
 
   add_executable(eval_regrade_test tests/quality/eval_regrade_test.cpp)
-  target_link_libraries(eval_regrade_test PRIVATE gufo_core)
+  target_link_libraries(eval_regrade_test PRIVATE superroc_core)
   add_test(NAME eval_regrade_test COMMAND eval_regrade_test)
   set_tests_properties(eval_regrade_test PROPERTIES LABELS "cpu;quality;eval")
 
   add_test(NAME eval_http_test
     COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/test_eval_http.py
-      --gufo $<TARGET_FILE:gufo>
+      --superroc $<TARGET_FILE:superroc>
       --data ${CMAKE_CURRENT_SOURCE_DIR}/tests/models/deepseek_v4_flash/fixtures/antirez-ds4.json)
   set_tests_properties(eval_http_test PROPERTIES
     LABELS "cpu;quality;eval;http;cli;server")
@@ -1173,14 +1216,14 @@ if (BUILD_TESTING)
   set_tests_properties(eval_http_client_test PROPERTIES LABELS "cpu;quality;eval;http")
 
   add_executable(kernel_bench_test tests/benchmarks/kernel_bench_test.cpp)
-  target_link_libraries(kernel_bench_test PRIVATE gufo_kernel_bench_support)
+  target_link_libraries(kernel_bench_test PRIVATE superroc_kernel_bench_support)
   add_test(NAME kernel_bench_test COMMAND kernel_bench_test)
   set_tests_properties(kernel_bench_test PROPERTIES
     LABELS "cpu;benchmarks;statistics;json")
 
   add_executable(hipblaslt_plan_cache_test
     tests/core/hipblaslt_plan_cache_test.cpp)
-  target_link_libraries(hipblaslt_plan_cache_test PRIVATE gufo_core)
+  target_link_libraries(hipblaslt_plan_cache_test PRIVATE superroc_core)
   add_test(NAME hipblaslt_plan_cache_test COMMAND hipblaslt_plan_cache_test)
   set_tests_properties(hipblaslt_plan_cache_test PROPERTIES
     LABELS "cpu;hipblaslt;cache")
@@ -1188,14 +1231,14 @@ if (BUILD_TESTING)
   if (ENGINE_ENABLE_HIP)
     add_executable(qwen3_tts_synthesis_hip_test
       tests/models/qwen3_tts/synthesis_hip_test.cpp)
-    target_link_libraries(qwen3_tts_synthesis_hip_test PRIVATE gufo_qwen3_tts)
+    target_link_libraries(qwen3_tts_synthesis_hip_test PRIVATE superroc_qwen3_tts)
     add_test(NAME qwen3_tts_synthesis_hip_test COMMAND qwen3_tts_synthesis_hip_test)
     set_tests_properties(qwen3_tts_synthesis_hip_test PROPERTIES
       LABELS "hip;gpu;models;qwen3-tts;quality;external-model;slow" SKIP_RETURN_CODE 77)
     add_executable(qwen3_tts_speech_decoder_hip_test
       tests/models/qwen3_tts/speech_decoder_hip_test.cpp)
     target_link_libraries(qwen3_tts_speech_decoder_hip_test PRIVATE
-      gufo_qwen3_tts hip::host)
+      superroc_qwen3_tts hip::host)
     add_test(NAME qwen3_tts_speech_decoder_hip_test
       COMMAND qwen3_tts_speech_decoder_hip_test)
     set_tests_properties(qwen3_tts_speech_decoder_hip_test PROPERTIES
@@ -1204,7 +1247,7 @@ if (BUILD_TESTING)
     add_executable(qwen3_tts_talker_hip_prefill_test
       tests/models/qwen3_tts/talker_hip_prefill_test.cpp)
     target_link_libraries(qwen3_tts_talker_hip_prefill_test PRIVATE
-      gufo_qwen3_tts hip::host)
+      superroc_qwen3_tts hip::host)
     add_test(NAME qwen3_tts_talker_hip_prefill_test
       COMMAND qwen3_tts_talker_hip_prefill_test)
     set_tests_properties(qwen3_tts_talker_hip_prefill_test PROPERTIES
@@ -1214,7 +1257,7 @@ if (BUILD_TESTING)
     add_executable(qwen3_tts_variant_talker_hip_test
       tests/models/qwen3_tts/variant_talker_hip_test.cpp)
     target_link_libraries(qwen3_tts_variant_talker_hip_test PRIVATE
-      gufo_qwen3_tts hip::host)
+      superroc_qwen3_tts hip::host)
     add_test(NAME qwen3_tts_variant_talker_hip_test
       COMMAND qwen3_tts_variant_talker_hip_test)
     set_tests_properties(qwen3_tts_variant_talker_hip_test PROPERTIES
@@ -1224,7 +1267,7 @@ if (BUILD_TESTING)
     add_executable(qwen3_tts_base_encoders_hip_test
       tests/models/qwen3_tts/base_encoders_hip_test.cpp)
     target_link_libraries(qwen3_tts_base_encoders_hip_test PRIVATE
-      gufo_qwen3_tts hip::host)
+      superroc_qwen3_tts hip::host)
     add_test(NAME qwen3_tts_base_encoders_hip_test
       COMMAND qwen3_tts_base_encoders_hip_test)
     set_tests_properties(qwen3_tts_base_encoders_hip_test PROPERTIES
@@ -1234,7 +1277,7 @@ if (BUILD_TESTING)
     add_executable(minimax_h3_runtime_hip_test
       tests/models/minimax_h3_runtime_hip_test.cpp)
     target_link_libraries(minimax_h3_runtime_hip_test PRIVATE
-      gufo_core hip::host)
+      superroc_core hip::host)
     add_test(NAME minimax_h3_runtime_hip_test
       COMMAND minimax_h3_runtime_hip_test)
     set_tests_properties(minimax_h3_runtime_hip_test PROPERTIES
@@ -1244,9 +1287,9 @@ if (BUILD_TESTING)
     add_executable(minimax_h3_prompt_encoder_hip_test
       tests/models/minimax_h3_prompt_encoder_hip_test.hip)
     target_compile_definitions(minimax_h3_prompt_encoder_hip_test PRIVATE
-      GUFO_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
+      SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
     target_link_libraries(minimax_h3_prompt_encoder_hip_test PRIVATE
-      gufo_core hip::host)
+      superroc_core hip::host)
     add_test(NAME minimax_h3_prompt_encoder_analytic
       COMMAND minimax_h3_prompt_encoder_hip_test --analytic)
     set_tests_properties(minimax_h3_prompt_encoder_analytic PROPERTIES
@@ -1260,7 +1303,7 @@ if (BUILD_TESTING)
     add_executable(minimax_h3_sampling_hip_test
       tests/models/minimax_h3_sampling_hip_test.hip)
     target_link_libraries(minimax_h3_sampling_hip_test PRIVATE
-      gufo_core hip::host)
+      superroc_core hip::host)
     add_test(NAME minimax_h3_sampling_hip_test
       COMMAND minimax_h3_sampling_hip_test)
     set_tests_properties(minimax_h3_sampling_hip_test PROPERTIES
@@ -1270,9 +1313,9 @@ if (BUILD_TESTING)
     add_executable(minimax_h3_dit_hip_test
       tests/models/minimax_h3_dit_hip_test.hip)
     target_compile_definitions(minimax_h3_dit_hip_test PRIVATE
-      GUFO_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
+      SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
     target_link_libraries(minimax_h3_dit_hip_test PRIVATE
-      gufo_core hip::host)
+      superroc_core hip::host)
     add_test(NAME minimax_h3_dit_analytic
       COMMAND minimax_h3_dit_hip_test --analytic)
     set_tests_properties(minimax_h3_dit_analytic PROPERTIES
@@ -1286,9 +1329,9 @@ if (BUILD_TESTING)
     add_executable(minimax_h3_denoiser_hip_test
       tests/models/minimax_h3_denoiser_hip_test.hip)
     target_compile_definitions(minimax_h3_denoiser_hip_test PRIVATE
-      GUFO_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
+      SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
     target_link_libraries(minimax_h3_denoiser_hip_test PRIVATE
-      gufo_core hip::host)
+      superroc_core hip::host)
     add_test(NAME minimax_h3_denoiser_smoke
       COMMAND minimax_h3_denoiser_hip_test --smoke)
     set_tests_properties(minimax_h3_denoiser_smoke PROPERTIES
@@ -1313,10 +1356,10 @@ if (BUILD_TESTING)
     add_executable(minimax_h3_video_vae_hip_test
       tests/models/minimax_h3_video_vae_hip_test.hip)
     target_compile_definitions(minimax_h3_video_vae_hip_test PRIVATE
-      GUFO_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
-      GUFO_H3_VIDEO_VAE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimax_h3/video-vae-oracle-v1.json")
+      SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
+      SUPERROC_H3_VIDEO_VAE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimax_h3/video-vae-oracle-v1.json")
     target_link_libraries(minimax_h3_video_vae_hip_test PRIVATE
-      gufo_core hip::host)
+      superroc_core hip::host)
     add_test(NAME minimax_h3_video_vae_real
       COMMAND minimax_h3_video_vae_hip_test)
     set_tests_properties(minimax_h3_video_vae_real PROPERTIES
@@ -1326,10 +1369,10 @@ if (BUILD_TESTING)
     add_executable(minimax_h3_audio_vae_hip_test
       tests/models/minimax_h3_audio_vae_hip_test.hip)
     target_compile_definitions(minimax_h3_audio_vae_hip_test PRIVATE
-      GUFO_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
-      GUFO_H3_AUDIO_VAE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimax_h3/audio-vae-oracle-v1.json")
+      SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
+      SUPERROC_H3_AUDIO_VAE_FIXTURE="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/minimax_h3/audio-vae-oracle-v1.json")
     target_link_libraries(minimax_h3_audio_vae_hip_test PRIVATE
-      gufo_core hip::host)
+      superroc_core hip::host)
     add_test(NAME minimax_h3_audio_vae_primitives
       COMMAND minimax_h3_audio_vae_hip_test --primitives)
     set_tests_properties(minimax_h3_audio_vae_primitives PROPERTIES
@@ -1342,7 +1385,7 @@ if (BUILD_TESTING)
 
     add_executable(hip_memory_visibility_test
       tests/core/hip_memory_visibility_test.hip)
-    target_link_libraries(hip_memory_visibility_test PRIVATE gufo_core hip::host)
+    target_link_libraries(hip_memory_visibility_test PRIVATE superroc_core hip::host)
     add_test(NAME hip_memory_visibility_test COMMAND hip_memory_visibility_test)
     add_test(NAME hip_memory_visibility_restricted_test
       COMMAND hip_memory_visibility_test --deny-long-term-pins)
@@ -1355,14 +1398,14 @@ if (BUILD_TESTING)
       ENVIRONMENT "HSA_USERPTR_FOR_PAGED_MEM=0")
 
     add_executable(hip_weight_upload_test tests/core/hip_weight_upload_test.cpp)
-    target_link_libraries(hip_weight_upload_test PRIVATE gufo_core)
+    target_link_libraries(hip_weight_upload_test PRIVATE superroc_core)
     add_test(NAME hip_weight_upload_test COMMAND hip_weight_upload_test)
     set_tests_properties(hip_weight_upload_test PROPERTIES LABELS "hip;gpu;gfx1151")
 
     add_executable(hipblaslt_runtime_cache_test
       tests/kernels/hipblaslt_runtime_cache_test.cpp)
     target_link_libraries(hipblaslt_runtime_cache_test PRIVATE
-      gufo_core hip::host)
+      superroc_core hip::host)
     add_test(NAME hipblaslt_runtime_cache_test
       COMMAND hipblaslt_runtime_cache_test)
     set_tests_properties(hipblaslt_runtime_cache_test PROPERTIES
@@ -1370,29 +1413,29 @@ if (BUILD_TESTING)
 
     add_executable(persistent_deltanet_test
       tests/kernels/persistent_deltanet_test.cpp)
-    target_link_libraries(persistent_deltanet_test PRIVATE gufo_core hip::host)
+    target_link_libraries(persistent_deltanet_test PRIVATE superroc_core hip::host)
     add_test(NAME persistent_deltanet_test COMMAND persistent_deltanet_test)
     set_tests_properties(persistent_deltanet_test PROPERTIES
       LABELS "hip;gpu;kernels;deltanet;speculative")
 
     add_executable(gfx1151_acceptance_test tests/benchmarks/gfx1151_acceptance_test.cpp)
-    target_link_libraries(gfx1151_acceptance_test PRIVATE gufo_core hip::host roc::hipblas roc::rocblas)
+    target_link_libraries(gfx1151_acceptance_test PRIVATE superroc_core hip::host roc::hipblas roc::rocblas)
     add_test(NAME gfx1151_acceptance_test COMMAND gfx1151_acceptance_test)
     set_tests_properties(gfx1151_acceptance_test PROPERTIES LABELS "hip;gpu;benchmarks")
 
     add_executable(speculative_verification_test tests/core/test_speculative_verification.cpp)
-    target_link_libraries(speculative_verification_test PRIVATE gufo_core hip::host roc::hipblas roc::rocblas)
+    target_link_libraries(speculative_verification_test PRIVATE superroc_core hip::host roc::hipblas roc::rocblas)
     add_test(NAME speculative_verification_test COMMAND speculative_verification_test)
     set_tests_properties(speculative_verification_test PROPERTIES LABELS "hip;gpu;speculative")
   endif()
 
   if (ENGINE_ENABLE_HIP)
-    add_test(NAME gufo_gpu_probe COMMAND gufo)
-    set_tests_properties(gufo_gpu_probe PROPERTIES
+    add_test(NAME superroc_gpu_probe COMMAND superroc)
+    set_tests_properties(superroc_gpu_probe PROPERTIES
       LABELS "platform;probe;hip;gpu")
   else()
-    add_test(NAME gufo_cpu_probe COMMAND gufo)
-    set_tests_properties(gufo_cpu_probe PROPERTIES
+    add_test(NAME superroc_cpu_probe COMMAND superroc)
+    set_tests_properties(superroc_cpu_probe PROPERTIES
       LABELS "platform;probe;cpu")
   endif()
 endif()

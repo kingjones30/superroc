@@ -12,7 +12,7 @@
 #include <thread>
 #include <vector>
 
-namespace qfn = gufo::models::qwen38_flash_next::rocm;
+namespace qfn = superroc::models::qwen38_flash_next::rocm;
 namespace {
 void Check(hipError_t result) {
   assert(result == hipSuccess);

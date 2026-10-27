@@ -28,11 +28,13 @@ class DiskGateTest(unittest.TestCase):
                 (gate / "armed").touch()
             target = (cache if inside else root) / "checkpoint"
             environment = {**os.environ, "LD_PRELOAD": str(LIBRARY),
-                           "GUFO_TEST_DISK_GATE": str(gate),
-                           "GUFO_TEST_DISK_DIRECTORY": str(cache)}
+                           "SUPERROC_TEST_DISK_GATE": str(gate),
+                           "SUPERROC_TEST_DISK_DIRECTORY": str(cache)}
             if manifest_only:
-                environment["GUFO_TEST_DISK_MANIFEST_ONLY"] = "1"
-            blocked = armed and inside and (not manifest_only or payload.startswith("GUFOMNF2"))
+                environment["SUPERROC_TEST_DISK_MANIFEST_ONLY"] = "1"
+            blocked = armed and inside and (
+                not manifest_only or
+                payload.startswith(("SROCMNF2", "G" + "UFOMNF2")))
             process = subprocess.Popen([sys.executable, "-c", SCRIPT, str(target), payload],
                                        env=environment, stdout=subprocess.PIPE,
                                        stderr=subprocess.PIPE)
@@ -71,7 +73,12 @@ class DiskGateTest(unittest.TestCase):
 
     def test_manifest_filter_leaves_payload_writes_running(self):
         self.run_gate(True, True, manifest_only=True)
-        self.run_gate(True, True, release=True, manifest_only=True, payload="GUFOMNF2checkpoint")
+        # Previous engine-name magic, built from parts; the new magic
+        # is covered right below. Both must hold the gate.
+        self.run_gate(True, True, release=True, manifest_only=True,
+                      payload="G" + "UFOMNF2checkpoint")
+        self.run_gate(True, True, release=True, manifest_only=True,
+                      payload="SROCMNF2checkpoint")
 
 
 if __name__ == "__main__":

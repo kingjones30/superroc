@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_ROCM_FP4_FP4_F16_PREFILL_HPP_
-#define GUFO_CORE_ROCM_FP4_FP4_F16_PREFILL_HPP_
+#ifndef SUPERROC_CORE_ROCM_FP4_FP4_F16_PREFILL_HPP_
+#define SUPERROC_CORE_ROCM_FP4_FP4_F16_PREFILL_HPP_
 
 // SQ1 (Super ROC wave, A1a; rd1 DESIGN.md section 2.2.1): the Flash-Next
 // FP4->F16 prefill kernels, promoted from
@@ -24,7 +24,7 @@
 // blk[0..15] code bytes, byte i holding element i (low nibble) and element
 // i+16 (high nibble); scale at blk[16] (elements 0..15) and, for type 100,
 // blk[17] (elements 16..31). Decode (code x ue4m3_half, code 8 = +0,
-// e > 0x7e -> 0) matches src/core/rocm_fp4/gufo_fp4_quant.hpp, the CPU oracle
+// e > 0x7e -> 0) matches src/core/rocm_fp4/superroc_fp4_quant.hpp, the CPU oracle
 // the exactness test compares against bit-exactly.
 //
 // Exactness: |code| <= 10 (4 significant bits) and the ue4m3 scale (4
@@ -55,9 +55,9 @@
 #define FP4_F16_HD
 #endif
 
-namespace gufo::models::qwen38_flash_next::rocm::fp4_f16 {
+namespace superroc::models::qwen38_flash_next::rocm::fp4_f16 {
 
-// ue4m3 scale byte -> F16 bits. Value-identical to gufo_fp4_ue4m3_half:
+// ue4m3 scale byte -> F16 bits. Value-identical to superroc_fp4_ue4m3_half:
 // e > 0x7e -> +0; exp == 0 -> man * 2^-10 (normal in F16: 2^-10 >> 2^-14);
 // else 2^(exp-8) * (1 + man/8).
 constexpr std::uint16_t Fp4ScaleByteToHalf(std::uint8_t e) {
@@ -95,7 +95,7 @@ constexpr Fp4ScaleTable Fp4BuildScaleTable() {
 }
 // Scalar twins of the device decode (moved here verbatim from the retired
 // fp4_f16_routed.hpp, SPEC2 unification; the routed unit test checks them
-// against the gufo_fp4 CPU oracle). Callable from host and device.
+// against the superroc_fp4 CPU oracle). Callable from host and device.
 
 // Unsigned E4M3 scale byte -> F16 bits. Exact everywhere: normal scales need
 // 4 significand bits, subnormals at most 3 after normalizing (F16's exponent
@@ -142,7 +142,7 @@ __device__ __forceinline__ __half2 Fp4Scale2(std::uint8_t s0, std::uint8_t s1) {
 // caller passes the packed dword for the low half and packed >> 4 for the
 // high half) -> the F16 codes of four elements as two half2 bit patterns.
 // Pure ALU (3 perms); mirrors the fork's Codebook10 selector order
-// (gufo_fp4_wmma.hip fp4_sub16): the mag perm's selector bit 2 picks the
+// (superroc_fp4_wmma.hip fp4_sub16): the mag perm's selector bit 2 picks the
 // dword, bits [1:0] the byte, so MAG0 covers mag3 0..3 and MAG1 mag3 4..7.
 // The sign (bit 3 of each nibble) shifts to the F16 sign bit and is OR-ed in
 // (the dword shift leaves no residue: every byte is 0x00 or 0x08).
@@ -206,7 +206,7 @@ __device__ __forceinline__ std::uint32_t Fp4NibblesToBiased(std::uint32_t nib) {
 
 // Contracts this header keeps (LFR DESIGN.md section 6, adopted SPEC2):
 // 1. Every decode entry point returns the EXACT value: max_abs against the
-//    F32 oracle (gufo_fp4_quant.hpp) is 0 over all 256 scales x 16 codes x
+//    F32 oracle (superroc_fp4_quant.hpp) is 0 over all 256 scales x 16 codes x
 //    both types. The product has <= 8 significant bits (F16 has 11).
 // 2. The only permitted difference from the oracle is the sign of zero (+0
 //    vs -0), and only for code = +/-0. Tests assert max_abs == 0 AND no
@@ -216,7 +216,7 @@ __device__ __forceinline__ std::uint32_t Fp4NibblesToBiased(std::uint32_t nib) {
 // 4. No table larger than 512 B; no __constant__; perm-based constants only.
 // 5. Determinism: no atomics, no cross-lane reductions; K-order staging.
 
-// ue4m3 scale byte -> F32 scale. Value-identical to gufo_fp4_ue4m3_half for
+// ue4m3 scale byte -> F32 scale. Value-identical to superroc_fp4_ue4m3_half for
 // the int8 route's per-block float scale (SPEC2 item 3): e > 0x7e -> +0;
 // exp == 0 -> man / 1024; else 2^(exp-8) * (1 + man/8). Host + device.
 constexpr float Fp4ScaleByteToFloat(std::uint8_t e) {
@@ -236,7 +236,7 @@ constexpr float Fp4ScaleByteToFloat(std::uint8_t e) {
 // Four nibbles (bits [3:0] of each byte of `nib`; upper bits ignored) ->
 // four signed int8 FP4 codes packed little-endian in `out`. Pure ALU
 // (3 perms): a magnitude gather, a negated-magnitude gather, and a select
-// by the sign bits. Matches gufo_fp4_rocmfp4_code on all 16 nibbles.
+// by the sign bits. Matches superroc_fp4_rocmfp4_code on all 16 nibbles.
 // Device only.
 __device__ __forceinline__ void Fp4NibblesToInt8(std::uint32_t nib,
                                                  std::uint32_t& out) {
@@ -257,9 +257,9 @@ __device__ __forceinline__ void Fp4NibblesToInt8(std::uint32_t nib,
 
 #endif
 
-}  // namespace gufo::models::qwen38_flash_next::rocm::fp4_f16
+}  // namespace superroc::models::qwen38_flash_next::rocm::fp4_f16
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 
 /// W8A8 WMMA GEMM over FP4 FAST weights (LFP SPEC2 item 3): the same
 /// tiled-Q8 activation side as W8A8Gemm; weights decode to int8 codes plus
@@ -302,6 +302,6 @@ bool Fp4SsmF16Gemm(const void* w0, const void* w1, const __half* x,
 // report_bytes, always NUL-terminated when report_bytes > 0).
 int Fp4F16PrefillMinWavesPerSimd(char* report, std::size_t report_bytes);
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm
 
-#endif  // GUFO_CORE_ROCM_FP4_FP4_F16_PREFILL_HPP_
+#endif  // SUPERROC_CORE_ROCM_FP4_FP4_F16_PREFILL_HPP_

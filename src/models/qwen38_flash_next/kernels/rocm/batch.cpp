@@ -9,7 +9,7 @@
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 #include "src/models/qwen38_flash_next/mtp_sampling.hpp"
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 namespace {
 
 constexpr std::uint32_t kBatchSessions = 8;
@@ -1119,4 +1119,4 @@ bool Executor::SelectBatchLogits(std::uint32_t offset, std::uint32_t rows,
   return true;
 }
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm

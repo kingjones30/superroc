@@ -32,7 +32,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R1): alias.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R1): alias.
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 #include "src/models/qwen/hip/executor.hpp"
@@ -40,7 +40,7 @@
 #include "src/models/qwen38_flash_next/engine.hpp"
 #endif
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 // Hash emitted IDs in a portable byte order, after the timed generation.
 // Decoded text alone can hide different token sequences.
@@ -253,9 +253,9 @@ void PrintModelLoadTime(std::chrono::steady_clock::time_point start,
 }
 
 bool IsDeepSeekV4Flash(const core::GgufReader& reader) {
-  return gufo::core::IsModelFamily(
+  return superroc::core::IsModelFamily(
       reader.GetMetadataString("general.architecture").value_or(""),
-      gufo::core::ModelFamilyId::kDeepSeek4);
+      superroc::core::ModelFamilyId::kDeepSeek4);
 }
 
 std::optional<ReasoningEffort> ParseReasoningEffort(std::string_view value) {
@@ -303,11 +303,11 @@ void ResolvePromptSampling(const core::GgufReader& reader, PromptOptions* opt) {
   sampling::TextModelPreset preset = sampling::TextModelPreset::kUnspecified;
   const auto artifact_architecture =
       reader.GetMetadataString("general.architecture");
-  if (gufo::core::IsModelFamily(artifact_architecture.value_or(""),
-                                gufo::core::ModelFamilyId::kDeepSeek4)) {
+  if (superroc::core::IsModelFamily(artifact_architecture.value_or(""),
+                                superroc::core::ModelFamilyId::kDeepSeek4)) {
     preset = sampling::TextModelPreset::kDeepSeekV4Flash;
-  } else if (gufo::core::IsModelFamily(artifact_architecture.value_or(""),
-                                       gufo::core::ModelFamilyId::kQwen4Exp)) {
+  } else if (superroc::core::IsModelFamily(artifact_architecture.value_or(""),
+                                       superroc::core::ModelFamilyId::kQwen4Exp)) {
     preset = sampling::TextModelPreset::kQwen38;
   } else if (const auto config = reader.ExtractModelConfig()) {
     preset = sampling::TextPreset(*config);
@@ -533,8 +533,8 @@ int RunDeepSeekPrompt(const PromptOptions& opt, const core::GgufReader& reader,
     return 1;
   std::string error;
   auto session = model->CreateSession(
-      opt.speculative_backend.empty() ? gufo::core::SessionMode::kAutoregressive
-                                      : gufo::core::SessionMode::kSpeculative,
+      opt.speculative_backend.empty() ? superroc::core::SessionMode::kAutoregressive
+                                      : superroc::core::SessionMode::kSpeculative,
       kDefaultContext, &error);
   if (!session) {
     std::cerr << "DeepSeek session creation failed: " << error << '\n';
@@ -575,8 +575,8 @@ int RunDeepSeekChat(const PromptOptions& opt, const core::GgufReader& reader,
     return 1;
   std::string error;
   auto session = model->CreateSession(
-      opt.speculative_backend.empty() ? gufo::core::SessionMode::kAutoregressive
-                                      : gufo::core::SessionMode::kSpeculative,
+      opt.speculative_backend.empty() ? superroc::core::SessionMode::kAutoregressive
+                                      : superroc::core::SessionMode::kSpeculative,
       kDefaultContext, &error);
   if (!session) {
     std::cerr << "DeepSeek session creation failed: " << error << '\n';
@@ -592,7 +592,7 @@ int RunDeepSeekChat(const PromptOptions& opt, const core::GgufReader& reader,
   const auto reasoning = PromptReasoningOptions(opt);
   const auto chat_options =
       models::deepseek_v4_flash::ResolveDeepSeekChatOptions(reasoning);
-  std::cout << "=== Gufo Interactive Chat (DeepSeek V4 Flash) ===\n"
+  std::cout << "=== SuperROC Interactive Chat (DeepSeek V4 Flash) ===\n"
             << "Type 'exit' or Ctrl+D to quit.\n\n";
   for (std::string input;;) {
     std::cout << ">>> User: " << std::flush;
@@ -790,7 +790,7 @@ std::unique_ptr<speculative::SpeculativeVerifier> CreateQwenVerifier(
       throw std::runtime_error("Failed to initialize MTP backend: " + err);
     }
     // SQ10 SPEC2 (R1): the drafter's stream uses this session's slot set.
-    if (gufo_fp4_slot_stream_alias(
+    if (superroc_fp4_slot_stream_alias(
             static_cast<hip::QwenMtpGpuDraftBackend*>(draft_backend.get())
                 ->DraftStream(),
             executor.ArenaStream()) < 0) {
@@ -861,24 +861,24 @@ void GenerateQwenGpuResponse(
 }
 
 // GLM: prompt must apply the same Glimmer policy serve sets before load.
-gufo::hip::QwenExecutionPolicy GlimmerAwarePolicy(
-    const gufo::core::GgufReader& reader) {
-  auto policy = gufo::hip::QwenExecutionPolicy::Production();
-  if (gufo::core::IsModelFamily(
+superroc::hip::QwenExecutionPolicy GlimmerAwarePolicy(
+    const superroc::core::GgufReader& reader) {
+  auto policy = superroc::hip::QwenExecutionPolicy::Production();
+  if (superroc::core::IsModelFamily(
           reader.GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kMuseGlimmer)) {
-    policy.kv_cache_storage = gufo::hip::QwenKvCacheStorage::kFp32;
+          superroc::core::ModelFamilyId::kMuseGlimmer)) {
+    policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
     policy.glimmer_fp16_kv = true;  // LGA: Glimmer fp16-KV plane
-  } else if (gufo::core::IsLfm2Family(
+  } else if (superroc::core::IsLfm2Family(
                  reader.GetMetadataString("general.architecture")
                      .value_or(""))) {                          // LFM2
-    policy.kv_cache_storage = gufo::hip::Lfm2KvCacheStorage();  // LFM2 (SPEC3)
+    policy.kv_cache_storage = superroc::hip::Lfm2KvCacheStorage();  // LFM2 (SPEC3)
     policy.fuse_qk_norm_rope_kv = false;
-  } else if (gufo::core::IsModelFamily(
+  } else if (superroc::core::IsModelFamily(
                  reader.GetMetadataString("general.architecture").value_or(""),
-                 gufo::core::ModelFamilyId::kFlint)) {
-    policy.kv_cache_storage = gufo::hip::QwenKvCacheStorage::kFp32;
+                 superroc::core::ModelFamilyId::kFlint)) {
+    policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
     policy.glimmer_fp16_kv = true;
   }
@@ -893,7 +893,7 @@ static std::optional<PromptOptions> ParseTextOptions(
     std::span<const char* const> args, std::string* error_msg,
     std::string_view command) {
   PromptOptions opt;
-  gufo::cli::ArgParser parser("superroc prompt",
+  superroc::cli::ArgParser parser("superroc prompt",
                               "Execute one prompt request and exit.");
   bool speculative_explicit = false;
   RegisterTextOptions(parser, opt, speculative_explicit, command);
@@ -1041,14 +1041,14 @@ int RunPrompt(std::span<const char* const> args) {
 
   const auto model_load_start = std::chrono::steady_clock::now();
   std::string err;
-  auto reader_owner = gufo::core::GgufReader::OpenFile(opt.model_path, &err);
+  auto reader_owner = superroc::core::GgufReader::OpenFile(opt.model_path, &err);
   if (!reader_owner) {
     std::cerr << "Error loading GGUF model '" << opt.model_path << "': " << err
               << "\n";
     PrintModelLoadTime(model_load_start, false);
     return 1;
   }
-  const std::shared_ptr<const gufo::core::GgufReader> reader(
+  const std::shared_ptr<const superroc::core::GgufReader> reader(
       std::move(reader_owner));
   ResolvePromptSampling(*reader, &opt);
 
@@ -1083,9 +1083,9 @@ int RunPrompt(std::span<const char* const> args) {
         tokenization::ResolveQwenChatOptions(reasoning, opt.add_vision_id);
     // GLIMMER: the static Qwen renderer emits ChatML. Muse must not.
     std::optional<std::string> rendered;
-    if (gufo::core::IsModelFamily(
+    if (superroc::core::IsModelFamily(
             reader->GetMetadataString("general.architecture").value_or(""),
-            gufo::core::ModelFamilyId::kMuseGlimmer)) {
+            superroc::core::ModelFamilyId::kMuseGlimmer)) {
       std::string chat_error;
       auto muse_tokenizer =
           tokenization::QwenTokenizer::CreateFromGguf(*reader, &chat_error);
@@ -1104,7 +1104,7 @@ int RunPrompt(std::span<const char* const> args) {
                   << chat_error << "\n";
         return 1;
       }
-    } else if (gufo::core::IsLfm2Family(
+    } else if (superroc::core::IsLfm2Family(
                    reader->GetMetadataString("general.architecture")
                        .value_or(""))) {  // LFM2
       std::string chat_error;
@@ -1124,10 +1124,10 @@ int RunPrompt(std::span<const char* const> args) {
                   << "\n";
         return 1;
       }
-    } else if (gufo::core::IsModelFamily(
+    } else if (superroc::core::IsModelFamily(
                    reader->GetMetadataString("general.architecture")
                        .value_or(""),
-                   gufo::core::ModelFamilyId::kFlint)) {
+                   superroc::core::ModelFamilyId::kFlint)) {
       std::string chat_error;
       rendered = tokenization::FlintRender(
           std::span<const tokenization::ChatMessage>(messages.data(),
@@ -1158,16 +1158,16 @@ int RunPrompt(std::span<const char* const> args) {
   };
 
 #if defined(ENGINE_ENABLE_HIP)
-  if (gufo::core::IsModelFamily(
+  if (superroc::core::IsModelFamily(
           reader->GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kQwen4Exp)) {
+          superroc::core::ModelFamilyId::kQwen4Exp)) {
     auto model = LoadFlashNextModel(opt, *reader, model_load_start);
     if (!model)
       return 1;
     auto session =
         model->CreateSession(opt.speculative_backend.empty()
-                                 ? gufo::core::SessionMode::kAutoregressive
-                                 : gufo::core::SessionMode::kSpeculative,
+                                 ? superroc::core::SessionMode::kAutoregressive
+                                 : superroc::core::SessionMode::kSpeculative,
                              kDefaultContext, &err);
     if (!session) {
       std::cerr << "Flash-Next session failed: " << err << '\n';
@@ -1192,7 +1192,7 @@ int RunPrompt(std::span<const char* const> args) {
   int dev_count = 0;
   if (!opt.force_cpu && hipGetDeviceCount(&dev_count) == hipSuccess &&
       dev_count > 0) {
-    auto gpu_exec = gufo::hip::QwenGpuExecutor::CreateFromGguf(
+    auto gpu_exec = superroc::hip::QwenGpuExecutor::CreateFromGguf(
         reader, &err, /*max_context=*/4096, GlimmerAwarePolicy(*reader));
     if (gpu_exec) {
       // LLAMA (F3): prompt/chat drive only the Qwen tokenizer. Refuse
@@ -1340,14 +1340,14 @@ int RunChat(std::span<const char* const> args) {
 
   const auto model_load_start = std::chrono::steady_clock::now();
   std::string err;
-  auto reader_owner = gufo::core::GgufReader::OpenFile(opt.model_path, &err);
+  auto reader_owner = superroc::core::GgufReader::OpenFile(opt.model_path, &err);
   if (!reader_owner) {
     std::cerr << "Error loading GGUF model '" << opt.model_path << "': " << err
               << "\n";
     PrintModelLoadTime(model_load_start, false);
     return 1;
   }
-  const std::shared_ptr<const gufo::core::GgufReader> reader(
+  const std::shared_ptr<const superroc::core::GgufReader> reader(
       std::move(reader_owner));
   ResolvePromptSampling(*reader, &opt);
 
@@ -1375,16 +1375,16 @@ int RunChat(std::span<const char* const> args) {
   std::unique_ptr<speculative::SpeculativeVerifier> verifier;
   std::shared_ptr<models::qwen38_flash_next::Model> flash_model;
   std::unique_ptr<models::qwen38_flash_next::Session> flash_session;
-  if (gufo::core::IsModelFamily(
+  if (superroc::core::IsModelFamily(
           reader->GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kQwen4Exp)) {
+          superroc::core::ModelFamilyId::kQwen4Exp)) {
     flash_model = LoadFlashNextModel(opt, *reader, model_load_start);
     if (!flash_model)
       return 1;
     flash_session = flash_model->CreateSession(
         opt.speculative_backend.empty()
-            ? gufo::core::SessionMode::kAutoregressive
-            : gufo::core::SessionMode::kSpeculative,
+            ? superroc::core::SessionMode::kAutoregressive
+            : superroc::core::SessionMode::kSpeculative,
         kDefaultContext, &err);
     if (!flash_session) {
       std::cerr << "Flash-Next session failed: " << err << '\n';
@@ -1392,7 +1392,7 @@ int RunChat(std::span<const char* const> args) {
     }
     tokenizer = &flash_model->tokenizer();
     architecture = std::string(
-        gufo::core::ModelFamilyArch(gufo::core::ModelFamilyId::kQwen4Exp));
+        superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kQwen4Exp));
     vision_encoder = flash_model->VisionEncoder();
   }
   int device_count = 0;
@@ -1458,7 +1458,7 @@ int RunChat(std::span<const char* const> args) {
   }
   PrintModelLoadTime(model_load_start);
 
-  std::cout << "=== Gufo Interactive Chat (" << architecture << ") ===\n"
+  std::cout << "=== SuperROC Interactive Chat (" << architecture << ") ===\n"
             << "Type 'exit' or Ctrl+D to quit.\n\n";
 
   std::vector<tokenization::ChatMessage> history;
@@ -1559,4 +1559,4 @@ int RunChat(std::span<const char* const> args) {
   return 0;
 }
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli

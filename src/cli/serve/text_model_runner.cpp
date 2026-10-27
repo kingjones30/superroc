@@ -18,8 +18,9 @@
 #include "src/cli/serve/continuation_disk_store.hpp"
 #include "src/cli/serve/logging.hpp"
 #include "src/core/json.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 std::optional<ChatRequest> ConstrainChatRequest(
     const ChatRequest& request, const TextModelRunner& runner,
@@ -42,10 +43,10 @@ std::optional<ChatRequest> ConstrainChatRequest(
     // LFM2 (Super ROC): a required call (the render prefills
     // "<|tool_call_start|>") is constrained to "[", the offered names,
     // declared keys and Python literals. Auto/none stay
-    // unconstrained and are parsed after generation. GUFO_LFM2_TOOL_GRAMMAR=0
+    // unconstrained and are parsed after generation. SUPERROC_LFM2_TOOL_GRAMMAR=0
     // turns the grammar off.
     static const bool lfm2_grammar = [] {
-      const char* env = std::getenv("GUFO_LFM2_TOOL_GRAMMAR");
+      const char* env = ::superroc::core::GetEnvCompat("SUPERROC_LFM2_TOOL_GRAMMAR");
       return env == nullptr || std::strcmp(env, "0") != 0;
     }();
     if (!lfm2_grammar || request.tools.empty() ||
@@ -2696,4 +2697,4 @@ std::size_t TextRunnerPool::CachedPrefixTokens(
                                           context->cache_prefixes);
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

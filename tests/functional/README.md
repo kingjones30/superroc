@@ -11,7 +11,7 @@ followed by full replay:
 ```sh
 nix develop -c python3 tests/functional/prompt_lookup.py \
   --output /tmp/prompt-lookup -- \
-  /path/to/production/gufo serve llm --model /path/to/model.gguf \
+  /path/to/production/superroc serve llm --model /path/to/model.gguf \
   --speculative mtp --mtp-model /path/to/mtp.gguf
 ```
 
@@ -52,7 +52,7 @@ and restore the same reply after a restart:
 ```sh
 nix develop -c python3 tests/functional/cache_startup.py \
   --output /tmp/cache-startup-mtp -- \
-  /path/to/production/gufo serve llm --model /path/to/model.gguf \
+  /path/to/production/superroc serve llm --model /path/to/model.gguf \
   --speculative mtp --mtp-model /path/to/mtp.gguf --context 8192
 ```
 
@@ -61,7 +61,7 @@ only that lifecycle. Commands, startup times, request timings, responses and log
 remain in the output directory. This check stays outside hosted model CI.
 
 The cluster workflow uses [impact.json](impact.json) to select suites from changed
-paths. Inspect a plan locally without running Gufo:
+paths. Inspect a plan locally without running SuperROC:
 
 ```sh
 python3 tests/functional/impact.py --model flash-next-q4 \
@@ -97,7 +97,7 @@ plans with `--model flash-next-q4`; the default is `--model flash-next-q4/mtp`.
 and production binary all come from the PR, as in `CI`.
 While it builds, it fetches the pinned Q4 shards, MTP sidecar and vision projector
 in the background into a persistent
-cache under `$GUFO_CI_CACHE` (default `$RUNNER_TOOL_CACHE/gufo`; the weights need
+cache under `$SUPERROC_CI_CACHE` (default `$RUNNER_TOOL_CACHE/superroc`; the weights need
 about 110 GiB free), and retains reports and selection reasons as artifacts.
 Weight and `ccache` reuse depend on the cluster preserving that directory on the
 allocated machine. The job also builds the merge base. After the suites,
@@ -151,7 +151,7 @@ included, and the real server must answer all three after the listener handoff:
 ```sh
 nix develop -c python3 tests/functional/startup_loading.py \
   --output /tmp/startup-loading -- \
-  /path/to/production/gufo serve llm --model /path/to/model.gguf \
+  /path/to/production/superroc serve llm --model /path/to/model.gguf \
   --cache-disk /tmp/startup-loading-disk
 ```
 
@@ -169,7 +169,7 @@ nix develop -c cmake --build --preset cpu-test --target device_loss_faults
 python3 tests/functional/device_loss.py \
   --fault-library build/cpu-test/libdevice_loss_faults.so \
   --output /tmp/device-loss-check -- \
-  /path/to/production/gufo serve llm --model /path/to/model.gguf \
+  /path/to/production/superroc serve llm --model /path/to/model.gguf \
   --sessions 2 --context 4096 --think off --speculative off
 ```
 
@@ -192,7 +192,7 @@ write without loading weights.
 nix develop -c python3 tests/functional/run.py \
   --record-baseline --output /tmp/api-baseline --sampling-preset qwen38 \
   --suite tools --suite sampling-defaults --suite batch -- \
-  /path/to/baseline/gufo serve llm --model /path/to/model.gguf \
+  /path/to/baseline/superroc serve llm --model /path/to/model.gguf \
   --mmproj /path/to/mmproj.gguf --sessions 4
 ```
 
@@ -352,7 +352,7 @@ controls and 128px image controls. It uses only the Python standard library:
 
 ```sh
 python3 tests/functional/image_history.py --output /tmp/image-history-main -- \
-  /path/to/production/gufo serve llm --model /path/to/model.gguf \
+  /path/to/production/superroc serve llm --model /path/to/model.gguf \
   --mmproj /path/to/mmproj.gguf --sessions 1 --context 32768 \
   --cache-ram-bytes 8589934592 --think off
 ```
@@ -515,7 +515,7 @@ nix develop -c cmake --preset cpu-test
 nix develop -c cmake --build --preset cpu-test --target cache_disk_faults
 nix develop -c python3 tests/functional/cache_lifecycle.py \
   --output /tmp/cache-lifecycle --fault-library build/cpu-test/libcache_disk_faults.so -- \
-  /path/to/production/gufo serve llm --model /path/to/model.gguf \
+  /path/to/production/superroc serve llm --model /path/to/model.gguf \
   --context 32768 --sessions 1 --think off --speculative off
 ```
 
@@ -563,7 +563,7 @@ expired recomputation budget and publication before that budget expires:
 ```sh
 nix develop -c python3 tests/functional/publication_wait.py \
   --output /tmp/publication-wait --fault-library build/cpu-test/libcache_disk_faults.so -- \
-  /path/to/production/gufo serve llm --model /path/to/flash-next.gguf \
+  /path/to/production/superroc serve llm --model /path/to/flash-next.gguf \
   --mtp-model /path/to/mtp.gguf --speculative mtp --sessions 1 --context 65536
 ```
 

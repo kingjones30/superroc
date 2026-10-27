@@ -20,7 +20,7 @@
 #include "src/models/qwen/hip/ops/token.hpp"
 #include "src/models/qwen/vision/device_input.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 void Require(const Lfm2LaunchStatus& status) {
@@ -241,5 +241,5 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptChunk(
   return CheckedSampleToken(next_token_id, config.vocab_size);
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

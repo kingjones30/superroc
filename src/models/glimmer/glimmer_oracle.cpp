@@ -9,7 +9,7 @@
 #include "src/models/qwen/forward.hpp"
 #include "src/models/qwen/oracles.hpp"
 
-namespace gufo::models {
+namespace superroc::models {
 namespace {
 
 constexpr std::int8_t kFp4Code[16] = {0, 1,  2,  3,  4,  6,  8,  10,
@@ -341,4 +341,4 @@ void GlimmerForwardModel(std::uint32_t token_id, std::uint32_t pos,
                       weights.config.logit_scale, weights.config.final_softcap);
 }
 
-}  // namespace gufo::models
+}  // namespace superroc::models

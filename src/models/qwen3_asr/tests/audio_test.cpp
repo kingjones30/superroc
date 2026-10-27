@@ -13,7 +13,7 @@
 #include <string_view>
 #include <vector>
 
-namespace qwen3_asr = gufo::models::qwen3_asr;
+namespace qwen3_asr = superroc::models::qwen3_asr;
 
 namespace {
 

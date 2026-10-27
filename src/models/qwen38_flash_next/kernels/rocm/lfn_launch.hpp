@@ -6,7 +6,7 @@
 
 #include <atomic>
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 
 inline std::atomic<int>& LfnLaunchArmed() {
   static std::atomic<int> v{0};
@@ -32,4 +32,4 @@ inline void LfnLaunchArm(bool on) {
   LfnLaunchArmed().store(on ? 1 : 0, std::memory_order_relaxed);
 }
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm

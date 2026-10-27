@@ -19,10 +19,11 @@
 #include "src/models/minimax_h3/dit.hpp"
 #include "src/models/minimax_h3/runtime.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
-namespace h3 = gufo::minimax_h3;
+namespace h3 = superroc::minimax_h3;
 
 int failures = 0;
 
@@ -124,16 +125,16 @@ void CheckF32Boundary(std::string_view name, std::span<const float> got,
 }
 
 int CheckReal() {
-  const char* root = std::getenv("GUFO_H3_MODEL_ROOT");
-  const char* conditioning_path = std::getenv("GUFO_H3_LAYER50_CONDITIONING");
+  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* conditioning_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_LAYER50_CONDITIONING");
   if (root == nullptr || conditioning_path == nullptr) {
-    std::cout << "SKIP: GUFO_H3_MODEL_ROOT or "
-                 "GUFO_H3_LAYER50_CONDITIONING unset\n";
+    std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or "
+                 "SUPERROC_H3_LAYER50_CONDITIONING unset\n";
     return 77;
   }
   std::string error;
   auto inventory =
-      h3::ModelInventory::Inspect(root, GUFO_H3_SOURCE_MANIFEST, &error);
+      h3::ModelInventory::Inspect(root, SUPERROC_H3_SOURCE_MANIFEST, &error);
   CHECK(inventory.has_value());
   if (!inventory) {
     std::cerr << error << '\n';
@@ -233,10 +234,10 @@ int CheckReal() {
 }
 
 int CheckOracle() {
-  const char* root = std::getenv("GUFO_H3_MODEL_ROOT");
-  const char* golden_value = std::getenv("GUFO_H3_DENOISER_GOLDEN");
+  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* golden_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_DENOISER_GOLDEN");
   if (root == nullptr || golden_value == nullptr) {
-    std::cout << "SKIP: GUFO_H3_MODEL_ROOT or GUFO_H3_DENOISER_GOLDEN unset\n";
+    std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or SUPERROC_H3_DENOISER_GOLDEN unset\n";
     return 77;
   }
   const std::filesystem::path golden(golden_value);
@@ -289,7 +290,7 @@ int CheckOracle() {
 
   std::string error;
   auto inventory =
-      h3::ModelInventory::Inspect(root, GUFO_H3_SOURCE_MANIFEST, &error);
+      h3::ModelInventory::Inspect(root, SUPERROC_H3_SOURCE_MANIFEST, &error);
   auto geometry = h3::ResolveGenerationGeometry(256, 256, 22, &error);
   CHECK(inventory.has_value());
   CHECK(geometry.has_value());
@@ -340,11 +341,11 @@ int CheckOracle() {
 }
 
 int CheckProductionShapeOracle(bool row_parallel) {
-  const char* root = std::getenv("GUFO_H3_MODEL_ROOT");
-  const char* golden_value = std::getenv("GUFO_H3_DENOISER_GOLDEN_512");
+  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* golden_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_DENOISER_GOLDEN_512");
   if (root == nullptr || golden_value == nullptr) {
-    std::cout << "SKIP: GUFO_H3_MODEL_ROOT or "
-                 "GUFO_H3_DENOISER_GOLDEN_512 unset\n";
+    std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or "
+                 "SUPERROC_H3_DENOISER_GOLDEN_512 unset\n";
     return 77;
   }
   const std::filesystem::path golden(golden_value);
@@ -395,7 +396,7 @@ int CheckProductionShapeOracle(bool row_parallel) {
 
   std::string error;
   auto inventory =
-      h3::ModelInventory::Inspect(root, GUFO_H3_SOURCE_MANIFEST, &error);
+      h3::ModelInventory::Inspect(root, SUPERROC_H3_SOURCE_MANIFEST, &error);
   auto geometry = h3::ResolveGenerationGeometry(512, 512, 22, &error);
   CHECK(inventory.has_value());
   CHECK(geometry.has_value());
@@ -449,11 +450,11 @@ int CheckProductionShapeOracle(bool row_parallel) {
 }
 
 int CheckReuseSmoke() {
-  const char* root = std::getenv("GUFO_H3_MODEL_ROOT");
-  const char* conditioning_path = std::getenv("GUFO_H3_LAYER50_CONDITIONING");
+  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* conditioning_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_LAYER50_CONDITIONING");
   if (root == nullptr || conditioning_path == nullptr) {
-    std::cout << "SKIP: GUFO_H3_MODEL_ROOT or "
-                 "GUFO_H3_LAYER50_CONDITIONING unset\n";
+    std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or "
+                 "SUPERROC_H3_LAYER50_CONDITIONING unset\n";
     return 77;
   }
   constexpr std::size_t kTextRows = 6;
@@ -461,7 +462,7 @@ int CheckReuseSmoke() {
       ReadBf16(conditioning_path, kTextRows * h3::kH3TextConditionWidth);
   std::string error;
   auto inventory =
-      h3::ModelInventory::Inspect(root, GUFO_H3_SOURCE_MANIFEST, &error);
+      h3::ModelInventory::Inspect(root, SUPERROC_H3_SOURCE_MANIFEST, &error);
   auto geometry = h3::ResolveGenerationGeometry(32, 32, 5, &error);
   CHECK(inventory.has_value());
   CHECK(geometry.has_value());
@@ -551,11 +552,11 @@ int CheckReuseSmoke() {
 }
 
 int ProfileFullResolutionForward() {
-  const char* root = std::getenv("GUFO_H3_MODEL_ROOT");
-  const char* conditioning_path = std::getenv("GUFO_H3_LAYER50_CONDITIONING");
+  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* conditioning_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_LAYER50_CONDITIONING");
   if (root == nullptr || conditioning_path == nullptr) {
-    std::cout << "SKIP: GUFO_H3_MODEL_ROOT or "
-                 "GUFO_H3_LAYER50_CONDITIONING unset\n";
+    std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or "
+                 "SUPERROC_H3_LAYER50_CONDITIONING unset\n";
     return 77;
   }
   constexpr std::size_t kTextRows = 6;
@@ -563,7 +564,7 @@ int ProfileFullResolutionForward() {
       ReadBf16(conditioning_path, kTextRows * h3::kH3TextConditionWidth);
   std::string error;
   auto inventory =
-      h3::ModelInventory::Inspect(root, GUFO_H3_SOURCE_MANIFEST, &error);
+      h3::ModelInventory::Inspect(root, SUPERROC_H3_SOURCE_MANIFEST, &error);
   auto geometry = h3::ResolveGenerationGeometry(1344, 768, 124, &error);
   CHECK(inventory.has_value());
   CHECK(geometry.has_value());

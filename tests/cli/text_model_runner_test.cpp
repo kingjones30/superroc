@@ -27,27 +27,27 @@
 #include "src/models/qwen/control_tokens.hpp"
 #include "src/models/qwen/vision/prompt.hpp"
 
-using gufo::tokenization::kImEnd;
-using gufo::tokenization::kImStart;
+using superroc::tokenization::kImEnd;
+using superroc::tokenization::kImStart;
 
 namespace {
 
-using gufo::server::ChatRequest;
-using gufo::server::TextDecodeSelection;
-using gufo::server::TextExecutionPlan;
-using gufo::server::TextExecutionPlanKind;
-using gufo::server::TextModelRunner;
-using gufo::server::TextPrefillStep;
-using gufo::server::TextRunnerAdvance;
-using gufo::server::TextRunnerCapabilities;
-using gufo::server::TextRunnerDescriptor;
-using gufo::server::TextRunnerDiskCacheOptions;
-using gufo::server::TextRunnerMeasuredResources;
-using gufo::server::TextRunnerPool;
-using gufo::server::TextRunnerResourceClaim;
-using gufo::server::TextRunnerSnapshot;
-using gufo::server::TextRunnerState;
-using gufo::server::TextRunnerToken;
+using superroc::server::ChatRequest;
+using superroc::server::TextDecodeSelection;
+using superroc::server::TextExecutionPlan;
+using superroc::server::TextExecutionPlanKind;
+using superroc::server::TextModelRunner;
+using superroc::server::TextPrefillStep;
+using superroc::server::TextRunnerAdvance;
+using superroc::server::TextRunnerCapabilities;
+using superroc::server::TextRunnerDescriptor;
+using superroc::server::TextRunnerDiskCacheOptions;
+using superroc::server::TextRunnerMeasuredResources;
+using superroc::server::TextRunnerPool;
+using superroc::server::TextRunnerResourceClaim;
+using superroc::server::TextRunnerSnapshot;
+using superroc::server::TextRunnerState;
+using superroc::server::TextRunnerToken;
 
 // Serialized size the persistent fixtures below write: four 64-bit words.
 // A single constant names it so the staging budget in the disk-only test is
@@ -249,7 +249,7 @@ public:
   }
 
   [[nodiscard]] TextDecodeSelection SelectNext(
-      TextRunnerState& state, gufo::sampling::SamplerState&) const override {
+      TextRunnerState& state, superroc::sampling::SamplerState&) const override {
     auto& fake = RequireFakeState(state);
     if (!fake.frontier.has_value()) {
       throw std::logic_error("fake state has no decode frontier");
@@ -314,16 +314,16 @@ void TestPromptCountingValidatesCapabilitiesBeforeInference() {
   ChatRequest request;
   Expect(!runner.CountPromptTokens(request),
          "unsupported template has no count");
-  gufo::tokenization::ChatMessage message;
-  message.role = gufo::tokenization::ChatRole::kUser;
+  superroc::tokenization::ChatMessage message;
+  message.role = superroc::tokenization::ChatRole::kUser;
   message.content = std::string(runner.Descriptor().max_context + 1, 'x');
   request.messages.push_back(message);
   Expect(runner.CountPromptTokens(request) == message.content.size(),
          "counting accepts text beyond the execution context");
   // A text renderer can ignore images. Counting must reject them first,
   // including images carried by a tool result.
-  for (const auto role : {gufo::tokenization::ChatRole::kUser,
-                          gufo::tokenization::ChatRole::kTool}) {
+  for (const auto role : {superroc::tokenization::ChatRole::kUser,
+                          superroc::tokenization::ChatRole::kTool}) {
     auto& input = request.messages.front();
     input.role = role;
     input.images = {{0, std::make_shared<const std::vector<std::uint8_t>>(
@@ -672,7 +672,7 @@ public:
   [[nodiscard]] TextRunnerDescriptor Descriptor() const override {
     auto descriptor = SnapshotRunner::Descriptor();
     descriptor.max_context = max_context_;
-    descriptor.persistence = gufo::server::TextRunnerPersistenceDescriptor{
+    descriptor.persistence = superroc::server::TextRunnerPersistenceDescriptor{
         .compatibility_identity = identity_,
         .payload_version = 1,
     };
@@ -751,7 +751,7 @@ class TemporaryDirectory {
 public:
   TemporaryDirectory() {
     std::string pattern = (std::filesystem::temp_directory_path() /
-                           "gufo-runner-disk-cache-XXXXXX")
+                           "superroc-runner-disk-cache-XXXXXX")
                               .string();
     const char* created = ::mkdtemp(pattern.data());
     if (created == nullptr) {
@@ -1537,7 +1537,7 @@ void TestNewImageGetsAStableCheckpoint() {
     using SnapshotRunner::SnapshotRunner;
     void SetPromptContext(
         TextRunnerState&,
-        std::shared_ptr<const gufo::server::TextPromptContext>) const override {
+        std::shared_ptr<const superroc::server::TextPromptContext>) const override {
     }
   };
   auto stats = std::make_shared<FakeStats>();
@@ -1549,7 +1549,7 @@ void TestNewImageGetsAStableCheckpoint() {
       (void)text.Prefill(64);
     text.Commit();
   }
-  auto image = std::make_shared<gufo::server::TextPromptContext>();
+  auto image = std::make_shared<superroc::server::TextPromptContext>();
   image->cache_identity = {10};
   image->cache_prefixes = {{5, {}}};
   const std::vector<TextRunnerToken> prompt{1, 2, 3, 50, 51, 60, 61, 40, 41};
@@ -1803,7 +1803,7 @@ void TestDiskOnlyCaptureReservesBudgetBeforeCommit() {
   // constant sized for the version-1 file stopped admitting version-2 files
   // the moment the chunk table added overhead.
   const std::size_t one_file_bytes =
-      gufo::server::ContinuationDiskStore::FileBytesFor(
+      superroc::server::ContinuationDiskStore::FileBytesFor(
           identity.size(), /*token_count=*/3, kPersistentSnapshotPayloadBytes);
   TextRunnerPool pool(runner, 2,
                       TextRunnerDiskCacheOptions{
@@ -1936,7 +1936,7 @@ void TestEntryCapacityEvictionIsLogged() {
   TextRunnerPool pool(runner, 1);
 
   for (std::size_t i = 0;
-       i <= gufo::server::TextRunnerRamCacheOptions::kMaxEntries; ++i) {
+       i <= superroc::server::TextRunnerRamCacheOptions::kMaxEntries; ++i) {
     const std::vector<TextRunnerToken> prefix{
         static_cast<TextRunnerToken>(i + 1), 0};
     auto request = pool.Acquire(prefix);
@@ -1956,7 +1956,7 @@ void TestEntryCapacityEvictionIsLogged() {
 }
 
 void TestSnapshotCacheCapacityIsReportedAtStartup() {
-  using gufo::server::TextRunnerRamCacheOptions;
+  using superroc::server::TextRunnerRamCacheOptions;
   // With the floor off the pool reports main's numbers: the claim-derived
   // static cap bounded by host headroom (cgroup included). Small claims pin
   // exact values (the host provably cannot bind under a 1 GiB margin);
@@ -1975,8 +1975,8 @@ void TestSnapshotCacheCapacityIsReportedAtStartup() {
           auto runner =
               std::make_shared<SnapshotRunner>(stats, 64, 256, budget);
           runner->retained_snapshot_ceiling_bytes = ceiling;
-          const auto host_budget = gufo::server::HostSnapshotBudgetBytes();
-          const auto host_ceiling = gufo::server::HostSnapshotCeilingBytes();
+          const auto host_budget = superroc::server::HostSnapshotBudgetBytes();
+          const auto host_ceiling = superroc::server::HostSnapshotCeilingBytes();
           std::ostringstream startup_log;
           auto* previous = std::clog.rdbuf(startup_log.rdbuf());
           {
@@ -2039,7 +2039,7 @@ void TestSnapshotCacheCapacityIsReportedAtStartup() {
 }
 
 void TestMeminfoAvailableExcludesFreeCma() {
-  using gufo::server::MeminfoAvailableBytes;
+  using superroc::server::MeminfoAvailableBytes;
   constexpr std::uint64_t kib = 1024;
   // Ubuntu 26.04's KHO scratch reports free CMA pages with CmaTotal 0.
   Expect(MeminfoAvailableBytes("MemTotal:       131072000 kB\n"
@@ -2059,10 +2059,10 @@ void TestMeminfoAvailableExcludesFreeCma() {
 
 void TestCgroupAvailableCountsReclaimableCache() {
   namespace fs = std::filesystem;
-  using gufo::server::CgroupAvailableBytes;
+  using superroc::server::CgroupAvailableBytes;
   constexpr std::uint64_t gib = std::uint64_t{1} << 30;
   const auto root = fs::temp_directory_path() /
-                    ("gufo_cgroup_test_" + std::to_string(::getpid()));
+                    ("superroc_cgroup_test_" + std::to_string(::getpid()));
   fs::remove_all(root);
   const auto write = [&](const fs::path& dir, const char* name,
                          const std::string& text) {
@@ -2151,7 +2151,7 @@ void TestSnapshotStartupReportsSelectedLimits() {
                                                          : 11 * gib;
       claim.retained_snapshot_capacity_bytes = available / 2;
       claim.retained_snapshot_ceiling_bytes =
-          available - gufo::server::kHostSnapshotHeadroomBytes;
+          available - superroc::server::kHostSnapshotHeadroomBytes;
       return claim;
     }
 
@@ -2162,8 +2162,8 @@ void TestSnapshotStartupReportsSelectedLimits() {
   // With the floor off, the pool also bounds the claim by the host's live
   // memory. The synthetic 8 GiB claim below is only observable on a host
   // with room for it; on a smaller host (a hosted CI runner) skip the check.
-  if (gufo::server::HostSnapshotBudgetBytes() < 7 * gib ||
-      gufo::server::HostSnapshotCeilingBytes() < 9 * gib) {
+  if (superroc::server::HostSnapshotBudgetBytes() < 7 * gib ||
+      superroc::server::HostSnapshotCeilingBytes() < 9 * gib) {
     std::cout << "skip TestSnapshotStartupReportsSelectedLimits: host has "
                  "less memory than the synthetic 8 GiB claim needs\n";
     return;
@@ -2208,21 +2208,21 @@ void TestPreparedConstraintVocabularyKeepsGrammarBehavior() {
   class VocabularyRunner final : public FakeRunner {
   public:
     VocabularyRunner() : FakeRunner(std::make_shared<FakeStats>()) {}
-    std::shared_ptr<const gufo::sampling::ConstraintVocabulary>
+    std::shared_ptr<const superroc::sampling::ConstraintVocabulary>
     BuildConstraintVocabulary() const override {
       ++builds;
       // Single bytes, a few multi-byte pieces and a stop token.
       static const std::vector<std::string> extra{"{\"", "\":", "\",\"",
                                                   "ab",  "12",  "\"}"};
-      return std::make_shared<gufo::sampling::ConstraintVocabulary>(
+      return std::make_shared<superroc::sampling::ConstraintVocabulary>(
           128 + extra.size() + 1, [](std::uint32_t id) {
             if (id < 128)
-              return gufo::sampling::ConstraintVocabulary::Piece{
+              return superroc::sampling::ConstraintVocabulary::Piece{
                   std::string(1, static_cast<char>(id)), false};
             if (id < 128 + extra.size())
-              return gufo::sampling::ConstraintVocabulary::Piece{
+              return superroc::sampling::ConstraintVocabulary::Piece{
                   extra[id - 128], false};
-            return gufo::sampling::ConstraintVocabulary::Piece{"", true};
+            return superroc::sampling::ConstraintVocabulary::Piece{"", true};
           });
     }
     mutable std::size_t builds{0};
@@ -2233,14 +2233,14 @@ void TestPreparedConstraintVocabularyKeepsGrammarBehavior() {
   Expect(size == 135 && prepared.PrepareConstraintVocabulary() == size &&
              prepared.builds == 1,
          "preparation builds the vocabulary once");
-  const auto grammar = gufo::sampling::JsonConstraint::Compile(
-      gufo::json::parse(
+  const auto grammar = superroc::sampling::JsonConstraint::Compile(
+      superroc::json::parse(
           R"({"type":"object","properties":{"keyword":{"type":"string"},)"
           R"("n":{"type":"integer"}},"required":["keyword","n"],)"
           R"("additionalProperties":false})"),
       false);
-  const auto other = gufo::sampling::JsonConstraint::Compile(
-      gufo::json::parse(
+  const auto other = superroc::sampling::JsonConstraint::Compile(
+      superroc::json::parse(
           R"({"type":"object","properties":{},"additionalProperties":false})"),
       false);
   const auto binding = prepared.BindConstraint(grammar);
@@ -2272,7 +2272,7 @@ void TestUnconstrainedNativeToolsSkipTheGrammar() {
   // the model's own template unconstrained, as in the Ling-VL build; without
   // the hook the same request is refused before generation ("model does not
   // support structured output", HTTP 400 on int 52899824).
-  using namespace gufo::tokenization;
+  using namespace superroc::tokenization;
   class NativeToolsRunner final : public FakeRunner {
   public:
     explicit NativeToolsRunner(bool unconstrained)
@@ -2290,9 +2290,9 @@ void TestUnconstrainedNativeToolsSkipTheGrammar() {
       R"("required":["city"],"additionalProperties":false})";
   const auto refusal = [](const ChatRequest& request,
                           const TextModelRunner& runner) {
-    gufo::sampling::SamplingConfig sampling;
+    superroc::sampling::SamplingConfig sampling;
     try {
-      (void)gufo::server::ConstrainChatRequest(request, runner, &sampling);
+      (void)superroc::server::ConstrainChatRequest(request, runner, &sampling);
     } catch (const std::invalid_argument& error) {
       return std::string(error.what());
     }
@@ -2314,12 +2314,12 @@ void TestUnconstrainedNativeToolsSkipTheGrammar() {
                      R"({"type":"function","function":{"name":"get_weather","strict":)") +
                  (strict ? "true" : "false") + R"(,"parameters":)" + schema +
                  "}}"}};
-        gufo::sampling::SamplingConfig sampling;
-        std::optional<gufo::sampling::JsonConstraint::ToolFormat> format;
-        const auto constrained = gufo::server::ConstrainChatRequest(
+        superroc::sampling::SamplingConfig sampling;
+        std::optional<superroc::sampling::JsonConstraint::ToolFormat> format;
+        const auto constrained = superroc::server::ConstrainChatRequest(
             request, ling, &sampling, &format);
         Expect(!constrained && !sampling.constraint &&
-                   format == gufo::sampling::JsonConstraint::ToolFormat::kJson,
+                   format == superroc::sampling::JsonConstraint::ToolFormat::kJson,
                "Ling3 tools reach the model's template with no grammar");
         Expect(refusal(request, plain) ==
                    "model does not support structured output",
@@ -2330,7 +2330,7 @@ void TestUnconstrainedNativeToolsSkipTheGrammar() {
   // response_format still needs a vocabulary: refused, never ignored.
   for (const bool tools : {false, true}) {
     ChatRequest request({{ChatRole::kUser, "Return JSON."}});
-    request.response_format = gufo::sampling::JsonConstraint::Object();
+    request.response_format = superroc::sampling::JsonConstraint::Object();
     if (tools)
       request.tools = {{.name = "get_weather", .parameters_json = schema}};
     Expect(refusal(request, ling) == "model does not support structured output",
@@ -2342,18 +2342,18 @@ void TestFlintToolGrammarStartsInTheAutoPhase() {
   // Flint (RecursiveSI/flint) is not prefilled into a reasoning block: its
   // template opens "<think>" itself, so an auto-phase request keeps the
   // grammar and admits the optional reasoning block before the native call.
-  using namespace gufo::tokenization;
+  using namespace superroc::tokenization;
   class FlintRunner final : public FakeRunner {
   public:
     FlintRunner() : FakeRunner(std::make_shared<FakeStats>()) {}
-    gufo::sampling::JsonConstraint::ToolFormat ToolFormat() const override {
-      return gufo::sampling::JsonConstraint::ToolFormat::kFlint;
+    superroc::sampling::JsonConstraint::ToolFormat ToolFormat() const override {
+      return superroc::sampling::JsonConstraint::ToolFormat::kFlint;
     }
-    std::shared_ptr<const gufo::sampling::ConstraintVocabulary>
+    std::shared_ptr<const superroc::sampling::ConstraintVocabulary>
     BuildConstraintVocabulary() const override {
-      return std::make_shared<gufo::sampling::ConstraintVocabulary>(
+      return std::make_shared<superroc::sampling::ConstraintVocabulary>(
           256, [](std::uint32_t id) {
-            return gufo::sampling::ConstraintVocabulary::Piece{
+            return superroc::sampling::ConstraintVocabulary::Piece{
                 std::string(1, static_cast<char>(id)), false};
           });
     }
@@ -2366,12 +2366,12 @@ void TestFlintToolGrammarStartsInTheAutoPhase() {
        .parameters_json =
            R"({"type":"object","properties":{"cmd":{"type":"string"}},)"
            R"("required":["cmd"],"additionalProperties":false})"}};
-  gufo::sampling::SamplingConfig sampling;
-  std::optional<gufo::sampling::JsonConstraint::ToolFormat> format;
+  superroc::sampling::SamplingConfig sampling;
+  std::optional<superroc::sampling::JsonConstraint::ToolFormat> format;
   const auto constrained =
-      gufo::server::ConstrainChatRequest(request, runner, &sampling, &format);
+      superroc::server::ConstrainChatRequest(request, runner, &sampling, &format);
   Expect(constrained && sampling.constraint &&
-             format == gufo::sampling::JsonConstraint::ToolFormat::kFlint,
+             format == superroc::sampling::JsonConstraint::ToolFormat::kFlint,
          "Flint tool requests are constrained in the auto phase");
   const auto& grammar = *sampling.constraint->grammar;
   const auto accepts = [&](std::string_view text) {
@@ -2396,46 +2396,46 @@ void TestFlintToolGrammarStartsInTheAutoPhase() {
 }
 
 void TestServerInstructionsAreFraming() {
-  using namespace gufo::tokenization;
+  using namespace superroc::tokenization;
   class ConstraintRunner final : public FakeRunner {
   public:
-    explicit ConstraintRunner(gufo::sampling::JsonConstraint::ToolFormat format)
+    explicit ConstraintRunner(superroc::sampling::JsonConstraint::ToolFormat format)
         : FakeRunner(std::make_shared<FakeStats>()), format_(format) {}
-    gufo::sampling::JsonConstraint::ToolFormat ToolFormat() const override {
+    superroc::sampling::JsonConstraint::ToolFormat ToolFormat() const override {
       return format_;
     }
-    std::shared_ptr<const gufo::sampling::ConstraintVocabulary>
+    std::shared_ptr<const superroc::sampling::ConstraintVocabulary>
     BuildConstraintVocabulary() const override {
-      return std::make_shared<gufo::sampling::ConstraintVocabulary>(
+      return std::make_shared<superroc::sampling::ConstraintVocabulary>(
           256, [](std::uint32_t id) {
-            return gufo::sampling::ConstraintVocabulary::Piece{
+            return superroc::sampling::ConstraintVocabulary::Piece{
                 std::string(1, static_cast<char>(id)), false};
           });
     }
 
   private:
-    gufo::sampling::JsonConstraint::ToolFormat format_;
+    superroc::sampling::JsonConstraint::ToolFormat format_;
   };
   // Only runners without a native call syntax use the JSON envelope and its
   // instruction; a native runner never switches syntax for a schema (#383).
   const ConstraintRunner runner(
-      gufo::sampling::JsonConstraint::ToolFormat::kJson);
+      superroc::sampling::JsonConstraint::ToolFormat::kJson);
   const ConstraintRunner native_runner(
-      gufo::sampling::JsonConstraint::ToolFormat::kQwen);
+      superroc::sampling::JsonConstraint::ToolFormat::kQwen);
   for (const auto format :
-       {gufo::sampling::JsonConstraint::ToolFormat::kQwen,
-        gufo::sampling::JsonConstraint::ToolFormat::kDeepSeek}) {
+       {superroc::sampling::JsonConstraint::ToolFormat::kQwen,
+        superroc::sampling::JsonConstraint::ToolFormat::kDeepSeek}) {
     const ConstraintRunner plain_runner(format);
     for (const bool json : {false, true}) {
       ChatRequest request;
       if (json)
-        request.response_format = gufo::sampling::JsonConstraint::Compile(
-            gufo::json::parse(
+        request.response_format = superroc::sampling::JsonConstraint::Compile(
+            superroc::json::parse(
                 R"({"type":"object","properties":{},"additionalProperties":false})"),
             false);
-      gufo::sampling::SamplingConfig sampling;
-      std::optional<gufo::sampling::JsonConstraint::ToolFormat> observed;
-      const auto constrained = gufo::server::ConstrainChatRequest(
+      superroc::sampling::SamplingConfig sampling;
+      std::optional<superroc::sampling::JsonConstraint::ToolFormat> observed;
+      const auto constrained = superroc::server::ConstrainChatRequest(
           request, plain_runner, &sampling, &observed);
       Expect(observed == format && constrained.has_value() == json,
              "plain and JSON answers retain the native output dialect");
@@ -2475,13 +2475,13 @@ void TestServerInstructionsAreFraming() {
           request.messages.emplace_back(role, client);
         request.messages.emplace_back(
             ChatRole::kUser, role == ChatRole::kUser ? client : "Call record.");
-        gufo::sampling::SamplingConfig sampling;
-        std::optional<gufo::sampling::JsonConstraint::ToolFormat> format;
-        const auto constrained = gufo::server::ConstrainChatRequest(
+        superroc::sampling::SamplingConfig sampling;
+        std::optional<superroc::sampling::JsonConstraint::ToolFormat> format;
+        const auto constrained = superroc::server::ConstrainChatRequest(
             request, runner, &sampling, &format);
         Expect(
             constrained &&
-                format == gufo::sampling::JsonConstraint::ToolFormat::kJson &&
+                format == superroc::sampling::JsonConstraint::ToolFormat::kJson &&
                 sampling.constraint,
             "the actual request path selects and binds the JSON fallback");
         Expect(constrained->messages.front().content ==
@@ -2494,7 +2494,7 @@ void TestServerInstructionsAreFraming() {
         Expect(instruction.find("<tool_call>") != std::string::npos &&
                    instruction.find("</tool_call>") != std::string::npos,
                "JSON fallback uses the server framing field");
-        const auto prepared = gufo::models::qwen::vision::Prepare(
+        const auto prepared = superroc::models::qwen::vision::Prepare(
             *tokenizer, constrained->messages, constrained->tools, options, {},
             8192);
         auto without = constrained->messages;
@@ -2542,15 +2542,15 @@ void TestServerInstructionsAreFraming() {
     request.reasoning.enabled = false;
     request.response_format =
         schema
-            ? gufo::sampling::JsonConstraint::Compile(
-                  gufo::json::parse(
+            ? superroc::sampling::JsonConstraint::Compile(
+                  superroc::json::parse(
                       R"({"type":"object","properties":{"text":{"type":"string","const":"<tool_call>"}},"required":["text"],"additionalProperties":false})"),
                   true)
-            : gufo::sampling::JsonConstraint::Object();
+            : superroc::sampling::JsonConstraint::Object();
     request.response_format_description = "Describe <tool_call> in the schema.";
-    gufo::sampling::SamplingConfig sampling;
+    superroc::sampling::SamplingConfig sampling;
     auto constrained =
-        gufo::server::ConstrainChatRequest(request, runner, &sampling);
+        superroc::server::ConstrainChatRequest(request, runner, &sampling);
     Expect(constrained &&
                constrained->messages.front().content ==
                    request.messages.front().content &&
@@ -2573,9 +2573,9 @@ void TestServerInstructionsAreFraming() {
       {.name = "record",
        .parameters_json =
            R"({"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false})"}};
-  gufo::sampling::SamplingConfig sampling;
+  superroc::sampling::SamplingConfig sampling;
   const auto constrained =
-      gufo::server::ConstrainChatRequest(native, native_runner, &sampling);
+      superroc::server::ConstrainChatRequest(native, native_runner, &sampling);
   Expect(constrained && constrained->messages.front().framing_suffix.empty(),
          "native constraints add no instruction or change to the prompt");
   // Schemas native tags cannot enforce exactly, beside an ordinary neighbor,
@@ -2610,11 +2610,11 @@ void TestServerInstructionsAreFraming() {
             {.name = "record",
              .parameters_json = schema,
              .definition_json = definition}};
-        gufo::sampling::SamplingConfig sampled;
-        std::optional<gufo::sampling::JsonConstraint::ToolFormat> format;
+        superroc::sampling::SamplingConfig sampled;
+        std::optional<superroc::sampling::JsonConstraint::ToolFormat> format;
         std::optional<ChatRequest> result;
         try {
-          result = gufo::server::ConstrainChatRequest(request, native_runner,
+          result = superroc::server::ConstrainChatRequest(request, native_runner,
                                                       &sampled, &format);
         } catch (const std::invalid_argument&) {
           // An impossible strict schema is rejected before generation.
@@ -2623,7 +2623,7 @@ void TestServerInstructionsAreFraming() {
         }
         Expect(
             result &&
-                format == gufo::sampling::JsonConstraint::ToolFormat::kQwen &&
+                format == superroc::sampling::JsonConstraint::ToolFormat::kQwen &&
                 sampled.constraint,
             "a native runner keeps native calls for every schema");
         Expect(result->messages.front().framing_suffix.empty() &&
@@ -2637,12 +2637,12 @@ void TestServerInstructionsAreFraming() {
 }  // namespace
 
 void TestLlamaRenderPrompt() {
-  using gufo::tokenization::ChatRole;
+  using superroc::tokenization::ChatRole;
   // F13: content plus framing_suffix (structured-output instructions) reach
   // the prompt when no tools are requested.
   ChatRequest plain({{ChatRole::kUser, "hi"}});
   plain.messages.front().framing_suffix = " [suffix]";
-  const auto rendered = gufo::server::LlamaRenderPrompt(plain);
+  const auto rendered = superroc::server::LlamaRenderPrompt(plain);
   Expect(rendered.has_value() && *rendered == "hi [suffix]",
          "llama render keeps content and framing_suffix");
   // F13: tool requests are refused, not silently dropped.
@@ -2651,7 +2651,7 @@ void TestLlamaRenderPrompt() {
     ChatRequest tools({{ChatRole::kUser, "hi"}});
     tools.tool_choice = choice;
     tools.tools = {{.name = "get_weather"}};
-    Expect(!gufo::server::LlamaRenderPrompt(tools).has_value(),
+    Expect(!superroc::server::LlamaRenderPrompt(tools).has_value(),
            "llama render refuses tool requests");
   }
   // ToolChoice::kNone means the tools ride along unused, as in the Qwen
@@ -2659,16 +2659,16 @@ void TestLlamaRenderPrompt() {
   ChatRequest none({{ChatRole::kUser, "hi"}});
   none.tool_choice = ChatRequest::ToolChoice::kNone;
   none.tools = {{.name = "get_weather"}};
-  Expect(gufo::server::LlamaRenderPrompt(none).has_value(),
+  Expect(superroc::server::LlamaRenderPrompt(none).has_value(),
          "llama render ignores tools when choice is none");
 }
 
 void TestLlamaIncrementalTextNotExact() {
   // F14: llama TokenText pieces are not Decode()-exact (leading space),
   // other families are unaffected.
-  Expect(!gufo::server::RunnerIncrementalTextIsExact(true),
+  Expect(!superroc::server::RunnerIncrementalTextIsExact(true),
          "llama incremental text is not exact");
-  Expect(gufo::server::RunnerIncrementalTextIsExact(false),
+  Expect(superroc::server::RunnerIncrementalTextIsExact(false),
          "non-llama incremental text stays exact");
 }
 
@@ -2749,9 +2749,9 @@ int main() {
 namespace {
 
 void TestSnapshotRoomMath() {
-  using gufo::server::MeminfoTotalBytes;
-  using gufo::server::ResolveSnapshotFloorBytes;
-  using gufo::server::SnapshotRoomBytesFromMeminfo;
+  using superroc::server::MeminfoTotalBytes;
+  using superroc::server::ResolveSnapshotFloorBytes;
+  using superroc::server::SnapshotRoomBytesFromMeminfo;
   constexpr std::int64_t kib = 1024;
   Expect(MeminfoTotalBytes("MemTotal:       8000000 kB\n") == 8000000 * kib,
          "MemTotal parses to bytes");
@@ -2790,7 +2790,7 @@ void TestSnapshotFloorFlagOptions() {
         startup_log.str().find(" basis=system_memory\n") != std::string::npos,
         "the load line names the system-memory basis");
   }
-  if (gufo::server::DefaultSnapshotFloorBytes().has_value()) {
+  if (superroc::server::DefaultSnapshotFloorBytes().has_value()) {
     auto stats = std::make_shared<FakeStats>();
     auto runner = std::make_shared<SnapshotRunner>(stats);
     bool refused = false;
@@ -2813,7 +2813,7 @@ void TestFloorRefusesDiskCaptureWithoutRamReserve() {
   std::ifstream meminfo("/proc/meminfo");
   std::ostringstream text;
   text << meminfo.rdbuf();
-  const auto available = gufo::server::MeminfoAvailableBytes(text.str());
+  const auto available = superroc::server::MeminfoAvailableBytes(text.str());
   constexpr std::size_t kSnapshot = std::size_t{16} << 20;
   constexpr std::size_t kRoom = std::size_t{8} << 20;
   if (!available.has_value() || *available <= kRoom + kSnapshot)
@@ -2857,7 +2857,7 @@ void TestFloorOffMatchesMainNumbers() {
   // numbers (cgroup included), not the 32 GiB static cap. Claims above any
   // test host's headroom, so the host binds deterministically: every Strix
   // Halo box has 128 GiB total, hence a ceiling below 128 GiB.
-  if (gufo::server::HostSnapshotCeilingBytes() >= (std::size_t{128} << 30))
+  if (superroc::server::HostSnapshotCeilingBytes() >= (std::size_t{128} << 30))
     return;
   auto stats = std::make_shared<FakeStats>();
   auto runner = std::make_shared<SnapshotRunner>(
@@ -2897,7 +2897,7 @@ void TestFloorBindingAtLoadWarns() {
   std::ifstream meminfo("/proc/meminfo");
   std::ostringstream text;
   text << meminfo.rdbuf();
-  const auto total = gufo::server::MeminfoTotalBytes(text.str());
+  const auto total = superroc::server::MeminfoTotalBytes(text.str());
   if (!total.has_value() || *total == 0)
     return;  // Needs readable MemTotal; the boxes qualify.
   auto stats = std::make_shared<FakeStats>();
@@ -2943,7 +2943,7 @@ void TestSnapshotFloorNotApplicableToSharedRows() {
   };
   // Claims above any test host's headroom, so the host binds
   // deterministically (same shape as TestFloorOffMatchesMainNumbers).
-  if (gufo::server::HostSnapshotCeilingBytes() >= (std::size_t{128} << 30))
+  if (superroc::server::HostSnapshotCeilingBytes() >= (std::size_t{128} << 30))
     return;
   const auto start_with_floor = [](std::size_t floor_bytes) {
     auto stats = std::make_shared<FakeStats>();
@@ -2995,7 +2995,7 @@ void TestSnapshotFloorNotApplicableToSharedRows() {
   std::ifstream meminfo("/proc/meminfo");
   std::ostringstream text;
   text << meminfo.rdbuf();
-  const auto total = gufo::server::MeminfoTotalBytes(text.str());
+  const auto total = superroc::server::MeminfoTotalBytes(text.str());
   if (!total.has_value() || *total == 0)
     return;  // Needs readable MemTotal; the boxes qualify.
   auto stats = std::make_shared<FakeStats>();

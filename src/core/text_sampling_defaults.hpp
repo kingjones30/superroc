@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_TEXT_SAMPLING_DEFAULTS_HPP_
-#define GUFO_CORE_TEXT_SAMPLING_DEFAULTS_HPP_
+#ifndef SUPERROC_CORE_TEXT_SAMPLING_DEFAULTS_HPP_
+#define SUPERROC_CORE_TEXT_SAMPLING_DEFAULTS_HPP_
 
 #include <optional>
 
@@ -7,7 +7,7 @@
 #include "src/core/model_family.hpp"
 #include "src/core/sampling.hpp"
 
-namespace gufo::sampling {
+namespace superroc::sampling {
 
 enum class TextModelPreset {
   kUnspecified,
@@ -36,11 +36,11 @@ struct SamplingOverrides {
 };
 
 inline TextModelPreset TextPreset(const core::ModelConfig& config) {
-  if (gufo::core::IsModelFamily(config.architecture,
-                                gufo::core::ModelFamilyId::kDeepSeek4))
+  if (superroc::core::IsModelFamily(config.architecture,
+                                superroc::core::ModelFamilyId::kDeepSeek4))
     return TextModelPreset::kDeepSeekV4Flash;
-  if (gufo::core::IsModelFamily(config.architecture,
-                                gufo::core::ModelFamilyId::kQwen4Exp) ||
+  if (superroc::core::IsModelFamily(config.architecture,
+                                superroc::core::ModelFamilyId::kQwen4Exp) ||
       (config.num_layers == 64 && config.hidden_size == 5120 &&
        config.vocab_size == 248320))
     return TextModelPreset::kQwen38;
@@ -98,6 +98,6 @@ inline SamplingConfig ResolveTextSampling(TextModelPreset model,
   return result;
 }
 
-}  // namespace gufo::sampling
+}  // namespace superroc::sampling
 
 #endif

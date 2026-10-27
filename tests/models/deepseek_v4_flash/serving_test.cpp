@@ -19,12 +19,13 @@
 #include "src/models/deepseek_v4_flash/dspark_sampler.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
 #include "src/models/qwen/chat_template.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
-using Model = gufo::models::deepseek_v4_flash::Model;
-using ModelOptions = gufo::models::deepseek_v4_flash::ModelOptions;
-using gufo::models::deepseek_v4_flash::ResolveDeepSeekChatOptions;
+using Model = superroc::models::deepseek_v4_flash::Model;
+using ModelOptions = superroc::models::deepseek_v4_flash::ModelOptions;
+using superroc::models::deepseek_v4_flash::ResolveDeepSeekChatOptions;
 
 void Expect(bool condition, std::string_view message) {
   if (!condition) {
@@ -32,26 +33,26 @@ void Expect(bool condition, std::string_view message) {
   }
 }
 
-std::vector<gufo::tokenization::TokenId> GenerateDirect(
+std::vector<superroc::tokenization::TokenId> GenerateDirect(
     const std::shared_ptr<Model>& model, std::span<const int> prompt,
-    std::size_t max_tokens, const gufo::sampling::SamplingConfig& sampling = {},
+    std::size_t max_tokens, const superroc::sampling::SamplingConfig& sampling = {},
     bool dspark = false) {
   std::string error;
   auto session =
-      model->CreateSession(dspark ? gufo::core::SessionMode::kSpeculative
-                                  : gufo::core::SessionMode::kAutoregressive,
+      model->CreateSession(dspark ? superroc::core::SessionMode::kSpeculative
+                                  : superroc::core::SessionMode::kAutoregressive,
                            dspark ? 4096 : 512, &error);
   Expect(session != nullptr, error);
   Expect(session->Sync(prompt, &error), error);
-  const std::vector<gufo::sampling::TokenId> history(prompt.begin(),
+  const std::vector<superroc::sampling::TokenId> history(prompt.begin(),
                                                      prompt.end());
-  gufo::sampling::SamplerState sampler(sampling, history);
+  superroc::sampling::SamplerState sampler(sampling, history);
 
-  std::vector<gufo::tokenization::TokenId> result;
+  std::vector<superroc::tokenization::TokenId> result;
   result.reserve(max_tokens);
   if (dspark) {
     while (result.size() < max_tokens) {
-      gufo::models::deepseek_v4_flash::DsparkSamplerBridge bridge(sampler);
+      superroc::models::deepseek_v4_flash::DsparkSamplerBridge bridge(sampler);
       std::vector<int> emitted;
       Expect(session->DsparkStep(max_tokens - result.size(), 7, &emitted,
                                  &error, bridge.hook()),
@@ -80,8 +81,8 @@ std::vector<gufo::tokenization::TokenId> GenerateDirect(
     if (model->IsStopToken(token)) {
       break;
     }
-    sampler.Accept(static_cast<gufo::sampling::TokenId>(token));
-    result.push_back(static_cast<gufo::tokenization::TokenId>(token));
+    sampler.Accept(static_cast<superroc::sampling::TokenId>(token));
+    result.push_back(static_cast<superroc::tokenization::TokenId>(token));
     if (index + 1 < max_tokens) {
       Expect(session->Evaluate(token, &error), error);
     }
@@ -91,7 +92,7 @@ std::vector<gufo::tokenization::TokenId> GenerateDirect(
 
 void CheckSampledBatchReplay(const std::shared_ptr<Model>& model,
                              std::span<const int> prompt) {
-  using namespace gufo::models::deepseek_v4_flash;
+  using namespace superroc::models::deepseek_v4_flash;
   // A fixed dispatch schedule separates sampler reproducibility from HTTP
   // arrival order. Different seeds/filters exercise independent request state.
   std::array<std::vector<int>, 2> reference;
@@ -104,21 +105,21 @@ void CheckSampledBatchReplay(const std::shared_ptr<Model>& model,
   for (int run = 0; run < 2; ++run) {
     std::string error;
     std::array<std::unique_ptr<Session>, 2> sessions;
-    std::array<gufo::sampling::SamplerState, 2> samplers{
-        gufo::sampling::SamplerState(
+    std::array<superroc::sampling::SamplerState, 2> samplers{
+        superroc::sampling::SamplerState(
             {.temperature = 1.F, .top_p = 0.95F, .seed = 7}),
-        gufo::sampling::SamplerState({.temperature = 0.8F,
+        superroc::sampling::SamplerState({.temperature = 0.8F,
                                       .top_k = 40,
                                       .top_p = 0.95F,
                                       .seed = 11,
                                       .repeat_penalty = 1.1F})};
-    const std::vector<gufo::sampling::TokenId> history(prompt.begin(),
+    const std::vector<superroc::sampling::TokenId> history(prompt.begin(),
                                                        prompt.end());
     std::array<std::vector<int>, 2> output;
     for (std::size_t i = 0; i < sessions.size(); ++i) {
       sessions[i] = model->CreateSession(
-          model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                             : gufo::core::SessionMode::kAutoregressive,
+          model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                             : superroc::core::SessionMode::kAutoregressive,
           4096, &error);
       Expect(sessions[i] && sessions[i]->Sync(prompt, &error), error);
       samplers[i].ResetHistory(history);
@@ -198,7 +199,7 @@ void CheckSampledBatchReplay(const std::shared_ptr<Model>& model,
 }
 
 void CheckDsparkEosBoundary(const std::shared_ptr<Model>& model) {
-  using namespace gufo::models::deepseek_v4_flash;
+  using namespace superroc::models::deepseek_v4_flash;
   const auto prompt = model->Tokenize("Continue the pattern: red, blue, red,");
   struct Draw {
     int token;
@@ -213,8 +214,8 @@ void CheckDsparkEosBoundary(const std::shared_ptr<Model>& model) {
   std::string error;
   for (std::size_t i = 0; i < sessions.size(); ++i) {
     sessions[i] = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         4096, &error);
     Expect(sessions[i] && sessions[i]->Sync(prompt, &error), error);
     hooks[i] = {.ctx = &draws[i],
@@ -269,7 +270,7 @@ void CheckDsparkEosBoundary(const std::shared_ptr<Model>& model) {
 }
 
 void CheckExecutionModes(const std::shared_ptr<Model>& model) {
-  using gufo::core::SessionMode;
+  using superroc::core::SessionMode;
   std::string error;
   auto ar = model->CreateSession(SessionMode::kAutoregressive, 512, &error);
   auto spec = model->CreateSession(SessionMode::kSpeculative, 512, &error);
@@ -289,7 +290,7 @@ void CheckExecutionModes(const std::shared_ptr<Model>& model) {
   Expect(
       saved_ar && saved_spec && saved_ar->SizeBytes() < saved_spec->SizeBytes(),
       "AR snapshot includes predictor state");
-  gufo::server::InferenceBackend backend;
+  superroc::server::InferenceBackend backend;
   Expect(backend.load(model, &error, 512, 1), error);
   const auto actual = backend.complete(text, 8, 0.0F);
   Expect(actual.draft_tokens == 0 &&
@@ -302,7 +303,7 @@ void CheckExecutionModes(const std::shared_ptr<Model>& model) {
 }
 
 void CheckDsparkServing(const char* model_path, const char* support_path) {
-  using namespace gufo::server;
+  using namespace superroc::server;
   std::string error;
   auto model = Model::Load(
       model_path,
@@ -314,7 +315,7 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
   const TextSpeculativeConfig speculative{
       .backend = TextSpeculativeBackend::kDSpark,
       .draft_model_path = support_path};
-  const ChatRequest prompt({{gufo::tokenization::ChatRole::kUser,
+  const ChatRequest prompt({{superroc::tokenization::ChatRole::kUser,
                              "Continue the pattern with twenty terms: red, "
                              "blue, blue, red, blue, blue,",
                              "", ""}});
@@ -334,7 +335,7 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
 
   // C1 retains the point-mass route and its stronger AR seed-trace contract.
   {
-    const std::vector<gufo::models::deepseek_v4_flash::ChatMessage>
+    const std::vector<superroc::models::deepseek_v4_flash::ChatMessage>
         direct_messages = {
             {.role = "user",
              .content = "Continue the pattern with twenty terms: red, blue, "
@@ -347,9 +348,9 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
     const auto greedy = backend.chat(prompt, 32, 0.0F);
     std::size_t sampled_drafts = 0;
     for (const auto& sampling : {
-             gufo::sampling::SamplingConfig{.temperature = 0.6F, .seed = 7},
-             gufo::sampling::SamplingConfig{.temperature = 1.0F, .seed = 7},
-             gufo::sampling::SamplingConfig{.temperature = 0.6F,
+             superroc::sampling::SamplingConfig{.temperature = 0.6F, .seed = 7},
+             superroc::sampling::SamplingConfig{.temperature = 1.0F, .seed = 7},
+             superroc::sampling::SamplingConfig{.temperature = 0.6F,
                                             .top_k = 40,
                                             .top_p = 0.95F,
                                             .seed = 11,
@@ -381,7 +382,7 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
   }
 
   // Greedy and seeded sampled requests share one DSpark cohort.
-  const gufo::sampling::SamplingConfig sampled{.temperature = 0.8F,
+  const superroc::sampling::SamplingConfig sampled{.temperature = 0.8F,
                                                .top_k = 20,
                                                .top_p = 0.9F,
                                                .seed = 1234,
@@ -397,7 +398,7 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
       request.client_id = "mixed-" + std::to_string(i);
       pending.push_back(backend.start_chat(
           request, 32,
-          i % 2 == 0 ? gufo::sampling::SamplingConfig{.temperature = 0.0F}
+          i % 2 == 0 ? superroc::sampling::SamplingConfig{.temperature = 0.0F}
                      : sampled,
           {}, true));
       Expect(pending.back() != nullptr, "mixed DSpark request admission");
@@ -465,7 +466,7 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
       .directory = directory,
       .model_artifact_fingerprint = std::string(64, 'a'),
       .draft_model_artifact_fingerprint = std::string(64, 'b')};
-  std::vector<gufo::tokenization::TokenId> expected;
+  std::vector<superroc::tokenization::TokenId> expected;
   for (int run = 0; run < 3; ++run) {
     if (run == 2)
       disk.draft_model_artifact_fingerprint = std::string(64, 'c');
@@ -489,17 +490,17 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
 
 int main(int argc, char** argv) {
   try {
-    const char* model_path = std::getenv("GUFO_DEEPSEEK_V4_FLASH_MODEL");
+    const char* model_path = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
     if (model_path == nullptr || model_path[0] == '\0') {
-      std::cout << "SKIP: GUFO_DEEPSEEK_V4_FLASH_MODEL is not set\n";
+      std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_MODEL is not set\n";
       return 77;
     }
     if (argc > 1) {
       Expect(argc == 2 && std::string_view(argv[1]) == "--dspark-eos",
              "usage: ds4_serving_test [--dspark-eos]");
-      const char* support = std::getenv("GUFO_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
+      const char* support = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
       if (support == nullptr || *support == '\0') {
-        std::cout << "SKIP: GUFO_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
+        std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
         return 77;
       }
       std::string error;
@@ -523,7 +524,7 @@ int main(int argc, char** argv) {
                                &error);
       Expect(model != nullptr, error);
 
-      gufo::server::InferenceBackend backend;
+      superroc::server::InferenceBackend backend;
       Expect(backend.load(model, &error, 512, 2), error);
       Expect(backend.model_id() == model->ModelName(), "HTTP model identifier");
 
@@ -534,7 +535,7 @@ int main(int argc, char** argv) {
       Expect(http_raw.tokens == direct_raw, "raw direct/HTTP token parity");
       Expect(http_raw.ttft_ms > 0.0, "raw TTFT");
 
-      const gufo::sampling::SamplingConfig sampled{
+      const superroc::sampling::SamplingConfig sampled{
           .temperature = 0.8F,
           .top_k = 20,
           .top_p = 0.9F,
@@ -549,13 +550,13 @@ int main(int argc, char** argv) {
                  sampled_repeat.tokens == direct_sampled,
              "seeded sampling and penalties match direct execution and repeat");
 
-      const std::vector<gufo::tokenization::ChatMessage> messages = {
-          {gufo::tokenization::ChatRole::kSystem,
+      const std::vector<superroc::tokenization::ChatMessage> messages = {
+          {superroc::tokenization::ChatRole::kSystem,
            "Answer with one short sentence.", "", ""},
-          {gufo::tokenization::ChatRole::kUser, "Name one primary color.", "",
+          {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "",
            ""},
       };
-      const std::vector<gufo::models::deepseek_v4_flash::ChatMessage>
+      const std::vector<superroc::models::deepseek_v4_flash::ChatMessage>
           direct_messages = {
               {.role = "system", .content = "Answer with one short sentence."},
               {.role = "user", .content = "Name one primary color."},
@@ -579,14 +580,14 @@ int main(int argc, char** argv) {
              "exact DeepSeek reuse avoids another full snapshot copy");
 
       auto continued_messages = messages;
-      continued_messages.emplace_back(gufo::tokenization::ChatRole::kAssistant,
+      continued_messages.emplace_back(superroc::tokenization::ChatRole::kAssistant,
                                       http_chat.text);
-      continued_messages.emplace_back(gufo::tokenization::ChatRole::kUser,
+      continued_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                       "Name a different primary color.");
       auto forked_messages = messages;
-      forked_messages.emplace_back(gufo::tokenization::ChatRole::kAssistant,
+      forked_messages.emplace_back(superroc::tokenization::ChatRole::kAssistant,
                                    http_chat.text);
-      forked_messages.emplace_back(gufo::tokenization::ChatRole::kUser,
+      forked_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                    "Name one warm primary color.");
       auto continued_direct_messages = direct_messages;
       continued_direct_messages.push_back(
@@ -609,9 +610,9 @@ int main(int argc, char** argv) {
                                            ResolveDeepSeekChatOptions({})),
                          2);
 
-      gufo::server::ChatRequest continuation_request(continued_messages);
+      superroc::server::ChatRequest continuation_request(continued_messages);
       continuation_request.client_id = "deepseek-snapshot-branch-a";
-      gufo::server::ChatRequest fork_request(forked_messages);
+      superroc::server::ChatRequest fork_request(forked_messages);
       fork_request.client_id = "deepseek-snapshot-branch-b";
       auto pending_continuation =
           backend.start_chat(continuation_request, 2, 0.0F, {}, true);
@@ -645,26 +646,26 @@ int main(int argc, char** argv) {
       Expect(http_fork.tokens == direct_fork,
              "forked DeepSeek continuation differs from cold full prefill");
 
-      gufo::server::ChatRequest concurrent_a({
-          {gufo::tokenization::ChatRole::kUser,
+      superroc::server::ChatRequest concurrent_a({
+          {superroc::tokenization::ChatRole::kUser,
            "Continue this sequence with four short items: one, two, three,", "",
            ""},
       });
       concurrent_a.client_id = "deepseek-a";
-      gufo::server::ChatRequest concurrent_b({
-          {gufo::tokenization::ChatRole::kUser,
+      superroc::server::ChatRequest concurrent_b({
+          {superroc::tokenization::ChatRole::kUser,
            "Continue this sequence with four short items: red, green, blue,",
            "", ""},
       });
       concurrent_b.client_id = "deepseek-b";
-      const std::vector<gufo::models::deepseek_v4_flash::ChatMessage>
+      const std::vector<superroc::models::deepseek_v4_flash::ChatMessage>
           direct_a_messages = {
               {.role = "user",
                .content =
                    "Continue this sequence with four short items: one, two, "
                    "three,"},
           };
-      const std::vector<gufo::models::deepseek_v4_flash::ChatMessage>
+      const std::vector<superroc::models::deepseek_v4_flash::ChatMessage>
           direct_b_messages = {
               {.role = "user",
                .content =
@@ -687,8 +688,8 @@ int main(int argc, char** argv) {
 
       std::mutex event_mutex;
       std::vector<char> events;
-      gufo::server::InferenceBackend::Result concurrent_result_a;
-      gufo::server::InferenceBackend::Result concurrent_result_b;
+      superroc::server::InferenceBackend::Result concurrent_result_a;
+      superroc::server::InferenceBackend::Result concurrent_result_b;
       std::exception_ptr failure_a;
       std::exception_ptr failure_b;
       std::jthread waiter_a([&] {
@@ -759,9 +760,9 @@ int main(int argc, char** argv) {
              "cancelled DeepSeek state must not remain cached");
     }
     const char* support_path =
-        std::getenv("GUFO_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
+        ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
     if (support_path == nullptr || *support_path == '\0') {
-      std::cout << "SKIP: GUFO_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
+      std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
       return 77;
     }
     CheckDsparkServing(model_path, support_path);

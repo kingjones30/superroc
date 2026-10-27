@@ -85,7 +85,7 @@ void Compare(const std::vector<float>& x, const std::vector<float>& gate, int k,
   }
   std::vector<int> cpu_ids(n_used);
   std::vector<float> cpu_w(n_used);
-  Expect(gufo::models::KatRouteSoftmaxTopK(logits, n_used, cpu_ids, cpu_w),
+  Expect(superroc::models::KatRouteSoftmaxTopK(logits, n_used, cpu_ids, cpu_w),
          "cpu route");
 
   DeviceF32 d_x(x.size());
@@ -341,19 +341,19 @@ bool QvbRowsCases() {
     return false;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "qvb open: " + error);
-  auto weights = gufo::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+  auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "qvb bind: " + error);
   const auto& gate = weights->layers[0].ffn_gate_inp;
   const auto& shexp = weights->layers[0].ffn_gate_inp_shexp;
   constexpr int k = 2048;
   constexpr int n_expert = 256;
   constexpr int n_used = 8;
-  Expect(gate.type == gufo::core::GgmlType::kF32 &&
+  Expect(gate.type == superroc::core::GgmlType::kF32 &&
              gate.num_elements == static_cast<std::size_t>(k) * n_expert,
          "qvb router f32");
-  Expect(shexp.type == gufo::core::GgmlType::kF32 &&
+  Expect(shexp.type == superroc::core::GgmlType::kF32 &&
              shexp.num_elements == static_cast<std::size_t>(k),
          "qvb shexp gate f32");
   std::vector<float> g(gate.num_elements);
@@ -495,12 +495,12 @@ int main() {
     return 77;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open: " + error);
-  auto weights = gufo::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+  auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "bind: " + error);
   const auto& gate = weights->layers[0].ffn_gate_inp;
-  Expect(gate.type == gufo::core::GgmlType::kF32, "router f32");
+  Expect(gate.type == superroc::core::GgmlType::kF32, "router f32");
   constexpr int k = 2048;
   constexpr int n_expert = 256;
   Expect(gate.num_elements == static_cast<std::size_t>(k) * n_expert,

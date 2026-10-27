@@ -1,13 +1,13 @@
-#ifndef GUFO_SERVER_AUDIO_WEBSOCKET_HPP_
-#define GUFO_SERVER_AUDIO_WEBSOCKET_HPP_
+#ifndef SUPERROC_SERVER_AUDIO_WEBSOCKET_HPP_
+#define SUPERROC_SERVER_AUDIO_WEBSOCKET_HPP_
 
 #include "src/cli/serve/http_server.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 HttpResponse HandleTtsWebSocket(const HttpRequest& request,
                                 TtsService& service);
 HttpResponse HandleAsrWebSocket(const HttpRequest& request,
                                 AsrService& service);
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_AUDIO_WEBSOCKET_HPP_
+#endif  // SUPERROC_SERVER_AUDIO_WEBSOCKET_HPP_

@@ -1,10 +1,10 @@
-#ifndef GUFO_CACHE_TYPES_HPP_
-#define GUFO_CACHE_TYPES_HPP_
+#ifndef SUPERROC_CACHE_TYPES_HPP_
+#define SUPERROC_CACHE_TYPES_HPP_
 
 #include <cstddef>
 #include <cstdint>
 
-namespace gufo::cache {
+namespace superroc::cache {
 
 using Token = std::uint32_t;
 using Rows = std::uint64_t;
@@ -53,6 +53,6 @@ struct Capabilities {
   bool persistent_encoding{false};
 };
 
-}  // namespace gufo::cache
+}  // namespace superroc::cache
 
 #endif

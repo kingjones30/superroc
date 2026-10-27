@@ -19,9 +19,9 @@ void Expect(bool ok, const std::string& msg) {
 }  // namespace
 
 int main() {
-  using gufo::models::qwen::ClassifyKatDispatch;
-  using gufo::models::qwen::KatDispatch;
-  using gufo::models::qwen::KatSpecKind;
+  using superroc::models::qwen::ClassifyKatDispatch;
+  using superroc::models::qwen::KatDispatch;
+  using superroc::models::qwen::KatSpecKind;
 
   Expect(ClassifyKatDispatch("qwen35", KatSpecKind::kOff, true, false) ==
              KatDispatch::kNotKat,
@@ -55,10 +55,10 @@ int main() {
     return 77;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open GGUF: " + error);
 
-  auto weights = gufo::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+  auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "bind: " + error);
   const auto& cfg = weights->config;
   Expect(cfg.architecture == "qwen35moe", "arch");
@@ -93,9 +93,9 @@ int main() {
   Expect(weights->mtp_head_tied_to_output, "tied MTP head");
   Expect(weights->mtp_embed_tied_to_token, "tied MTP embed");
   Expect(!weights->output_tied_to_token_embd, "trunk head is its own tensor");
-  Expect(weights->output.type == gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST,
+  Expect(weights->output.type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST,
          "output type 101");
-  Expect(weights->token_embd.type == gufo::core::GgmlType::kQ6_K,
+  Expect(weights->token_embd.type == superroc::core::GgmlType::kQ6_K,
          "token embd type 14");
   Expect(weights->output.data != weights->token_embd.data, "head not embd");
   Expect(reader->FindTensor("blk.40.nextn.embed_tokens.weight") == nullptr,
@@ -112,17 +112,17 @@ int main() {
            "hybrid map " + std::to_string(i));
     Expect(layer.is_moe, "trunk moe " + std::to_string(i));
     Expect(layer.nextn_eh_proj.empty(), "trunk has no nextn");
-    Expect(layer.ffn_gate_inp.type == gufo::core::GgmlType::kF32, "router f32");
+    Expect(layer.ffn_gate_inp.type == superroc::core::GgmlType::kF32, "router f32");
     Expect(layer.ffn_gate_inp.num_elements == 2048U * 256U, "router numel");
-    Expect(layer.ffn_gate_inp_shexp.type == gufo::core::GgmlType::kF32,
+    Expect(layer.ffn_gate_inp_shexp.type == superroc::core::GgmlType::kF32,
            "shexp gate f32");
     Expect(layer.ffn_gate_inp_shexp.num_elements == 2048, "shexp gate numel");
-    Expect(layer.ffn_gate_exps.type == gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST,
+    Expect(layer.ffn_gate_exps.type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST,
            "expert type 101");
-    Expect(layer.ffn_down_exps.type == gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST,
+    Expect(layer.ffn_down_exps.type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST,
            "down expert type");
     Expect(
-        layer.ffn_gate_shexp.type == gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST,
+        layer.ffn_gate_shexp.type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST,
         "shexp type 101");
     Expect(layer.ffn_gate.empty() && layer.ffn_up.empty() &&
                layer.ffn_down.empty(),
@@ -151,16 +151,16 @@ int main() {
 
   const auto& mtp = *weights->mtp;
   Expect(mtp.is_full_attention && mtp.is_moe, "MTP is full-attn MoE");
-  Expect(mtp.ffn_gate_exps.type == gufo::core::GgmlType::kQ8_0,
+  Expect(mtp.ffn_gate_exps.type == superroc::core::GgmlType::kQ8_0,
          "MTP experts Q8_0");
-  Expect(mtp.ffn_gate_inp.type == gufo::core::GgmlType::kF32, "MTP router F32");
-  Expect(mtp.ffn_gate_inp_shexp.type == gufo::core::GgmlType::kF32,
+  Expect(mtp.ffn_gate_inp.type == superroc::core::GgmlType::kF32, "MTP router F32");
+  Expect(mtp.ffn_gate_inp_shexp.type == superroc::core::GgmlType::kF32,
          "MTP shexp gate");
-  Expect(mtp.nextn_eh_proj.type == gufo::core::GgmlType::kQ8_0, "eh_proj Q8_0");
+  Expect(mtp.nextn_eh_proj.type == superroc::core::GgmlType::kQ8_0, "eh_proj Q8_0");
   Expect(mtp.nextn_eh_proj.num_elements == 4096U * 2048U, "eh_proj numel");
-  Expect(mtp.nextn_enorm.type == gufo::core::GgmlType::kF32 &&
-             mtp.nextn_hnorm.type == gufo::core::GgmlType::kF32 &&
-             mtp.nextn_shared_head_norm.type == gufo::core::GgmlType::kF32,
+  Expect(mtp.nextn_enorm.type == superroc::core::GgmlType::kF32 &&
+             mtp.nextn_hnorm.type == superroc::core::GgmlType::kF32 &&
+             mtp.nextn_shared_head_norm.type == superroc::core::GgmlType::kF32,
          "MTP norms F32");
   Expect(mtp.nextn_eh_proj.data != weights->layers[0].ffn_gate_inp.data,
          "MTP storage is not a trunk layer");

@@ -1,5 +1,5 @@
-#ifndef GUFO_CLI_VIDEO_HPP_
-#define GUFO_CLI_VIDEO_HPP_
+#ifndef SUPERROC_CLI_VIDEO_HPP_
+#define SUPERROC_CLI_VIDEO_HPP_
 
 #include <filesystem>
 #include <optional>
@@ -9,7 +9,7 @@
 
 #include "src/models/minimax_h3/generation.hpp"
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 struct VideoCliOptions {
   minimax_h3::GenerationRequest request;
@@ -24,6 +24,6 @@ void PrintVideoHelp(std::string_view program_name);
     std::span<const char* const> args, std::string* error = nullptr);
 [[nodiscard]] int RunVideo(std::span<const char* const> args);
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli
 
-#endif  // GUFO_CLI_VIDEO_HPP_
+#endif  // SUPERROC_CLI_VIDEO_HPP_

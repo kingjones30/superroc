@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_IMAGE_21_WEIGHTS_HPP_
-#define GUFO_MODELS_QWEN_IMAGE_21_WEIGHTS_HPP_
+#ifndef SUPERROC_MODELS_QWEN_IMAGE_21_WEIGHTS_HPP_
+#define SUPERROC_MODELS_QWEN_IMAGE_21_WEIGHTS_HPP_
 
 #include <cstddef>
 #include <filesystem>
@@ -11,7 +11,7 @@
 
 #include "src/core/json.hpp"
 
-namespace gufo::models::qwen_image_21 {
+namespace superroc::models::qwen_image_21 {
 
 struct Weight {
   std::vector<int> shape;
@@ -38,5 +38,5 @@ private:
   json::Value vae_config_;
 };
 
-}  // namespace gufo::models::qwen_image_21
+}  // namespace superroc::models::qwen_image_21
 #endif

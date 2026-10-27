@@ -12,15 +12,15 @@
 
 namespace {
 
-using gufo::core::GgmlType;
-using gufo::models::qwen::DecideQwenFp4F16Prefill;
-using gufo::models::qwen::kQwenFp4F16PrefillForce;
-using gufo::models::qwen::kQwenFp4F16PrefillGated;
-using gufo::models::qwen::kQwenFp4F16PrefillOff;
-using gufo::models::qwen::ParseQwenFp4F16PrefillMode;
-using gufo::models::qwen::QwenFp4F16Decision;
-using gufo::models::qwen::QwenFp4F16LayerTypes;
-using gufo::models::qwen::QwenFp4F16Route;
+using superroc::core::GgmlType;
+using superroc::models::qwen::DecideQwenFp4F16Prefill;
+using superroc::models::qwen::kQwenFp4F16PrefillForce;
+using superroc::models::qwen::kQwenFp4F16PrefillGated;
+using superroc::models::qwen::kQwenFp4F16PrefillOff;
+using superroc::models::qwen::ParseQwenFp4F16PrefillMode;
+using superroc::models::qwen::QwenFp4F16Decision;
+using superroc::models::qwen::QwenFp4F16LayerTypes;
+using superroc::models::qwen::QwenFp4F16Route;
 
 constexpr GgmlType kT100 = GgmlType::kQ4_0_ROCMFP4;
 constexpr GgmlType kT101 = GgmlType::kQ4_0_ROCMFP4_FAST;

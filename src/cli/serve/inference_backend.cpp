@@ -55,8 +55,8 @@
 #include "src/core/hip/heap_placement.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/hip/host_allocations.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"  // SQ10: slot sets.
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"    // SQ10 SPEC2 (R4): codes.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10: slot sets.
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"    // SQ10 SPEC2 (R4): codes.
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/deepseek_v4_flash/dspark_sampler.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
@@ -73,7 +73,7 @@
 #include "src/models/qwen38_flash_next/engine.hpp"
 #endif
 
-namespace gufo::server {
+namespace superroc::server {
 
 // A selected token ends the turn only when the request admits EOS and the token
 // is one of the model's stop tokens. The engine stops there itself and the stop
@@ -99,8 +99,8 @@ void SetError(std::string* error, std::string message) {
 // result from the same weights), so the counter is the operator's only sign
 // that a set was under-provisioned or a registration dropped.
 void LogFp4SlotRefusals(const char* phase) {
-  std::fprintf(stderr, "GUFO_FP4_SLOTS phase=%s refusals=%lu\n", phase,
-               gufo_fp4_slot_refuse_count());
+  std::fprintf(stderr, "SUPERROC_FP4_SLOTS phase=%s refusals=%lu\n", phase,
+               superroc_fp4_slot_refuse_count());
 }
 #endif
 
@@ -137,7 +137,7 @@ tokenization::ChatTemplateOptions QwenChatOptions(const ChatRequest& request,
                                                       request.add_vision_id);
   options.require_tool_call =
       request.tool_choice == ChatRequest::ToolChoice::kRequired;
-  // gufo #285: the rendered prompt may be as long as the context can hold.
+  // superroc #285: the rendered prompt may be as long as the context can hold.
   options.max_output_bytes =
       tokenization::RenderedPromptBoundBytes(max_context);
   return options;
@@ -323,7 +323,7 @@ std::vector<std::uint8_t> DeepSeekCompatibilityIdentity(
         "DeepSeek disk cache requires an artifact fingerprint");
   }
   std::ostringstream identity;
-  identity << "schema=gufo-text-continuation-v2\n"
+  identity << "schema=superroc-text-continuation-v2\n"
            << "model_kind=deepseek4\n"
            << "artifact_id=" << core::kGgufIdentityScheme << ':'
            << artifact_fingerprint << '\n'
@@ -362,7 +362,7 @@ std::vector<std::uint8_t> QwenFlashNextCompatibilityIdentity(
         "fingerprint");
   }
   std::ostringstream identity;
-  identity << "schema=gufo-text-continuation-v2\n"
+  identity << "schema=superroc-text-continuation-v2\n"
            << "model_kind=qwen38-flash-next\n"
            << "artifact_id=" << core::kGgufIdentityScheme << ':'
            << artifact_fingerprint << '\n'
@@ -413,11 +413,11 @@ std::vector<std::uint8_t> QwenCompatibilityIdentity(
                             execution_policy.UsesBf16RecurrentState());
   std::ostringstream identity;
   identity
-      << "schema=gufo-text-continuation-v2\n"
+      << "schema=superroc-text-continuation-v2\n"
       << "model_kind="
       << (flint ? std::string_view("flint")
           : lfm2
-              ? gufo::core::ModelFamilyArch(gufo::core::ModelFamilyId::kLfm2Moe)
+              ? superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kLfm2Moe)
               : std::string_view("qwen3.8"))  // LFM2
       << "\n"
       << "artifact_id=" << core::kGgufIdentityScheme << ':'
@@ -578,7 +578,7 @@ public:
               .max_context = max_context,
               .max_draft_tokens = speculative_options.max_draft_tokens,
               // The MTP draft consumes the target's vision embeddings, exactly
-              // as gufo prompt does (prompt.cpp:758). Without this an image
+              // as superroc prompt does (prompt.cpp:758). Without this an image
               // prompt would draft against a null vision input.
               .vision_input = &executor_->VisionInput(),
           },
@@ -589,7 +589,7 @@ public:
       // SQ10 SPEC2 (R1): the drafter's stream uses this session's slot
       // set (the host alternates the two streams, so they never collide).
       // The MTP dtor removes the alias (R3).
-      if (gufo_fp4_slot_stream_alias(draft_backend->DraftStream(),
+      if (superroc_fp4_slot_stream_alias(draft_backend->DraftStream(),
                                      executor_->ArenaStream()) < 0) {
         throw std::runtime_error("Failed to alias MTP draft stream");
       }
@@ -1306,9 +1306,9 @@ public:
       execution_policy_.fuse_qk_norm_rope_kv = false;
       execution_policy_.glimmer_fp16_kv = true;  // LGA: Glimmer fp16-KV plane
     }
-    // LFM2: fp16 KV (GUFO_LFM2_KV=fp32 for the reference), no fused
+    // LFM2: fp16 KV (SUPERROC_LFM2_KV=fp32 for the reference), no fused
     // QK-RoPE-KV (NOT glimmer_fp16_kv).
-    if (gufo::core::IsLfm2Family(model_->GetConfig().architecture)) {
+    if (superroc::core::IsLfm2Family(model_->GetConfig().architecture)) {
       execution_policy_.kv_cache_storage = hip::Lfm2KvCacheStorage();
       execution_policy_.fuse_qk_norm_rope_kv = false;
     }
@@ -1333,7 +1333,7 @@ public:
           .compatibility_identity = QwenCompatibilityIdentity(
               artifact_fingerprint, draft_artifact_fingerprint, max_context_,
               execution_policy_, speculative, speculative_options_,
-              gufo::core::IsLfm2Family(
+              superroc::core::IsLfm2Family(
                   model_->GetConfig().architecture),  // LFM2
               model_->GetConfig().flint, mtp_model_ != nullptr),
           .payload_version = kQwenPersistentPayloadVersion,
@@ -1352,7 +1352,7 @@ public:
         .state_abi =
             model_->GetConfig().flint
                 ? std::string(FlintStateAbi(execution_policy_.glimmer_fp16_kv))
-            : gufo::core::IsLfm2Family(
+            : superroc::core::IsLfm2Family(
                   model_->GetConfig().architecture)  // LFM2
                 ? std::string(
                       Lfm2StateAbi(speculative_enabled,
@@ -1377,11 +1377,11 @@ public:
                 // ForwardVerificationChunk).
                 .batched_multi_token_decode =
                     speculative_enabled &&
-                    !gufo::core::IsLfm2Family(
+                    !superroc::core::IsLfm2Family(
                         model_->GetConfig().architecture) &&
                     MaximumDecodeBatchWidth() > 1,
                 .batched_multi_token_decode_max_width =
-                    speculative_enabled && !gufo::core::IsLfm2Family(
+                    speculative_enabled && !superroc::core::IsLfm2Family(
                                                model_->GetConfig().architecture)
                         ? MaximumDecodeBatchWidth()
                         : 0,
@@ -1540,7 +1540,7 @@ public:
           QwenChatOptions(request, max_context_));
     }
     // LFM2: pinned lfm2moe template, same span/tool_choice handling.
-    if (gufo::core::IsLfm2Family(model_->GetConfig().architecture)) {
+    if (superroc::core::IsLfm2Family(model_->GetConfig().architecture)) {
       const auto messages = std::span<const tokenization::ChatMessage>(
           request.messages.data(), request.messages.size());
       const auto tools = request.tool_choice == ChatRequest::ToolChoice::kNone
@@ -1595,7 +1595,7 @@ public:
       return TextPreparedPrompt{std::move(*tokens), {}, 0};
     }
     // LFM2: the same tokens-only TextPreparedPrompt as Glimmer.
-    if (gufo::core::IsLfm2Family(model_->GetConfig().architecture)) {
+    if (superroc::core::IsLfm2Family(model_->GetConfig().architecture)) {
       auto tokens = RenderAndTokenize(request);
       if (!tokens.has_value()) {
         return std::nullopt;
@@ -2285,8 +2285,8 @@ public:
       std::uint32_t max_context, bool use_dspark) {
     std::string error;
     session_ = model->CreateSession(
-        use_dspark ? gufo::core::SessionMode::kSpeculative
-                   : gufo::core::SessionMode::kAutoregressive,
+        use_dspark ? superroc::core::SessionMode::kSpeculative
+                   : superroc::core::SessionMode::kAutoregressive,
         max_context, &error);
     if (session_ == nullptr) {
       throw std::runtime_error("Failed to create DeepSeek session: " + error);
@@ -3151,7 +3151,7 @@ public:
       component_identity_ = persistence_->compatibility_identity;
     } else {
       std::ostringstream identity;
-      identity << "schema=gufo-process-text-continuation-v1\n"
+      identity << "schema=superroc-process-text-continuation-v1\n"
                << "model_instance=" << model_.get() << '\n'
                << "context_tokens=" << max_context_ << '\n'
                << "mtp=" << use_mtp_ << '\n'
@@ -3399,8 +3399,8 @@ public:
         .resident_weights_bytes = model_->ResidentBytes(),
         .state_capacity_bytes = capacity,
         .per_request_state_bytes = model_->SessionBytes(
-            use_mtp_ ? gufo::core::SessionMode::kSpeculative
-                     : gufo::core::SessionMode::kAutoregressive,
+            use_mtp_ ? superroc::core::SessionMode::kSpeculative
+                     : superroc::core::SessionMode::kAutoregressive,
             max_context_),
         // Runtime scratch is shared and already allocated at model load;
         // reserve its remaining lazy buffers once from aggregate capacity.
@@ -3955,9 +3955,9 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
     std::string probe_error;
     auto probe = core::GgufReader::OpenFile(model_path, &probe_error);
     if (probe != nullptr &&
-        gufo::core::IsModelFamily(
+        superroc::core::IsModelFamily(
             probe->GetMetadataString("general.architecture").value_or(""),
-            gufo::core::ModelFamilyId::kBailingMoe3)) {
+            superroc::core::ModelFamilyId::kBailingMoe3)) {
       std::shared_ptr<models::ling3::vision::VisionTower> vision_tower;
       if (!vision_model_path.empty()) {
         const auto general_name =
@@ -4068,9 +4068,9 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
     max_context = static_cast<std::uint32_t>(native);
   }
 
-  if (gufo::core::IsModelFamily(
+  if (superroc::core::IsModelFamily(
           reader->GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kDeepSeek4)) {
+          superroc::core::ModelFamilyId::kDeepSeek4)) {
     if (!vision_model_path.empty()) {
       SetError(error, "DeepSeek does not support --mmproj");
       return false;
@@ -4125,9 +4125,9 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
                 prefill_policy, scheduler_policy, speculative_config,
                 std::move(resolved_disk_cache_config), ram_cache_config);
   }
-  if (gufo::core::IsModelFamily(
+  if (superroc::core::IsModelFamily(
           reader->GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kQwen4Exp)) {
+          superroc::core::ModelFamilyId::kQwen4Exp)) {
     if (speculative_config.backend != TextSpeculativeBackend::kDisabled &&
         speculative_config.backend != TextSpeculativeBackend::kMtp) {
       SetError(error,
@@ -4206,7 +4206,7 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
   {
     const auto arch =
         reader->GetMetadataString("general.architecture").value_or("");
-    const gufo::core::ModelFamily* family = gufo::core::FindModelFamily(arch);
+    const superroc::core::ModelFamily* family = superroc::core::FindModelFamily(arch);
     if (family == nullptr) {
       SetError(error, "unsupported architecture: " + std::string(arch));
       return false;
@@ -4223,7 +4223,7 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
     // LFM2: DSpark drafting via dflash2 only. There is no MTP head (and
     // the DeepSeek DSpark enumerator is a different support model), so
     // every other backend refuses here with the arch in the message.
-    if (gufo::core::IsLfm2Family(arch) &&
+    if (superroc::core::IsLfm2Family(arch) &&
         speculative_config.backend != TextSpeculativeBackend::kDisabled &&
         speculative_config.backend != TextSpeculativeBackend::kDFlash) {
       SetError(error, std::string(arch) +
@@ -4233,7 +4233,7 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
     }
     // NBFAST T1: plain Llama accepts only DFlash2 drafting, for the same
     // reason as LFM2 (no MTP head in the target file).
-    if (gufo::core::IsModelFamily(arch, gufo::core::ModelFamilyId::kLlama) &&
+    if (superroc::core::IsModelFamily(arch, superroc::core::ModelFamilyId::kLlama) &&
         speculative_config.backend != TextSpeculativeBackend::kDisabled &&
         speculative_config.backend != TextSpeculativeBackend::kDFlash) {
       SetError(error, std::string(arch) +
@@ -4245,9 +4245,9 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
   // KAT: qwen35moe binds on the Qwen chassis. Refuse vision, the DeepSeek
   // DSpark enumerator, and a sidecar MTP draft. `--speculative dflash2` is
   // accepted only when the sidecar is the markov/DSpark kind.
-  if (gufo::core::IsModelFamily(
+  if (superroc::core::IsModelFamily(
           reader->GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kQwen35Moe)) {
+          superroc::core::ModelFamilyId::kQwen35Moe)) {
     // KAT: map the real enumerator by name. Do not cast the integer.
     models::qwen::KatSpecKind kat_spec = models::qwen::KatSpecKind::kOff;
     switch (speculative_config.backend) {
@@ -4280,7 +4280,7 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
       }
     }
     const auto decision = models::qwen::ClassifyKatDispatch(
-        gufo::core::ModelFamilyArch(gufo::core::ModelFamilyId::kQwen35Moe),
+        superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kQwen35Moe),
         kat_spec, speculative_config.draft_model_path.empty(),
         reader->HasVisionTensors(), dflash_markov_sidecar);
     if (decision == models::qwen::KatDispatch::kRefuseVision) {
@@ -4303,7 +4303,7 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
       return false;
     }
     // KAT S3: GPU expert decode is installed. Fall through into
-    // QwenGpuModel::CreateFromGguf (same path as `gufo prompt`). MoE layers
+    // QwenGpuModel::CreateFromGguf (same path as `superroc prompt`). MoE layers
     // have empty dense ffn projections; decode_step and prefill_chunk take
     // the expert path when is_moe, so the dense SwiGLU is not launched.
   }
@@ -4364,7 +4364,7 @@ bool ConfigureFp4SlotSets(std::size_t session_count, std::string* error) {
   (void)error;
   if (session_count < 1)
     session_count = 1;
-  (void)gufo_fp4_slot_sets_configure(static_cast<int>(session_count));
+  (void)superroc_fp4_slot_sets_configure(static_cast<int>(session_count));
   return true;
 }
 
@@ -4526,7 +4526,7 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
       speculative_options.use_batched_verification = true;
       speculative_options.retain_frontier_logits = true;
       // MTP drafts a chain, so the adaptive length controller is meaningful
-      // here (this is what gufo prompt already selects for --speculative mtp).
+      // here (this is what superroc prompt already selects for --speculative mtp).
       // DFlash2 diffuses a fixed block, so it pins the length instead.
       speculative_options.enable_adaptive_draft_length = true;
     }
@@ -4858,7 +4858,7 @@ bool InferenceBackend::load(
   SetError(
       error,
       "Ling-3.0-flash (bailingmoe3) needs the HIP backend; this superroc was "
-      "built with ENGINE_ENABLE_HIP=OFF. Use gufo_ling3_ref for the CPU "
+      "built with ENGINE_ENABLE_HIP=OFF. Use superroc_ling3_ref for the CPU "
       "oracle, or rebuild with -DENGINE_ENABLE_HIP=ON.");
   return false;
 }
@@ -5281,4 +5281,4 @@ std::optional<std::size_t> InferenceBackend::count_chat_tokens(
 #endif
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

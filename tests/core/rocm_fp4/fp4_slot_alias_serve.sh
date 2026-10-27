@@ -1,12 +1,12 @@
 #!/bin/bash
 # SQ10 SPEC3 (S3-3): the alias wiring through the real serve path.
 #
-# Serves the KAT+MTP model named by GUFO_FP4_TEST_KAT_MODEL at one session
+# Serves the KAT+MTP model named by SUPERROC_FP4_TEST_KAT_MODEL at one session
 # and answers one drafted request. This goes through the production alias
 # registration (the serve state ctor), so it fails when that wiring is
 # dropped: on sq10-1 the drafter waits for a set nobody frees (no answer
 # before the deadline); with the registration dropped on a refuse-at-once
-# tree every draft launch refuses (GUFO_FP4_SLOT_REFUSE lines). Without a
+# tree every draft launch refuses (SUPERROC_FP4_SLOT_REFUSE lines). Without a
 # model file it SKIPs (exit 77) for ctest SKIP_RETURN_CODE.
 #
 # SQ10 SPEC4: (1) trap EXIT INT TERM HUP so a ctest timeout (SIGTERM) still
@@ -17,25 +17,25 @@
 # weights loaded + usage.draft_tokens > 0), so a mis-set model file FAILs
 # naming what was missing instead of passing vacuously.
 #
-# Usage: fp4_slot_alias_serve.sh <gufo-binary>
-# Env: GUFO_FP4_TEST_KAT_MODEL (required), GUFO_FP4_TEST_PORT (default 18231),
-#      GUFO_FP4_TEST_OUT (log dir, default: current directory).
+# Usage: fp4_slot_alias_serve.sh <superroc-binary>
+# Env: SUPERROC_FP4_TEST_KAT_MODEL (required), SUPERROC_FP4_TEST_PORT (default 18231),
+#      SUPERROC_FP4_TEST_OUT (log dir, default: current directory).
 set -uo pipefail
-BIN=${1:?usage: fp4_slot_alias_serve.sh <gufo-binary>}
-if [ -z "${GUFO_FP4_TEST_KAT_MODEL:-}" ]; then
-  echo "SKIP fp4_slot_alias_serve: GUFO_FP4_TEST_KAT_MODEL is not set"
+BIN=${1:?usage: fp4_slot_alias_serve.sh <superroc-binary>}
+if [ -z "${SUPERROC_FP4_TEST_KAT_MODEL:-}" ]; then
+  echo "SKIP fp4_slot_alias_serve: SUPERROC_FP4_TEST_KAT_MODEL is not set"
   exit 77
 fi
-if [ ! -f "$GUFO_FP4_TEST_KAT_MODEL" ]; then
-  echo "SKIP fp4_slot_alias_serve: model file missing: $GUFO_FP4_TEST_KAT_MODEL"
+if [ ! -f "$SUPERROC_FP4_TEST_KAT_MODEL" ]; then
+  echo "SKIP fp4_slot_alias_serve: model file missing: $SUPERROC_FP4_TEST_KAT_MODEL"
   exit 77
 fi
 if [ ! -x "$BIN" ]; then
-  echo "FAIL fp4_slot_alias_serve: gufo binary not executable: $BIN"
+  echo "FAIL fp4_slot_alias_serve: superroc binary not executable: $BIN"
   exit 1
 fi
-PORT=${GUFO_FP4_TEST_PORT:-18231}
-OUT=${GUFO_FP4_TEST_OUT:-$(pwd)}
+PORT=${SUPERROC_FP4_TEST_PORT:-18231}
+OUT=${SUPERROC_FP4_TEST_OUT:-$(pwd)}
 LOG=$OUT/fp4_slot_alias_serve.log
 ANS=$OUT/fp4_slot_alias_serve.ans.json
 rm -f "$LOG" "$ANS"
@@ -57,8 +57,8 @@ if curl -sf -m 1 "localhost:$PORT/health" >/dev/null 2>&1; then
   exit 1
 fi
 # Flags are Jay's KAT+MTP seat flags (sq10v2/job.sh): built-in drafter, greedy.
-(GUFO_FP4_SLOT_TRACE=1 exec "$BIN" serve -i 127.0.0.1 -p "$PORT" -j 1 llm \
-  -m "$GUFO_FP4_TEST_KAT_MODEL" --served-model-name m --context 32768 \
+(SUPERROC_FP4_SLOT_TRACE=1 exec "$BIN" serve -i 127.0.0.1 -p "$PORT" -j 1 llm \
+  -m "$SUPERROC_FP4_TEST_KAT_MODEL" --served-model-name m --context 32768 \
   --think off -t 0 --presence-penalty 0 -d 3 --min-draft-tokens 1 \
   --speculative mtp) >"$LOG" 2>&1 < /dev/null &
 P=$!
@@ -73,7 +73,7 @@ if [ "$up" != 1 ]; then
   # SPEC4 item 3: name a mis-set model file instead of leaving a bare startup
   # failure. A non-KAT file is refused here at load (no embedded nextn block).
   if grep -q 'requires --mtp-model\|Failed to create Qwen MTP model' "$LOG" 2>/dev/null; then
-    echo "FAIL fp4_slot_alias_serve: the model file has no embedded KAT+MTP drafter path: $GUFO_FP4_TEST_KAT_MODEL"
+    echo "FAIL fp4_slot_alias_serve: the model file has no embedded KAT+MTP drafter path: $SUPERROC_FP4_TEST_KAT_MODEL"
     grep -h 'requires --mtp-model\|Failed to create Qwen MTP model' "$LOG" | head -n 2 | cut -c1-200
   fi
   tail -n 5 "$LOG" | cut -c1-200
@@ -105,20 +105,20 @@ if [ -z "$TEXT" ]; then
   echo "FAIL fp4_slot_alias_serve: empty answer: $(head -c 300 "$ANS")"
   exit 1
 fi
-REFUSALS=$(grep -c GUFO_FP4_SLOT_REFUSE "$LOG" || true)
+REFUSALS=$(grep -c SUPERROC_FP4_SLOT_REFUSE "$LOG" || true)
 if [ "$REFUSALS" != 0 ]; then
   echo "FAIL fp4_slot_alias_serve: $REFUSALS refusal lines (dropped-registration shape)"
-  grep GUFO_FP4_SLOT_REFUSE "$LOG" | head -n 3 | cut -c1-200
+  grep SUPERROC_FP4_SLOT_REFUSE "$LOG" | head -n 3 | cut -c1-200
   exit 1
 fi
-WAITS=$(grep -c GUFO_FP4_SLOT_WAIT "$LOG" || true)
+WAITS=$(grep -c SUPERROC_FP4_SLOT_WAIT "$LOG" || true)
 if [ "$WAITS" != 0 ]; then
   echo "FAIL fp4_slot_alias_serve: $WAITS wait lines"
   exit 1
 fi
-SLOTS=$(grep -c 'GUFO_FP4_SLOTS phase=load_end' "$LOG" || true)
+SLOTS=$(grep -c 'SUPERROC_FP4_SLOTS phase=load_end' "$LOG" || true)
 if [ "$SLOTS" = 0 ]; then
-  echo "FAIL fp4_slot_alias_serve: no GUFO_FP4_SLOTS load_end line in server log"
+  echo "FAIL fp4_slot_alias_serve: no SUPERROC_FP4_SLOTS load_end line in server log"
   exit 1
 fi
 # SPEC4 item 3: positive proof the drafter path really ran through the alias.
@@ -126,14 +126,14 @@ fi
 # refusal, no wait, one load_end line). The MTP draft weights must have
 # loaded, and the answer's usage must show drafts proposed.
 if ! grep -q 'phase=draft_weights' "$LOG" 2>/dev/null; then
-  echo "FAIL fp4_slot_alias_serve: no phase=draft_weights line in server log - the MTP draft weights never loaded: $GUFO_FP4_TEST_KAT_MODEL"
+  echo "FAIL fp4_slot_alias_serve: no phase=draft_weights line in server log - the MTP draft weights never loaded: $SUPERROC_FP4_TEST_KAT_MODEL"
   exit 1
 fi
 DRAFTS=$(python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); print(j.get("usage",{}).get("draft_tokens",-1))' "$ANS" 2>/dev/null || echo -1)
 DRAFTS_ACC=$(python3 -c 'import json,sys; j=json.load(open(sys.argv[1])); print(j.get("usage",{}).get("draft_tokens_accepted",-1))' "$ANS" 2>/dev/null || echo -1)
 case "$DRAFTS" in ''|*[!0-9]*) DRAFTS=-1;; esac
 if [ "$DRAFTS" -le 0 ]; then
-  echo "FAIL fp4_slot_alias_serve: no drafts proposed (usage.draft_tokens=$DRAFTS) - the KAT+MTP drafter path did not run; GUFO_FP4_TEST_KAT_MODEL must name a KAT file with a built-in drafter"
+  echo "FAIL fp4_slot_alias_serve: no drafts proposed (usage.draft_tokens=$DRAFTS) - the KAT+MTP drafter path did not run; SUPERROC_FP4_TEST_KAT_MODEL must name a KAT file with a built-in drafter"
   exit 1
 fi
 echo "SERVE_WIRING PASS (answer ${#TEXT} chars, drafts proposed=$DRAFTS accepted=$DRAFTS_ACC, refusals 0, waits 0)"

@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_INFERENCE_BACKEND_HPP_
-#define GUFO_SERVER_INFERENCE_BACKEND_HPP_
+#ifndef SUPERROC_SERVER_INFERENCE_BACKEND_HPP_
+#define SUPERROC_SERVER_INFERENCE_BACKEND_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -15,34 +15,34 @@
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/qwen/dflash_policy.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 class QwenGpuModel;
 }
 
-namespace gufo::models::deepseek_v4_flash {
+namespace superroc::models::deepseek_v4_flash {
 class Model;
 }
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 class Model;
 }
 
 // Ling-3.0-flash (bailingmoe3). Deliberately NOT HIP-guarded: the CPU
-// reference backend is a complete implementation, so `gufo serve` can serve
+// reference backend is a complete implementation, so `superroc serve` can serve
 // Ling in a CPU-only build as well.
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 class Model;
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3
 
-namespace gufo::models::ling3::vision {
+namespace superroc::models::ling3::vision {
 class VisionTower;
 }
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 class QwenTokenizer;
 }
 
-namespace gufo::server {
+namespace superroc::server {
 
 enum class TextSpeculativeBackend : std::uint8_t {
   kDisabled,
@@ -214,6 +214,6 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_INFERENCE_BACKEND_HPP_
+#endif  // SUPERROC_SERVER_INFERENCE_BACKEND_HPP_

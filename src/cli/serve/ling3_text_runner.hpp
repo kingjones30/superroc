@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_LING3_TEXT_RUNNER_HPP_
-#define GUFO_SERVER_LING3_TEXT_RUNNER_HPP_
+#ifndef SUPERROC_SERVER_LING3_TEXT_RUNNER_HPP_
+#define SUPERROC_SERVER_LING3_TEXT_RUNNER_HPP_
 
 #include <cstdint>
 #include <memory>
@@ -9,11 +9,11 @@
 #include "src/models/ling3/engine.hpp"
 #include "src/models/ling3/vision_prompt.hpp"
 
-namespace gufo::models::ling3::vision {
+namespace superroc::models::ling3::vision {
 class VisionTower;
 }
 
-namespace gufo::server {
+namespace superroc::server {
 
 /// Per-request state for Ling-3.0-flash. Holds only the model session plus the
 /// position the scheduler believes it is at, which the runner cross-checks so a
@@ -138,6 +138,6 @@ private:
 [[nodiscard]] const Ling3RunnerState& RequireLing3State(
     const TextRunnerState& state);
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_LING3_TEXT_RUNNER_HPP_
+#endif  // SUPERROC_SERVER_LING3_TEXT_RUNNER_HPP_

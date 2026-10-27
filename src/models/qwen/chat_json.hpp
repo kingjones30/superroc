@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_CHAT_JSON_HPP_
-#define GUFO_MODELS_QWEN_CHAT_JSON_HPP_
+#ifndef SUPERROC_MODELS_QWEN_CHAT_JSON_HPP_
+#define SUPERROC_MODELS_QWEN_CHAT_JSON_HPP_
 
 // LFM2: shared JSON helpers for the Qwen chat renderers. Moved verbatim from
 // chat_template.cpp's anonymous namespace so the LFM2 renderer reuses the
@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 
 inline std::string PythonJsonSpacing(std::string_view value) {
   std::string output;
@@ -69,6 +69,6 @@ inline void AppendJsonString(std::string& output, std::string_view value) {
   output.push_back('"');
 }
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization
 
-#endif  // GUFO_MODELS_QWEN_CHAT_JSON_HPP_
+#endif  // SUPERROC_MODELS_QWEN_CHAT_JSON_HPP_

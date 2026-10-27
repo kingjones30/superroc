@@ -29,7 +29,7 @@
 #include "src/core/model_family.hpp"
 #include "src/core/quant/ggml_dequant.hpp"
 
-namespace gufo::core {
+namespace superroc::core {
 
 namespace {
 
@@ -1056,8 +1056,8 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
   // decode index `l / interval` equal the layer index. SSM scalars stay at
   // their defaults so SsmValueSize() does not divide by zero; SsmLayerCount()
   // is 0 because every layer is attention.
-  if (gufo::core::IsModelFamily(config.architecture,
-                                gufo::core::ModelFamilyId::kMuseGlimmer)) {
+  if (superroc::core::IsModelFamily(config.architecture,
+                                superroc::core::ModelFamilyId::kMuseGlimmer)) {
     if (HasMtpTensors() || embedded_mtp_layers.value_or(0U) != 0U) {
       if (error_msg != nullptr) {
         *error_msg = "muse-glimmer does not support MTP";
@@ -1130,7 +1130,7 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     }
   }
 
-  if (gufo::core::IsLfm2Family(config.architecture)) {  // LFM2
+  if (superroc::core::IsLfm2Family(config.architecture)) {  // LFM2
     if (HasMtpTensors()) {
       if (error_msg != nullptr) {
         *error_msg = "lfm2moe does not support MTP";
@@ -1140,8 +1140,8 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     config.num_layers = total_layers;
     config.mtp_num_layers = 0;
     config.lfm2 = true;
-    const bool lfm2_dense = gufo::core::IsModelFamily(
-        config.architecture, gufo::core::ModelFamilyId::kLfm2);
+    const bool lfm2_dense = superroc::core::IsModelFamily(
+        config.architecture, superroc::core::ModelFamilyId::kLfm2);
     if (total_layers == 0 || total_layers > config.lfm2_attn.size()) {
       if (error_msg != nullptr) {
         *error_msg = "lfm2moe block_count out of range";
@@ -1247,8 +1247,8 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     config.norm_eps_post = config.norm_eps_pre;             // LFM2 chassis
   }  // LFM2
 
-  if (gufo::core::IsModelFamily(config.architecture,
-                                gufo::core::ModelFamilyId::kFlint)) {
+  if (superroc::core::IsModelFamily(config.architecture,
+                                superroc::core::ModelFamilyId::kFlint)) {
     if (HasMtpTensors() || embedded_mtp_layers.value_or(0U) != 0U) {
       if (error_msg != nullptr) {
         *error_msg = "flint does not support MTP";
@@ -1326,8 +1326,8 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     }
   }
 
-  if (gufo::core::IsModelFamily(config.architecture,
-                                gufo::core::ModelFamilyId::kLlama)) {
+  if (superroc::core::IsModelFamily(config.architecture,
+                                superroc::core::ModelFamilyId::kLlama)) {
     // LLAMA: a plain dense transformer. Every architectural key is required:
     // the struct defaults are Qwen's, so a missing key must never be inherited.
     if (HasMtpTensors() || embedded_mtp_layers.value_or(0U) != 0U) {
@@ -1427,8 +1427,8 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     config.rope_theta = *theta;
     // Every layer is full causal attention with adjacent-pair (NORM) RoPE.
     config.full_attention_interval = 1;
-    config.rope_variant = gufo::core::RopeVariant::kNorm;
-    config.attn_gate_mode = gufo::core::AttnGateMode::kFused;
+    config.rope_variant = superroc::core::RopeVariant::kNorm;
+    config.attn_gate_mode = superroc::core::AttnGateMode::kFused;
     config.mtp_num_layers = 0;
     config.is_moe = false;
     config.attn_sinks = false;
@@ -1466,4 +1466,4 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
   return config;
 }
 
-}  // namespace gufo::core
+}  // namespace superroc::core

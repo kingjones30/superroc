@@ -38,8 +38,9 @@
 #include <vector>
 
 #include "src/core/crypto/sha256.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 namespace {
 
 TextRunnerDescriptor DescriptorForInput(
@@ -77,8 +78,12 @@ void VisitInputRanges(std::size_t token_count,
   visit(begin, token_count, identity);
 }
 
-constexpr std::array<std::uint8_t, 8> kMagic = {'G', 'U', 'F', 'O',
+constexpr std::array<std::uint8_t, 8> kMagic = {'S', 'R', 'O', 'C',
                                                 'K', 'V', 'C', '1'};
+/// Previous engine-name magic, kept in char form so the old spelling never
+/// appears here; readers still accept files written by previous releases.
+constexpr std::array<std::uint8_t, 8> kPreviousMagic = {
+    'G', 'U', 'F', 'O', 'K', 'V', 'C', '1'};
 // Format version 2. Version 1 hashed the whole image with one serial SHA-256
 // stream and stored the digest where version 2 keeps the table digest. A
 // version-1 file is a clean miss for this reader: it is never parsed as
@@ -112,10 +117,10 @@ constexpr std::string_view kTemporaryPrefix = ".tmp-";
   return ChunkCount(payload_bytes) * kChecksumBytes;
 }
 
-/// Chunk verification threads: GUFOKVC_VERIFY_THREADS wins, else the machine's
+/// Chunk verification threads: SUPERROC_KVC_VERIFY_THREADS wins, else the machine's
 /// parallelism capped at 8. Tests pin it to 1, 2, 8 and 16.
 [[nodiscard]] std::size_t VerifyThreads() noexcept {
-  if (const char* text = std::getenv("GUFOKVC_VERIFY_THREADS")) {
+  if (const char* text = ::superroc::core::GetEnvCompat("SUPERROC_KVC_VERIFY_THREADS")) {
     char* end = nullptr;
     const unsigned long parsed = std::strtoul(text, &end, 10);
     if (end != text && parsed >= 1 && parsed <= kMaxVerifyThreads)
@@ -127,16 +132,16 @@ constexpr std::string_view kTemporaryPrefix = ".tmp-";
 }
 
 [[nodiscard]] bool TimingEnabled() noexcept {
-  const char* text = std::getenv("GUFOKVC_TIMING");
+  const char* text = ::superroc::core::GetEnvCompat("SUPERROC_KVC_TIMING");
   return text != nullptr && text[0] != '\0' && text[0] != '0';
 }
 
-/// Measurement aid only: GUFOKVC_LEGACY_STAGING=1 restores through the
+/// Measurement aid only: SUPERROC_KVC_LEGACY_STAGING=1 restores through the
 /// previous "read the whole image into a heap buffer" staging path, with the
 /// verification and runner calls unchanged, so the mmap change can be measured
 /// from one binary. Unset in production.
 [[nodiscard]] bool LegacyStagingEnabled() noexcept {
-  const char* text = std::getenv("GUFOKVC_LEGACY_STAGING");
+  const char* text = ::superroc::core::GetEnvCompat("SUPERROC_KVC_LEGACY_STAGING");
   return text != nullptr && text[0] != '\0' && text[0] != '0';
 }
 
@@ -568,8 +573,10 @@ struct ImageFields {
 ParseFailure DecodeHeader(std::span<const std::uint8_t> header,
                           ImageFields* fields) {
   if (fields == nullptr || header.size() < kHeaderBytes ||
-      !std::equal(kMagic.begin(), kMagic.end(),
-                  header.begin() + kMagicOffset)) {
+      (!std::equal(kMagic.begin(), kMagic.end(),
+                   header.begin() + kMagicOffset) &&
+       !std::equal(kPreviousMagic.begin(), kPreviousMagic.end(),
+                   header.begin() + kMagicOffset))) {
     return ParseFailure::kCorrupt;
   }
   std::uint32_t file_version = 0;
@@ -1083,7 +1090,7 @@ struct ContinuationDiskStore::Impl {
   }
 
   /// Stage breakdown for the disk-restore critical path, off unless
-  /// GUFOKVC_TIMING is set. Every field is wall-clock milliseconds measured
+  /// SUPERROC_KVC_TIMING is set. Every field is wall-clock milliseconds measured
   /// inside this store; the one field that covers work done by the runner is
   /// called out by name (runner_ms) because the host-to-device copies and
   /// their stream synchronisation happen behind RestorePersistentSnapshot.
@@ -1240,7 +1247,7 @@ struct ContinuationDiskStore::Impl {
   };
 
   /// Loads the image for a restore. Production maps the published file, so
-  /// there is no staging copy at all; GUFOKVC_LEGACY_STAGING=1 keeps the
+  /// there is no staging copy at all; SUPERROC_KVC_LEGACY_STAGING=1 keeps the
   /// previous read-into-heap path for measurement.
   [[nodiscard]] bool StageImage(
       std::string_view filename, StagedImage* staged,
@@ -2311,4 +2318,4 @@ std::size_t ContinuationDiskStore::staging_capacity_bytes() const noexcept {
   return impl_->options.staging_capacity_bytes;
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

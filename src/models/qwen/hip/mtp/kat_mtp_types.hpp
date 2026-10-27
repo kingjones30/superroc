@@ -1,12 +1,12 @@
-#ifndef GUFO_MODELS_QWEN_HIP_MTP_KAT_MTP_TYPES_HPP_
-#define GUFO_MODELS_QWEN_HIP_MTP_KAT_MTP_TYPES_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MTP_TYPES_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MTP_TYPES_HPP_
 
 #include <string>
 
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/mtp_reference.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // KAT-MTP: the only types the one-token expert GEMV runs, for a routed or a
 // shared nextn expert (hip/mtp/kat_moe_ffn.hip, GemvQ8).
@@ -76,6 +76,6 @@ namespace gufo::hip {
   return true;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
-#endif  // GUFO_MODELS_QWEN_HIP_MTP_KAT_MTP_TYPES_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MTP_TYPES_HPP_

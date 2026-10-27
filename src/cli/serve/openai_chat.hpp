@@ -1,10 +1,10 @@
-#ifndef GUFO_SERVER_OPENAI_CHAT_HPP_
-#define GUFO_SERVER_OPENAI_CHAT_HPP_
+#ifndef SUPERROC_SERVER_OPENAI_CHAT_HPP_
+#define SUPERROC_SERVER_OPENAI_CHAT_HPP_
 
 #include "src/cli/serve/http_server.hpp"
 #include "src/core/image.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 /// Handles the supported OpenAI Chat Completions subset. Streaming responses
 /// consume scheduler-published token pieces from HttpResponse::streaming_body;
@@ -59,6 +59,6 @@ HttpResponse CreateAnthropicMessage(const HttpRequest& request,
                                     const sampling::SamplingConfig& sampling,
                                     bool stream);
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_OPENAI_CHAT_HPP_
+#endif  // SUPERROC_SERVER_OPENAI_CHAT_HPP_

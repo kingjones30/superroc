@@ -8,12 +8,12 @@
 #include <iostream>
 #include <vector>
 
-extern "C" int gufo_fp4_gemv_fp4(int qtype, const void* W, const float* x,
+extern "C" int superroc_fp4_gemv_fp4(int qtype, const void* W, const float* x,
                                  float* y, int k, int n, hipStream_t stream);
-extern "C" int gufo_fp4_gemv_q8_codebook_check(void);
+extern "C" int superroc_fp4_gemv_q8_codebook_check(void);
 
 int main() {
-  const int bad = gufo_fp4_gemv_q8_codebook_check();
+  const int bad = superroc_fp4_gemv_q8_codebook_check();
   hipDeviceSynchronize();
   if (bad != 0) {
     std::cerr << "FAIL codebook bad=" << bad << '\n';
@@ -58,7 +58,7 @@ int main() {
     hipMemcpy(xd, x.data(), x.size() * sizeof(float), hipMemcpyHostToDevice);
     hipMemset(yd, 0, static_cast<std::size_t>(n) * sizeof(float));
     const int rc =
-        gufo_fp4_gemv_fp4(qtype, weights, static_cast<const float*>(xd),
+        superroc_fp4_gemv_fp4(qtype, weights, static_cast<const float*>(xd),
                           static_cast<float*>(yd), k, n, nullptr);
     hipDeviceSynchronize();
     if (rc != 0) {

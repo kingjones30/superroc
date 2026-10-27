@@ -1,5 +1,5 @@
 // ling3_mla.hip — gated-MLA kernels for Ling-3.0 (bailingmoe3), lane LK phase 2.
-// Lane: LK (MiMo) — Ling-on-gufo overnight build. Do not confuse with LG's drafts.
+// Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with LG's drafts.
 //
 // The fork's absorbed form (bailingmoe3.cpp gated-MLA branch, build_attn_mha with v_mla).
 // Arithmetic:
@@ -84,7 +84,7 @@ __device__ __forceinline__ float block_reduce_sum(float v, float * smem) {
 // old quant+GEMV sequence run byte for byte -- that is the A/B the bench gate
 // measures and the escape hatch if a gate ever moves.
 //
-// g_wo_qs / g_wo_ds are the Q8_1 activation the wo GEMV reads: gufo's internal
+// g_wo_qs / g_wo_ds are the Q8_1 activation the wo GEMV reads: superroc's internal
 // layout, qs[o_dim] int8 + ds[o_dim/32] floats. They are the epilogue's output
 // and the handoff's input, sized for one decode row (o_dim 4096 here).
 // ---------------------------------------------------------------------------
@@ -387,7 +387,7 @@ static __global__ __launch_bounds__(256) void mla_pre_fused_kernel(
 // takes, and (amp, idx) is a total order so the reduction order cannot change
 // the outcome), d = mv / 127.f, id = d != 0.f ? 1.0f / d : 0.f, and each lane
 // stores roundf(v * id) with the id it broadcasts from lane 0. An all-zero
-// group still gets d = 0, id = 0, codes all 0. The layout is gufo's internal
+// group still gets d = 0, id = 0, codes all 0. The layout is superroc's internal
 // Q8_1 contract (qs[k] int8 + ds[k/32] floats), which has NO ggml `s` field to
 // preserve -- the ds/qs pair is everything the wo GEMV reads.
 //

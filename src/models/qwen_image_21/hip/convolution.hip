@@ -7,7 +7,7 @@
 #include "src/models/qwen_image_21/hip/runtime.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::models::qwen_image_21::hip {
+namespace superroc::models::qwen_image_21::hip {
 namespace {
 // Read pairs of adjacent NHWC channels, then transpose in LDS into the trained
 // convolution's [channel][kernel_y][kernel_x] order. Each block covers four
@@ -164,7 +164,7 @@ void Convolve(const std::uint16_t* input, const std::uint16_t* weights,
            WM * WN * 32, 0, stream>>>(input, weights, bias, output, height,
                                       width, channels, output_channels, padding,
                                       out_height, out_width);
-    GUFO_CHECK_LAUNCH("ImplicitConvolution3<M, N, C, WM, WN, Stride, Upscale, Halo>");
+    SUPERROC_CHECK_LAUNCH("ImplicitConvolution3<M, N, C, WM, WN, Stride, Upscale, Halo>");
   };
   if constexpr (Stride == 1) {
     if (out_width % 64 == 0) {
@@ -250,19 +250,19 @@ bool ExpandConvolution3(const std::uint16_t* input, std::uint16_t* output,
     TiledIm2col<2, 1><<<grid, 256, 0, stream>>>(input, output, height, width,
                                                 channels, padding, output_width,
                                                 start, count);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   }
   else if (upscale == 2) {
     TiledIm2col<1, 2><<<grid, 256, 0, stream>>>(input, output, height, width,
                                                 channels, padding, output_width,
                                                 start, count);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   }
   else
     TiledIm2col<1, 1><<<grid, 256, 0, stream>>>(input, output, height, width,
                                                 channels, padding, output_width,
                                                 start, count);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
-}  // namespace gufo::models::qwen_image_21::hip
+}  // namespace superroc::models::qwen_image_21::hip

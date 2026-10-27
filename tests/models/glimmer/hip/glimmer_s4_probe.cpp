@@ -97,19 +97,19 @@ int RunProbe(const char* path, std::size_t max_new_tokens,
              const std::string& prompt_text) {
   try {
     std::string err;
-    auto opened = gufo::core::GgufReader::OpenFile(path, &err);
+    auto opened = superroc::core::GgufReader::OpenFile(path, &err);
     if (opened == nullptr) {
       std::cerr << "SKIP glimmer_s4_probe: " << path << " unreadable: " << err
                 << '\n';
       return 77;
     }
-    std::shared_ptr<const gufo::core::GgufReader> reader(std::move(opened));
+    std::shared_ptr<const superroc::core::GgufReader> reader(std::move(opened));
 
-    gufo::hip::QwenExecutionPolicy policy;
-    policy.kv_cache_storage = gufo::hip::QwenKvCacheStorage::kFp32;
+    superroc::hip::QwenExecutionPolicy policy;
+    policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
     auto executor =
-        gufo::hip::QwenGpuExecutor::CreateFromGguf(reader, &err, 32768, policy);
+        superroc::hip::QwenGpuExecutor::CreateFromGguf(reader, &err, 32768, policy);
     if (executor == nullptr) {
       std::cerr << "FAIL load " << err << '\n';
       return 1;
@@ -121,24 +121,24 @@ int RunProbe(const char* path, std::size_t max_new_tokens,
     }
     const auto& tokenizer = executor->GetTokenizer();
 
-    const std::vector<gufo::tokenization::ChatMessage> messages = {
-        gufo::tokenization::ChatMessage(gufo::tokenization::ChatRole::kUser,
+    const std::vector<superroc::tokenization::ChatMessage> messages = {
+        superroc::tokenization::ChatMessage(superroc::tokenization::ChatRole::kUser,
                                         prompt_text)};
-    gufo::tokenization::ChatTemplateOptions options;
+    superroc::tokenization::ChatTemplateOptions options;
     options.reasoning_strength = "low";
     options.add_generation_prompt = true;
     std::string render_error;
-    const auto rendered = gufo::tokenization::GlimmerRender(
+    const auto rendered = superroc::tokenization::GlimmerRender(
         tokenizer, messages, {}, options, &render_error);
     if (!rendered.has_value()) {
       std::cerr << "FAIL render " << render_error << '\n';
       return 1;
     }
-    gufo::tokenization::TokenizerOptions tokenizer_options;
+    superroc::tokenization::TokenizerOptions tokenizer_options;
     tokenizer_options.add_bos = false;
     tokenizer_options.add_eos = false;
     tokenizer_options.parse_special_tokens = true;
-    const std::vector<gufo::tokenization::TokenId> prompt =
+    const std::vector<superroc::tokenization::TokenId> prompt =
         tokenizer.Encode(*rendered, tokenizer_options);
     if (prompt.empty()) {
       std::cerr << "FAIL empty prompt\n";
@@ -153,7 +153,7 @@ int RunProbe(const char* path, std::size_t max_new_tokens,
     std::cout << '\n';
 
     const std::size_t vocab_size = config.vocab_size;
-    auto emit_step = [&](std::size_t step, gufo::tokenization::TokenId token) {
+    auto emit_step = [&](std::size_t step, superroc::tokenization::TokenId token) {
       const auto logits_span = executor->CopyLastLogits();
       const std::vector<float> logits(logits_span.begin(), logits_span.end());
       float logsumexp = 0.0F;
@@ -176,7 +176,7 @@ int RunProbe(const char* path, std::size_t max_new_tokens,
       std::cout << '\n';
     };
 
-    gufo::tokenization::TokenId next =
+    superroc::tokenization::TokenId next =
         executor->ForwardPromptBatch(prompt, 0, /*compute_logits=*/true);
     std::size_t position = prompt.size();
     std::size_t emitted = 0;

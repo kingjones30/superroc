@@ -11,7 +11,7 @@
 #include <variant>
 #include <vector>
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 namespace {
 
 using core::GgufValueType;
@@ -41,7 +41,7 @@ constexpr char kCptLetter = '\xD2';
 constexpr char kCptWhitespace = '\x0B';
 
 /// True for the Unicode classes the fork's table calls a letter / a number /
-/// whitespace -- the same predicates the other gufo tokenizers take from ICU
+/// whitespace -- the same predicates the other superroc tokenizers take from ICU
 /// (see models/qwen/tokenizer.cpp).
 [[nodiscard]] bool IsUnicodeLetter(std::uint32_t cpt) noexcept {
   return (U_GET_GC_MASK(static_cast<UChar32>(cpt)) & U_GC_L_MASK) != 0;
@@ -668,4 +668,4 @@ std::string LingTokenizer::Decode(std::span<const std::int32_t> tokens) const {
   return out;
 }
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3

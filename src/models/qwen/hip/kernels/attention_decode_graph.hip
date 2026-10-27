@@ -12,7 +12,7 @@
 #include "src/models/qwen/hip/ops/attention.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void WriteKVCachePtrKernel(
     const float* __restrict__ k, const float* __restrict__ v,
@@ -306,7 +306,7 @@ void LaunchAttention(const float* q, const float* k, const float* v,
         k, v, k_cache, v_cache, static_cast<__half*>(k_cache_f16),
         static_cast<__half*>(v_cache_f16), layer_idx, d_pos, max_context,
         num_kv_heads, head_dim);
-    GUFO_CHECK_LAUNCH("WriteKVCachePtrKernel");
+    SUPERROC_CHECK_LAUNCH("WriteKVCachePtrKernel");
   }
 
   if (head_dim == 256 && num_kv_heads > 0 && (num_heads % num_kv_heads) == 0) {
@@ -315,14 +315,14 @@ void LaunchAttention(const float* q, const float* k, const float* v,
       QwenDecodeOnlineAttentionPtrKernel<<<num_heads, 32, 0, stream>>>(
           q, gate, k_cache, v_cache, out_context, layer_idx, d_pos, max_context,
           num_heads, num_kv_heads);
-      GUFO_CHECK_LAUNCH("QwenDecodeOnlineAttentionPtrKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeOnlineAttentionPtrKernel");
     } else {
       detail::EmitAttentionDispatch("decode_online_fp16_graph", "");
       QwenDecodeOnlineAttentionHalfPtrKernel<<<num_heads, 32, 0, stream>>>(
           q, gate, static_cast<const __half*>(k_cache_f16),
           static_cast<const __half*>(v_cache_f16), out_context, layer_idx,
           d_pos, max_context, num_heads, num_kv_heads);
-      GUFO_CHECK_LAUNCH("QwenDecodeOnlineAttentionHalfPtrKernel");
+      SUPERROC_CHECK_LAUNCH("QwenDecodeOnlineAttentionHalfPtrKernel");
     }
   } else {
     detail::EmitAttentionDispatch(
@@ -330,5 +330,5 @@ void LaunchAttention(const float* q, const float* k, const float* v,
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

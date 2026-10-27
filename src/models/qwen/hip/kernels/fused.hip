@@ -17,7 +17,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 __launch_bounds__(256, 4) __global__ void FusedQKNormRoPEKvWriteKernel(
@@ -186,8 +186,8 @@ void LaunchFusedQKNormRoPEKvWrite(
       static_cast<__half*>(k_cache_f16), static_cast<__half*>(v_cache_f16),
       layer_idx, d_pos, max_context, num_heads, num_kv_heads, head_dim,
       rotary_dim, rope_theta, eps, rope);
-  GUFO_CHECK_LAUNCH("FusedQKNormRoPEKvWriteKernel");
+  SUPERROC_CHECK_LAUNCH("FusedQKNormRoPEKvWriteKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

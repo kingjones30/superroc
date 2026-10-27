@@ -1,5 +1,5 @@
-#ifndef GUFO_LING3_ROCM_BACKEND_HPP_
-#define GUFO_LING3_ROCM_BACKEND_HPP_
+#ifndef SUPERROC_LING3_ROCM_BACKEND_HPP_
+#define SUPERROC_LING3_ROCM_BACKEND_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +17,7 @@
 /// numerics were still unverified when this was written (their held jobs had
 /// not produced a passing result), and nothing has been through
 /// `ling-lg-gpu` yet. Treat the token output as unproven until the GPU gates
-/// have run against `gufo serve`.
+/// have run against `superroc serve`.
 ///
 /// The per-token shape, per block:
 ///   ops_rms_norm -> (KDA via LK kda_forward | MLA via LK mla_block)
@@ -39,8 +39,8 @@
 ///
 /// LK's entry points are in `namespace ling3`; LX's are C-linkage globals with
 /// no namespace at all. Both collide by name with this package's own
-/// `gufo::models::ling3`, so LK's are always spelled `::ling3::`.
-namespace gufo::models::ling3::rocm {
+/// `superroc::models::ling3`, so LK's are always spelled `::ling3::`.
+namespace superroc::models::ling3::rocm {
 
 /// Per-sequence device state: the KDA conv + SSM state for every KDA layer
 /// (3*(d_conv-1)*d_inner + head_dim*head_dim*n_head floats each), the MLA
@@ -285,6 +285,6 @@ struct MultiRowKeep {
 /// experts staged per token have no batched path) and Init succeeded.
 [[nodiscard]] bool BatchCapable() noexcept;
 
-}  // namespace gufo::models::ling3::rocm
+}  // namespace superroc::models::ling3::rocm
 
-#endif  // GUFO_LING3_ROCM_BACKEND_HPP_
+#endif  // SUPERROC_LING3_ROCM_BACKEND_HPP_

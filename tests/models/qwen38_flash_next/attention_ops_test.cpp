@@ -15,7 +15,7 @@
 
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 
-namespace q = gufo::models::qwen38_flash_next::rocm;
+namespace q = superroc::models::qwen38_flash_next::rocm;
 namespace {
 
 // The model's full-attention geometry: 24 query heads over 2 KV heads,

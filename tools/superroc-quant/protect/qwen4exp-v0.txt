@@ -1,0 +1,38 @@
+# qwen4exp protect preset v0 (QF_BRIEF §1.C; rule grammar from tools/superroc-quant/rules.hpp v0.5)
+# LFT-proven splice set (LFT-C byte-reproduces from this preset).
+# Notes on the prior draft (rejected 16:21 CDT, see DECISIONS):
+#   - `*ple_.* as-is` was a parse error (no `as-is` in TypeNameTable; "no rule = stock type stays" is the fix).
+#   - `^hc_.*_down` / `^hc_.*_up` / `^hc_.*_inject` looked like regex but `*` is a full-name glob and `.`
+#     is literal; a glob with `^` prefix does a STARTS-WITH check on the LITERAL pat, so `^hc\.\*\_down`
+#     would not match `blk.N.hc_attn_down.weight` (which starts with `blk.`, not `hc.`). The rules below
+#     use `blk.*.hc_attn_down.weight` etc. (the glob star lives where the block-index belongs).
+#   - `*nextn.eh_proj.weight` matched 0 because Flash-Next's nextn lives in the ROCsidecar
+#     (`mtp-…-Q4_0.gguf`), NOT this trunk file; the rule was dropped (add it ONLY when targeting the sidecar).
+#   - `*indexer.* BF16` matched `blk.N.indexer.k_norm.weight` (a 1-D F32 norm) too — protecting a norm to
+#     BF16 BREAKS the file (the loader requires F32 norms [repo:weights.cpp:75-79]). The two indexer rules
+#     below are split by exact projection name (q_proj / k_proj) — norms are intentionally untouched.
+#   - Router F32 "no-op" rules (`*ffn_gate_inp.weight F32`, `*ffn_gate_inp_shexp.weight F32`) removed; the
+#     loader already forces these to F32 — a protect-to-F32 rule is a no-op that confuses `--protect-allow-unmatched`.
+# Re-verified against superroc at 1194feaa9fbee6ca0438ca5af882ee09ac62bea4, 2026-10-10.
+# DECISIONS binding (16:21 CDT): rule LITERALS below match DESIGN §1.4; this file adds
+# `# why` tails citing the engine line that pays for each rule (no rule change).
+# DECISIONS condition: every rule matches >= 1 tensor on the shipped arch file
+# (this preset is NOT allow-unmatched; Flash-Next-Uncensored is the reference trunk file).
+blk.*.hc_attn_down.weight Q8_0  # wide-mixer gate: hc_ffn.down.type == kQ8_0 (or FP4 under F16 prefill); Q8_0 takes W8A8BlockedWmmaGEMMKernel — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:659-672
+blk.*.hc_ffn_down.weight Q8_0  # as above (the wide-mixer runs on either attn or ffn down) — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:659-672
+blk.*.hc_attn_up.weight Q8_0  # fused_projection gate: m.up.type == kQ8_0 && m.up.rows == HcDim && m.up.cols == hc_low_rank — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:1727-1733
+blk.*.hc_ffn_up.weight Q8_0  # as above — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:1727-1733
+blk.*.hc_attn_inject.weight F32  # fused_inject gate: m.inject.type == kF32; quantized inject falls to the non-fused path [repo:executor.cpp:1838-1861] — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:1784-1785
+blk.*.hc_ffn_inject.weight F32  # as above — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:1784-1785
+=output_hc_down.weight Q8_0  # top-level hc mixer down; same wide-mixer gate as blk.N.hc_ffn_down — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:659-672
+=output_hc_up.weight Q8_0  # top-level hc mixer up; same fused_projection gate — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:1727-1733
+=output.weight Q6_K  # head never 4-bit; precondition hidden%256==0 (Flash-Next: 2560 OK) — src/models/qwen38_flash_next/weights.cpp:290-292
+=token_embd.weight Q6_K  # recipe default; precondition hidden%256==0 — src/models/qwen38_flash_next/weights.cpp:288-289
+blk.*.ssm_alpha.weight F32  # NOTE: Flash-Next keeps ssm_alpha F32 (stock parity); qwen35 →Q8_0 fused rule does NOT translate (no fused-control launch on this engine) — src/models/qwen38_flash_next/weights.cpp:171-178
+blk.*.ssm_beta.weight F32  # as ssm_alpha — src/models/qwen38_flash_next/weights.cpp:175-178
+blk.*.indexer.q_proj.weight BF16  # indexer q projection (dense set accepted); norms `blk.*.indexer.*_norm.weight` are F32 by the loader — intentionally NOT touched — src/models/qwen38_flash_next/weights.cpp:196-199
+blk.*.indexer.k_proj.weight BF16  # indexer k projection (dense set accepted); norms F32 by the loader — intentionally NOT touched — src/models/qwen38_flash_next/weights.cpp:196-199
+# PLE tensors (ple_key/ple_value/ple_conv1d/ple_norm_*) stay at stock type (no rule = stock parity):
+# codec accepts the dense set, PLE n-gram table (per_layer_token_embd) stays at IQ4_NL — src/models/qwen38_flash_next/weights.cpp:206-218, 296-310
+# Router F32 (ffn_gate_inp.weight, ffn_gate_inp_shexp.weight): the loader forces F32 — a protect-to-F32 rule is a no-op (removed).
+# nextn.eh_proj.weight: lives in the ROCsidecar (`mtp-…-Q4_0.gguf`), NOT this trunk file. Add it ONLY when targeting the sidecar — src/models/qwen38_flash_next/weights.cpp:264-372

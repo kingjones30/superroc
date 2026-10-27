@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_VISION_TOWER_HPP_
-#define GUFO_MODELS_LING3_VISION_TOWER_HPP_
+#ifndef SUPERROC_MODELS_LING3_VISION_TOWER_HPP_
+#define SUPERROC_MODELS_LING3_VISION_TOWER_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -7,9 +7,9 @@
 #include <string>
 #include <vector>
 
-namespace gufo::models::ling3::vision {
+namespace superroc::models::ling3::vision {
 
-/// Qwen3-VL mmproj (BF16 clip) kept resident for `gufo serve`.
+/// Qwen3-VL mmproj (BF16 clip) kept resident for `superroc serve`.
 /// Encode takes HWC RGB8 whose edges are multiples of 32 and at most 1024.
 class VisionTower {
 public:
@@ -32,6 +32,6 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace gufo::models::ling3::vision
+}  // namespace superroc::models::ling3::vision
 
 #endif

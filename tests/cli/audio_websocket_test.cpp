@@ -18,8 +18,8 @@
 #include "src/core/json.hpp"
 
 namespace {
-using namespace gufo::server;
-namespace json = gufo::json;
+using namespace superroc::server;
+namespace json = superroc::json;
 
 class Client {
 public:

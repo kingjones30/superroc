@@ -33,8 +33,8 @@
 
 namespace {
 
-using gufo::models::ling3::ModelWeights;
-using gufo::models::ling3::ReferenceModel;
+using superroc::models::ling3::ModelWeights;
+using superroc::models::ling3::ReferenceModel;
 
 [[noreturn]] void Die(const std::string& why) {
   std::fprintf(stderr, "mtp_ref_test: %s\n", why.c_str());
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
   std::string err;
   // OpenFile resolves the "-0000N-of-0000M" split set itself; pass shard 1.
   auto reader =
-      gufo::core::GgufReader::OpenFile(std::filesystem::path(model_path), &err);
+      superroc::core::GgufReader::OpenFile(std::filesystem::path(model_path), &err);
   if (reader == nullptr)
     Die("cannot open the GGUF: " + err);
   auto weights = ModelWeights::Bind(*reader, &err);
@@ -123,13 +123,13 @@ int main(int argc, char** argv) {
   } else {
     // Render exactly what the server renders for a one-user-message chat
     // request, so acceptance is comparable with bench.sh's prompts.
-    std::vector<gufo::models::ling3::chat::Message> msgs;
+    std::vector<superroc::models::ling3::chat::Message> msgs;
     msgs.push_back({"user", prompt_text, "", {}});
     auto rendered =
-        gufo::models::ling3::chat::RenderChat(msgs, {}, true, true, &err);
+        superroc::models::ling3::chat::RenderChat(msgs, {}, true, true, &err);
     if (!rendered.has_value())
       Die("RenderChat: " + err);
-    auto tok = gufo::models::ling3::LingTokenizer::FromGguf(*reader, &err);
+    auto tok = superroc::models::ling3::LingTokenizer::FromGguf(*reader, &err);
     if (!tok.has_value())
       Die("LingTokenizer::FromGguf: " + err);
     prompt = tok->Encode(*rendered, /*add_bos=*/false, /*parse_special=*/true);

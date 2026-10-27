@@ -32,14 +32,14 @@
 #include <hip/hip_runtime.h>
 
 #include "src/core/hip/hip_utils.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R1): alias.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R1): alias.
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/mtp.hpp"
 #endif
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 namespace {
 
@@ -341,9 +341,9 @@ bool ValidatePrefill(hip::QwenGpuExecutor& executor,
 }
 
 bool IsDeepSeekV4Flash(const core::GgufReader& reader) {
-  return gufo::core::IsModelFamily(
+  return superroc::core::IsModelFamily(
       reader.GetMetadataString("general.architecture").value_or(""),
-      gufo::core::ModelFamilyId::kDeepSeek4);
+      superroc::core::ModelFamilyId::kDeepSeek4);
 }
 
 std::vector<int> MakeDeepSeekBenchmarkTokens(
@@ -442,13 +442,13 @@ int RunDeepSeekBenchmark(
   if (options.validate_prefill_tokens != 0) {
     auto sequential =
         model->CreateSession(options.speculative_backend.empty()
-                                 ? gufo::core::SessionMode::kAutoregressive
-                                 : gufo::core::SessionMode::kSpeculative,
+                                 ? superroc::core::SessionMode::kAutoregressive
+                                 : superroc::core::SessionMode::kSpeculative,
                              required_context, &error);
     auto batched =
         model->CreateSession(options.speculative_backend.empty()
-                                 ? gufo::core::SessionMode::kAutoregressive
-                                 : gufo::core::SessionMode::kSpeculative,
+                                 ? superroc::core::SessionMode::kAutoregressive
+                                 : superroc::core::SessionMode::kSpeculative,
                              required_context, &error);
     const auto prefix =
         std::span(tokens).first(options.validate_prefill_tokens);
@@ -523,8 +523,8 @@ int RunDeepSeekBenchmark(
       for (const std::size_t depth : options.n_depths) {
         auto base = model->CreateSession(
             options.speculative_backend.empty()
-                ? gufo::core::SessionMode::kAutoregressive
-                : gufo::core::SessionMode::kSpeculative,
+                ? superroc::core::SessionMode::kAutoregressive
+                : superroc::core::SessionMode::kSpeculative,
             static_cast<uint32_t>(required_context), &error);
         const std::size_t prefix = depth > 0 ? depth : 16;
         if (!base || !base->Sync(std::span(tokens).first(prefix), &error)) {
@@ -553,8 +553,8 @@ int RunDeepSeekBenchmark(
               for (std::size_t i = 0; i < concurrency; ++i) {
                 auto session = model->CreateSession(
                     options.speculative_backend.empty()
-                        ? gufo::core::SessionMode::kAutoregressive
-                        : gufo::core::SessionMode::kSpeculative,
+                        ? superroc::core::SessionMode::kAutoregressive
+                        : superroc::core::SessionMode::kSpeculative,
                     static_cast<uint32_t>(required_context), &error);
                 if (!session ||
                     ((generate || depth > 0) &&
@@ -694,8 +694,8 @@ int RunDeepSeekBenchmark(
         if (prepared_session == nullptr || depth < prepared_depth) {
           prepared_session = model->CreateSession(
               options.speculative_backend.empty()
-                  ? gufo::core::SessionMode::kAutoregressive
-                  : gufo::core::SessionMode::kSpeculative,
+                  ? superroc::core::SessionMode::kAutoregressive
+                  : superroc::core::SessionMode::kSpeculative,
               static_cast<std::uint32_t>(required_context), &error);
           prepared_depth = 0;
         }
@@ -732,8 +732,8 @@ int RunDeepSeekBenchmark(
           if (snapshot == nullptr) {
             local_session = model->CreateSession(
                 options.speculative_backend.empty()
-                    ? gufo::core::SessionMode::kAutoregressive
-                    : gufo::core::SessionMode::kSpeculative,
+                    ? superroc::core::SessionMode::kAutoregressive
+                    : superroc::core::SessionMode::kSpeculative,
                 static_cast<std::uint32_t>(required_context), &error);
             session = local_session.get();
             if (session != nullptr && depth > 0 &&
@@ -782,8 +782,8 @@ int RunDeepSeekBenchmark(
           if (snapshot == nullptr) {
             local_session = model->CreateSession(
                 options.speculative_backend.empty()
-                    ? gufo::core::SessionMode::kAutoregressive
-                    : gufo::core::SessionMode::kSpeculative,
+                    ? superroc::core::SessionMode::kAutoregressive
+                    : superroc::core::SessionMode::kSpeculative,
                 static_cast<std::uint32_t>(required_context), &error);
             session = local_session.get();
             if (session != nullptr &&
@@ -872,9 +872,9 @@ int RunDeepSeekBenchmark(
 }
 
 bool IsQwen38FlashNext(const core::GgufReader& reader) {
-  return gufo::core::IsModelFamily(
+  return superroc::core::IsModelFamily(
       reader.GetMetadataString("general.architecture").value_or(""),
-      gufo::core::ModelFamilyId::kQwen4Exp);
+      superroc::core::ModelFamilyId::kQwen4Exp);
 }
 
 int RunQwen38FlashNextBenchmark(
@@ -967,13 +967,13 @@ int RunQwen38FlashNextBenchmark(
     // prefix; both run on the GPU, so this checks the batched kernels.
     auto sequential = model->CreateSession(
         options.speculative_backend.empty()
-            ? gufo::core::SessionMode::kAutoregressive
-            : gufo::core::SessionMode::kSpeculative,
+            ? superroc::core::SessionMode::kAutoregressive
+            : superroc::core::SessionMode::kSpeculative,
         static_cast<std::uint32_t>(required_context), &error);
     auto batched = model->CreateSession(
         options.speculative_backend.empty()
-            ? gufo::core::SessionMode::kAutoregressive
-            : gufo::core::SessionMode::kSpeculative,
+            ? superroc::core::SessionMode::kAutoregressive
+            : superroc::core::SessionMode::kSpeculative,
         static_cast<std::uint32_t>(required_context), &error);
     const auto prefix =
         std::span(tokens).first(options.validate_prefill_tokens);
@@ -1055,8 +1055,8 @@ int RunQwen38FlashNextBenchmark(
            repetition <= options.repetitions; ++repetition) {
         auto session = model->CreateSession(
             options.speculative_backend.empty()
-                ? gufo::core::SessionMode::kAutoregressive
-                : gufo::core::SessionMode::kSpeculative,
+                ? superroc::core::SessionMode::kAutoregressive
+                : superroc::core::SessionMode::kSpeculative,
             static_cast<std::uint32_t>(required_context), &error);
         if (!session ||
             (depth > 0 &&
@@ -1092,8 +1092,8 @@ int RunQwen38FlashNextBenchmark(
            ++repetition) {
         auto session = model->CreateSession(
             options.speculative_backend.empty()
-                ? gufo::core::SessionMode::kAutoregressive
-                : gufo::core::SessionMode::kSpeculative,
+                ? superroc::core::SessionMode::kAutoregressive
+                : superroc::core::SessionMode::kSpeculative,
             static_cast<std::uint32_t>(required_context), &error);
         if (!session ||
             !session->Sync(std::span(tokens).first(prefix_length), &error)) {
@@ -1170,7 +1170,7 @@ std::optional<BenchOptions> ParseBenchOptions(std::span<const char* const> args,
   bool explicit_p = false;
   bool explicit_n = false;
 
-  gufo::cli::ArgParser parser(
+  superroc::cli::ArgParser parser(
       "superroc bench",
       "Benchmark prompt processing (pp) and token generation (tg) "
       "throughput.");
@@ -1259,14 +1259,14 @@ int RunBench(std::span<const char* const> args) {
 
   const auto model_load_start = std::chrono::steady_clock::now();
   std::string err;
-  auto reader_owner = gufo::core::GgufReader::OpenFile(opt.model_path, &err);
+  auto reader_owner = superroc::core::GgufReader::OpenFile(opt.model_path, &err);
   if (!reader_owner) {
     std::cerr << "Error loading GGUF model '" << opt.model_path << "': " << err
               << "\n";
     PrintModelLoadTime(model_load_start, false);
     return 1;
   }
-  const std::shared_ptr<const gufo::core::GgufReader> reader(
+  const std::shared_ptr<const superroc::core::GgufReader> reader(
       std::move(reader_owner));
 
 #if defined(ENGINE_ENABLE_HIP)
@@ -1607,7 +1607,7 @@ int RunBench(std::span<const char* const> args) {
               throw std::runtime_error("MTP initialization failed: " + err);
             }
             // SQ10 SPEC2 (R1): the drafter's stream uses this session's set.
-            if (gufo_fp4_slot_stream_alias(
+            if (superroc_fp4_slot_stream_alias(
                     static_cast<hip::QwenMtpGpuDraftBackend*>(
                         draft_backend.get())
                         ->DraftStream(),
@@ -1737,10 +1737,10 @@ int RunBench(std::span<const char* const> args) {
     return 1;
   }
 #else
-  std::cerr << "Error: Gufo GPU benchmark requires ENGINE_ENABLE_HIP=ON\n";
+  std::cerr << "Error: SuperROC GPU benchmark requires ENGINE_ENABLE_HIP=ON\n";
   PrintModelLoadTime(model_load_start, false);
   return 1;
 #endif
 }
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli

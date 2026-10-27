@@ -17,7 +17,7 @@ void Expect(bool condition, const char* message) {
 
 void TestDefaultOptions() {
   const std::array<const char*, 0> args{};
-  const auto options = gufo::cli::ParseBenchOptions(args);
+  const auto options = superroc::cli::ParseBenchOptions(args);
   Expect(options.has_value(), "default options parse");
   Expect(options->model_path.empty(), "no implicit model path");
   Expect(options->n_prompts == std::vector<std::size_t>{2048},
@@ -34,17 +34,17 @@ void TestDefaultOptions() {
 void TestDs4SamplingOptions() {
   const std::array<const char*, 4> args = {"--temperature", "0.6", "--seed",
                                            "7"};
-  const auto options = gufo::cli::ParseBenchOptions(args);
+  const auto options = superroc::cli::ParseBenchOptions(args);
   Expect(options && options->sampling.temperature == 0.6F &&
              options->sampling.seed == 7,
          "DS4 benchmark retains temperature and seed");
   for (const char* value : {"-1", "nan", "inf"}) {
     const std::array<const char*, 2> invalid = {"--temperature", value};
-    Expect(!gufo::cli::ParseBenchOptions(invalid),
+    Expect(!superroc::cli::ParseBenchOptions(invalid),
            "invalid benchmark temperature is rejected");
   }
   const std::array<const char*, 2> invalid_seed = {"--seed", "-1"};
-  Expect(!gufo::cli::ParseBenchOptions(invalid_seed),
+  Expect(!superroc::cli::ParseBenchOptions(invalid_seed),
          "negative benchmark seed is rejected");
 }
 
@@ -75,7 +75,7 @@ void TestFlashMtpSamplingOptions() {
                         "0.2",
                         "--presence-penalty",
                         "0.1"};
-  const auto options = gufo::cli::ParseBenchOptions(args);
+  const auto options = superroc::cli::ParseBenchOptions(args);
   Expect(options.has_value(), "Flash MTP sampling options parse");
   const auto& s = options->sampling;
   Expect(options->draft_tokens == 3 && s.temperature == 0.8F && s.seed == 73 &&
@@ -91,7 +91,7 @@ void TestDepthOptions() {
       "--n-prompt",    "2048",      "--n-gen",
       "128",           "--n-depth", "4096,8192,12288,16384",
       "--repetitions", "1"};
-  const auto options = gufo::cli::ParseBenchOptions(args);
+  const auto options = superroc::cli::ParseBenchOptions(args);
   Expect(options.has_value(), "depth options parse");
   Expect(options->n_prompts == std::vector<std::size_t>{2048},
          "prompt length parsed");
@@ -106,24 +106,24 @@ void TestDepthOptions() {
 void TestInvalidDepth() {
   std::string error;
   const std::array<const char*, 2> args = {"--n-depth", "invalid"};
-  Expect(!gufo::cli::ParseBenchOptions(args, &error).has_value(),
+  Expect(!superroc::cli::ParseBenchOptions(args, &error).has_value(),
          "invalid depth rejected");
   Expect(!error.empty(), "invalid depth reports an error");
 
   const std::array<const char*, 4> range_args = {"--draft-tokens", "3",
                                                  "--min-draft-tokens", "4"};
-  Expect(!gufo::cli::ParseBenchOptions(range_args, &error).has_value(),
+  Expect(!superroc::cli::ParseBenchOptions(range_args, &error).has_value(),
          "invalid draft range rejected");
 
   const std::array<const char*, 4> unsupported_floor = {
       "--speculative", "dflash2", "--min-draft-tokens", "2"};
-  Expect(!gufo::cli::ParseBenchOptions(unsupported_floor, &error).has_value() &&
+  Expect(!superroc::cli::ParseBenchOptions(unsupported_floor, &error).has_value() &&
              error.find("min-draft-tokens") != std::string::npos,
          "DFlash2 rejects an unsupported minimum draft length");
   for (const char* policy : {"fixed", "adaptive", "unknown"}) {
     const std::array<const char*, 4> args = {"--speculative", "dflash2",
                                              "--draft-policy", policy};
-    const auto parsed = gufo::cli::ParseBenchOptions(args, &error);
+    const auto parsed = superroc::cli::ParseBenchOptions(args, &error);
     Expect(parsed.has_value() == (std::string_view(policy) != "unknown"),
            "DFlash benchmark validates its controller");
     if (parsed)
@@ -132,7 +132,7 @@ void TestInvalidDepth() {
   }
   const std::array<const char*, 2> policy_without_backend = {"--draft-policy",
                                                              "adaptive"};
-  Expect(!gufo::cli::ParseBenchOptions(policy_without_backend, &error),
+  Expect(!superroc::cli::ParseBenchOptions(policy_without_backend, &error),
          "a DFlash controller requires its backend");
 }
 
@@ -140,17 +140,17 @@ void TestInvalidWorkload() {
   for (const char* option : {"-p", "-n", "-d"}) {
     for (const char* count : {"32x", "32,bad", "32,", ",32", "-1"}) {
       const char* args[] = {option, count};
-      Expect(!gufo::cli::ParseBenchOptions(args),
+      Expect(!superroc::cli::ParseBenchOptions(args),
              "malformed workload is rejected");
     }
   }
   const char* no_runs[] = {"-r", "0"};
-  Expect(!gufo::cli::ParseBenchOptions(no_runs),
+  Expect(!superroc::cli::ParseBenchOptions(no_runs),
          "zero repetitions are rejected");
   const char* empty[] = {"-p", "0", "-n", "0"};
-  Expect(!gufo::cli::ParseBenchOptions(empty), "empty benchmark is rejected");
+  Expect(!superroc::cli::ParseBenchOptions(empty), "empty benchmark is rejected");
   const char* decode[] = {"-p", "0", "-n", "64"};
-  const auto options = gufo::cli::ParseBenchOptions(decode);
+  const auto options = superroc::cli::ParseBenchOptions(decode);
   Expect(options && options->n_prompts.empty() && options->n_gens.size() == 1,
          "zero still disables an individual workload");
 }

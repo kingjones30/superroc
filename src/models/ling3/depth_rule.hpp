@@ -17,12 +17,12 @@
 //
 // LING3_MTP_DEPTH unset uses this rule. LING3_MTP_DEPTH=0 skips it.
 
-#ifndef GUFO_MODELS_LING3_DEPTH_RULE_HPP_
-#define GUFO_MODELS_LING3_DEPTH_RULE_HPP_
+#ifndef SUPERROC_MODELS_LING3_DEPTH_RULE_HPP_
+#define SUPERROC_MODELS_LING3_DEPTH_RULE_HPP_
 
 #include <algorithm>
 
-namespace gufo::models::ling3::mtp::depth {
+namespace superroc::models::ling3::mtp::depth {
 
 constexpr int kBuckets = 6;
 constexpr int kAccRing = 16;
@@ -301,6 +301,6 @@ inline bool DraftShort(const Bucket& d, int remaining, double global_plain,
   return Pays(d, global_plain);
 }
 
-}  // namespace gufo::models::ling3::mtp::depth
+}  // namespace superroc::models::ling3::mtp::depth
 
-#endif  // GUFO_MODELS_LING3_DEPTH_RULE_HPP_
+#endif  // SUPERROC_MODELS_LING3_DEPTH_RULE_HPP_

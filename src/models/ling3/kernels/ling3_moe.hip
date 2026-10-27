@@ -557,7 +557,7 @@ extern "C" int ling3_dequant(int qtype, const void * rows, float * y, int k, int
         return LING3_ERR_ARG;
     }
     k_dequant<<<launch_1d(n), 64, 0, stream>>>(qtype, (const uint8_t *) rows, rb, y, k, n);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ling3_chk("dequant");
 }
 
@@ -589,11 +589,11 @@ extern "C" int ling3_gemv(int qtype, const void * W, const float * x, float * y,
     }
     if (n <= LING3_GEMV_WIDE_MAX) {
         k_gemv_wide<<<n, 64, 0, stream>>>(qtype, (const uint8_t *) W, rb, x, y, k, n);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     } else {
         const int blocks = n < LING3_GEMV_GS_BLOCKS ? n : LING3_GEMV_GS_BLOCKS;
         k_gemv_wide_gs<<<blocks, 64, 0, stream>>>(qtype, (const uint8_t *) W, rb, x, y, k, n);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     }
     return ling3_chk("gemv");
 }
@@ -606,7 +606,7 @@ extern "C" int ling3_gemm(int qtype, const void * W, const float * x, float * y,
     }
     dim3 grid(launch_1d(n), m);
     k_gemm<<<grid, 64, 0, stream>>>(qtype, (const uint8_t *) W, rb, x, y, k, n, m);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ling3_chk("gemm");
 }
 
@@ -616,7 +616,7 @@ extern "C" int ling3_swiglu(const float * gate, const float * up, float * h, int
         return LING3_ERR_ARG;
     }
     k_swiglu<<<launch_1d(n), 64, 0, stream>>>(gate, up, h, n, limit);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ling3_chk("swiglu");
 }
 
@@ -626,7 +626,7 @@ extern "C" int ling3_vec_add(const float * a, const float * b, float * y, int n,
         return LING3_ERR_ARG;
     }
     k_add<<<launch_1d(n), 64, 0, stream>>>(a, b, y, n);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ling3_chk("add");
 }
 
@@ -664,12 +664,12 @@ extern "C" int ling3_route_ref(
         ling3_moe_dev_register_route_rc(rc_d);
     }
     k_route_logits_ref<<<n_expert, 64, 0, (hipStream_t) nullptr>>>(x, gate, k, sf);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     {
         const size_t smem = ((size_t) nf * sizeof(float) + (size_t) ni * sizeof(int) + 255) & ~(size_t) 255;
         k_route<<<1, 256, smem, (hipStream_t) nullptr>>>(x, gate, bias, k, n_expert, n_used, n_groups, n_group_used,
                 w_scale, norm_w, ids, weights, sf, rc_d);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     }
     // Launch errors are still reported synchronously -- that is not a D2H and costs nothing.
     // k_route's own status word now stays on the device until ling3_moe_dev_check() reads it,
@@ -768,7 +768,7 @@ extern "C" int ling3_expert_ffn(
             }
             if (rc == LING3_OK) {
                 k_axpy<<<launch_1d(k), 64, 0, stream>>>(w, p, yt, k);
-                if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+                if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
                 rc = ling3_chk("ffn axpy");
             }
         }
@@ -981,7 +981,7 @@ extern "C" int ling3_route(
         if (blocks < 1) blocks = 1;
         const size_t smem_x = ((size_t) k * sizeof(float) + 255) & ~(size_t) 255;
         k_route_logits<<<blocks, threads, smem_x, stream>>>(x, gate, n_expert, k, sf);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         if (ling3_chk("route logits") != LING3_OK) return LING3_ERR_HIP;
     }
     {
@@ -999,11 +999,11 @@ extern "C" int ling3_route(
         if (use_ref) {
             k_route<<<1, 256, smem, stream>>>(x, gate, bias, k, n_expert, n_used, n_groups, n_group_used,
                                       w_scale, norm_w, ids, weights, sf, rc_d);
-            if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+            if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         } else {
             k_route_fast<<<1, 256, smem, stream>>>(x, gate, bias, k, n_expert, n_used, n_groups, n_group_used,
                                            w_scale, norm_w, ids, weights, sf, rc_d);
-            if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+            if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         }
     }
     return ling3_chk("route");

@@ -18,7 +18,7 @@
 #include "src/models/qwen/hip/fp4_launch.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 void ReleaseWeightRegions(std::vector<QwenGpuWeightRegion>& regions) noexcept {
@@ -362,7 +362,7 @@ void AttachAndWarmRocmFp4ExecutorSet(hipStream_t stream,
       std::max<std::size_t>({config.hidden_size, config.intermediate_size,
                              config.ssm_inner_size, config.AttentionSize()});
   const std::size_t wk = (wide + 31) / 32 * 32;
-  (void)gufo_fp4_slot_stream_attach_grow(stream, __func__, 0);
+  (void)superroc_fp4_slot_stream_attach_grow(stream, __func__, 0);
   (void)WarmupRocmFp4Slots(wk, stream);
   const std::size_t hs_elems =
       std::max(config.expert_used_count * config.expert_feed_forward_length,
@@ -372,9 +372,9 @@ void AttachAndWarmRocmFp4ExecutorSet(hipStream_t stream,
                    config.expert_shared_feed_forward_length);
   const std::size_t m_total =
       std::max<std::size_t>({4 * wk, (hs_m_elems + 31) / 32 * 32});
-  if (gufo_fp4_slots_warm_moe(static_cast<int>(hs_elems),
+  if (superroc_fp4_slots_warm_moe(static_cast<int>(hs_elems),
                               static_cast<int>(hs_m_elems),
-                              static_cast<int>(m_total)) != GUFO_FP4_OK) {
+                              static_cast<int>(m_total)) != SUPERROC_FP4_OK) {
     DiscardRocmFp4Warmup();
   }
   if (!RocmFp4SwigluScratchWarm(config.intermediate_size)) {
@@ -437,9 +437,9 @@ std::unique_ptr<QwenGpuExecutor> QwenGpuExecutor::Create(
                  config.expert_shared_feed_forward_length);
     const std::size_t m_total =
         std::max<std::size_t>({4 * wk, (hs_m_elems + 31) / 32 * 32});
-    if (gufo_fp4_slots_warm_moe(static_cast<int>(hs_elems),
+    if (superroc_fp4_slots_warm_moe(static_cast<int>(hs_elems),
                                 static_cast<int>(hs_m_elems),
-                                static_cast<int>(m_total)) != GUFO_FP4_OK) {
+                                static_cast<int>(m_total)) != SUPERROC_FP4_OK) {
       DiscardRocmFp4Warmup();
     }
     if (!RocmFp4SwigluScratchWarm(config.intermediate_size)) {
@@ -455,7 +455,7 @@ std::unique_ptr<QwenGpuExecutor> QwenGpuExecutor::Create(
   // FP4 model the constructor already attached this stream and this only
   // re-resolves it, while a stock model (no FP4 tensors, ctor skipped)
   // still owns its set without paying any warmup.
-  (void)gufo_fp4_slot_stream_attach_grow(executor->arena_.stream, __func__, 0);
+  (void)superroc_fp4_slot_stream_attach_grow(executor->arena_.stream, __func__, 0);
   return executor;
 }
 
@@ -469,5 +469,5 @@ std::unique_ptr<QwenGpuExecutor> QwenGpuExecutor::CreateFromGguf(
   return Create(std::move(model), error_msg, max_context, policy);
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

@@ -1,6 +1,6 @@
 {
   lib,
-  gufo ? null,
+  superroc ? null,
 }:
 
 {
@@ -75,8 +75,8 @@
   manifest ? null,
   ttl ? null,
 
-  # Custom gufo package override
-  gufoPackage ? gufo,
+  # Custom superroc package override
+  superrocPackage ? superroc,
   extraArgs ? [ ],
 }:
 
@@ -304,7 +304,7 @@ let
           language = if structured then (entry.language or null) else null;
         in
         assert lib.assertMsg (!structured || entry ? wav)
-          "gufo.mkServe: voice '${name}' must set 'wav'";
+          "superroc.mkServe: voice '${name}' must set 'wav'";
         [
           "--voice"
           "${name}=${toString wav}"
@@ -321,7 +321,7 @@ let
     )
     ++ extraArgs;
 
-  bin = if gufoPackage != null then "${gufoPackage}/bin/gufo" else "gufo";
+  bin = if superrocPackage != null then "${superrocPackage}/bin/superroc" else "superroc";
   escapedServerArgs = lib.escapeShellArgs serverArgs;
   escapedModalityArgs = lib.escapeShellArgs modalityArgs;
   rawHostStr = if (host != null && isRawEnvVar host) then " --host ${host}" else "";
@@ -330,19 +330,19 @@ let
   modalityStr = if (escapedModalityArgs != "") then " " + escapedModalityArgs else "";
 in
 assert lib.assertMsg (lib.elem modality validModalities)
-  "gufo.mkServe: 'modality' must be one of ${lib.generators.toJSON { } validModalities}, got '${modality}'";
+  "superroc.mkServe: 'modality' must be one of ${lib.generators.toJSON { } validModalities}, got '${modality}'";
 assert lib.assertMsg (!lib.elem modality [ "image" "tts" "asr" ] || sessions == null)
-  "gufo.mkServe: image and speech requests are queued; 'sessions' is an LLM/video option";
+  "superroc.mkServe: image and speech requests are queued; 'sessions' is an LLM/video option";
 assert lib.assertMsg (model != null && model != "")
-  "gufo.mkServe: 'model' must be specified (cannot be empty)";
+  "superroc.mkServe: 'model' must be specified (cannot be empty)";
 assert lib.assertMsg (modality == "tts" || voices == { })
-  "gufo.mkServe: 'voices' requires modality 'tts'";
+  "superroc.mkServe: 'voices' requires modality 'tts'";
 assert lib.assertMsg (think == null || lib.elem think validThinkModes)
-  "gufo.mkServe: 'think' must be one of ${lib.generators.toJSON { } validThinkModes}, got '${toString think}'";
+  "superroc.mkServe: 'think' must be one of ${lib.generators.toJSON { } validThinkModes}, got '${toString think}'";
 assert lib.assertMsg (preserveThinking == null || lib.elem preserveThinking validThinkModes)
-  "gufo.mkServe: 'preserveThinking' must be one of ${lib.generators.toJSON { } validThinkModes}, got '${toString preserveThinking}'";
+  "superroc.mkServe: 'preserveThinking' must be one of ${lib.generators.toJSON { } validThinkModes}, got '${toString preserveThinking}'";
 assert lib.assertMsg (reasoningEffort == null || lib.elem reasoningEffort validReasoningEfforts)
-  "gufo.mkServe: 'reasoningEffort' must be one of ${lib.generators.toJSON { } validReasoningEfforts}, got '${toString reasoningEffort}'";
+  "superroc.mkServe: 'reasoningEffort' must be one of ${lib.generators.toJSON { } validReasoningEfforts}, got '${toString reasoningEffort}'";
 assert lib.assertMsg (speculative == null || lib.elem speculative validSpeculativeModes)
-  "gufo.mkServe: 'speculative' must be one of ${lib.generators.toJSON { } validSpeculativeModes}, got '${toString speculative}'";
+  "superroc.mkServe: 'speculative' must be one of ${lib.generators.toJSON { } validSpeculativeModes}, got '${toString speculative}'";
 "${bin} serve${serverStr}${rawHostStr}${rawPortStr} ${modality}${modalityStr}"

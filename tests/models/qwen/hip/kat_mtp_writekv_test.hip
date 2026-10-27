@@ -38,11 +38,11 @@
 #include <string>
 #include <vector>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // Defined at namespace scope in
 // src/models/qwen/hip/kernels/attention_decode.hip, which is compiled into
-// gufo_core. Declared here so the test can drive the reference kernel at
+// superroc_core. Declared here so the test can drive the reference kernel at
 // layer_idx 0 with the same arguments the production decode path passes.
 __global__ void WriteKVCacheKernel(
     const float* __restrict__ k, const float* __restrict__ v,
@@ -51,7 +51,7 @@ __global__ void WriteKVCacheKernel(
     std::uint32_t layer_idx, std::uint32_t pos, std::uint32_t max_context,
     std::uint32_t num_kv_heads, std::uint32_t head_dim);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 namespace {
 
@@ -194,7 +194,7 @@ void RunCase(const Case& c, bool fp32_caches) {
   hipStream_t stream = nullptr;
   HIP_REQUIRE(hipStreamCreate(&stream));
 
-  gufo::hip::LaunchKatMtpWriteKv(
+  superroc::hip::LaunchKatMtpWriteKv(
       d_k.f32(), d_v.f32(), fp32_caches ? mtp_kc.f32() : nullptr,
       fp32_caches ? mtp_vc.f32() : nullptr, mtp_kf.raw(), mtp_vf.raw(),
       c.start_pos, static_cast<std::size_t>(c.batch), kMaxContext, kKvHeads,
@@ -205,7 +205,7 @@ void RunCase(const Case& c, bool fp32_caches) {
   const std::size_t row_stride =
       static_cast<std::size_t>(kKvHeads) * kHeadDim;
   for (std::uint32_t token = 0; token < c.batch; ++token) {
-    gufo::hip::WriteKVCacheKernel<<<kKvHeads, 256, 0, stream>>>(
+    superroc::hip::WriteKVCacheKernel<<<kKvHeads, 256, 0, stream>>>(
         d_k.f32() + static_cast<std::size_t>(token) * row_stride,
         d_v.f32() + static_cast<std::size_t>(token) * row_stride,
         fp32_caches ? ref_kc.f32() : nullptr,

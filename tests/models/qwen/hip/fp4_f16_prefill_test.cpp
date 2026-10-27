@@ -9,8 +9,8 @@
 // (d) Fp4Int8Gemm vs F64 on small shapes (tiled Q8 from QuantizeQ8Tiled,
 //     the producer the route consumes in production).
 // FP4 decode on the host uses the header's scalar twins, pinned to the
-// gufo_fp4 CPU oracle over all 256 scales x 16 codes x both types first.
-// Run under gpu-run. Links gufo_core + gufo_qwen38_flash_next.
+// superroc_fp4 CPU oracle over all 256 scales x 16 codes x both types first.
+// Run under gpu-run. Links superroc_core + superroc_qwen38_flash_next.
 
 #include "src/core/rocm_fp4/fp4_f16_prefill.hpp"
 
@@ -25,10 +25,10 @@
 #include <string>
 #include <vector>
 
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 
-namespace f16 = gufo::models::qwen38_flash_next::rocm;
+namespace f16 = superroc::models::qwen38_flash_next::rocm;
 namespace fp4 = f16::fp4_f16;
 
 static int g_fail = 0;
@@ -157,7 +157,7 @@ static void FillAct(std::vector<float>& v, float amp) {
   }
 }
 
-// (pin) header scalar twins vs the gufo_fp4 CPU oracle, all scales x codes.
+// (pin) header scalar twins vs the superroc_fp4 CPU oracle, all scales x codes.
 static void TestOraclePin() {
   int diffs = 0;
   for (unsigned s = 0; s < 256; ++s) {
@@ -167,8 +167,8 @@ static void TestOraclePin() {
     blk[17] = std::uint8_t(s);
     for (unsigned n = 0; n < 16; ++n) {
       blk[0] = std::uint8_t(n);
-      const float o0 = gufo_fp4_elem(100, blk, 0);
-      const float o1 = gufo_fp4_elem(101, blk, 0);
+      const float o0 = superroc_fp4_elem(100, blk, 0);
+      const float o1 = superroc_fp4_elem(101, blk, 0);
       const float h = Fp4Host(std::uint8_t(n), std::uint8_t(s));
       // Bitwise except the sign of zero (code 8), per the header contract.
       if (o0 != h || o1 != h) {
@@ -178,7 +178,7 @@ static void TestOraclePin() {
     }
   }
   printf("oracle-pin: diffs=%d (256 scales x 16 codes x 2 types)\n", diffs);
-  Check(diffs == 0, "oracle pin vs gufo_fp4_elem");
+  Check(diffs == 0, "oracle pin vs superroc_fp4_elem");
 }
 
 // Narrow F32 activations to F16 on the host (bitwise == device RN here).

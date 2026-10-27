@@ -17,10 +17,12 @@
 #include "src/models/minimax_h3/runtime.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
 #include "src/models/minimax_h3/video_vae.hpp"
+#include "src/core/previous_name_compat.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
-namespace h3 = gufo::minimax_h3;
+namespace h3 = superroc::minimax_h3;
 
 int failures = 0;
 
@@ -100,11 +102,11 @@ void RecordProgress(int completed, int total, void* opaque) {
 
 int main() {
   constexpr std::array<int, 5> kSelectedIndexes = {0, 5, 11, 16, 21};
-  const char* root = std::getenv("GUFO_H3_MODEL_ROOT");
-  const char* golden_value = std::getenv("GUFO_H3_VIDEO_VAE_GOLDEN");
+  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* golden_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_VIDEO_VAE_GOLDEN");
   if (root == nullptr || golden_value == nullptr) {
     std::cout
-        << "SKIP: GUFO_H3_MODEL_ROOT or GUFO_H3_VIDEO_VAE_GOLDEN unset\n";
+        << "SKIP: SUPERROC_H3_MODEL_ROOT or SUPERROC_H3_VIDEO_VAE_GOLDEN unset\n";
     return 77;
   }
   constexpr std::size_t kLatentElements = 24 * 7 * 16 * 16;
@@ -115,9 +117,10 @@ int main() {
   double relative_max_bound = 0.0;
   try {
     const h3::json::Value fixture =
-        h3::json::ParseFile(GUFO_H3_VIDEO_VAE_FIXTURE, 1U << 20U);
-    CHECK(RequireField(fixture, "schema").AsString() ==
-          "gufo.minimax-h3-video-vae-golden.v1");
+        h3::json::ParseFile(SUPERROC_H3_VIDEO_VAE_FIXTURE, 1U << 20U);
+    CHECK(::superroc::core::MatchesCurrentOrPrevious(
+        RequireField(fixture, "schema").AsString(),
+        "superroc.minimax-h3-video-vae-golden.v1"));
     CHECK(RequireField(fixture, "model_revision").AsString() ==
           "42ed227ee7df40d41602854ae760620d6eb651fe");
     CHECK(RequireField(fixture, "reference_revision").AsString() ==
@@ -158,7 +161,7 @@ int main() {
 
   std::string error;
   auto inventory =
-      h3::ModelInventory::Inspect(root, GUFO_H3_SOURCE_MANIFEST, &error);
+      h3::ModelInventory::Inspect(root, SUPERROC_H3_SOURCE_MANIFEST, &error);
   auto geometry = h3::ResolveGenerationGeometry(256, 256, 22, &error);
   CHECK(inventory.has_value());
   CHECK(geometry.has_value());

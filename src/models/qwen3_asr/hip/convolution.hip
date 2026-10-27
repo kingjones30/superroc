@@ -6,7 +6,7 @@
 #include "src/models/qwen3_asr/hip/audio_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::models::qwen3_asr::hip {
+namespace superroc::models::qwen3_asr::hip {
 namespace {
 using B = hip_bfloat16;
 using Fragment = __attribute__((ext_vector_type(16))) unsigned short;
@@ -150,7 +150,7 @@ void LaunchPackConvolutionWeights(const void* input, void* output,
   PackWeights<<<(480 * 480 * 9 + 255) / 256, 256, 0, stream>>>(
       static_cast<const unsigned short*>(input),
       static_cast<unsigned short*>(output));
-  GUFO_CHECK_LAUNCH("PackWeights");
+  SUPERROC_CHECK_LAUNCH("PackWeights");
 }
 
 void LaunchConvolution3x3(const void* input, const void* weight, void* output,
@@ -161,7 +161,7 @@ void LaunchConvolution3x3(const void* input, const void* weight, void* output,
     FirstConvolution<<<dim3(5, (64 * 50 + 63) / 64, chunks), 128, 0, stream>>>(
         static_cast<const unsigned short*>(input),
         static_cast<const unsigned short*>(weight), static_cast<B*>(output));
-    GUFO_CHECK_LAUNCH("FirstConvolution");
+    SUPERROC_CHECK_LAUNCH("FirstConvolution");
     return;
   }
   constexpr int M = 480, N = 32, WM = 6, WN = 2;
@@ -172,7 +172,7 @@ void LaunchConvolution3x3(const void* input, const void* weight, void* output,
            stream>>>(static_cast<const unsigned short*>(input),
                      static_cast<const unsigned short*>(weight),
                      static_cast<B*>(output));
-    GUFO_CHECK_LAUNCH("Convolution<H, W, M, N, WM, WN>");
+    SUPERROC_CHECK_LAUNCH("Convolution<H, W, M, N, WM, WN>");
   };
   if (input_channels == 480 && height == 64 && width == 50)
     launch.template operator()<64, 50>();
@@ -181,4 +181,4 @@ void LaunchConvolution3x3(const void* input, const void* weight, void* output,
   else
     throw std::invalid_argument("unsupported Qwen3-ASR convolution shape");
 }
-}  // namespace gufo::models::qwen3_asr::hip
+}  // namespace superroc::models::qwen3_asr::hip

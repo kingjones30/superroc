@@ -1,11 +1,11 @@
-#ifndef GUFO_MODELS_QWEN3_TTS_TEXT_STREAM_HPP_
-#define GUFO_MODELS_QWEN3_TTS_TEXT_STREAM_HPP_
+#ifndef SUPERROC_MODELS_QWEN3_TTS_TEXT_STREAM_HPP_
+#define SUPERROC_MODELS_QWEN3_TTS_TEXT_STREAM_HPP_
 
 #include <string>
 #include <string_view>
 #include <vector>
 
-namespace gufo::models::qwen3_tts {
+namespace superroc::models::qwen3_tts {
 
 // Boundaries depend on text, not WebSocket packet sizes. Latin punctuation
 // waits for whitespace so a decimal point does not force a split.
@@ -53,5 +53,5 @@ inline std::vector<std::string> TakeSpeechSegments(std::string* pending,
   return result;
 }
 
-}  // namespace gufo::models::qwen3_tts
-#endif  // GUFO_MODELS_QWEN3_TTS_TEXT_STREAM_HPP_
+}  // namespace superroc::models::qwen3_tts
+#endif  // SUPERROC_MODELS_QWEN3_TTS_TEXT_STREAM_HPP_

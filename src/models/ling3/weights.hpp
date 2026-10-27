@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_WEIGHTS_HPP_
-#define GUFO_MODELS_LING3_WEIGHTS_HPP_
+#ifndef SUPERROC_MODELS_LING3_WEIGHTS_HPP_
+#define SUPERROC_MODELS_LING3_WEIGHTS_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +12,7 @@
 #include "src/core/gguf_reader.hpp"
 #include "src/models/ling3/config.hpp"
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 
 /// Non-owning view of one GGUF tensor. `cols` x `rows` follows the GGUF
 /// convention: cols (ne[0]) is the contiguous reduction dimension, rows
@@ -145,6 +145,6 @@ struct ModelWeights {
       const core::GgufReader& reader, std::string* error_msg = nullptr);
 };
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3
 
-#endif  // GUFO_MODELS_LING3_WEIGHTS_HPP_
+#endif  // SUPERROC_MODELS_LING3_WEIGHTS_HPP_

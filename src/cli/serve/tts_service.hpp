@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_TTS_SERVICE_HPP_
-#define GUFO_SERVER_TTS_SERVICE_HPP_
+#ifndef SUPERROC_SERVER_TTS_SERVICE_HPP_
+#define SUPERROC_SERVER_TTS_SERVICE_HPP_
 
 #include <cstddef>
 #include <filesystem>
@@ -14,7 +14,7 @@
 #include "src/models/qwen3_tts/config.hpp"
 #include "src/models/qwen3_tts/synthesis.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 /// An operator-registered named voice: reference audio the server holds on
 /// behalf of clients, so a Base checkpoint can be driven by voice name alone
@@ -78,6 +78,6 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_TTS_SERVICE_HPP_
+#endif  // SUPERROC_SERVER_TTS_SERVICE_HPP_

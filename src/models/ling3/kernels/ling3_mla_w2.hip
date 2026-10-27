@@ -10,7 +10,7 @@
 //
 // The score dot and the latent accumulation become two f16 WMMA GEMMs
 // (16x16x16, wave32 — the same builtin and the same fragment mapping as
-// gufo's qwen attention_wmma.hip, validated there against a CPU double
+// superroc's qwen attention_wmma.hip, validated there against a CPU double
 // reference on this tree):
 //   A fragment: lane L supplies matrix row L%16, 16 contiguous K values.
 //   B fragment: lane L supplies matrix column L%16, 16 contiguous K values,

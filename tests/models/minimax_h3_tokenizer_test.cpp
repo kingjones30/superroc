@@ -10,12 +10,13 @@
 #include "src/models/minimax_h3/prompt_encoder.hpp"
 #include "src/models/minimax_h3/tokenizer.hpp"
 #include "src/models/qwen/control_tokens.hpp"
+#include "src/core/env_compat.hpp"
 
-using gufo::tokenization::kImStart;
+using superroc::tokenization::kImStart;
 
 namespace {
 
-using gufo::minimax_h3::Tokenizer;
+using superroc::minimax_h3::Tokenizer;
 
 int failures = 0;
 
@@ -189,9 +190,9 @@ void CheckSynthetic(const std::filesystem::path& directory) {
 }
 
 void CheckPinnedCheckpoint() {
-  const char* root = std::getenv("GUFO_H3_MODEL_ROOT");
+  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
   if (root == nullptr || *root == '\0') {
-    std::cout << "SKIP pinned tokenizer corpus: GUFO_H3_MODEL_ROOT unset\n";
+    std::cout << "SKIP pinned tokenizer corpus: SUPERROC_H3_MODEL_ROOT unset\n";
     return;
   }
   const auto path =
@@ -223,12 +224,12 @@ void CheckPinnedCheckpoint() {
 
 void CheckNoCpuTensorFallback() {
 #if !defined(ENGINE_ENABLE_HIP)
-  gufo::minimax_h3::ModelInventory inventory;
+  superroc::minimax_h3::ModelInventory inventory;
   const std::vector<std::uint32_t> ids = {Tokenizer::kPadTokenId};
-  gufo::minimax_h3::PromptEmbedding output;
-  gufo::minimax_h3::PromptEncoderTelemetry telemetry;
+  superroc::minimax_h3::PromptEmbedding output;
+  superroc::minimax_h3::PromptEncoderTelemetry telemetry;
   std::string error;
-  CHECK(!gufo::minimax_h3::EncodePromptLayer50(inventory, ids, {}, nullptr,
+  CHECK(!superroc::minimax_h3::EncodePromptLayer50(inventory, ids, {}, nullptr,
                                                &output, &telemetry, &error));
   CHECK(error == "MiniMax H3 prompt encoder requires ENGINE_ENABLE_HIP");
 #endif
@@ -237,12 +238,12 @@ void CheckNoCpuTensorFallback() {
 void CheckPromptTokenLimit() {
 #if defined(ENGINE_ENABLE_HIP)
   // Validation happens before inventory access or GPU allocation.
-  gufo::minimax_h3::ModelInventory inventory;
+  superroc::minimax_h3::ModelInventory inventory;
   const std::vector<std::uint32_t> ids(4097, Tokenizer::kPadTokenId);
-  gufo::minimax_h3::PromptEmbedding output;
-  gufo::minimax_h3::PromptEncoderTelemetry telemetry;
+  superroc::minimax_h3::PromptEmbedding output;
+  superroc::minimax_h3::PromptEncoderTelemetry telemetry;
   std::string error;
-  CHECK(!gufo::minimax_h3::EncodePromptLayer50(inventory, ids, {}, nullptr,
+  CHECK(!superroc::minimax_h3::EncodePromptLayer50(inventory, ids, {}, nullptr,
                                                &output, &telemetry, &error));
   CHECK(error == "MiniMax H3 prompt exceeds 4096 tokens");
   CHECK(output.values.empty() && telemetry.peak_device_bytes == 0);
@@ -253,7 +254,7 @@ void CheckPromptTokenLimit() {
 
 int main() {
   const auto directory =
-      std::filesystem::temp_directory_path() / "gufo-h3-tokenizer-test";
+      std::filesystem::temp_directory_path() / "superroc-h3-tokenizer-test";
   std::error_code filesystem_error;
   std::filesystem::remove_all(directory, filesystem_error);
   std::filesystem::create_directories(directory, filesystem_error);

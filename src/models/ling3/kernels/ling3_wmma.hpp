@@ -3,12 +3,12 @@
 //
 // The phase-1/2 tiled kernel (ling3_gemm.hip) dequantises FP4 weights to float
 // in LDS and does scalar float FMA: ~5-6 % of the box's fp32 peak, while the
-// same silicon demonstrates 55 TOPS on the int8 WMMA matrix core (gufo's own
+// same silicon demonstrates 55 TOPS on the int8 WMMA matrix core (superroc's own
 // Qwen W8A8 prefill, and the fork's ROCmFP4 prefill, which is W8A8 too: FP4
 // nibbles -> int8 in registers, Q8_1 activations, one int32 dot per
 // 16x16x16 tile, block scales applied in the epilogue).
 //
-// This file is the Ling instantiation of that design, built from gufo's
+// This file is the Ling instantiation of that design, built from superroc's
 // WKQuantA8BlockedWmmaGEMMKernel skeleton (src/models/qwen/hip/kernels/
 // prefill_quant_gemm.hpp) and the fork's FP4->int8 decode
 // (ggml/rocmfp4/rocmfp4_hip_codebook.cuh). It is a NEW file in the LS3 zone:
@@ -19,7 +19,7 @@
 //     row r at r*ling3_row_bytes(qtype,k), an expert stack at expert_stride.
 //     Only LING3_Q4_0_ROCMFP4 / _FAST (types 100/101) is implemented; every
 //     weight matrix Ling projects through in prefill is one of these.
-//   * activations: PRE-QUANTISED to the tiled Q8_1 layout of gufo's kernel
+//   * activations: PRE-QUANTISED to the tiled Q8_1 layout of superroc's kernel
 //     (kQ8ActTileBytes = 576-byte tiles: [b0: 16 tokens x 16 bytes]
 //     [b1: same, k-half 1] [16 fp32 token scales]), by ling3_wmma_quant.
 //     The tile ORDER for the grouped kernel is GROUP-LOCAL: slot j of group g
@@ -36,7 +36,7 @@
 //
 // Bounds discipline (this lane faults no GPUs):
 //   * weight reads: the fetch clamps row to n-1 and k-block to num_kb-1 and
-//     zeroes the block scale by a multiply (gufo opt-c179: bit-identical to
+//     zeroes the block scale by a multiply (superroc opt-c179: bit-identical to
 //     zero-filling, and it keeps every load inside the row's blocks).
 //     The 16-byte qs load is a memcpy from a 17/18-byte block: it can never
 //     leave the block, and scales are read at block bytes 16/17.
@@ -57,7 +57,7 @@ extern "C" {
 /// Q8_1 layout. Row r reads x[x_rows ? x_rows[r] : r] * k floats and lands at
 /// tile dest[r] >> 4, lane dest[r] & 15 (dest == nullptr -> identity, which
 /// is also the correct dense mapping). One warp per (row, 32-block); the
-/// scale is max-abs/127 with roundf, gufo's QuantizeActivationToQ8_1Kernel
+/// scale is max-abs/127 with roundf, superroc's QuantizeActivationToQ8_1Kernel
 /// verbatim.
 int ling3_wmma_quant(const float* x, const int* x_rows, const int* dest,
                      void* q8, int n_rows, int k);

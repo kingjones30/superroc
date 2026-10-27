@@ -1,6 +1,6 @@
 // LFP item 1: per-shape dense GEMM timing. Q8_0 via DenseF16Gemm (the ceiling),
 // Q8_0 via QuantizeQ8Tiled+W8A8Gemm, type-101 via
-// gufo_fp4_wmma_quant+gemm_dense. Random weights (timing only). HIP events, 20
+// superroc_fp4_wmma_quant+gemm_dense. Random weights (timing only). HIP events, 20
 // reps, median. Run under gpu-run.
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -14,11 +14,11 @@
 #include <string>
 #include <vector>
 
-#include "src/core/rocm_fp4/gufo_fp4_wmma.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_wmma.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 
 namespace {
-namespace rocm = gufo::models::qwen38_flash_next::rocm;
+namespace rocm = superroc::models::qwen38_flash_next::rocm;
 
 // 20:02 fault ruling: a dead context must FAIL the bench. Every HIP/hipblas
 // call is checked; launches are followed by hipGetLastError + a checked sync.
@@ -46,11 +46,11 @@ inline void LfpBlasCheck(hipblasStatus_t e, const char* what, int line) {
   }
 }
 #define LFP_BLAS_CHECK(x) LfpBlasCheck((x), #x, __LINE__)
-// gufo_fp4 lib calls return 0 (GUFO_FP4_OK) or an error code.
-#define LFP_GUFO4_CHECK(x)                                        \
+// superroc_fp4 lib calls return 0 (SUPERROC_FP4_OK) or an error code.
+#define LFP_SUPERROC4_CHECK(x)                                        \
   do {                                                            \
     if ((x) != 0) {                                               \
-      std::printf("GUFO4 FATAL [%s]:%d\n", g_hip_case, __LINE__); \
+      std::printf("SUPERROC4 FATAL [%s]:%d\n", g_hip_case, __LINE__); \
       std::fflush(stdout);                                        \
       std::exit(1);                                               \
     }                                                             \
@@ -184,9 +184,9 @@ int Run(std::size_t batch, std::size_t m, std::size_t k) {
       st, "w8a8");
   const double t_fp4 = time_it(
       [&] {
-        LFP_GUFO4_CHECK(gufo_fp4_wmma_quant(xfp, nullptr, nullptr, d_fq8.p,
+        LFP_SUPERROC4_CHECK(superroc_fp4_wmma_quant(xfp, nullptr, nullptr, d_fq8.p,
                                             (int)batch, (int)k));
-        LFP_GUFO4_CHECK(gufo_fp4_wmma_gemm_dense(101, wf, d_fq8.p, out, (int)k,
+        LFP_SUPERROC4_CHECK(superroc_fp4_wmma_gemm_dense(101, wf, d_fq8.p, out, (int)k,
                                                  (int)m, (int)batch));
       },
       nullptr, "fp4");

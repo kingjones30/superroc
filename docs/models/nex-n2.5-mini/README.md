@@ -1,6 +1,6 @@
 # Nex-N2.5-mini, ROCmFP4 STRIX_LEAN
 
-Nex-N2.5-mini is a 40-layer Qwen3.5 MoE model with 256 routed experts (8 active) and a 262,144-token context for text and image input. These files are ROCmFP4 quantizations for Strix Halo built with gufo-quant, with the output head kept at Q6_K. The served file uses the STRIX_LEAN tier and carries no MTP head, so it runs without speculative decoding.
+Nex-N2.5-mini is a 40-layer Qwen3.5 MoE model with 256 routed experts (8 active) and a 262,144-token context for text and image input. These files are ROCmFP4 quantizations for Strix Halo built with superroc-quant, with the output head kept at Q6_K. The served file uses the STRIX_LEAN tier and carries no MTP head, so it runs without speculative decoding.
 
 | | |
 |---|---|

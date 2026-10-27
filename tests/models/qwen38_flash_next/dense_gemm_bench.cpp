@@ -26,7 +26,7 @@
 
 namespace {
 
-namespace q = gufo::models::qwen38_flash_next::rocm;
+namespace q = superroc::models::qwen38_flash_next::rocm;
 
 void CheckHip(hipError_t error, const char* operation) {
   if (error != hipSuccess)

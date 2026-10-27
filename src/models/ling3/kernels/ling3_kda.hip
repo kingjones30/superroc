@@ -1,5 +1,5 @@
 // ling3_kda.hip — KDA kernels for Ling-3.0 (bailingmoe3), lane LK.
-// Lane: LK (MiMo) — Ling-on-gufo overnight build. Do not confuse with LG's drafts.
+// Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with LG's drafts.
 //
 // Arithmetic follows the fork exactly:
 //   conv     ggml_compute_forward_ssm_conv_f32   (tap 0 = oldest stream sample)

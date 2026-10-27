@@ -19,8 +19,8 @@
 #include "src/models/ling3/engine.hpp"
 #include "src/models/ling3/vision_prompt.hpp"
 
-namespace l3 = gufo::models::ling3;
-namespace vis = gufo::models::ling3::vision;
+namespace l3 = superroc::models::ling3;
+namespace vis = superroc::models::ling3::vision;
 
 namespace {
 
@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
     const int w = std::atoi(argv[3]);
     const int h = std::atoi(argv[4]);
     std::string err;
-    auto reader = gufo::core::GgufReader::OpenFile(model_path, &err);
+    auto reader = superroc::core::GgufReader::OpenFile(model_path, &err);
     if (!reader) {
       std::fprintf(stderr, "OPEN FAIL %s\n", err.c_str());
       return 1;
@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
   if (do_text) {
     const std::vector<std::int32_t> ids =
         model->tokenizer().Encode("The capital of France is", false, true);
-    auto s1 = model->CreateSession(gufo::core::SessionMode::kAutoregressive,
+    auto s1 = model->CreateSession(superroc::core::SessionMode::kAutoregressive,
                                    2048, &err);
     if (!s1 || !PrefillIds(*s1, ids, &err)) {
       std::fprintf(stderr, "TEXT PREFILL FAIL %s\n", err.c_str());
@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
     s1.reset();
     vis::Clear();
     auto ident = vis::IdentityOf(ids);
-    auto s2 = model->CreateSession(gufo::core::SessionMode::kAutoregressive,
+    auto s2 = model->CreateSession(superroc::core::SessionMode::kAutoregressive,
                                    2048, &err);
     if (!s2 || !s2->PrefillVision(ident, &err)) {
       std::fprintf(stderr, "TEXT IDENT FAIL %s\n", err.c_str());
@@ -258,14 +258,14 @@ int main(int argc, char** argv) {
                   prep.rope[static_cast<std::size_t>(p) * 3 + 2]);
     }
     auto session = model->CreateSession(
-        gufo::core::SessionMode::kAutoregressive, 2048, &err);
+        superroc::core::SessionMode::kAutoregressive, 2048, &err);
     if (!session || !session->PrefillVision(prep, &err)) {
       std::fprintf(stderr, "IMAGE PREFILL FAIL %s %s\n", im.label.c_str(),
                    err.c_str());
       return 1;
     }
     Gen g = Greedy(*session, *model, ntok);
-    std::printf("GUFO %s ok=%d first=%d text=%s\n", im.label.c_str(),
+    std::printf("SUPERROC %s ok=%d first=%d text=%s\n", im.label.c_str(),
                 static_cast<int>(g.ok), g.first, g.text.c_str());
     session.reset();
     vis::Clear();

@@ -20,10 +20,10 @@ void Check(bool ok, const char* what) {
 }  // namespace
 
 int main() {
-  using gufo::core::FindModelFamily;
-  using gufo::core::IsModelFamily;
-  using gufo::core::ModelFamilyArch;
-  using gufo::core::ModelFamilyId;
+  using superroc::core::FindModelFamily;
+  using superroc::core::IsModelFamily;
+  using superroc::core::ModelFamilyArch;
+  using superroc::core::ModelFamilyId;
 
   // Every exact family resolves to itself and spells its arch once.
   Check(IsModelFamily("qwen35moe", ModelFamilyId::kQwen35Moe), "qwen35moe");
@@ -64,9 +64,9 @@ int main() {
         "llama is not the qwen prefix");
   Check(IsModelFamily("lfm2", ModelFamilyId::kLfm2), "lfm2 dense");
   Check(!IsModelFamily("lfm2", ModelFamilyId::kLfm2Moe), "lfm2 is not lfm2moe");
-  Check(gufo::core::IsLfm2Family("lfm2") &&
-            gufo::core::IsLfm2Family("lfm2moe") &&
-            !gufo::core::IsLfm2Family("qwen35"),
+  Check(superroc::core::IsLfm2Family("lfm2") &&
+            superroc::core::IsLfm2Family("lfm2moe") &&
+            !superroc::core::IsLfm2Family("qwen35"),
         "lfm2 family");
   Check(ModelFamilyArch(ModelFamilyId::kLfm2) == "lfm2", "arch lfm2");
   Check(FindModelFamily("Qwen35") == nullptr, "case sensitive");
@@ -113,7 +113,7 @@ int main() {
         "llama speculative text");
 
   // Compile-time use (package constants are initialised from the table).
-  static_assert(gufo::core::IsModelFamily("lfm2moe", ModelFamilyId::kLfm2Moe));
+  static_assert(superroc::core::IsModelFamily("lfm2moe", ModelFamilyId::kLfm2Moe));
   static_assert(ModelFamilyArch(ModelFamilyId::kBailingMoe3) == "bailingmoe3");
 
   if (g_failures != 0) {

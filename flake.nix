@@ -1,5 +1,5 @@
 {
-  description = "gufo - Gufo Engine for AMD Strix Halo (gfx1151 GPU)";
+  description = "superroc - SuperROC Engine for AMD Strix Halo (gfx1151 GPU)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -28,7 +28,7 @@
 
       pkgs = forAllSystems (system: import nixpkgs { inherit system; });
 
-      gufoPackages = forAllSystems (
+      superrocPackages = forAllSystems (
         system:
         pkgs.${system}.callPackage ./.devops/nix/scope.nix { inherit revision; }
       );
@@ -93,42 +93,42 @@
     {
       lib = {
         inherit releaseVersion revision;
-        mkGufoServe =
+        mkSuperrocServe =
           {
             pkgs ? null,
             system ? pkgs.system or "x86_64-linux",
-            gufo ? self.packages.${system}.default,
+            superroc ? self.packages.${system}.default,
             ...
           }@args:
           let
-            targetScope = gufoPackages.${system};
+            targetScope = superrocPackages.${system};
             mkServeFn = targetScope.mkServe.override {
-              inherit gufo;
+              inherit superroc;
             };
-            fnArgs = builtins.removeAttrs args [ "pkgs" "system" "gufo" ];
+            fnArgs = builtins.removeAttrs args [ "pkgs" "system" "superroc" ];
           in
           mkServeFn fnArgs;
-        mkServe = self.lib.mkGufoServe;
+        mkServe = self.lib.mkSuperrocServe;
       } // forAllSystems (system: {
-        mkGufoServe =
+        mkSuperrocServe =
           args:
-          self.lib.mkGufoServe (args // { inherit system; });
+          self.lib.mkSuperrocServe (args // { inherit system; });
         mkServe =
           args:
-          self.lib.mkGufoServe (args // { inherit system; });
+          self.lib.mkSuperrocServe (args // { inherit system; });
       });
 
       packages = forAllSystems (
         system:
         let
-          base = gufoPackages.${system}.gufo;
+          base = superrocPackages.${system}.superroc;
         in
         {
           default = base;
           # Official artifacts select this output from a tagged source. The
           # default package remains visibly developmental on moving branches.
           release = base.override { inherit releaseVersion; };
-          # Optional benchmark packages: excluded from Gufo, the default
+          # Optional benchmark packages: excluded from SuperROC, the default
           # development shell and hosted checks.
           ds4-reference = pkgs.${system}.callPackage ./.devops/nix/ds4-reference.nix { };
           llama-cpp-reference = llamaReferences.${system}.release;
@@ -254,17 +254,17 @@
 
           h3ManifestSource = mkFilteredSource {
             directories = [
-              "tools/gufo"
+              "tools/superroc"
             ];
             files = [
               "tests/tools/test_h3_manifest.py"
-              "tools/h3/gufo-h3-manifest.py"
+              "tools/h3/superroc-h3-manifest.py"
             ];
           };
 
           h3QualitySource = mkFilteredSource {
             directories = [
-              "tools/gufo"
+              "tools/superroc"
             ];
             files = [
               "src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
@@ -278,7 +278,7 @@
               "tests/tools/h3_profile_report_test.py"
               "tests/tools/h3_rng_test.py"
               "tests/tools/test_h3_quality.py"
-              "tools/h3/gufo-h3-quality.py"
+              "tools/h3/superroc-h3-quality.py"
             ];
           };
 
@@ -441,7 +441,7 @@
             set -euo pipefail
 
             ccache_launcher=
-            ccache_dir=/tmp/gufo-ccache
+            ccache_dir=/tmp/superroc-ccache
             if [[ -d "$ccache_dir" && -w "$ccache_dir" ]]; then
               export CCACHE_DIR="$ccache_dir"
               export CCACHE_BASEDIR="$src"
@@ -477,7 +477,7 @@
           mkServeCheck =
             let
               # Test command rendering without realizing the GPU package.
-              mkServe = args: self.lib.${system}.mkGufoServe (args // { gufo = "/gufo-test"; });
+              mkServe = args: self.lib.${system}.mkSuperrocServe (args // { superroc = "/superroc-test"; });
               ttsCmd = mkServe {
                 modality = "tts";
                 model = "/var/models/qwen3-tts";
@@ -525,7 +525,7 @@
                 presencePenalty = 0.5;
                 reasoningEffort = "high";
                 preserveThinking = "auto";
-                cacheDisk = "/var/cache/gufo";
+                cacheDisk = "/var/cache/superroc";
                 cacheDiskBytes = 1024;
                 cacheDiskStagingBytes = 512;
               };
@@ -552,7 +552,7 @@
             pkgsSys.runCommand "check-mk-serve" { } ''
               # Verify the synthesized CLI string contains expected flags and binary path
               cmd_str="${cmd}"
-              echo "$cmd_str" | grep -F "/bin/gufo serve"
+              echo "$cmd_str" | grep -F "/bin/superroc serve"
               echo "$cmd_str" | grep -F -- "--model /var/models/qwen.gguf"
               echo "$cmd_str" | grep -F -- "--context 4096"
               echo "$cmd_str" | grep -F -- "--served-model-name qwen-test"
@@ -572,7 +572,7 @@
               echo "$cmd_str" | grep -F -- "--presence-penalty 0.500000"
               echo "$cmd_str" | grep -F -- "--reasoning-effort high"
               echo "$cmd_str" | grep -F -- "--preserve-thinking auto"
-              echo "$cmd_str" | grep -F -- "--cache-disk /var/cache/gufo"
+              echo "$cmd_str" | grep -F -- "--cache-disk /var/cache/superroc"
               echo "$cmd_str" | grep -F -- "--cache-disk-bytes 1024"
               echo "$cmd_str" | grep -F -- "--cache-disk-staging-bytes 512"
 
@@ -607,7 +607,7 @@
               echo "$image_str" | grep -F -- "--max-request-bytes 33554432"
               echo "$image_str" | grep -F -- "image --model /var/models/qwen-image --served-model-name qwen-image-test"
               mkdir -p $out
-              echo "PASS: mkGufoServe CLI string check passed" > $out/result.txt
+              echo "PASS: mkSuperrocServe CLI string check passed" > $out/result.txt
             '';
 
           # The hosted runner builds CPU contracts only. GPU compilation,

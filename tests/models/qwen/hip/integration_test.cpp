@@ -54,18 +54,18 @@ void TestGpuErrorsThrow() {
   assert(threw);
 }
 
-using gufo::core::GgmlType;
-using gufo::core::ModelConfig;
-using gufo::models::QwenTensorRef;
-using gufo::models::qwen::build_synthetic_qwen_weights;
-using gufo::models::qwen::HipModuleContext;
-using gufo::models::qwen::make_small_qwen_config;
-using gufo::models::qwen::NormForward;
-using gufo::models::qwen::NormLayerView;
-using gufo::models::qwen::QuantGemm;
-using gufo::models::qwen::ResidualAdd;
-using gufo::test::make_random_tensor;
-using gufo::test::make_seeded_rng;
+using superroc::core::GgmlType;
+using superroc::core::ModelConfig;
+using superroc::models::QwenTensorRef;
+using superroc::models::qwen::build_synthetic_qwen_weights;
+using superroc::models::qwen::HipModuleContext;
+using superroc::models::qwen::make_small_qwen_config;
+using superroc::models::qwen::NormForward;
+using superroc::models::qwen::NormLayerView;
+using superroc::models::qwen::QuantGemm;
+using superroc::models::qwen::ResidualAdd;
+using superroc::test::make_random_tensor;
+using superroc::test::make_seeded_rng;
 
 // Copies a host F32 QwenTensorRef into a freshly-allocated device buffer.
 void ToDevice(const QwenTensorRef& host, float** dptr) {

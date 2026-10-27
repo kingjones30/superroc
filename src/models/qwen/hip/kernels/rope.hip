@@ -9,7 +9,7 @@
 #include "src/models/qwen/hip/ops/token.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void RoPEKernel(float* __restrict__ q, float* __restrict__ k,
                            std::uint32_t num_heads, std::uint32_t num_kv_heads,
@@ -143,7 +143,7 @@ void LaunchRoPE(float* q, float* k, std::uint32_t num_heads,
   RoPEKernel<<<grid_size, block_size, 0, stream>>>(
       q, k, num_heads, num_kv_heads, head_dim, rotary_dim, pos, rope_theta,
       rope);
-  GUFO_CHECK_LAUNCH("RoPEKernel");
+  SUPERROC_CHECK_LAUNCH("RoPEKernel");
 }
 
 void LaunchRoPE(float* q, float* k, std::uint32_t num_heads,
@@ -160,8 +160,8 @@ void LaunchRoPE(float* q, float* k, std::uint32_t num_heads,
   RoPEPtrKernel<<<grid_size, block_size, 0, stream>>>(
       q, k, num_heads, num_kv_heads, head_dim, rotary_dim, d_pos, rope_theta,
       rope);
-  GUFO_CHECK_LAUNCH("RoPEPtrKernel");
+  SUPERROC_CHECK_LAUNCH("RoPEPtrKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

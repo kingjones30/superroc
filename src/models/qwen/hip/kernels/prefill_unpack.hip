@@ -12,7 +12,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void BatchedUnpackQGKernel(const float* __restrict__ qg,
                                       float* __restrict__ q_out,
@@ -50,7 +50,7 @@ void LaunchBatchedUnpackQG(const float* qg_interleaved, float* q_out,
   BatchedUnpackQGKernel<<<grid, static_cast<unsigned int>(block_size), 0,
                           stream>>>(qg_interleaved, q_out, gate_out, batch_size,
                                     num_heads, head_dim);
-  GUFO_CHECK_LAUNCH("BatchedUnpackQGKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedUnpackQGKernel");
 }
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

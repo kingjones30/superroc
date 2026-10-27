@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_OPS_HPP_
-#define GUFO_MODELS_QWEN_HIP_OPS_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_OPS_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_OPS_HPP_
 
 // Compatibility umbrella. New call sites should include the narrow operation
 // family they use.
@@ -10,4 +10,4 @@
 #include "src/models/qwen/hip/ops/swiglu.hpp"
 #include "src/models/qwen/hip/ops/token.hpp"
 
-#endif  // GUFO_MODELS_QWEN_HIP_OPS_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_OPS_HPP_

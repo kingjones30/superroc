@@ -1,5 +1,5 @@
 // ling3_ops.hip — the small ops around the attention blocks, lane LK phase 2.
-// Lane: LK (MiMo) — Ling-on-gufo overnight build. Do not confuse with LG's drafts.
+// Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with LG's drafts.
 // See ling3_ops.hpp for scope. RMSNorm matches ggml-cuda rms_norm_f32 (float accumulation).
 
 #include "ling3_ops.hpp"

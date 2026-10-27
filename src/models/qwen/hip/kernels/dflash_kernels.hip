@@ -13,7 +13,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip::kernels {
+namespace superroc::hip::kernels {
 
 // The DFlash-2 draft head is the target LM head, which the Q8 target keeps in
 // BF16 at 2.54 GB -- half of everything the draft graph reads. Drafting is
@@ -60,7 +60,7 @@ void LaunchDFlashQuantizeBf16ToQ8_0(const void* bf16_source,
                                         kThreads, 0, stream>>>(
       static_cast<const hip_bfloat16*>(bf16_source),
       static_cast<Q8_0Block*>(q8_destination), total_blocks);
-  GUFO_CHECK_LAUNCH("dflash_quantize_bf16_to_q8_0_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_quantize_bf16_to_q8_0_kernel");
 }
 
 __global__ void dflash_grouped_dynamic_conv_kernel(
@@ -1280,14 +1280,14 @@ void LaunchDFlashGroupedDynamicConv(
   dflash_grouped_dynamic_conv_kernel<<<blocks, 256, 0, stream>>>(
       input, dynamic_coefficients, base_kernel, output, num_tokens, hidden_size,
       kernel_size, group_size, side);
-  GUFO_CHECK_LAUNCH("dflash_grouped_dynamic_conv_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_grouped_dynamic_conv_kernel");
 }
 
 void LaunchDFlashSiLUMul(float* gate, const float* up,
                          std::uint32_t total_elements, hipStream_t stream) {
   const uint32_t blocks = (total_elements + 255u) / 256u;
   dflash_silu_mul_kernel<<<blocks, 256, 0, stream>>>(gate, up, total_elements);
-  GUFO_CHECK_LAUNCH("dflash_silu_mul_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_silu_mul_kernel");
 }
 
 namespace {
@@ -1335,7 +1335,7 @@ void LaunchDFlashNonCausalAttentionScalar(
       q, injected_k, injected_v, block_k, block_v, out, current_pos,
       history_length, block_count, sliding_window, num_q_heads, num_kv_heads,
       head_dim, scale, history_capacity);
-  GUFO_CHECK_LAUNCH("dflash_noncausal_attention_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_noncausal_attention_kernel");
 }
 
 void LaunchDFlashNonCausalAttentionWave(
@@ -1361,7 +1361,7 @@ void LaunchDFlashNonCausalAttentionWave(
             q, injected_k, injected_v, block_k, block_v, out, current_pos,
             history_length, block_count, sliding_window, num_q_heads,
             num_kv_heads, head_dim, scale, history_capacity);
-    GUFO_CHECK_LAUNCH("dflash_noncausal_attention_wave_kernel<2>");
+    SUPERROC_CHECK_LAUNCH("dflash_noncausal_attention_wave_kernel<2>");
     return;
   }
   // A score row longer than LDS (about 16K keys) cannot launch whole: a drafter
@@ -1378,7 +1378,7 @@ void LaunchDFlashNonCausalAttentionWave(
           q, injected_k, injected_v, block_k, block_v, out, current_pos,
           history_length, block_count, sliding_window, num_q_heads,
           num_kv_heads, head_dim, scale, history_capacity);
-  GUFO_CHECK_LAUNCH("dflash_noncausal_attention_wave_kernel<1>");
+  SUPERROC_CHECK_LAUNCH("dflash_noncausal_attention_wave_kernel<1>");
 }
 
 void LaunchDFlashNonCausalAttentionTiled(
@@ -1406,7 +1406,7 @@ void LaunchDFlashNonCausalAttentionTiled(
                      current_pos, history_length, block_count, sliding_window,
                      num_q_heads, num_kv_heads, head_dim, scale,
                      history_capacity, tile_keys);
-    GUFO_CHECK_LAUNCH("dflash_noncausal_attention_tiled_kernel<2>");
+    SUPERROC_CHECK_LAUNCH("dflash_noncausal_attention_tiled_kernel<2>");
     return;
   }
   dflash_noncausal_attention_tiled_kernel<1>
@@ -1414,7 +1414,7 @@ void LaunchDFlashNonCausalAttentionTiled(
           q, injected_k, injected_v, block_k, block_v, out, current_pos,
           history_length, block_count, sliding_window, num_q_heads,
           num_kv_heads, head_dim, scale, history_capacity, tile_keys);
-  GUFO_CHECK_LAUNCH("dflash_noncausal_attention_tiled_kernel<1>");
+  SUPERROC_CHECK_LAUNCH("dflash_noncausal_attention_tiled_kernel<1>");
 }
 
 std::size_t DFlashAttentionSplitScratchElements(
@@ -1492,12 +1492,12 @@ void LaunchDFlashNonCausalAttentionSplit(
       current_pos, history_length, block_count, sliding_window, num_q_heads,
       num_kv_heads, head_dim, scale, history_capacity, plan.keys_per_split,
       tile_keys);
-  GUFO_CHECK_LAUNCH("dflash_noncausal_attention_split_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_noncausal_attention_split_kernel");
   dflash_noncausal_attention_split_combine_kernel<<<
       dim3(block_count, num_q_heads), kDFlashSplitThreads, 0, stream>>>(
       partial_acc, partial_ml, out, block_count, num_q_heads, head_dim,
       plan.splits);
-  GUFO_CHECK_LAUNCH("dflash_noncausal_attention_split_combine_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_noncausal_attention_split_combine_kernel");
 }
 
 void LaunchDFlashNonCausalAttention(
@@ -1579,7 +1579,7 @@ void LaunchDFlashSelectorStep(
                                                0, stream>>>(
         logits, partial_scores, partial_ids, vocab_size, selector_top_k);
   }
-  GUFO_CHECK_LAUNCH("dflash_selector_partial_topk_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_selector_partial_topk_kernel");
   if (selector_top_k <= 16U) {
     dflash_selector_finalize_kernel<16U><<<1, kSelectorThreads, 0, stream>>>(
       partial_scores, partial_ids, projected_hidden,
@@ -1597,7 +1597,7 @@ void LaunchDFlashSelectorStep(
         sample_uniform, candidate_ids, candidate_probabilities, partial_count,
         selector_rank, selector_top_k);
   }
-  GUFO_CHECK_LAUNCH("dflash_selector_finalize_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_selector_finalize_kernel");
 }
 
 void LaunchDFlashSelectorBatch(
@@ -1643,7 +1643,7 @@ void LaunchDFlashSelectorBatch(
                                                kSelectorThreads, 0, stream>>>(
         logits, partial_scores, partial_ids, vocab_size, selector_top_k);
   }
-  GUFO_CHECK_LAUNCH("dflash_selector_partial_topk_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_selector_partial_topk_kernel");
   if (selector_top_k <= 16U) {
     dflash_selector_finalize_batch_kernel<16U><<<sequences.size(),
                                                  kSelectorThreads, 0, stream>>>(
@@ -1661,8 +1661,8 @@ void LaunchDFlashSelectorBatch(
         confidences, uniforms, candidate_ids, candidate_probabilities, batch,
         partial_count, selector_rank, selector_top_k);
   }
-  GUFO_CHECK_LAUNCH("dflash_selector_finalize_batch_kernel");
+  SUPERROC_CHECK_LAUNCH("dflash_selector_finalize_batch_kernel");
 }
 
-}  // namespace gufo::hip::kernels
+}  // namespace superroc::hip::kernels
 #endif  // defined(ENGINE_ENABLE_HIP)

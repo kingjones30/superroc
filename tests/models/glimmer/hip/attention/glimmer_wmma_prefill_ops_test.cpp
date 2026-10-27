@@ -261,7 +261,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
   if (use_baseline) {
     // Reference: the fp32 prefill attention over the head-major cache.
     HIP_CHECK(hipMemset(d_out_ref, 0, q_elements * sizeof(float)));
-    const auto ref = gufo::hip::LaunchGlimmerPrefillAttention(
+    const auto ref = superroc::hip::LaunchGlimmerPrefillAttention(
         d_q, d_gate, d_cache, v_cache, d_out_ref, layer, start_pos,
         static_cast<std::uint32_t>(batch_size), window, kMaxContext, kNumHeads,
         kNumKvHeads, kHeadDim, q_elements, q_elements, total_kv, q_elements,
@@ -276,7 +276,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
 
   // Fallback: the GQA-shared fp16 kernel over the token-major plane.
   HIP_CHECK(hipMemset(d_out_shared, 0, q_elements * sizeof(float)));
-  const auto shared = gufo::hip::LaunchGlimmerSharedAttention(
+  const auto shared = superroc::hip::LaunchGlimmerSharedAttention(
       d_q, d_gate, d_cache_f16, cache_f16_v, d_out_shared, layer, start_pos,
       static_cast<std::uint32_t>(batch_size), window, kMaxContext, kNumHeads,
       kNumKvHeads, kHeadDim, q_elements, q_elements, total_kv, q_elements,
@@ -293,7 +293,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
   // production wrapper (skip_kv_write, key_begin 0).
   HIP_CHECK(hipMemset(d_out_new, 0, q_elements * sizeof(float)));
   if (want_lse || key_begin != 0) {
-    if (!gufo::hip::LaunchQwenWmmaAttention(
+    if (!superroc::hip::LaunchQwenWmmaAttention(
             d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
             d_out_new, layer, start_pos, batch_size, kMaxContext, kNumHeads,
             kNumKvHeads, kHeadDim, nullptr, lse_new, key_begin,
@@ -302,7 +302,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
       std::abort();
     }
   } else {
-    const auto wmma = gufo::hip::LaunchGlimmerWmmaPrefillAttention(
+    const auto wmma = superroc::hip::LaunchGlimmerWmmaPrefillAttention(
         d_q, d_gate, d_cache_f16, cache_f16_v, d_out_new, layer, start_pos,
         static_cast<std::uint32_t>(batch_size), window, kMaxContext, kNumHeads,
         kNumKvHeads, kHeadDim, q_elements, q_elements, total_kv, q_elements, {},
@@ -418,7 +418,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
   // reach another, which would show up here as run-to-run drift.
   HIP_CHECK(hipMemset(d_out_new, 0, q_elements * sizeof(float)));
   if (want_lse || key_begin != 0) {
-    if (!gufo::hip::LaunchQwenWmmaAttention(
+    if (!superroc::hip::LaunchQwenWmmaAttention(
             d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
             d_out_new, layer, start_pos, batch_size, kMaxContext, kNumHeads,
             kNumKvHeads, kHeadDim, nullptr, lse_new, key_begin,
@@ -427,7 +427,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
       std::abort();
     }
   } else {
-    const auto wmma = gufo::hip::LaunchGlimmerWmmaPrefillAttention(
+    const auto wmma = superroc::hip::LaunchGlimmerWmmaPrefillAttention(
         d_q, d_gate, d_cache_f16, cache_f16_v, d_out_new, layer, start_pos,
         static_cast<std::uint32_t>(batch_size), window, kMaxContext, kNumHeads,
         kNumKvHeads, kHeadDim, q_elements, q_elements, total_kv, q_elements, {},
@@ -460,7 +460,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
     for (const std::size_t budget : {std::size_t{31}, std::size_t{512}}) {
       for (std::size_t offset = 0; offset < batch_size; offset += budget) {
         const auto count = std::min(budget, batch_size - offset);
-        const auto wmma = gufo::hip::LaunchGlimmerWmmaPrefillAttention(
+        const auto wmma = superroc::hip::LaunchGlimmerWmmaPrefillAttention(
             d_q + offset * attention_size, d_gate + offset * attention_size,
             d_cache_f16, cache_f16_v, d_out_new + offset * attention_size,
             layer, start_pos + static_cast<std::uint32_t>(offset),
@@ -512,7 +512,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
                       : words[1] / kNumKvHeads - 1};
       const auto k_work = work[0].first(sizes[0]);
       const auto v_work = work[1].first(sizes[1]);
-      const auto wmma = gufo::hip::LaunchGlimmerWmmaPrefillAttention(
+      const auto wmma = superroc::hip::LaunchGlimmerWmmaPrefillAttention(
           d_q, d_gate, d_cache_f16, cache_f16_v, d_out_new, layer, start_pos,
           static_cast<std::uint32_t>(batch_size), window, kMaxContext,
           kNumHeads, kNumKvHeads, kHeadDim, q_elements, q_elements, total_kv,
@@ -602,7 +602,7 @@ void CheckPack() {
   // remap, so the bytes compared below are the ones the kernel reads.
   HIP_CHECK(hipMemset(d_cache, 0xA5, total_kv * 2 * sizeof(float)));
   HIP_CHECK(hipMemset(d_cache_f16, 0xA5, total_kv * 2 * sizeof(std::uint16_t)));
-  const auto wrote = gufo::hip::LaunchGlimmerBatchedWriteKv(
+  const auto wrote = superroc::hip::LaunchGlimmerBatchedWriteKv(
       d_k, d_v, d_cache, v_cache, kCastLayer, kStart,
       static_cast<std::uint32_t>(kBatch), kCtx, kNumKvHeads, kHeadDim,
       kBatch * kv_size, total_kv, nullptr);
@@ -610,7 +610,7 @@ void CheckPack() {
     std::cerr << "fp32 kv write refused in pack check\n";
     std::abort();
   }
-  const auto cast = gufo::hip::LaunchGlimmerCastKvFp16(
+  const auto cast = superroc::hip::LaunchGlimmerCastKvFp16(
       d_cache, d_cache_f16, /*layers=*/1, kCtx, kNumKvHeads, kHeadDim,
       kStart + static_cast<std::uint32_t>(kBatch), nullptr,
       /*layer_base=*/kCastLayer, /*plane_layers=*/kPlaneLayers);
@@ -635,7 +635,7 @@ void CheckPack() {
   HIP_CHECK(hipMalloc(&d_q, kBatch * kNumHeads * kHeadDim * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_out, kBatch * kNumHeads * kHeadDim * sizeof(float)));
   HIP_CHECK(hipMemset(d_q, 0, kBatch * kNumHeads * kHeadDim * sizeof(float)));
-  if (!gufo::hip::LaunchQwenWmmaAttention(
+  if (!superroc::hip::LaunchQwenWmmaAttention(
           d_q, d_k, d_v, nullptr, d_cache, v_cache, d_cache_f16, cache_f16_v,
           d_out, /*layer_idx=*/kCastLayer, kStart, kBatch, kCtx, kNumHeads,
           kNumKvHeads, kHeadDim, nullptr, nullptr, 0, /*skip_kv_write=*/false,
@@ -781,7 +781,7 @@ void BenchTiming() {
       const std::uint64_t pairs = CausalPairs(start_pos, batch_size, window);
       const int fp32_iters = pairs > 20000000ULL ? 1 : 3;
       const float fp32_ms = time_it("fp32", fp32_iters, [&] {
-        const auto ref = gufo::hip::LaunchGlimmerPrefillAttention(
+        const auto ref = superroc::hip::LaunchGlimmerPrefillAttention(
             d_q, d_gate, d_cache, v_cache, d_out, 0, start_pos,
             static_cast<std::uint32_t>(batch_size), window, kMaxContext,
             kNumHeads, kNumKvHeads, kHeadDim, q_elements, q_elements, total_kv,
@@ -790,7 +790,7 @@ void BenchTiming() {
           std::abort();
       });
       const float shared_ms = time_it("shared", 5, [&] {
-        const auto sh = gufo::hip::LaunchGlimmerSharedAttention(
+        const auto sh = superroc::hip::LaunchGlimmerSharedAttention(
             d_q, d_gate, d_cache_f16, cache_f16_v, d_out, 0, start_pos,
             static_cast<std::uint32_t>(batch_size), window, kMaxContext,
             kNumHeads, kNumKvHeads, kHeadDim, q_elements, q_elements, total_kv,
@@ -799,7 +799,7 @@ void BenchTiming() {
           std::abort();
       });
       const float canon_ms = time_it("wmma_canonical", 10, [&] {
-        const auto wmma = gufo::hip::LaunchGlimmerWmmaPrefillAttention(
+        const auto wmma = superroc::hip::LaunchGlimmerWmmaPrefillAttention(
             d_q, d_gate, d_cache_f16, cache_f16_v, d_out, 0, start_pos,
             static_cast<std::uint32_t>(batch_size), window, kMaxContext,
             kNumHeads, kNumKvHeads, kHeadDim, q_elements, q_elements, total_kv,
@@ -810,7 +810,7 @@ void BenchTiming() {
       float packed_ms = 0;
       if (batch_size >= 1024) {
         packed_ms = time_it("wmma_packed", 10, [&] {
-          const auto wmma = gufo::hip::LaunchGlimmerWmmaPrefillAttention(
+          const auto wmma = superroc::hip::LaunchGlimmerWmmaPrefillAttention(
               d_q, d_gate, d_cache_f16, cache_f16_v, d_out, 0, start_pos,
               static_cast<std::uint32_t>(batch_size), window, kMaxContext,
               kNumHeads, kNumKvHeads, kHeadDim, q_elements, q_elements,
@@ -892,7 +892,7 @@ void CheckDispatch() {
   HIP_CHECK(hipMemset(d_cache_f16, 0, 2 * kMaxTotalKv * sizeof(std::uint16_t)));
   const auto wmma = [&](std::uint32_t hq, std::uint32_t hkv, std::uint32_t hd,
                         std::uint32_t window, float* lse = nullptr) {
-    return gufo::hip::LaunchQwenWmmaAttention(
+    return superroc::hip::LaunchQwenWmmaAttention(
         d_q, d_k, d_v, d_gate, d_cache, d_cache + kMaxTotalKv, d_cache_f16,
         static_cast<std::uint16_t*>(d_cache_f16) + kMaxTotalKv, d_out, 0, 0,
         kBatch, kCtx, hq, hkv, hd, nullptr, lse, 0, false, {}, {}, window);
@@ -914,7 +914,7 @@ void CheckDispatch() {
     std::cerr << "windowless Glimmer WMMA rejected lse_out\n";
     std::abort();
   }
-  if (gufo::hip::LaunchBatchedAttentionTile(
+  if (superroc::hip::LaunchBatchedAttentionTile(
           d_q, d_k, d_v, d_gate, d_cache, d_cache + kMaxTotalKv, d_cache_f16,
           static_cast<std::uint16_t*>(d_cache_f16) + kMaxTotalKv, d_out, 0, 0,
           kBatch, kCtx, 32, 2, 128)) {
@@ -933,7 +933,7 @@ void CheckDispatch() {
 
 }  // namespace
 
-constexpr gufo::hip::detail::AttentionSupportParams kGlimmerDispatchParams{
+constexpr superroc::hip::detail::AttentionSupportParams kGlimmerDispatchParams{
     .batch_size = 1024,
     .start_pos = 0,
     .max_context = 32768,
@@ -943,12 +943,12 @@ constexpr gufo::hip::detail::AttentionSupportParams kGlimmerDispatchParams{
     .has_k_cache_f16 = true,
     .has_v_cache_f16 = true};
 static_assert(
-    !gufo::hip::detail::IsTiledAttentionSupported(kGlimmerDispatchParams),
+    !superroc::hip::detail::IsTiledAttentionSupported(kGlimmerDispatchParams),
     "the shared tiled gate must keep rejecting Glimmer");
-static_assert(gufo::hip::detail::IsWmmaAttentionSupportedFor<32, 2, 128>(
+static_assert(superroc::hip::detail::IsWmmaAttentionSupportedFor<32, 2, 128>(
                   kGlimmerDispatchParams),
               "the WMMA gate must accept Glimmer");
-static_assert(!gufo::hip::detail::IsWmmaAttentionSupportedFor<32, 2>(
+static_assert(!superroc::hip::detail::IsWmmaAttentionSupportedFor<32, 2>(
                   kGlimmerDispatchParams),
               "the default-256 WMMA gate must reject head_dim 128");
 
@@ -957,9 +957,9 @@ static_assert(!gufo::hip::detail::IsWmmaAttentionSupportedFor<32, 2>(
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
   const int device_status =
-      gufo::test::GateHipDevice(gufo::test::HipDeviceRequirement::kOptional,
+      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
                                 "Glimmer WMMA prefill attention ops test");
-  if (device_status != gufo::test::kHipTestSuccess) {
+  if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }
 

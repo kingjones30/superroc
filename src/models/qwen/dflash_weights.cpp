@@ -9,12 +9,13 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "src/core/env_compat.hpp"
 
-namespace gufo::speculative {
+namespace superroc::speculative {
 namespace {
 
 [[nodiscard]] bool DsparkEnvOn(const char* name) {
-  const char* value = std::getenv(name);
+  const char* value = ::superroc::core::GetEnvCompat(name);
   return value != nullptr && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -336,7 +337,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
     if (df_cfg.sliding_window < df_cfg.block_size) {
       df_cfg.sliding_window = config.context_length;
     }
-    if (const char* window = std::getenv("GUFO_DSPARK_WINDOW")) {
+    if (const char* window = ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_WINDOW")) {
       char* end = nullptr;
       const unsigned long parsed = std::strtoul(window, &end, 10);
       if (end != window && parsed >= df_cfg.block_size &&
@@ -350,9 +351,9 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
   }
 
   // GGUF target_layers are layer-input indices (llama.cpp converter writes
-  // HF id + 1). Gufo captures layer OUTPUT of the stored id. The selector
+  // HF id + 1). SuperROC captures layer OUTPUT of the stored id. The selector
   // (27B) path always rewrites N → N−1. DSpark pdk-1 stored GGUF as-is;
-  // GUFO_DSPARK_TAP_MINUS1=1 applies the same N−1 rewrite (HF 3,11,19,27,35).
+  // SUPERROC_DSPARK_TAP_MINUS1=1 applies the same N−1 rewrite (HF 3,11,19,27,35).
   const auto encoded_target_layers =
       GetNonnegativeIntegerArray(reader, prefix + "target_layers");
   if (!encoded_target_layers.has_value()) {
@@ -377,7 +378,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
         return std::nullopt;
       }
       normalized = static_cast<std::uint32_t>(encoded_layer - 1U);
-    } else if (DsparkEnvOn("GUFO_DSPARK_TAP_MINUS1")) {
+    } else if (DsparkEnvOn("SUPERROC_DSPARK_TAP_MINUS1")) {
       if (encoded_layer == 0 ||
           !std::in_range<std::uint32_t>(encoded_layer - 1U)) {
         SetError(error_msg,
@@ -403,7 +404,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
   }
   if (!df_cfg.has_selector) {
     std::fprintf(stderr, "dspark loader tap_minus1=%d window=%u taps=",
-                 static_cast<int>(DsparkEnvOn("GUFO_DSPARK_TAP_MINUS1")),
+                 static_cast<int>(DsparkEnvOn("SUPERROC_DSPARK_TAP_MINUS1")),
                  df_cfg.sliding_window);
     for (std::size_t i = 0; i < df_cfg.target_layer_ids.size(); ++i) {
       std::fprintf(stderr, "%s%u", i == 0 ? "" : ",",
@@ -597,4 +598,4 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
   return weights;
 }
 
-}  // namespace gufo::speculative
+}  // namespace superroc::speculative

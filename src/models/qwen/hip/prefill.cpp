@@ -7,7 +7,7 @@
 #include "src/core/hip/hip_utils.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 void QwenGpuExecutor::CheckPrefillCancellation() const {
   if (cancellation_check_ && cancellation_check_())
     throw std::runtime_error("Qwen prefill cancelled");
@@ -84,5 +84,5 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptBatch(
   return next_token;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

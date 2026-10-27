@@ -6,14 +6,14 @@
 //   1. TensorRef::RowBytes() equals the raw on-disk block geometry for the
 //      type (18/17 bytes per 32-value ROCmFP4 block, 24 per Q5_1 block, ...);
 //   2. for ROCmFP4 rows, cpu::DequantizeRow (routing to
-//      gufo::quant::DequantizeROCMFP4_Dual/Fast) agrees EXACTLY with an
+//      superroc::quant::DequantizeROCMFP4_Dual/Fast) agrees EXACTLY with an
 //      independent re-derivation of the fork's block semantics
 //      (ggml/rocmfp4/rocmfp4.c: signed Codebook10 nibble x half-scale UE4M3,
 //      written here in ldexp power form instead of the oracle's bit form);
 //   3. for Q5_1 rows (the 320M-row PLE table), an independent q*d+m decode
 //      agrees exactly, and the NgramTable direct-I/O reader returns
 //      bit-identical rows to the mmap decode;
-//   4. gufo::quant::DotProductROCMFP4_* (float accumulation) agrees with
+//   4. superroc::quant::DotProductROCMFP4_* (float accumulation) agrees with
 //      cpu::DotRow (double accumulation) within 1e-4 relative;
 //   5. decoded rows are finite, every tensor has at least one nonzero row,
 //      and the whole row decode never faults (proves every addressed byte
@@ -36,8 +36,8 @@
 
 namespace {
 
-namespace qfn = gufo::models::qwen38_flash_next;
-using gufo::core::GgmlType;
+namespace qfn = superroc::models::qwen38_flash_next;
+using superroc::core::GgmlType;
 
 int failures = 0;
 std::uint64_t checked_rows = 0;
@@ -98,8 +98,8 @@ void ForkDecodeQ5_1(const std::uint8_t* row, std::uint64_t k, float* y) {
     std::memcpy(&dh, blk, 2);
     std::memcpy(&mh, blk + 2, 2);
     std::memcpy(&qh, blk + 4, 4);
-    const float d = gufo::quant::Fp16ToFloat(dh);
-    const float m = gufo::quant::Fp16ToFloat(mh);
+    const float d = superroc::quant::Fp16ToFloat(dh);
+    const float m = superroc::quant::Fp16ToFloat(mh);
     for (int j = 0; j < 16; ++j) {
       const int hi0 = ((qh >> j) & 1U) << 4;
       const int hi1 = ((qh >> (j + 16)) & 1U) << 4;
@@ -203,8 +203,8 @@ void CheckRows(const char* what, const qfn::TensorRef& t, std::uint64_t e,
       Check(exact, tag + " row " + std::to_string(r) +
                        " oracle != independent fork decode");
       const float dot_fast =
-          fast ? gufo::quant::DotProductROCMFP4_Fast(p, xv, t.cols)
-               : gufo::quant::DotProductROCMFP4_Dual(p, xv, t.cols);
+          fast ? superroc::quant::DotProductROCMFP4_Fast(p, xv, t.cols)
+               : superroc::quant::DotProductROCMFP4_Dual(p, xv, t.cols);
       // Backward-error gate: DotProductROCMFP4_* accumulates in FLOAT while
       // DotRow accumulates in double, so the honest bound on their
       // difference scales with sum |term|, not with |sum| -- random +-1
@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(argv[1], &error);
+  auto reader = superroc::core::GgufReader::OpenFile(argv[1], &error);
   if (reader == nullptr) {
     std::fprintf(stderr, "open failed: %s\n", error.c_str());
     return 2;
@@ -387,12 +387,12 @@ int main(int argc, char** argv) {
   // MTP sidecar (optional second argument): binder + MtpMatches on the real
   // Q8_0 heads file.
   if (argc > 2) {
-    auto mtp_reader = gufo::core::GgufReader::OpenFile(argv[2], &error);
+    auto mtp_reader = superroc::core::GgufReader::OpenFile(argv[2], &error);
     Check(mtp_reader != nullptr, "mtp open: " + error);
     if (mtp_reader != nullptr) {
       auto mtp = qfn::MtpWeights::Bind(*mtp_reader, c, &error);
       if (!mtp.has_value()) {
-        // FINDING (pre-existing on gufo-king main, NOT an FP4 regression):
+        // FINDING (pre-existing on main before the rename, NOT an FP4 regression):
         // the binder requires blk.48.nextn.hc_head_{norm,down,up}.weight but
         // King's sidecar exports nextn.shared_head_norm plus top-level
         // output_hc_* instead (35 tensors, all Q8_0/F32 -- zero FP4, so

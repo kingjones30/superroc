@@ -18,7 +18,7 @@ void Check(bool condition, const std::string& message) {
   }
 }
 
-using gufo::server::ParseLfm2PythonicCalls;
+using superroc::server::ParseLfm2PythonicCalls;
 
 void TestSingleStringArg() {
   const auto calls = ParseLfm2PythonicCalls("[get_weather(city='Paris')]");

@@ -22,7 +22,7 @@ Single-row outputs from main `23fd87dc` and the candidate are byte-identical
 in the production 24/4-head shape (fp32 and fp16 caches, gated and plain,
 starts 0–65,536), and verification rows 2–8 match those single rows. Every
 Q4/Q8 DFlash2 single-user completion from 0 to 128K matches the earlier
-October 19 rows; all concurrency completions match Gufo AR. The Q4 DFlash2
+October 19 rows; all concurrency completions match SuperROC AR. The Q4 DFlash2
 functional `batch`, `long-context`, `conversation`, `state-edges`,
 `cache-concurrency` and `cache` suites pass against main with no output
 change; 2,239 of 2,246 timings pass and 7 are inconclusive.
@@ -52,7 +52,7 @@ original date; these new checks establish consistency with current main.
 
 ## Quantization comparison
 
-September 24, 2026: short teacher-forced comparison against **Gufo's BF16 target**, with identical
+September 24, 2026: short teacher-forced comparison against **SuperROC's BF16 target**, with identical
 prefixes: three prose/code fixtures, nine logit rows each, full 248,320-token
 vocabulary, temperature 1 without filtering. This measures quantization and
 native arithmetic together; BF16 here is not an independent upstream oracle.
@@ -109,14 +109,14 @@ Full logits stay outside Git. A missing-weight skip is not a pass.
 
 ## Meaning of exact
 
-Matching Gufo AR/speculative tokens or completion hashes tests consistency.
+Matching SuperROC AR/speculative tokens or completion hashes tests consistency.
 Matching llama.cpp hashes also does not establish original-model accuracy;
 quantized implementations can disagree. Keep the reference, weights and history
 fixed before interpreting any numerical difference.
 
 ## Benchmark method
 
-All Gufo rows refreshed October 19, 2026 on `11813e51` (#660, rebased on
+All SuperROC rows refreshed October 19, 2026 on `11813e51` (#660, rebased on
 `23fd87dc`); llama.cpp retains September 23 measurements. One warmed sample per
 point, greedy, thinking off, `performance` platform profile.
 Single-user rows use pp2048/tg128 and cached depths 0–128K. Each mode creates

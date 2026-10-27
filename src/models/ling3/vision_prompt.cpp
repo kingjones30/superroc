@@ -4,7 +4,7 @@
 #include <string>
 #include <utility>
 
-namespace gufo::models::ling3::vision {
+namespace superroc::models::ling3::vision {
 namespace {
 
 constexpr int kHidden = 2560;
@@ -246,4 +246,4 @@ PreparedPrompt IdentityOf(std::span<const std::int32_t> tokens) {
   return out;
 }
 
-}  // namespace gufo::models::ling3::vision
+}  // namespace superroc::models::ling3::vision

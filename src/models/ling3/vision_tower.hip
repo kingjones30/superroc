@@ -1,4 +1,4 @@
-// Ling-VL vision tower for King's gufo.
+// Ling-VL vision tower for King's superroc.
 // Qwen3-VL graph from llama.cpp clip_graph_qwen3vl: temporal conv sum,
 // 2x2 reorder, absolute position embeddings, LayerNorm + GELU ViT,
 // merger mm.0 / GELU / mm.2. GEMMs run on the GPU through hipBLAS.
@@ -810,7 +810,7 @@ int main(int argc, char** argv) {
     const char* env_out = std::getenv("LVV_EMB_OUT");
     const std::string out_path =
         (env_out != nullptr && env_out[0] != '\0') ? env_out
-                                                    : "/path/to/lvv/gufo-emb.bin";
+                                                    : "/path/to/lvv/superroc-emb.bin";
     std::ofstream out(out_path, std::ios::binary);
     out.write(reinterpret_cast<const char*>(emb.data()), emb.size() * sizeof(float));
     std::cerr << "wrote " << out_path << " rows=" << n_out << " dim=" << kProj << "\n";
@@ -851,7 +851,7 @@ int main(int argc, char** argv) {
 }
 #endif
 
-namespace gufo::models::ling3::vision {
+namespace superroc::models::ling3::vision {
 
 struct VisionTower::Impl {
   int slot{-1};
@@ -924,4 +924,4 @@ std::size_t VisionTower::ScratchBytes() const noexcept {
   return ScratchFor(1024, 1024);
 }
 
-}  // namespace gufo::models::ling3::vision
+}  // namespace superroc::models::ling3::vision

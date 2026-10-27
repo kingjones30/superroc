@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_MOE_FORWARD_MOE_HPP_
-#define GUFO_MODELS_QWEN_MOE_FORWARD_MOE_HPP_
+#ifndef SUPERROC_MODELS_QWEN_MOE_FORWARD_MOE_HPP_
+#define SUPERROC_MODELS_QWEN_MOE_FORWARD_MOE_HPP_
 
 #include <cstddef>
 #include <span>
@@ -7,7 +7,7 @@
 #include "src/core/model_config.hpp"
 #include "src/models/qwen/state.hpp"
 
-namespace gufo::models {
+namespace superroc::models {
 
 /// KAT: bytes in one expert row. F32 is k·4, F16 and BF16 are k·2, and a
 /// quantized type uses QuantizedRowBytes. Returns 0 when the row cannot be
@@ -51,6 +51,6 @@ void ForwardMoe(std::span<const float> x, const QwenLayerWeights& layer,
                 std::span<float> up_scratch, std::span<float> act_scratch,
                 std::span<float> expert_hidden, std::span<float> out);
 
-}  // namespace gufo::models
+}  // namespace superroc::models
 
-#endif  // GUFO_MODELS_QWEN_MOE_FORWARD_MOE_HPP_
+#endif  // SUPERROC_MODELS_QWEN_MOE_FORWARD_MOE_HPP_

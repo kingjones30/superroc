@@ -22,7 +22,7 @@
 #include <set>
 #include <stdexcept>
 
-namespace gufo::cache {
+namespace superroc::cache {
 namespace detail {
 struct DiskAvailability {
   ResourceCharge metadata;
@@ -58,8 +58,12 @@ private:
   std::uint64_t& cost_;
   std::chrono::steady_clock::time_point start_;
 };
-constexpr std::array<std::uint8_t, 8> kMagic{'G', 'U', 'F', 'O',
+constexpr std::array<std::uint8_t, 8> kMagic{'S', 'R', 'O', 'C',
                                              'M', 'N', 'F', '2'};
+/// Previous engine-name magic, kept in char form so the old spelling never
+/// appears here; readers still accept files written by previous releases.
+constexpr std::array<std::uint8_t, 8> kPreviousMagic{'G', 'U', 'F', 'O',
+                                                      'M', 'N', 'F', '2'};
 constexpr std::size_t kMaxTokens = std::size_t{2} * 1024 * 1024;
 constexpr std::size_t kMaxComponents = 256, kMaxReferences = 65536;
 constexpr std::size_t kMaxInputBytes = 65536;
@@ -462,7 +466,8 @@ DiskManifest DecodeManifest(std::span<const std::uint8_t> bytes) {
     Invalid();
   Reader r{bytes.first(bytes.size() - 8)};
   auto magic = r.Blob(kMagic.size());
-  if (!std::equal(magic.begin(), magic.end(), kMagic.begin()) ||
+  if ((!std::equal(magic.begin(), magic.end(), kMagic.begin()) &&
+       !std::equal(magic.begin(), magic.end(), kPreviousMagic.begin())) ||
       r.Number(4) != kDiskFormatVersion)
     Invalid();
   DiskManifest m;
@@ -595,7 +600,7 @@ struct DiskStore::Impl {
     // The charge returns to the ledger outside the verification lock.
     node = {};
   }
-#ifdef GUFO_CACHE_TESTING
+#ifdef SUPERROC_CACHE_TESTING
   std::function<void(DiskPublicationStep)> crash_hook;
 #define DISK_STEP(step)                      \
   do {                                       \
@@ -1788,10 +1793,10 @@ void DiskStore::WaitForReclamation() {
   if (impl_->reclamation.valid())
     impl_->reclamation.get();
 }
-#ifdef GUFO_CACHE_TESTING
+#ifdef SUPERROC_CACHE_TESTING
 void DiskStore::SetCrashHook(std::function<void(DiskPublicationStep)> hook) {
   std::lock_guard guard(impl_->mutex);
   impl_->crash_hook = std::move(hook);
 }
 #endif
-}  // namespace gufo::cache
+}  // namespace superroc::cache

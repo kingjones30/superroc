@@ -1,11 +1,11 @@
-#ifndef GUFO_EVAL_TRACE_HPP_
-#define GUFO_EVAL_TRACE_HPP_
+#ifndef SUPERROC_EVAL_TRACE_HPP_
+#define SUPERROC_EVAL_TRACE_HPP_
 
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace gufo::eval {
+namespace superroc::eval {
 
 struct EvalCaseTrace {
   std::string case_id;
@@ -24,6 +24,6 @@ struct EvalTraceReport {
   std::vector<EvalCaseTrace> cases;
 };
 
-}  // namespace gufo::eval
+}  // namespace superroc::eval
 
-#endif  // GUFO_EVAL_TRACE_HPP_
+#endif  // SUPERROC_EVAL_TRACE_HPP_

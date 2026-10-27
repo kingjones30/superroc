@@ -1,4 +1,4 @@
-// ling3_mla_tile.hip — LF1 (MiMo), wave 2: gufo's absorbed-MLA PREFILL
+// ling3_mla_tile.hip — LF1 (MiMo), wave 2: superroc's absorbed-MLA PREFILL
 // attention as the fork's TILE kernel. 2026-10-03. Header: ling3_mla_tile.hpp.
 //
 // ATTRIBUTION — adapted from llama.cpp's ggml/src/ggml-cuda/fattn-tile.cuh
@@ -7,7 +7,7 @@
 // The algorithm (register-blocked KQ/VKQ dot2 products over f16 K/V tiles in
 // LDS, online softmax with one warp reduction per tile, no shuffles in the
 // inner loop) is theirs; the absorbed-MLA shapes, the per-column causal limit,
-// the MQA cache sharing and the de-absorb GEMM are gufo's (see the .hpp).
+// the MQA cache sharing and the de-absorb GEMM are superroc's (see the .hpp).
 //
 // Arithmetic, identical to mla_attn_tok up to f16 inputs and reordered sums:
 //   q576 = [wk_b[h] . q_nope | q_pe] * (1/sqrt(192))     (512 + 64)

@@ -22,7 +22,7 @@
 #include "src/models/qwen/hip/ops/token.hpp"  // LFM2
 #include "src/models/qwen/moe/qwen_moe_prefill.hpp"  // LFM2 (grouped experts)
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 // LFM2: Glimmer's CheckGpu renamed. // LFM2
@@ -562,5 +562,5 @@ void QwenGpuExecutor::MaterializeFlintRowLogits(std::size_t row) {  // LFM2
   }  // LFM2
 }  // LFM2
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

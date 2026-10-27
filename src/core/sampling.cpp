@@ -10,7 +10,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace gufo::sampling {
+namespace superroc::sampling {
 namespace {
 
 struct Candidate {
@@ -320,7 +320,7 @@ TokenId SamplingDistribution::Sample(std::uint64_t* rng_state) const {
   if (entries_.size() == 1) {
     return entries_.front().token;
   }
-  double sample = gufo::sampling::Uniform(rng_state);
+  double sample = superroc::sampling::Uniform(rng_state);
   for (const auto& entry : entries_) {
     sample -= entry.value;
     if (sample < 0.0) {
@@ -784,7 +784,7 @@ TokenId SamplerState::SampleResidual(
 }
 
 double SamplerState::Uniform() {
-  return gufo::sampling::Uniform(&rng_state_);
+  return superroc::sampling::Uniform(&rng_state_);
 }
 
 void SamplerState::TrimHistory() {
@@ -1159,4 +1159,4 @@ TokenId SampleResidual(std::span<const float> target_logits, float temperature,
       .SampleResidual(candidate_ids, candidate_probabilities, rng_state);
 }
 
-}  // namespace gufo::sampling
+}  // namespace superroc::sampling

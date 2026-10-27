@@ -26,15 +26,15 @@
 
 namespace {
 
-using gufo::core::ModelConfig;
-using gufo::models::QwenLayerWeights;
-using gufo::models::qwen::build_synthetic_qwen_weights;
-using gufo::models::qwen::CpuModuleContext;
-using gufo::models::qwen::make_small_qwen_config;
-using gufo::models::qwen::MakeAttnNormView;
-using gufo::models::qwen::MakeFfnNormView;
-using gufo::models::qwen::NormForward;
-using gufo::models::qwen::NormLayerView;
+using superroc::core::ModelConfig;
+using superroc::models::QwenLayerWeights;
+using superroc::models::qwen::build_synthetic_qwen_weights;
+using superroc::models::qwen::CpuModuleContext;
+using superroc::models::qwen::make_small_qwen_config;
+using superroc::models::qwen::MakeAttnNormView;
+using superroc::models::qwen::MakeFfnNormView;
+using superroc::models::qwen::NormForward;
+using superroc::models::qwen::NormLayerView;
 
 void RunNormModule(const ModelConfig& c, const NormLayerView& view,
                    std::span<const float> x, std::vector<float>& out) {
@@ -64,12 +64,12 @@ void TestNormModuleMatchesIndependentReference() {
   const ModelConfig config = make_small_qwen_config();
   auto sw = build_synthetic_qwen_weights(config);
   const auto& weights = sw.weights;
-  std::mt19937 rng = gufo::test::make_seeded_rng(0xA117u);
+  std::mt19937 rng = superroc::test::make_seeded_rng(0xA117u);
   const std::size_t hidden = config.hidden_size;
   const auto& layer = weights.layers[0];
 
   std::vector<float> x =
-      gufo::test::make_random_tensor(hidden, rng, -1.0F, 1.0F);
+      superroc::test::make_random_tensor(hidden, rng, -1.0F, 1.0F);
 
   // attn pre-norm slice (MakeAttnNormView).
   {
@@ -80,7 +80,7 @@ void TestNormModuleMatchesIndependentReference() {
     std::vector<float> ref(hidden, 0.0F);
     ComputeManualRmsNorm(x, layer.attn_norm.AsFloatSpan(), view.eps, ref);
 
-    auto res = gufo::test::compare_module_logits(ref, out);
+    auto res = superroc::test::compare_module_logits(ref, out);
     assert(res.match);
     assert(res.finite);
     float max_abs = 0.0F;
@@ -100,7 +100,7 @@ void TestNormModuleMatchesIndependentReference() {
     std::vector<float> ref(hidden, 0.0F);
     ComputeManualRmsNorm(x, layer.ffn_norm.AsFloatSpan(), view.eps, ref);
 
-    auto res = gufo::test::compare_module_logits(ref, out);
+    auto res = superroc::test::compare_module_logits(ref, out);
     assert(res.match);
     assert(res.finite);
   }

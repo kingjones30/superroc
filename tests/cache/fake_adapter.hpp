@@ -1,5 +1,5 @@
-#ifndef GUFO_CACHE_TESTING_FAKE_ADAPTER_HPP_
-#define GUFO_CACHE_TESTING_FAKE_ADAPTER_HPP_
+#ifndef SUPERROC_CACHE_TESTING_FAKE_ADAPTER_HPP_
+#define SUPERROC_CACHE_TESTING_FAKE_ADAPTER_HPP_
 
 #include <atomic>
 #include <cstdint>
@@ -10,7 +10,7 @@
 
 #include "src/cache/adapter.hpp"
 
-namespace gufo::cache::testing {
+namespace superroc::cache::testing {
 
 struct FakeTransfer;
 struct FakeStreamState;
@@ -106,6 +106,6 @@ private:
   Rows prefill_pass_rows_{2048};
 };
 
-}  // namespace gufo::cache::testing
+}  // namespace superroc::cache::testing
 
 #endif

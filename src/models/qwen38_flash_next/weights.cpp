@@ -5,7 +5,7 @@
 #include <string>
 #include <utility>
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 namespace {
 
 using core::GgmlType;
@@ -374,4 +374,4 @@ std::optional<MtpWeights> MtpWeights::Bind(const core::GgufReader& reader,
   return m;
 }
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN3_ASR_TENSOR_HPP_
-#define GUFO_MODELS_QWEN3_ASR_TENSOR_HPP_
+#ifndef SUPERROC_MODELS_QWEN3_ASR_TENSOR_HPP_
+#define SUPERROC_MODELS_QWEN3_ASR_TENSOR_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace gufo::models::qwen3_asr {
+namespace superroc::models::qwen3_asr {
 
 enum class DType : std::uint8_t {
   kF32,
@@ -44,6 +44,6 @@ private:
   std::unordered_map<std::string, Tensor> tensors_;
 };
 
-}  // namespace gufo::models::qwen3_asr
+}  // namespace superroc::models::qwen3_asr
 
-#endif  // GUFO_MODELS_QWEN3_ASR_TENSOR_HPP_
+#endif  // SUPERROC_MODELS_QWEN3_ASR_TENSOR_HPP_

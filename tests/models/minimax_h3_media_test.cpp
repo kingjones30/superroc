@@ -11,15 +11,16 @@
 #include <vector>
 
 #include "src/models/minimax_h3/media.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
-using gufo::minimax_h3::CancellationToken;
-using gufo::minimax_h3::MediaMuxTelemetry;
-using gufo::minimax_h3::MediaProbe;
-using gufo::minimax_h3::MediaVideoOptions;
-using gufo::minimax_h3::ProbeMediaFile;
-using gufo::minimax_h3::WriteSynchronizedMp4;
+using superroc::minimax_h3::CancellationToken;
+using superroc::minimax_h3::MediaMuxTelemetry;
+using superroc::minimax_h3::MediaProbe;
+using superroc::minimax_h3::MediaVideoOptions;
+using superroc::minimax_h3::ProbeMediaFile;
+using superroc::minimax_h3::WriteSynchronizedMp4;
 
 [[noreturn]] void Fail(const std::string& message) {
   std::cerr << "FAIL minimax_h3_media_test: " << message << '\n';
@@ -73,7 +74,7 @@ bool HasSentinel(const std::filesystem::path& path) {
 }
 
 bool HasPartialFor(const std::filesystem::path& path) {
-  const std::string prefix = path.filename().string() + ".gufo-partial-";
+  const std::string prefix = path.filename().string() + ".superroc-partial-";
   for (const std::filesystem::directory_entry& entry :
        std::filesystem::directory_iterator(path.parent_path())) {
     if (entry.path().filename().string().starts_with(prefix)) {
@@ -93,15 +94,15 @@ int main() {
   constexpr int kOutputHeight = 48;
   constexpr int kSamples = 29600;
   const std::filesystem::path output =
-      std::filesystem::temp_directory_path() / "gufo-h3-media-test.mp4";
+      std::filesystem::temp_directory_path() / "superroc-h3-media-test.mp4";
   const std::filesystem::path cancelled_output =
       std::filesystem::temp_directory_path() /
-      "gufo-h3-media-cancelled-test.mp4";
+      "superroc-h3-media-cancelled-test.mp4";
   const std::filesystem::path error_output =
-      std::filesystem::temp_directory_path() / "gufo-h3-media-error-test.mp4";
+      std::filesystem::temp_directory_path() / "superroc-h3-media-error-test.mp4";
   const std::filesystem::path probe_error_output =
       std::filesystem::temp_directory_path() /
-      "gufo-h3-media-probe-error-test.mp4";
+      "superroc-h3-media-probe-error-test.mp4";
   std::error_code ignored;
   std::filesystem::remove(output, ignored);
   std::filesystem::remove(cancelled_output, ignored);
@@ -183,35 +184,35 @@ int main() {
   }
   std::filesystem::remove(cancelled_output, ignored);
 
-  const char* saved = std::getenv("GUFO_FFMPEG");
+  const char* saved = ::superroc::core::GetEnvCompat("SUPERROC_FFMPEG");
   const std::string saved_value = saved == nullptr ? "" : saved;
   WriteSentinel(error_output);
-  setenv("GUFO_FFMPEG", "/bin/false", 1);
+  setenv("SUPERROC_FFMPEG", "/bin/false", 1);
   const bool error_result = WriteSynchronizedMp4(
       error_output, frames, kFrames, kWidth, kHeight, 24, pcm, kSamples, 2,
       32000, nullptr, &telemetry, &error);
   if (saved == nullptr) {
-    unsetenv("GUFO_FFMPEG");
+    unsetenv("SUPERROC_FFMPEG");
   } else {
-    setenv("GUFO_FFMPEG", saved_value.c_str(), 1);
+    setenv("SUPERROC_FFMPEG", saved_value.c_str(), 1);
   }
   if (error_result || !HasSentinel(error_output) ||
       HasPartialFor(error_output)) {
     Fail("FFmpeg child error did not preserve the prior output");
   }
 
-  const char* saved_probe = std::getenv("GUFO_FFPROBE");
+  const char* saved_probe = ::superroc::core::GetEnvCompat("SUPERROC_FFPROBE");
   const std::string saved_probe_value =
       saved_probe == nullptr ? "" : saved_probe;
   WriteSentinel(probe_error_output);
-  setenv("GUFO_FFPROBE", "/bin/false", 1);
+  setenv("SUPERROC_FFPROBE", "/bin/false", 1);
   const bool probe_error_result = WriteSynchronizedMp4(
       probe_error_output, frames, kFrames, kWidth, kHeight, 24, pcm, kSamples,
       2, 32000, nullptr, &telemetry, &error);
   if (saved_probe == nullptr) {
-    unsetenv("GUFO_FFPROBE");
+    unsetenv("SUPERROC_FFPROBE");
   } else {
-    setenv("GUFO_FFPROBE", saved_probe_value.c_str(), 1);
+    setenv("SUPERROC_FFPROBE", saved_probe_value.c_str(), 1);
   }
   if (probe_error_result || !HasSentinel(probe_error_output) ||
       HasPartialFor(probe_error_output)) {

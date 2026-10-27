@@ -1,17 +1,17 @@
-// ling3_mla_tile.hpp — LF1 (MiMo), wave 2: gufo's absorbed-MLA PREFILL
+// ling3_mla_tile.hpp — LF1 (MiMo), wave 2: superroc's absorbed-MLA PREFILL
 // attention as the fork's TILE kernel. 2026-10-03. Companion:
 // ling3_mla_tile.hip.
 //
 // WHAT — a port of llama.cpp ROCmFPX's `flash_attn_tile<DKQ=576, DV=512,
 // ncols1=2, ncols2=16>` (ggml/src/ggml-cuda/fattn-tile.cuh, MIT; attribution in
-// the .hip) to gufo's absorbed MLA prefill, per Jay's DECISIONS 2026-10-03
+// the .hip) to superroc's absorbed MLA prefill, per Jay's DECISIONS 2026-10-03
 // 01:05. The fork's kernel is the proven design on gfx1151: one launch per
 // layer per chunk, 16 heads x 2 tokens per block sharing each K/V tile,
 // f16 K/V in LDS (half2), Q f32->f16 pre-scaled, register-blocked KQ and VKQ
 // dot2 products with NO shuffles in the inner loop, online softmax with one
 // warp reduction per tile.
 //
-// gufo-specific shape of the same algorithm:
+// superroc-specific shape of the same algorithm:
 //   - the 32 query columns of a block are 2 tokens x 16 heads of ONE shared
 //     cache (MQA): every column reads the same K/V tile, so the tile is staged
 //     once and reused 32x;

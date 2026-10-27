@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_MTP_SAMPLING_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_MTP_SAMPLING_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_MTP_SAMPLING_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_MTP_SAMPLING_HPP_
 
 #include <array>
 #include <cmath>
@@ -9,7 +9,7 @@
 
 #include "src/core/sampling.hpp"
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 
 enum class DraftDecision { kAccept, kReject, kStop };
 
@@ -146,6 +146,6 @@ inline float ForkDraftTopProbability(const MtpCandidateLogits& candidates,
   return static_cast<float>(1.0 / sum);
 }
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next
 
 #endif

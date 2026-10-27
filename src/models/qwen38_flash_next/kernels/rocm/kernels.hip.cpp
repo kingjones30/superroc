@@ -19,14 +19,14 @@
 #define hipLaunchKernelGGL(kernelName, numBlocks, numThreads, memPerBlock, \
                            streamId, ...)                                  \
   do {                                                                     \
-    ::gufo::models::qwen38_flash_next::rocm::LfnNoteLaunch();              \
+    ::superroc::models::qwen38_flash_next::rocm::LfnNoteLaunch();              \
     kernelName<<<(numBlocks), (numThreads), (memPerBlock), (streamId)>>>(  \
         __VA_ARGS__);                                                      \
   } while (0)
 
 // HIP kernels follow the layouts and operator formulas in reference.cpp.
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 namespace {
 
 constexpr unsigned kThreads = 256;
@@ -7401,7 +7401,7 @@ void SmallGemm(const void* w, WeightType type, const float* x, float* out,
                                                 stream);
     // FLASHNEXT: ROCmFP4 float fallback. Slow (per-element decode in the
     // wave-per-row kernel) but numerically the oracle; the executor prefers
-    // gufo_fp4_gemv_m for narrow decode and lands here for everything else.
+    // superroc_fp4_gemv_m for narrow decode and lands here for everything else.
     case WeightType::kQ4_0_ROCMFP4:
       return SmallGemmForType<WeightType::kQ4_0_ROCMFP4>(w, x, out, n_tokens, m,
                                                          k, stream);
@@ -8009,4 +8009,4 @@ void MtpTopCandidates(const float* logits, std::uint32_t* ids,
                                       stream);
 }
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm

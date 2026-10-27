@@ -3,7 +3,7 @@
 #include <string>
 #include <utility>
 
-namespace gufo::models::ling3::chat {
+namespace superroc::models::ling3::chat {
 namespace {
 
 /// The fixed instruction block the template emits between </tools> and the
@@ -36,7 +36,7 @@ std::string Escaper(const std::string& s) {
 }  // namespace
 
 std::string Tool::to_json() const {
-  // Hand-built rather than pulled from gufo's JSON writer so the key order is
+  // Hand-built rather than pulled from superroc's JSON writer so the key order is
   // fixed: the template embeds this verbatim, and a different order would
   // change the token ids of the prompt.
   std::string out = "{\"type\": \"function\", \"function\": {\"name\": \"";
@@ -225,4 +225,4 @@ std::optional<std::string> RenderChat(const std::vector<Message>& messages,
   return out;
 }
 
-}  // namespace gufo::models::ling3::chat
+}  // namespace superroc::models::ling3::chat

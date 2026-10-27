@@ -1,5 +1,5 @@
-#ifndef GUFO_CLI_BENCH_HPP_
-#define GUFO_CLI_BENCH_HPP_
+#ifndef SUPERROC_CLI_BENCH_HPP_
+#define SUPERROC_CLI_BENCH_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +11,7 @@
 
 #include "src/core/sampling.hpp"
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 struct BenchOptions {
   std::string model_path;
@@ -37,6 +37,6 @@ std::optional<BenchOptions> ParseBenchOptions(std::span<const char* const> args,
                                               std::string* error_msg = nullptr);
 int RunBench(std::span<const char* const> args);
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli
 
-#endif  // GUFO_CLI_BENCH_HPP_
+#endif  // SUPERROC_CLI_BENCH_HPP_

@@ -17,7 +17,7 @@
 #include "src/models/qwen/hip/kernels/q4_0_gemv.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<std::uint32_t WavesPerBlock>
 __launch_bounds__(WavesPerBlock * 32, 4) __global__
@@ -257,12 +257,12 @@ void LaunchFusedQKVProjections(const void* q_w, core::GgmlType q_type,
   if (IsRocmFp4(q_type) && IsRocmFp4(k_type) && IsRocmFp4(v_type) &&
       RocmFp4ShapeOk(q_dim, hidden_size) &&
       RocmFp4ShapeOk(kv_dim, hidden_size) &&
-      PrepareRocmFp4Act(x, hidden_size, GUFO_FP4_Q8_SLOT_ATTN_NORM, stream) &&
-      TryLaunchRocmFp4GemvSlot(q_type, q_w, GUFO_FP4_Q8_SLOT_ATTN_NORM, q_out,
+      PrepareRocmFp4Act(x, hidden_size, SUPERROC_FP4_Q8_SLOT_ATTN_NORM, stream) &&
+      TryLaunchRocmFp4GemvSlot(q_type, q_w, SUPERROC_FP4_Q8_SLOT_ATTN_NORM, q_out,
                                q_dim, hidden_size, stream) &&
-      TryLaunchRocmFp4GemvSlot(k_type, k_w, GUFO_FP4_Q8_SLOT_ATTN_NORM, k_out,
+      TryLaunchRocmFp4GemvSlot(k_type, k_w, SUPERROC_FP4_Q8_SLOT_ATTN_NORM, k_out,
                                kv_dim, hidden_size, stream) &&
-      TryLaunchRocmFp4GemvSlot(v_type, v_w, GUFO_FP4_Q8_SLOT_ATTN_NORM, v_out,
+      TryLaunchRocmFp4GemvSlot(v_type, v_w, SUPERROC_FP4_Q8_SLOT_ATTN_NORM, v_out,
                                kv_dim, hidden_size, stream)) {
     return;
   }
@@ -282,15 +282,15 @@ void LaunchFusedQKVProjections(const void* q_w, core::GgmlType q_type,
         <<<grid, kBlockThreads, 0, stream>>>(q_w, q_type, k_w, k_type, v_w,
                                              v_type, x, q_out, k_out, v_out,
                                              q_dim, kv_dim, hidden_size);
-    GUFO_CHECK_LAUNCH("Wave32FusedQKVProjectionsKernel_1Row<kWavesPerBlock>");
+    SUPERROC_CHECK_LAUNCH("Wave32FusedQKVProjectionsKernel_1Row<kWavesPerBlock>");
     return;
   }
 
   FusedQKVProjectionsKernel<<<total_rows, 128, 0, stream>>>(
       q_w, q_type, k_w, k_type, v_w, v_type, x, q_out, k_out, v_out, q_dim,
       kv_dim, hidden_size);
-  GUFO_CHECK_LAUNCH("FusedQKVProjectionsKernel");
+  SUPERROC_CHECK_LAUNCH("FusedQKVProjectionsKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

@@ -6,7 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 
-namespace dr = gufo::models::ling3::mtp::depth;
+namespace dr = superroc::models::ling3::mtp::depth;
 
 static int g_fails = 0;
 

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_KERNELS_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_KERNELS_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_KERNELS_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_KERNELS_HPP_
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -16,7 +16,7 @@
 /// tier. Activations are row-major float32 [tokens][dim] unless noted; every
 /// launch is asynchronous on `stream`. Weights referenced here are device
 /// pointers in their GGUF encoding.
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 
 /// Stable per-prefix rollback addresses. Growing the depth does not move
 /// existing buffers or invalidate graphs captured for a smaller batch.
@@ -606,6 +606,6 @@ void MtpTopCandidates(const float* logits, std::uint32_t* ids,
                       std::uint32_t* scratch_ids, float* scores,
                       std::uint32_t vocab, hipStream_t stream);
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm
 
-#endif  // GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_KERNELS_HPP_
+#endif  // SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_KERNELS_HPP_

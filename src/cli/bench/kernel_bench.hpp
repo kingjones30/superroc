@@ -1,12 +1,12 @@
-#ifndef GUFO_BENCH_KERNEL_BENCH_HPP_
-#define GUFO_BENCH_KERNEL_BENCH_HPP_
+#ifndef SUPERROC_BENCH_KERNEL_BENCH_HPP_
+#define SUPERROC_BENCH_KERNEL_BENCH_HPP_
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace gufo::bench {
+namespace superroc::bench {
 
 struct KernelBenchOptions {
   std::uint32_t warmup{3};
@@ -90,6 +90,6 @@ struct KernelBenchReport {
 [[nodiscard]] KernelBenchStatistics ComputeKernelBenchStatistics(
     const std::vector<double>& samples_us);
 
-}  // namespace gufo::bench
+}  // namespace superroc::bench
 
-#endif  // GUFO_BENCH_KERNEL_BENCH_HPP_
+#endif  // SUPERROC_BENCH_KERNEL_BENCH_HPP_

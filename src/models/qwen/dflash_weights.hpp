@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_DFLASH_WEIGHTS_HPP_
-#define GUFO_MODELS_QWEN_DFLASH_WEIGHTS_HPP_
+#ifndef SUPERROC_MODELS_QWEN_DFLASH_WEIGHTS_HPP_
+#define SUPERROC_MODELS_QWEN_DFLASH_WEIGHTS_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +11,7 @@
 #include "src/models/qwen/state.hpp"
 #include "src/models/qwen/tokenizer.hpp"
 
-namespace gufo::speculative {
+namespace superroc::speculative {
 
 /// Configuration for a DFlash-2 block-diffusion drafting model.
 struct QwenDFlashConfig {
@@ -105,6 +105,6 @@ struct QwenDFlashWeights {
       const core::GgufReader& reader, std::string* error_msg = nullptr);
 };
 
-}  // namespace gufo::speculative
+}  // namespace superroc::speculative
 
-#endif  // GUFO_MODELS_QWEN_DFLASH_WEIGHTS_HPP_
+#endif  // SUPERROC_MODELS_QWEN_DFLASH_WEIGHTS_HPP_

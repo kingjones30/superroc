@@ -4,7 +4,7 @@
 #include <map>
 #include <stdexcept>
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 namespace {
 bool IsDraft(ContinuationPart part) {
   return part == ContinuationPart::kDraftKey ||
@@ -144,4 +144,4 @@ std::size_t ContinuationLayout::RowBytes(std::uint32_t target,
     bytes += components_[i].descriptor.row_bytes * positions[i].valid_rows;
   return bytes;
 }
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next

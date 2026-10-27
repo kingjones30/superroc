@@ -10,7 +10,7 @@
 #include "src/core/quant/ggml_dequant.hpp"
 #include "src/models/ling3/rocmfp4.hpp"
 
-namespace gufo::models::ling3::cpu {
+namespace superroc::models::ling3::cpu {
 
 using core::GgmlType;
 
@@ -451,4 +451,4 @@ void SwigluClamped(const float* gate, const float* up, float* out,
   }
 }
 
-}  // namespace gufo::models::ling3::cpu
+}  // namespace superroc::models::ling3::cpu

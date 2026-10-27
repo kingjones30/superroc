@@ -13,7 +13,7 @@
 #include "src/models/qwen3_tts/hip/talker_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::models::qwen3_tts::hip {
+namespace superroc::models::qwen3_tts::hip {
 namespace {
 
 // Preserve the descending shared-memory sum tree. Once only the first wave
@@ -656,7 +656,7 @@ void LaunchBfloat16Attention(const float* query, const float* key,
     Bfloat16CacheWriteKernel<<<dim3(tokens, kv_heads), 256, 0, stream>>>(
         key, value, key_cache, value_cache, layer, position, capacity, kv_heads,
         head_dim);
-    GUFO_CHECK_LAUNCH("Bfloat16CacheWriteKernel");
+    SUPERROC_CHECK_LAUNCH("Bfloat16CacheWriteKernel");
   }
   const auto launch = [&]<unsigned int Threads>() {
     Bfloat16AttentionKernel<Threads>
@@ -664,7 +664,7 @@ void LaunchBfloat16Attention(const float* query, const float* key,
            stream>>>(query, key_cache, value_cache,
                      static_cast<hip_bfloat16*>(output_bfloat16), layer,
                      position, capacity, heads, kv_heads, head_dim);
-    GUFO_CHECK_LAUNCH("Bfloat16AttentionKernel<Threads>");
+    SUPERROC_CHECK_LAUNCH("Bfloat16AttentionKernel<Threads>");
   };
   // Predictor contexts contain at most 16 keys. The omitted reduction
   // partners are all zero/-infinity, so active additions retain their order.
@@ -685,7 +685,7 @@ void LaunchBfloat16PerHeadRMSNorm(float* values, const float* weight,
   const dim3 grid(num_heads, static_cast<unsigned int>(batch_size));
   Bfloat16PerHeadRMSNormKernel<128><<<grid, 128, 0, stream>>>(
       values, weight, batch_size, num_heads, head_dim, epsilon);
-  GUFO_CHECK_LAUNCH("Bfloat16PerHeadRMSNormKernel<128>");
+  SUPERROC_CHECK_LAUNCH("Bfloat16PerHeadRMSNormKernel<128>");
 }
 
 void LaunchBfloat16RoPEAndRoundV(float* query, float* key, float* value,
@@ -712,7 +712,7 @@ void LaunchBfloat16RoPEAndRoundV(float* query, float* key, float* value,
   Bfloat16RoPEAndRoundVKernel<<<grid, kBlockSize, 0, stream>>>(
       query, key, value, batch_size, num_heads, num_key_value_heads, head_dim,
       start_position, rope_theta);
-  GUFO_CHECK_LAUNCH("Bfloat16RoPEAndRoundVKernel");
+  SUPERROC_CHECK_LAUNCH("Bfloat16RoPEAndRoundVKernel");
 }
 
 bool LaunchBfloat16QkNormRoPE(
@@ -737,7 +737,7 @@ bool LaunchBfloat16QkNormRoPE(
       query, key, value, query_weight, key_weight, batch_size, num_heads,
       num_key_value_heads, head_dim, start_position, rope_theta, epsilon,
       key_cache, value_cache, layer_index, max_context);
-  if (::gufo::hip_check::LaunchFailed()) return false;
+  if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
 
@@ -754,7 +754,7 @@ void LaunchBfloat16ResidualAddRMSNorm(float* hidden, const float* update,
                                      0, stream>>>(
       hidden, update, weight, static_cast<hip_bfloat16*>(output_bfloat16),
       batch_size, dimension, epsilon);
-  GUFO_CHECK_LAUNCH("Bfloat16ResidualAddRMSNormKernel");
+  SUPERROC_CHECK_LAUNCH("Bfloat16ResidualAddRMSNormKernel");
 }
 
 void LaunchRoundBfloat16InPlace(float* values, std::size_t count,
@@ -763,7 +763,7 @@ void LaunchRoundBfloat16InPlace(float* values, std::size_t count,
     return;
   }
   RoundBfloat16InPlaceKernel<<<Grid(count), 256, 0, stream>>>(values, count);
-  GUFO_CHECK_LAUNCH("RoundBfloat16InPlaceKernel");
+  SUPERROC_CHECK_LAUNCH("RoundBfloat16InPlaceKernel");
 }
 
 void LaunchBfloat16ToFloat(const void* input_bfloat16, float* output,
@@ -773,7 +773,7 @@ void LaunchBfloat16ToFloat(const void* input_bfloat16, float* output,
   }
   Bfloat16ToFloatKernel<<<Grid(count), 256, 0, stream>>>(
       static_cast<const hip_bfloat16*>(input_bfloat16), output, count);
-  GUFO_CHECK_LAUNCH("Bfloat16ToFloatKernel");
+  SUPERROC_CHECK_LAUNCH("Bfloat16ToFloatKernel");
 }
 
 void LaunchBfloat16ResidualAdd(const float* residual, const float* update,
@@ -784,7 +784,7 @@ void LaunchBfloat16ResidualAdd(const float* residual, const float* update,
   }
   Bfloat16ResidualAddKernel<<<Grid(count), 256, 0, stream>>>(residual, update,
                                                              output, count);
-  GUFO_CHECK_LAUNCH("Bfloat16ResidualAddKernel");
+  SUPERROC_CHECK_LAUNCH("Bfloat16ResidualAddKernel");
 }
 
 void LaunchBfloat16SwiGlu(const float* gate, const float* up, float* output,
@@ -795,7 +795,7 @@ void LaunchBfloat16SwiGlu(const float* gate, const float* up, float* output,
   }
   Bfloat16SwiGluKernel<<<Grid(count), 256, 0, stream>>>(
       gate, up, output, static_cast<hip_bfloat16*>(output_bfloat16), count);
-  GUFO_CHECK_LAUNCH("Bfloat16SwiGluKernel");
+  SUPERROC_CHECK_LAUNCH("Bfloat16SwiGluKernel");
 }
 
 void LaunchBfloat16BiasSilu(const float* input, const void* bias_bfloat16,
@@ -809,7 +809,7 @@ void LaunchBfloat16BiasSilu(const float* input, const void* bias_bfloat16,
   Bfloat16BiasSiluKernel<<<Grid(count), 256, 0, stream>>>(
       input, static_cast<const hip_bfloat16*>(bias_bfloat16), output,
       static_cast<hip_bfloat16*>(output_bfloat16), count, columns);
-  GUFO_CHECK_LAUNCH("Bfloat16BiasSiluKernel");
+  SUPERROC_CHECK_LAUNCH("Bfloat16BiasSiluKernel");
 }
 
 void LaunchBfloat16Bias(const float* input, const void* bias_bfloat16,
@@ -822,7 +822,7 @@ void LaunchBfloat16Bias(const float* input, const void* bias_bfloat16,
   Bfloat16BiasKernel<<<Grid(count), 256, 0, stream>>>(
       input, static_cast<const hip_bfloat16*>(bias_bfloat16), output, count,
       columns);
-  GUFO_CHECK_LAUNCH("Bfloat16BiasKernel");
+  SUPERROC_CHECK_LAUNCH("Bfloat16BiasKernel");
 }
 
 void LaunchBatchedCodecEmbeddingSum(
@@ -836,7 +836,7 @@ void LaunchBatchedCodecEmbeddingSum(
   BatchedCodecEmbeddingSumKernel<<<Grid(elements), 256, 0, stream>>>(
       reinterpret_cast<const hip_bfloat16* const*>(embedding_tables_bfloat16),
       codes, text_embedding, output, elements, groups, hidden_size);
-  GUFO_CHECK_LAUNCH("BatchedCodecEmbeddingSumKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedCodecEmbeddingSumKernel");
 }
 
 bool LaunchBfloat16Gemv(const void* weights_bfloat16,
@@ -872,13 +872,13 @@ bool LaunchBfloat16Gemv(const void* weights_bfloat16,
           static_cast<const uint4*>(weights_bfloat16),
           static_cast<const uint4*>(inputs_bfloat16), output, packed,
           row_count);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     } else {
       Bfloat16GemvKernel<uint2, kVectors><<<grid, block, 0, stream>>>(
           static_cast<const uint2*>(weights_bfloat16),
           static_cast<const uint2*>(inputs_bfloat16), output, packed,
           row_count);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     }
   };
   switch (batch) {
@@ -962,7 +962,7 @@ bool LaunchBfloat16GemvGrouped(const Bfloat16GemvGroup* groups,
         Bfloat16GemvGroupedKernel<Packed, kGroups, kVectors>
             <<<grid, block, 0, stream>>>(
                 args, static_cast<const Packed*>(inputs_bfloat16), packed);
-        if (::gufo::hip_check::LaunchFailed()) return false;
+        if (::superroc::hip_check::LaunchFailed()) return false;
       };
   const auto dispatch_vectors = [&]<typename Packed, unsigned int kGroups>() {
     switch (batch) {
@@ -990,6 +990,6 @@ bool LaunchBfloat16GemvGrouped(const Bfloat16GemvGroup* groups,
                     : dispatch_groups.template operator()<uint2>();
 }
 
-}  // namespace gufo::models::qwen3_tts::hip
+}  // namespace superroc::models::qwen3_tts::hip
 
 #endif  // defined(ENGINE_ENABLE_HIP)

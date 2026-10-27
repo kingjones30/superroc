@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_COMPONENT_TEXT_CACHE_HPP_
-#define GUFO_SERVER_COMPONENT_TEXT_CACHE_HPP_
+#ifndef SUPERROC_SERVER_COMPONENT_TEXT_CACHE_HPP_
+#define SUPERROC_SERVER_COMPONENT_TEXT_CACHE_HPP_
 
 #include <functional>
 #include <memory>
@@ -11,7 +11,7 @@
 #include "src/cli/serve/continuation_cache.hpp"
 #include "src/cli/serve/text_publication_wait.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 class TextModelRunner;
 class TextRunnerState;
 class TextRunnerSnapshot;
@@ -165,5 +165,5 @@ private:
   ContinuationCache::Lease legacy_;
   std::unique_ptr<ComponentTextCache::Lease> component_;
 };
-}  // namespace gufo::server
+}  // namespace superroc::server
 #endif

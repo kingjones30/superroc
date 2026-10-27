@@ -18,19 +18,20 @@
 #include "src/models/minimax_h3/prompt_encoder_ops.hip.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
 #include "src/models/minimax_h3/tokenizer.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
-using gufo::minimax_h3::CancellationToken;
-using gufo::minimax_h3::EncodePromptLayer50;
-using gufo::minimax_h3::ModelInventory;
-using gufo::minimax_h3::PromptEmbedding;
-using gufo::minimax_h3::PromptEncoderLiveRegisteredHostBytes;
-using gufo::minimax_h3::PromptEncoderOptions;
-using gufo::minimax_h3::PromptEncoderTelemetry;
-using gufo::minimax_h3::Sha256File;
-using gufo::minimax_h3::Tokenizer;
-namespace h3ops = gufo::minimax_h3::ops;
+using superroc::minimax_h3::CancellationToken;
+using superroc::minimax_h3::EncodePromptLayer50;
+using superroc::minimax_h3::ModelInventory;
+using superroc::minimax_h3::PromptEmbedding;
+using superroc::minimax_h3::PromptEncoderLiveRegisteredHostBytes;
+using superroc::minimax_h3::PromptEncoderOptions;
+using superroc::minimax_h3::PromptEncoderTelemetry;
+using superroc::minimax_h3::Sha256File;
+using superroc::minimax_h3::Tokenizer;
+namespace h3ops = superroc::minimax_h3::ops;
 
 int failures = 0;
 
@@ -278,15 +279,15 @@ bool CheckAnalytic() {
 }
 
 int CheckReal() {
-  const char* root_value = std::getenv("GUFO_H3_MODEL_ROOT");
+  const char* root_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
   if (root_value == nullptr || *root_value == '\0') {
-    std::cout << "SKIP: GUFO_H3_MODEL_ROOT unset\n";
+    std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT unset\n";
     return 77;
   }
   const std::filesystem::path root(root_value);
   std::string error;
   auto inventory =
-      ModelInventory::Inspect(root, GUFO_H3_SOURCE_MANIFEST, &error);
+      ModelInventory::Inspect(root, SUPERROC_H3_SOURCE_MANIFEST, &error);
   CHECK(inventory.has_value());
   if (!inventory.has_value()) {
     std::cerr << error << '\n';
@@ -295,7 +296,7 @@ int CheckReal() {
   Tokenizer tokenizer;
   CHECK(Tokenizer::Load(root / "FL2VA/tokenizer/tokenizer.json", &tokenizer,
                         &error));
-  const char* prompt_value = std::getenv("GUFO_H3_PROMPT_TEXT");
+  const char* prompt_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_PROMPT_TEXT");
   const std::string prompt =
       prompt_value != nullptr && *prompt_value != '\0'
           ? prompt_value
@@ -316,14 +317,14 @@ int CheckReal() {
   CHECK(error.find("text-only") != std::string::npos);
 
   PromptEncoderOptions options;
-  if (const char* layers = std::getenv("GUFO_H3_PROMPT_LAYERS");
+  if (const char* layers = ::superroc::core::GetEnvCompat("SUPERROC_H3_PROMPT_LAYERS");
       layers != nullptr && *layers != '\0') {
     options.layer_count =
         static_cast<std::size_t>(std::strtoull(layers, nullptr, 10));
   }
-  const char* golden_path = std::getenv("GUFO_H3_PROMPT_GOLDEN");
+  const char* golden_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_PROMPT_GOLDEN");
   if (golden_path != nullptr && *golden_path != '\0') {
-    const char* golden_layers = std::getenv("GUFO_H3_PROMPT_GOLDEN_LAYERS");
+    const char* golden_layers = ::superroc::core::GetEnvCompat("SUPERROC_H3_PROMPT_GOLDEN_LAYERS");
     options.layer_count = golden_layers != nullptr && *golden_layers != '\0'
                               ? static_cast<std::size_t>(
                                     std::strtoull(golden_layers, nullptr, 10))
@@ -372,7 +373,7 @@ int CheckReal() {
             << " layer_gpu_ms=" << layer_gpu_ms
             << " prefetch_wait_ms=" << layer_prefetch_wait_ms << '\n';
 
-  if (const char* output_path = std::getenv("GUFO_H3_PROMPT_OUTPUT");
+  if (const char* output_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_PROMPT_OUTPUT");
       output_path != nullptr && *output_path != '\0') {
     std::ofstream native_output(output_path, std::ios::binary);
     native_output.write(
@@ -384,7 +385,7 @@ int CheckReal() {
 
   if (golden_path != nullptr && *golden_path != '\0') {
     if (const char* expected_hash =
-            std::getenv("GUFO_H3_PROMPT_GOLDEN_SHA256");
+            ::superroc::core::GetEnvCompat("SUPERROC_H3_PROMPT_GOLDEN_SHA256");
         expected_hash != nullptr && *expected_hash != '\0') {
       CHECK(Sha256File(golden_path) == expected_hash);
     }

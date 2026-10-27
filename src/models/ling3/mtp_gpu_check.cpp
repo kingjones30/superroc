@@ -125,10 +125,10 @@ int main(int argc, char** argv) {
 
   std::string err;
   auto reader =
-      gufo::core::GgufReader::OpenFile(std::filesystem::path(model_path), &err);
+      superroc::core::GgufReader::OpenFile(std::filesystem::path(model_path), &err);
   if (reader == nullptr)
     Die("cannot open the GGUF: " + err);
-  auto weights = gufo::models::ling3::ModelWeights::Bind(*reader, &err);
+  auto weights = superroc::models::ling3::ModelWeights::Bind(*reader, &err);
   if (!weights.has_value())
     Die("ModelWeights::Bind: " + err);
   if (hidden != weights->config.hidden_size) {
@@ -137,10 +137,10 @@ int main(int argc, char** argv) {
 
   // The head borrows the trunk's token_embd / output / output_norm, so the
   // trunk's own ROCm Init has to run first.
-  gufo::models::ling3::rocm::ExpertPlacement placement{};
+  superroc::models::ling3::rocm::ExpertPlacement placement{};
   placement.stream = false;
   std::size_t resident = 0;
-  if (!gufo::models::ling3::rocm::Init(*weights, *reader, placement, &resident,
+  if (!superroc::models::ling3::rocm::Init(*weights, *reader, placement, &resident,
                                        &err)) {
     Die("rocm::Init: " + err);
   }
@@ -148,21 +148,21 @@ int main(int argc, char** argv) {
               static_cast<double>(resident) / 1073741824.0);
 
   const auto head_norm = layer_out_norm
-                             ? gufo::models::ling3::mtp::HeadNorm::kLayerOutNorm
-                             : gufo::models::ling3::mtp::HeadNorm::kOutputNorm;
+                             ? superroc::models::ling3::mtp::HeadNorm::kLayerOutNorm
+                             : superroc::models::ling3::mtp::HeadNorm::kOutputNorm;
   std::size_t head_bytes = 0;
-  if (!gufo::models::ling3::mtp::Init(*weights, head_norm, &head_bytes, &err)) {
+  if (!superroc::models::ling3::mtp::Init(*weights, head_norm, &head_bytes, &err)) {
     Die("mtp::Init: " + err);
   }
   std::printf("# head resident=%.2f GiB\n",
               static_cast<double>(head_bytes) / 1073741824.0);
 
-  auto* st = gufo::models::ling3::mtp::NewState(context);
+  auto* st = superroc::models::ling3::mtp::NewState(context);
   if (st == nullptr)
     Die("mtp::NewState failed");
   std::printf(
       "# state=%.1f MiB\n",
-      static_cast<double>(gufo::models::ling3::mtp::StateBytes(context)) /
+      static_cast<double>(superroc::models::ling3::mtp::StateBytes(context)) /
           1048576.0);
 
   const std::size_t H = weights->config.hidden_size;
@@ -186,7 +186,7 @@ int main(int argc, char** argv) {
       continue;
     }
     std::int32_t draft = -1;
-    if (!gufo::models::ling3::mtp::DraftNext(
+    if (!superroc::models::ling3::mtp::DraftNext(
             st, r.x_next, std::span<const float>(r.h_prev.data(), H), r.pos,
             &draft, std::span<float>(h_new.data(), h_new.size()), &err)) {
       Die("DraftNext at pos " + std::to_string(r.pos) + ": " + err);
@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  gufo::models::ling3::mtp::DestroyState(st);
+  superroc::models::ling3::mtp::DestroyState(st);
 
   std::printf(
       "\nGPU_VS_CPU_MEASURED rows=%zu draft_token_exact=%d "

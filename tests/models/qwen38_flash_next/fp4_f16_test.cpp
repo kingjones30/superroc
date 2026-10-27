@@ -1,5 +1,5 @@
 // LFP item 4 (+ SPEC2 item 6): (a) FP4->F16 decode exactness vs the
-// gufo_fp4_elem CPU oracle (all 16 codes x all 256 scale bytes x types
+// superroc_fp4_elem CPU oracle (all 16 codes x all 256 scale bytes x types
 // 100/101, bitwise + max_abs); (b) Fp4DenseF16Gemm vs an F64 reference on
 // every dense (m, k) at 16/96/1024/2048 tokens, next to DenseF16Gemm/Q8_0's
 // own error, plus bitwise determinism; 6(a) FP4->int8 code exactness;
@@ -18,11 +18,11 @@
 #include <string>
 #include <vector>
 
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 
 namespace {
-namespace rocm = gufo::models::qwen38_flash_next::rocm;
+namespace rocm = superroc::models::qwen38_flash_next::rocm;
 namespace fp4 = rocm::fp4_f16;
 
 int failures = 0;
@@ -117,7 +117,7 @@ void DecodeExactness() {
     for (int b = 0; b < n_blocks; ++b) {
       const std::uint8_t* blk = &blocks[static_cast<std::size_t>(b) * stride];
       for (int j = 0; j < 32; ++j) {
-        const float ref = gufo_fp4_elem(type, blk, j);
+        const float ref = superroc_fp4_elem(type, blk, j);
         const std::uint16_t got = out[static_cast<std::size_t>(b) * 32 + j];
         __half gh;
         __builtin_memcpy(&gh, &got, 2);
@@ -152,7 +152,7 @@ void DecodeExactness() {
     const std::uint16_t bits =
         fp4::Fp4ScaleByteToHalf(static_cast<std::uint8_t>(e));
     __builtin_memcpy(&h, &bits, 2);
-    const float ref = gufo_fp4_ue4m3_half(static_cast<std::uint8_t>(e));
+    const float ref = superroc_fp4_ue4m3_half(static_cast<std::uint8_t>(e));
     if (static_cast<double>(__half2float(h)) != static_cast<double>(ref)) {
       Check(false, "host scale table mismatch e=" + std::to_string(e));
       break;
@@ -197,7 +197,7 @@ double RefDot(const std::uint8_t* wrow, int qtype, const __half* xrow,
               std::size_t k) {
   double acc = 0.0;
   for (std::size_t i = 0; i < k; ++i) {
-    const double wv = gufo_fp4_elem(qtype, wrow, static_cast<int>(i));
+    const double wv = superroc_fp4_elem(qtype, wrow, static_cast<int>(i));
     __half h = xrow[i];
     acc += wv * static_cast<double>(__half2float(h));
   }
@@ -313,7 +313,7 @@ __global__ void Int8CheckKernel(const std::uint32_t* nibs, std::uint32_t* out,
   fp4::Fp4NibblesToInt8(nibs[i], out[i]);
 }
 
-// 6(a): int8 code bytes match gufo_fp4_rocmfp4_code on every nibble, in
+// 6(a): int8 code bytes match superroc_fp4_rocmfp4_code on every nibble, in
 // every lane, with garbage upper bits set (the contract ignores them).
 void Int8Exactness() {
   g_hip_case = __func__;
@@ -340,7 +340,7 @@ void Int8Exactness() {
     for (int lane = 0; lane < 4; ++lane) {
       const int nib = (nibs[i] >> (lane * 8)) & 0xF;
       const auto got = static_cast<std::int8_t>((out[i] >> (lane * 8)) & 0xFF);
-      const int want = gufo_fp4_rocmfp4_code(static_cast<std::uint32_t>(nib));
+      const int want = superroc_fp4_rocmfp4_code(static_cast<std::uint32_t>(nib));
       if (got != want) {
         ++bad;
       }
@@ -351,7 +351,7 @@ void Int8Exactness() {
   // The host float-scale twin matches the oracle on all 256 bytes, exactly.
   for (int e = 0; e < 256; ++e) {
     const float got = fp4::Fp4ScaleByteToFloat(static_cast<std::uint8_t>(e));
-    const float ref = gufo_fp4_ue4m3_half(static_cast<std::uint8_t>(e));
+    const float ref = superroc_fp4_ue4m3_half(static_cast<std::uint8_t>(e));
     if (got != ref) {
       Check(false, "host float scale mismatch e=" + std::to_string(e));
       break;
@@ -439,7 +439,7 @@ void Int8GemmCase(std::size_t batch, std::size_t m, std::size_t k) {
       const std::size_t t = batch <= 96 ? b : b * batch / n_tt;
       double ref = 0.0, reft = 0.0;
       for (std::size_t i = 0; i < k; ++i) {
-        const double wv = gufo_fp4_elem(101, wrow, static_cast<int>(i));
+        const double wv = superroc_fp4_elem(101, wrow, static_cast<int>(i));
         ref += wv * TiledQ8At(q.data(), k, t, i);
         reft += wv * xf[t * k + i];
       }

@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_CRYPTO_SHA256_HPP_
-#define GUFO_CORE_CRYPTO_SHA256_HPP_
+#ifndef SUPERROC_CORE_CRYPTO_SHA256_HPP_
+#define SUPERROC_CORE_CRYPTO_SHA256_HPP_
 
 #include <openssl/evp.h>
 
@@ -11,7 +11,7 @@
 #include <span>
 #include <string>
 
-namespace gufo::crypto {
+namespace superroc::crypto {
 
 /// Incremental SHA-256 over a byte stream.
 class Sha256Hasher {
@@ -32,6 +32,6 @@ private:
 [[nodiscard]] std::string Sha256Hex(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::string Sha256FileHex(const std::filesystem::path& path);
 
-}  // namespace gufo::crypto
+}  // namespace superroc::crypto
 
-#endif  // GUFO_CORE_CRYPTO_SHA256_HPP_
+#endif  // SUPERROC_CORE_CRYPTO_SHA256_HPP_

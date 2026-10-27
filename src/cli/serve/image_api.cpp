@@ -16,7 +16,7 @@
 #include "src/core/image.hpp"
 #include "src/core/json.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 namespace {
 
 namespace image = models::qwen_image_21;
@@ -422,4 +422,4 @@ HttpResponse HandleImageApiRequest(const HttpRequest& request,
   }
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

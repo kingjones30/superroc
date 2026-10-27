@@ -21,7 +21,7 @@
 
 namespace {
 
-using gufo::tokenization::TokenId;
+using superroc::tokenization::TokenId;
 
 void Expect(bool condition, std::string_view message) {
   if (!condition) {
@@ -30,11 +30,11 @@ void Expect(bool condition, std::string_view message) {
 }
 
 class ScriptedTargetExecutor final
-    : public gufo::speculative::ISpeculativeTargetExecutor {
+    : public superroc::speculative::ISpeculativeTargetExecutor {
 public:
   ScriptedTargetExecutor(
       std::vector<TokenId> generated_tokens, TokenId eos_id,
-      TokenId endoftext_id = gufo::tokenization::kInvalidTokenId)
+      TokenId endoftext_id = superroc::tokenization::kInvalidTokenId)
       : generated_tokens_(std::move(generated_tokens)),
         eos_id_(eos_id),
         endoftext_id_(endoftext_id) {}
@@ -139,7 +139,7 @@ private:
   bool hidden_capture_enabled_{false};
 };
 
-class HiddenAwareDraftBackend final : public gufo::speculative::IDraftBackend {
+class HiddenAwareDraftBackend final : public superroc::speculative::IDraftBackend {
 public:
   [[nodiscard]] std::string_view Name() const noexcept override {
     return "HiddenAwareDraftBackend";
@@ -150,7 +150,7 @@ public:
   }
 
   [[nodiscard]] bool PrimeTargetContext(
-      const gufo::speculative::DraftTargetContext& context) override {
+      const superroc::speculative::DraftTargetContext& context) override {
     primed_prompt_.assign(context.prompt_tokens.begin(),
                           context.prompt_tokens.end());
     primed_hidden_.assign(context.prompt_hidden_states.begin(),
@@ -162,11 +162,11 @@ public:
                context.prompt_tokens.size() * context.hidden_size;
   }
 
-  [[nodiscard]] gufo::speculative::DraftProposal Propose(
+  [[nodiscard]] superroc::speculative::DraftProposal Propose(
       std::span<const TokenId> prompt_tokens, std::uint32_t current_pos,
       std::uint32_t max_tokens) override {
     (void)prompt_tokens;
-    gufo::speculative::DraftProposal proposal;
+    superroc::speculative::DraftProposal proposal;
     proposal.start_pos = current_pos;
     if (max_tokens > 0) {
       proposal.tokens.push_back(11);
@@ -213,7 +213,7 @@ private:
 };
 
 class SampledTargetExecutor final
-    : public gufo::speculative::ISpeculativeTargetExecutor {
+    : public superroc::speculative::ISpeculativeTargetExecutor {
 public:
   explicit SampledTargetExecutor(std::vector<float> target_logits,
                                  bool repeat_logits = false)
@@ -240,7 +240,7 @@ public:
     last_logits_ = state_.size() == 2 || repeat_logits_
                        ? target_logits_
                        : std::vector<float>{0.0F, -INFINITY, -INFINITY};
-    return gufo::sampling::SampleLogits(last_logits_, 0.0F, nullptr);
+    return superroc::sampling::SampleLogits(last_logits_, 0.0F, nullptr);
   }
 
   void SaveState(std::uint32_t valid_context) override {
@@ -252,7 +252,7 @@ public:
 
   std::span<const float> CopyLastLogits() override { return last_logits_; }
 
-  TokenId SampleLastLogits(gufo::sampling::SamplerState& sampler) override {
+  TokenId SampleLastLogits(superroc::sampling::SamplerState& sampler) override {
     ++sample_calls_;
     return ISpeculativeTargetExecutor::SampleLastLogits(sampler);
   }
@@ -263,7 +263,7 @@ public:
   }
   std::size_t StateSize() const noexcept { return state_.size(); }
 
-  gufo::speculative::VerificationChunkResult ForwardVerificationChunk(
+  superroc::speculative::VerificationChunkResult ForwardVerificationChunk(
       std::span<const TokenId> tokens, std::uint32_t position,
       bool capture_hidden, bool capture_logits) override {
     verification_rows_ += tokens.size();
@@ -274,8 +274,8 @@ public:
   std::size_t VerificationRows() const noexcept { return verification_rows_; }
   std::size_t VerificationCalls() const noexcept { return verification_calls_; }
 
-  gufo::speculative::TargetVerificationBatch ForwardVerificationBatch(
-      std::span<const gufo::speculative::TargetVerificationItem> items)
+  superroc::speculative::TargetVerificationBatch ForwardVerificationBatch(
+      std::span<const superroc::speculative::TargetVerificationItem> items)
       override {
     last_batch_size_ = items.size();
     return ISpeculativeTargetExecutor::ForwardVerificationBatch(items);
@@ -301,7 +301,7 @@ private:
 };
 
 class BinarySampledDraftBackend final
-    : public gufo::speculative::IDraftBackend {
+    : public superroc::speculative::IDraftBackend {
 public:
   BinarySampledDraftBackend(float first_probability, float second_probability)
       : probabilities_{first_probability, second_probability} {}
@@ -310,10 +310,10 @@ public:
     return "BinarySampledDraftBackend";
   }
 
-  gufo::speculative::DraftProposal Propose(std::span<const TokenId>,
+  superroc::speculative::DraftProposal Propose(std::span<const TokenId>,
                                            std::uint32_t current_pos,
                                            std::uint32_t max_tokens) override {
-    gufo::speculative::DraftProposal proposal;
+    superroc::speculative::DraftProposal proposal;
     proposal.start_pos = current_pos;
     if (max_tokens > 0) {
       proposal.tokens.push_back(probabilities_[0] >= probabilities_[1] ? 1 : 2);
@@ -321,10 +321,10 @@ public:
     return proposal;
   }
 
-  gufo::speculative::DraftProposal ProposeSampled(
+  superroc::speculative::DraftProposal ProposeSampled(
       std::span<const TokenId>, std::uint32_t current_pos,
       std::uint32_t max_tokens, float, std::uint64_t* rng_state) override {
-    gufo::speculative::DraftProposal proposal;
+    superroc::speculative::DraftProposal proposal;
     proposal.start_pos = current_pos;
     if (max_tokens == 0) {
       return proposal;
@@ -334,7 +334,7 @@ public:
     proposal.candidate_probabilities.assign(probabilities_.begin(),
                                             probabilities_.end());
     proposal.tokens.push_back(
-        gufo::sampling::Uniform(rng_state) < probabilities_[0] ? 1 : 2);
+        superroc::sampling::Uniform(rng_state) < probabilities_[0] ? 1 : 2);
     return proposal;
   }
 
@@ -344,19 +344,19 @@ private:
   std::array<float, 2> probabilities_;
 };
 
-class FixedSampledDraftBackend final : public gufo::speculative::IDraftBackend {
+class FixedSampledDraftBackend final : public superroc::speculative::IDraftBackend {
 public:
-  explicit FixedSampledDraftBackend(gufo::speculative::DraftProposal proposal)
+  explicit FixedSampledDraftBackend(superroc::speculative::DraftProposal proposal)
       : proposal_(std::move(proposal)) {}
   std::string_view Name() const noexcept override {
     return "FixedSampledDraft";
   }
-  gufo::speculative::DraftProposal Propose(std::span<const TokenId>,
+  superroc::speculative::DraftProposal Propose(std::span<const TokenId>,
                                            std::uint32_t,
                                            std::uint32_t) override {
     return proposal_;
   }
-  gufo::speculative::DraftProposal ProposeSampled(std::span<const TokenId>,
+  superroc::speculative::DraftProposal ProposeSampled(std::span<const TokenId>,
                                                   std::uint32_t, std::uint32_t,
                                                   float,
                                                   std::uint64_t*) override {
@@ -364,8 +364,8 @@ public:
   }
   bool SupportsSampledProposals() const noexcept override { return true; }
 
-  std::vector<gufo::speculative::DraftProposal> ProposeBatch(
-      std::span<const gufo::speculative::DraftProposalRequest> requests)
+  std::vector<superroc::speculative::DraftProposal> ProposeBatch(
+      std::span<const superroc::speculative::DraftProposalRequest> requests)
       override {
     last_batch_size_ = requests.size();
     return IDraftBackend::ProposeBatch(requests);
@@ -373,12 +373,12 @@ public:
   std::size_t LastBatchSize() const noexcept { return last_batch_size_; }
 
 private:
-  gufo::speculative::DraftProposal proposal_;
+  superroc::speculative::DraftProposal proposal_;
   std::size_t last_batch_size_{0};
 };
 
 class PersistentDraftSnapshot final
-    : public gufo::speculative::IDraftBackendSnapshot {
+    : public superroc::speculative::IDraftBackendSnapshot {
 public:
   explicit PersistentDraftSnapshot(std::uint32_t marker) : marker_(marker) {}
 
@@ -408,7 +408,7 @@ private:
   std::uint32_t marker_;
 };
 
-class PersistentDraftBackend final : public gufo::speculative::IDraftBackend {
+class PersistentDraftBackend final : public superroc::speculative::IDraftBackend {
 public:
   PersistentDraftBackend(std::vector<TokenId> target_tokens,
                          std::size_t prompt_size)
@@ -428,12 +428,12 @@ public:
     return target_layers;
   }
 
-  [[nodiscard]] gufo::speculative::DraftProposal Propose(
+  [[nodiscard]] superroc::speculative::DraftProposal Propose(
       std::span<const TokenId>, std::uint32_t current_pos,
       std::uint32_t max_tokens) override {
     Expect(current_pos >= prompt_size_, "persistent draft position");
     ++marker_;
-    gufo::speculative::DraftProposal proposal;
+    superroc::speculative::DraftProposal proposal;
     proposal.start_pos = current_pos;
     const std::size_t target_start =
         static_cast<std::size_t>(current_pos) - prompt_size_ + 1U;
@@ -460,13 +460,13 @@ public:
     return sizeof(marker_);
   }
 
-  [[nodiscard]] std::unique_ptr<gufo::speculative::IDraftBackendSnapshot>
+  [[nodiscard]] std::unique_ptr<superroc::speculative::IDraftBackendSnapshot>
   Snapshot() const override {
     return std::make_unique<PersistentDraftSnapshot>(marker_);
   }
 
   void RestoreSnapshot(
-      const gufo::speculative::IDraftBackendSnapshot& snapshot) override {
+      const superroc::speculative::IDraftBackendSnapshot& snapshot) override {
     const auto* persistent =
         dynamic_cast<const PersistentDraftSnapshot*>(&snapshot);
     if (persistent == nullptr) {
@@ -495,15 +495,15 @@ private:
   std::uint32_t marker_{0};
 };
 
-gufo::models::GenerationOptions GenerationOptions(std::size_t max_tokens) {
-  gufo::models::GenerationOptions options;
+superroc::models::GenerationOptions GenerationOptions(std::size_t max_tokens) {
+  superroc::models::GenerationOptions options;
   options.max_new_tokens = max_tokens;
   return options;
 }
 
 void TestSpeculativeDraftBackendInterface() {
   std::vector<TokenId> pool = {101, 102, 103, 104};
-  gufo::speculative::MockDraftBackend backend(pool);
+  superroc::speculative::MockDraftBackend backend(pool);
 
   Expect(backend.Name() == "MockDraftBackend", "mock backend name");
 
@@ -518,7 +518,7 @@ void TestSpeculativeDraftBackendInterface() {
 }
 
 void TestSpeculativeStats() {
-  gufo::speculative::SpeculativeStats stats;
+  superroc::speculative::SpeculativeStats stats;
   Expect(stats.AcceptanceRate() == 0.0F, "empty acceptance rate");
 
   stats.total_draft_tokens = 10;
@@ -530,22 +530,22 @@ void TestSpeculativeStats() {
 void TestPlainRateGuard() {
   ScriptedTargetExecutor target({}, 900);
   auto draft = [] {
-    return std::make_unique<gufo::speculative::MockDraftBackend>(
+    return std::make_unique<superroc::speculative::MockDraftBackend>(
         std::vector<TokenId>{101, 102, 103});
   };
 
   // No rate table: the guard never arms.
-  gufo::speculative::SpeculativeVerifier unguarded(
-      target, draft(), gufo::speculative::SpeculativeOptions{});
+  superroc::speculative::SpeculativeVerifier unguarded(
+      target, draft(), superroc::speculative::SpeculativeOptions{});
   for (int round = 0; round < 30; ++round) {
     unguarded.RecordDecodeRound(1, 1.0, 512);
   }
   Expect(!unguarded.SpeculationDisabled(),
          "empty rate table keeps the guard off");
 
-  gufo::speculative::SpeculativeOptions policy;
+  superroc::speculative::SpeculativeOptions policy;
   policy.plain_decode_rates = {{512, 10.0}, {4096, 8.0}, {8192, 7.0}};
-  gufo::speculative::SpeculativeVerifier verifier(target, draft(), policy);
+  superroc::speculative::SpeculativeVerifier verifier(target, draft(), policy);
 
   // Rounds that produce nothing are not evidence about throughput.
   for (int round = 0; round < 30; ++round) {
@@ -618,11 +618,11 @@ void TestStopTokensFollowTargetVocabulary() {
   const std::vector<TokenId> generated{10, 151643, 248044, 248046, 11, 37, 12};
   for (const bool batched : {false, true}) {
     ScriptedTargetExecutor target(generated, 900, 37);
-    auto draft = std::make_unique<gufo::speculative::MockDraftBackend>(
+    auto draft = std::make_unique<superroc::speculative::MockDraftBackend>(
         std::vector<TokenId>{151643, 248044, 248046, 11, 37, 12});
-    gufo::speculative::SpeculativeOptions policy;
+    superroc::speculative::SpeculativeOptions policy;
     policy.use_batched_verification = batched;
-    gufo::speculative::SpeculativeVerifier verifier(target, std::move(draft),
+    superroc::speculative::SpeculativeVerifier verifier(target, std::move(draft),
                                                     policy);
     const auto output = verifier.Generate(std::array<TokenId, 3>{1, 2, 3},
                                           GenerationOptions(16));
@@ -635,9 +635,9 @@ void TestStopTokensFollowTargetVocabulary() {
 void TestFullAcceptanceProducesTargetBonusToken() {
   constexpr TokenId eos_id = 900;
   ScriptedTargetExecutor target({10, 11, 12, 13}, eos_id);
-  auto backend = std::make_unique<gufo::speculative::MockDraftBackend>(
+  auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{11, 12});
-  gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   const auto output = verifier.Generate(prompt, GenerationOptions(4));
@@ -658,7 +658,7 @@ void TestHiddenAwareBackendReceivesCommittedTargetState() {
   ScriptedTargetExecutor target({10, 11, 12}, eos_id);
   auto backend = std::make_unique<HiddenAwareDraftBackend>();
   auto* backend_view = backend.get();
-  gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   const auto output = verifier.Generate(prompt, GenerationOptions(3));
@@ -689,7 +689,7 @@ void TestRetainedPrefixAdvanceUpdatesTargetAndDraftState() {
   ScriptedTargetExecutor target({10, 11}, eos_id);
   auto backend = std::make_unique<HiddenAwareDraftBackend>();
   auto* backend_view = backend.get();
-  gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   Expect(verifier.Prime(prompt) == 10,
@@ -706,9 +706,9 @@ void TestRetainedPrefixAdvanceUpdatesTargetAndDraftState() {
 void TestPartialRejectionRestoresAndReplaysState() {
   constexpr TokenId eos_id = 900;
   ScriptedTargetExecutor target({10, 11, 12}, eos_id);
-  auto backend = std::make_unique<gufo::speculative::MockDraftBackend>(
+  auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{11, 99});
-  gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   const auto current = verifier.Prime(prompt);
@@ -726,9 +726,9 @@ void TestPartialRejectionRestoresAndReplaysState() {
 void TestImmediateRejectionRestoresGreedyState() {
   constexpr TokenId eos_id = 900;
   ScriptedTargetExecutor target({10, 11}, eos_id);
-  auto backend = std::make_unique<gufo::speculative::MockDraftBackend>(
+  auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{99, 98});
-  gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   const auto current = verifier.Prime(prompt);
@@ -746,9 +746,9 @@ void TestImmediateRejectionRestoresGreedyState() {
 void TestFirstPrefillTokenHonorsBudgetAndCallback() {
   constexpr TokenId eos_id = 900;
   ScriptedTargetExecutor target({10, 11}, eos_id);
-  auto backend = std::make_unique<gufo::speculative::MockDraftBackend>(
+  auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{11});
-  gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
   std::vector<TokenId> callback_tokens;
 
@@ -768,9 +768,9 @@ void TestFirstPrefillTokenHonorsBudgetAndCallback() {
 void TestFirstPrefillEosIsNotEmitted() {
   constexpr TokenId eos_id = 900;
   ScriptedTargetExecutor target({eos_id}, eos_id);
-  auto backend = std::make_unique<gufo::speculative::MockDraftBackend>(
+  auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{1});
-  gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
   std::size_t callback_count = 0;
 
@@ -787,7 +787,7 @@ void TestFirstPrefillEosIsNotEmitted() {
 
 void TestFirstTokenUsesTargetSampler() {
   SampledTargetExecutor target({0.0F, -INFINITY, -INFINITY});
-  gufo::speculative::SpeculativeVerifier verifier(target, nullptr);
+  superroc::speculative::SpeculativeVerifier verifier(target, nullptr);
   auto options = GenerationOptions(1);
   options.sampling.temperature = 0.8F;
   options.sampling.seed = 73;
@@ -806,12 +806,12 @@ void TestSampledSpeculationMatchesTargetDistribution() {
   for (std::uint64_t seed = 1; seed <= trials; ++seed) {
     SampledTargetExecutor target({-INFINITY, std::log(0.25F), std::log(0.75F)});
     auto backend = std::make_unique<BinarySampledDraftBackend>(0.80F, 0.20F);
-    gufo::speculative::SpeculativeOptions options;
+    superroc::speculative::SpeculativeOptions options;
     options.max_draft_tokens = 1;
     options.min_draft_tokens = 1;
     options.initial_draft_tokens = 1;
     options.enable_adaptive_draft_length = false;
-    gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend),
+    superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend),
                                                     options);
     const std::vector<TokenId> prompt = {0};
     const TokenId current = verifier.Prime(prompt);
@@ -837,7 +837,7 @@ void TestFilteredSampledSpeculationMatchesTargetDistribution(
   constexpr std::size_t trials = 4096;
   const std::vector<float> target_logits = {-INFINITY, std::log(0.40F),
                                             std::log(0.60F)};
-  gufo::sampling::SamplingConfig config;
+  superroc::sampling::SamplingConfig config;
   config.temperature = 0.8F;
   config.top_k = 2;
   config.top_p = 0.95F;
@@ -855,7 +855,7 @@ void TestFilteredSampledSpeculationMatchesTargetDistribution(
 
   const std::vector<TokenId> initial_sequence = {1, 0};
   const double expected_second_probability =
-      gufo::sampling::BuildDistribution(target_logits, config, initial_sequence)
+      superroc::sampling::BuildDistribution(target_logits, config, initial_sequence)
           .probability(2);
   std::size_t second_token_count = 0;
   std::size_t drafted_count = 0;
@@ -863,18 +863,18 @@ void TestFilteredSampledSpeculationMatchesTargetDistribution(
   for (std::uint64_t seed = 1; seed <= trials; ++seed) {
     SampledTargetExecutor target(target_logits);
     auto backend = std::make_unique<BinarySampledDraftBackend>(0.80F, 0.20F);
-    gufo::speculative::SpeculativeOptions options;
+    superroc::speculative::SpeculativeOptions options;
     options.max_draft_tokens = 1;
     options.min_draft_tokens = 1;
     options.initial_draft_tokens = 1;
     options.enable_adaptive_draft_length = false;
-    gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend),
+    superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend),
                                                     options);
     const std::vector<TokenId> prompt = {1};
     const TokenId current = verifier.Prime(prompt);
     std::vector<TokenId> sequence = {prompt.front(), current};
     config.seed = static_cast<std::int64_t>(seed);
-    gufo::sampling::SamplerState sampler(config, sequence);
+    superroc::sampling::SamplerState sampler(config, sequence);
     const auto result =
         verifier.VerifyStep(sequence, 1, current, 99, 2, sampler);
     Expect(!result.emitted_tokens.empty(),
@@ -894,7 +894,7 @@ void TestGreedyPenaltiesRetainSpeculationAndHistory() {
   for (int scenario = 0; scenario < 5; ++scenario) {
     const std::vector<float> logits = {-INFINITY, 2.0F, 1.8F};
     SampledTargetExecutor target(logits, true);
-    gufo::speculative::DraftProposal proposal{
+    superroc::speculative::DraftProposal proposal{
         .tokens = scenario == 0   ? std::vector<TokenId>{2, 1}
                   : scenario == 1 ? std::vector<TokenId>{1, 1}
                                   : std::vector<TokenId>{1, 2},
@@ -902,20 +902,20 @@ void TestGreedyPenaltiesRetainSpeculationAndHistory() {
         .candidate_probabilities = {},
         .start_pos = 1,
     };
-    gufo::speculative::SpeculativeOptions options;
+    superroc::speculative::SpeculativeOptions options;
     options.max_draft_tokens = 2;
     options.initial_draft_tokens = 2;
     options.enable_adaptive_draft_length = false;
-    gufo::speculative::SpeculativeVerifier verifier(
+    superroc::speculative::SpeculativeVerifier verifier(
         target, std::make_unique<FixedSampledDraftBackend>(proposal), options);
     const std::vector<TokenId> prompt{0};
     const TokenId current = verifier.Prime(prompt);
     std::vector<TokenId> sequence{0, current};
-    gufo::sampling::SamplingConfig config;
+    superroc::sampling::SamplingConfig config;
     config.seed = 73;
     config.frequency_penalty = 0.6F;
     config.repeat_last_n = 2;
-    gufo::sampling::SamplerState sampler(config, sequence);
+    superroc::sampling::SamplerState sampler(config, sequence);
     auto reference = sampler;
     const auto initial_rng = sampler.rng_state();
     const TokenId eos = scenario == 3 ? 2 : 99;
@@ -953,28 +953,28 @@ void TestGreedyReasoningBudgetForcesEndThroughVerification() {
   for (const std::size_t reasoning_budget : {0U, 1U, 2U, 5U}) {
     const std::vector<float> logits = {-INFINITY, 2.0F, 1.8F};
     SampledTargetExecutor target(logits, true);
-    gufo::speculative::DraftProposal proposal{
+    superroc::speculative::DraftProposal proposal{
         .tokens = {1, 1},
         .candidate_ids = {},
         .candidate_probabilities = {},
         .start_pos = 1,
     };
-    gufo::speculative::SpeculativeOptions options;
+    superroc::speculative::SpeculativeOptions options;
     options.max_draft_tokens = 2;
     options.initial_draft_tokens = 2;
     options.enable_adaptive_draft_length = false;
-    gufo::speculative::SpeculativeVerifier verifier(
+    superroc::speculative::SpeculativeVerifier verifier(
         target, std::make_unique<FixedSampledDraftBackend>(proposal), options);
     const std::vector<TokenId> prompt{0};
     const TokenId current = verifier.Prime(prompt);
     std::vector<TokenId> sequence{0, current};
-    gufo::sampling::SamplingConfig config;
-    auto budget = std::make_shared<gufo::sampling::ReasoningBudget>();
+    superroc::sampling::SamplingConfig config;
+    auto budget = std::make_shared<superroc::sampling::ReasoningBudget>();
     budget->tokens = reasoning_budget;
     budget->forced = {2};
     budget->ends = {2};
     config.reasoning_budget = budget;
-    gufo::sampling::SamplerState sampler(config);
+    superroc::sampling::SamplerState sampler(config);
     auto reference = sampler;
     const auto result =
         verifier.VerifyStep(sequence, 1, current, 99, 3, sampler);
@@ -995,7 +995,7 @@ void TestGreedyReasoningBudgetForcesEndThroughVerification() {
 void TestMalformedProposalDoesNotAdvanceTarget() {
   for (int kind = 0; kind < 7; ++kind) {
     SampledTargetExecutor target({-INFINITY, std::log(0.25F), std::log(0.75F)});
-    gufo::speculative::DraftProposal proposal{
+    superroc::speculative::DraftProposal proposal{
         .tokens = {1, 2},
         .candidate_ids = {1, 2, 1, 2},
         .candidate_probabilities = {0.8F, 0.2F, 0.8F, 0.2F},
@@ -1028,11 +1028,11 @@ void TestMalformedProposalDoesNotAdvanceTarget() {
         proposal.candidate_ids.pop_back();
         break;
     }
-    gufo::speculative::SpeculativeOptions options;
+    superroc::speculative::SpeculativeOptions options;
     options.max_draft_tokens = 2;
     options.initial_draft_tokens = 2;
     options.enable_adaptive_draft_length = false;
-    gufo::speculative::SpeculativeVerifier verifier(
+    superroc::speculative::SpeculativeVerifier verifier(
         target, std::make_unique<FixedSampledDraftBackend>(std::move(proposal)),
         options);
     const std::vector<TokenId> prompt{0};
@@ -1053,11 +1053,11 @@ void TestMalformedProposalDoesNotAdvanceTarget() {
 void TestStopAndBudgetKeepExactFrontier() {
   for (const bool batched : {false, true}) {
     ScriptedTargetExecutor target({10, 11, 900, 12}, 900);
-    auto backend = std::make_unique<gufo::speculative::MockDraftBackend>(
+    auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
         std::vector<TokenId>{11, 900, 12});
-    gufo::speculative::SpeculativeOptions options;
+    superroc::speculative::SpeculativeOptions options;
     options.use_batched_verification = batched;
-    gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend),
+    superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend),
                                                     options);
     const std::vector<TokenId> prompt{1, 2, 3};
     const auto current = verifier.Prime(prompt);
@@ -1071,16 +1071,16 @@ void TestStopAndBudgetKeepExactFrontier() {
   }
   {
     SampledTargetExecutor target({-INFINITY, -INFINITY, 0});
-    gufo::speculative::DraftProposal proposal{
+    superroc::speculative::DraftProposal proposal{
         .tokens = {2, 1},
         .candidate_ids = {2, 1, 1, 2},
         .candidate_probabilities = {1, 0, 1, 0},
         .candidates_per_token = 2,
         .start_pos = 1,
     };
-    gufo::speculative::SpeculativeOptions options;
+    superroc::speculative::SpeculativeOptions options;
     options.max_draft_tokens = options.initial_draft_tokens = 2;
-    gufo::speculative::SpeculativeVerifier verifier(
+    superroc::speculative::SpeculativeVerifier verifier(
         target, std::make_unique<FixedSampledDraftBackend>(proposal), options);
     const std::vector<TokenId> prompt{0};
     const auto current = verifier.Prime(prompt);
@@ -1095,9 +1095,9 @@ void TestStopAndBudgetKeepExactFrontier() {
   }
   {
     ScriptedTargetExecutor target({10, 11, 12, 13, 14}, 900);
-    auto backend = std::make_unique<gufo::speculative::MockDraftBackend>(
+    auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
         std::vector<TokenId>{11, 12, 13});
-    gufo::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+    superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
     const std::vector<TokenId> prompt{1, 2, 3};
     const auto output = verifier.Generate(prompt, GenerationOptions(2));
     Expect(output == std::vector<TokenId>({10, 11}) &&
@@ -1107,7 +1107,7 @@ void TestStopAndBudgetKeepExactFrontier() {
 }
 
 void TestConcurrentTargetOnlySteps() {
-  using namespace gufo::speculative;
+  using namespace superroc::speculative;
   struct Observation {
     std::vector<TokenId> emitted;
     TokenId next;
@@ -1122,7 +1122,7 @@ void TestConcurrentTargetOnlySteps() {
     const auto run = [&](bool batched) {
       std::vector<std::unique_ptr<SampledTargetExecutor>> targets;
       std::vector<std::unique_ptr<SpeculativeVerifier>> verifiers;
-      std::vector<gufo::sampling::SamplerState> samplers;
+      std::vector<superroc::sampling::SamplerState> samplers;
       samplers.reserve(3);
       std::vector<TokenId> sequence{0, 0};
       std::vector<SpeculativeVerifier::StepRequest> requests;
@@ -1151,7 +1151,7 @@ void TestConcurrentTargetOnlySteps() {
             *targets.back(), std::move(draft), options));
         Expect(verifiers.back()->Prime(std::span(sequence).first(1)) == 0,
                "concurrent target-only prime");
-        gufo::sampling::SamplingConfig config;
+        superroc::sampling::SamplingConfig config;
         config.seed = static_cast<std::int64_t>(73 + index);
         if (scenario == 1 || scenario == 2) {
           config.frequency_penalty = 0.6F;
@@ -1222,7 +1222,7 @@ void TestConcurrentTargetOnlySteps() {
   Expect(tail.Prime(std::span(sequence).first(3)) == 10 &&
              draft.Prime(std::span(sequence).first(3)) == 10,
          "hidden-aware concurrent prime");
-  gufo::sampling::SamplerState tail_sampler, draft_sampler;
+  superroc::sampling::SamplerState tail_sampler, draft_sampler;
   const std::array<SpeculativeVerifier::StepRequest, 2> requests{{
       {tail, sequence, 3, 10, 900, 1, tail_sampler},
       {draft, sequence, 3, 10, 900, 3, draft_sampler},
@@ -1244,15 +1244,15 @@ void TestConcurrentTargetOnlySteps() {
 }
 
 void TestConstrainedGreedyVerification() {
-  using namespace gufo::speculative;
-  using namespace gufo::sampling;
+  using namespace superroc::speculative;
+  using namespace superroc::sampling;
   for (const bool tool : {false, true}) {
     const std::vector<std::string> pieces{
         tool ? "<tool_call>{\"name\":\"f\",\"arguments\":{" : "{", "\"v\":1",
         tool ? "}}</tool_call>" : "}"};
     auto constraint = std::make_shared<TokenConstraint>();
     constraint->grammar = JsonConstraint::Compile(
-        gufo::json::parse(
+        superroc::json::parse(
             R"({"type":"object","properties":{"v":{"type":"integer","const":1}},
                            "required":["v"],"additionalProperties":false})"),
         false);
@@ -1312,7 +1312,7 @@ void TestConstrainedGreedyVerification() {
 }
 
 void TestConcurrentVerificationChunks() {
-  using namespace gufo::speculative;
+  using namespace superroc::speculative;
   class Draft final : public IDraftBackend {
   public:
     explicit Draft(std::size_t accepted) : accepted_(accepted) {}
@@ -1339,7 +1339,7 @@ void TestConcurrentVerificationChunks() {
       result.candidate_probabilities.assign(result.tokens.size(), 1.0F);
       // Even discarded suffix proposals consume their original private draws.
       for (std::size_t row = 0; row < result.tokens.size(); ++row)
-        (void)gufo::sampling::Uniform(rng);
+        (void)superroc::sampling::Uniform(rng);
       return result;
     }
     bool SupportsSampledProposals() const noexcept override { return true; }
@@ -1372,7 +1372,7 @@ void TestConcurrentVerificationChunks() {
         std::array<std::unique_ptr<SpeculativeVerifier>, count> verifiers;
         std::array<const Draft*, count> drafts{};
         std::array<std::vector<TokenId>, count> sequences;
-        std::vector<gufo::sampling::SamplerState> samplers;
+        std::vector<superroc::sampling::SamplerState> samplers;
         samplers.reserve(count);
         SpeculativeOptions options;
         options.max_draft_tokens = options.initial_draft_tokens = 7;
@@ -1389,7 +1389,7 @@ void TestConcurrentVerificationChunks() {
               *targets[index], std::move(draft), options);
           sequences[index] = {0};
           sequences[index].push_back(verifiers[index]->Prime(sequences[index]));
-          gufo::sampling::SamplingConfig config;
+          superroc::sampling::SamplingConfig config;
           config.seed = static_cast<std::int64_t>(83 + index);
           if (scenario != 0) {
             config.repeat_penalty = 1.1F;
@@ -1489,12 +1489,12 @@ void TestPersistentVerifierSnapshotRoundTrip() {
   auto source_backend =
       std::make_unique<PersistentDraftBackend>(generated, prompt.size());
   auto* source_backend_view = source_backend.get();
-  gufo::speculative::SpeculativeOptions options;
+  superroc::speculative::SpeculativeOptions options;
   options.max_draft_tokens = 4;
   options.min_draft_tokens = 1;
   options.initial_draft_tokens = 2;
   options.rolling_window = 4;
-  gufo::speculative::SpeculativeVerifier source(
+  superroc::speculative::SpeculativeVerifier source(
       source_target, std::move(source_backend), options);
 
   const auto generated_tokens = source.Generate(prompt, GenerationOptions(6));
@@ -1513,7 +1513,7 @@ void TestPersistentVerifierSnapshotRoundTrip() {
   auto restored_backend =
       std::make_unique<PersistentDraftBackend>(generated, prompt.size());
   auto* restored_backend_view = restored_backend.get();
-  gufo::speculative::SpeculativeVerifier restored(
+  superroc::speculative::SpeculativeVerifier restored(
       restored_target, std::move(restored_backend), options);
 
   auto corrupt = payload;

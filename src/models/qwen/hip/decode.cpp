@@ -10,7 +10,7 @@
 #include "src/models/qwen/hip/detail/verify_debug.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 tokenization::TokenId QwenGpuExecutor::ForwardToken(
     tokenization::TokenId token_id, std::uint32_t pos, bool compute_logits) {
@@ -108,7 +108,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardToken(
     if (!warned) {
       warned = true;
       std::fprintf(stderr,
-                   "GUFO_VERIFY_DEBUG=1: HIP graph capture disabled for this "
+                   "SUPERROC_VERIFY_DEBUG=1: HIP graph capture disabled for this "
                    "run (dense decode runs eager).\n");
     }
   }
@@ -149,5 +149,5 @@ tokenization::TokenId QwenGpuExecutor::ForwardToken(
   return CheckedSampleToken(next_token_id, config.vocab_size);
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

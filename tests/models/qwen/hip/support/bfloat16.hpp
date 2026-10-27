@@ -1,10 +1,10 @@
-#ifndef GUFO_TESTS_MODELS_QWEN_HIP_SUPPORT_BFLOAT16_HPP_
-#define GUFO_TESTS_MODELS_QWEN_HIP_SUPPORT_BFLOAT16_HPP_
+#ifndef SUPERROC_TESTS_MODELS_QWEN_HIP_SUPPORT_BFLOAT16_HPP_
+#define SUPERROC_TESTS_MODELS_QWEN_HIP_SUPPORT_BFLOAT16_HPP_
 
 #include <cstdint>
 #include <cstring>
 
-namespace gufo::test {
+namespace superroc::test {
 
 [[nodiscard]] inline std::uint16_t FloatToBf16Bits(float value) noexcept {
   std::uint32_t bits = 0;
@@ -19,6 +19,6 @@ namespace gufo::test {
   return value;
 }
 
-}  // namespace gufo::test
+}  // namespace superroc::test
 
-#endif  // GUFO_TESTS_MODELS_QWEN_HIP_SUPPORT_BFLOAT16_HPP_
+#endif  // SUPERROC_TESTS_MODELS_QWEN_HIP_SUPPORT_BFLOAT16_HPP_

@@ -1,6 +1,6 @@
 // ling3_ops.hpp — the small ops a Ling-3.0 decode step needs around the
-// attention blocks. Lane: LK (MiMo) — Ling-on-gufo overnight build. Do not
-// confuse with LG's drafts. Lane LK, phase 2 of the Ling-on-gufo build.
+// attention blocks. Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not
+// confuse with LG's drafts. Lane LK, phase 2 of the Ling-on-superroc build.
 //
 // Five things (phase-2 spec):
 //   1. RMSNorm          eps from the GGUF

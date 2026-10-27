@@ -18,7 +18,7 @@
 //   4. the same outputs vs the F32 dequant oracle (ling3_gemv_cpu) — the
 //      quantisation-cost number, normalised by the reference RMS.
 //   5. the dense W8A8 WMMA GEMM at m = 1/5/64/256.
-//   6. optional REAL weight rows: `gufo_ling3_wmma_test <raw-rows-file> <k>`
+//   6. optional REAL weight rows: `superroc_ling3_wmma_test <raw-rows-file> <k>`
 //      treats the file as consecutive FP4 rows and runs check 3/4 on them.
 //
 // Weights are synthetic but not kind: every FP4 code appears many times in
@@ -179,7 +179,7 @@ void TestQuant(int qtype, int n_rows, int k) {
         // The kernel file compiles with -ffast-math, which lowers the block
         // scale's `max/127` to a reciprocal multiply on gfx11 (measured: the
         // GPU byte equals max*(1/127) exactly) -- the same compiled form as
-        // gufo's quantizer and LS1's shipped ling3_gemv_q8 under the same
+        // superroc's quantizer and LS1's shipped ling3_gemv_q8 under the same
         // flags. The gate therefore pins every byte against the UNION of
         // the two exact CPU lowerings; anything outside that union is an
         // indexing/layout bug, which is what the gate exists to catch.

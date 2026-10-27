@@ -12,7 +12,7 @@
 // Numerics: the activation is quantised to int8 with ggml's quantize_row_q8_1
 // recipe (max|x| over each 32, scale = max/127, round(x/scale)), and the FP4 code
 // table is exactly ling3_rocmfp4_code (0,1,2,3,4,6,8,10 / -...), unscaled. This is
-// the fork's / ggml's computation, not gufo's float one.
+// the fork's / ggml's computation, not superroc's float one.
 //
 // There is deliberately NO cache of "which vector is currently quantised". A
 // pointer-keyed one would be wrong: rocm_backend.cpp reuses st->normed for every
@@ -297,7 +297,7 @@ extern "C" int ling3_quant_q8(const float * x, int k, int slot, hipStream_t stre
     const int threads = 256;
     const int blocks = (nb + 7) / 8;
     k_q8_1_quant<<<blocks, threads, 0, stream>>>(x, g_qs[slot], g_ds[slot], nb);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("q8 quant");
 }
 
@@ -622,7 +622,7 @@ extern "C" int ling3_gemv_q6k(int qtype, const void * W, const float * x, float 
     }
     lvl_gemv_q6k_rows<<<blocks, block, 0, stream>>>(
         (const uint8_t *) W, x, y, k, n, blocks);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("gemv q6k");
 }
 
@@ -763,7 +763,7 @@ extern "C" int ling3_gemv_fp4_q8_rows(int qtype, const void * W, int slot, float
     const int nwarps = block >> 5;
     k_gemv_wide_q8_rows<<<ls1_gemv_blocks(n, nwarps), block, 0, stream>>>(
         qtype, (const uint8_t *) W, rb, g_qs[slot], g_ds[slot], y, k, n, 1 << 20);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("gemv rows");
 }
 
@@ -786,16 +786,16 @@ extern "C" int ling3_gemv_fp4_q8(int qtype, const void * W, int slot,
     if (ls1_variant_gemv() && n <= LS1_GEMV_WIDE_MAX) {
         k_gemv_wide_q8_rows<<<ls1_gemv_blocks(n, 8), 256, 0, stream>>>(
             qtype, (const uint8_t *) W, rb, qs, ds, y, k, n, 1 << 20);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         return ls1_chk("gemv rows sel");
     }
     if (n <= LS1_GEMV_WIDE_MAX) {
         k_gemv_wide_q8_cta64<<<n, 64, 0, stream>>>(qtype, (const uint8_t *) W, rb, qs, ds, y, k, n);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     } else {
         const int blocks = n < LS1_GEMV_GS_BLOCKS ? n : LS1_GEMV_GS_BLOCKS;
         k_gemv_wide_q8_gs<<<blocks, 64, 0, stream>>>(qtype, (const uint8_t *) W, rb, qs, ds, y, k, n);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     }
     return ls1_chk("gemv q8");
 }
@@ -819,14 +819,14 @@ extern "C" int ling3_gemv_fp4_q8_zp(int qtype, const void * W, int slot,
     if (ls1_variant_gemv() && n <= LS1_GEMV_WIDE_MAX) {
         k_gemv_wide_q8_rows_zp<<<ls1_gemv_blocks(n, 8), 256, 0, stream>>>(
             qtype, (const uint8_t *) W, rb, qs, ds, y, k, n, 1 << 20);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         return ls1_chk("gemv rows zp");
     }
     if (n > LS1_GEMV_WIDE_MAX) {
         return LING3_ERR_ARG;
     }
     k_gemv_wide_q8_cta64_zp<<<n, 64, 0, stream>>>(qtype, (const uint8_t *) W, rb, qs, ds, y, k, n);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("gemv q8 zp");
 }
 
@@ -892,7 +892,7 @@ extern "C" int ling3_gemv_q8_codebook_check(void) {
     }
     hipMemset(d_bad, 0, sizeof(int));
     k_cb_selftest<<<65536 / 256, 256, 0, (hipStream_t) nullptr>>>(d_bad);
-    if (::gufo::hip_check::LaunchFailed()) return -1;
+    if (::superroc::hip_check::LaunchFailed()) return -1;
     int bad = -1;
     if (hipDeviceSynchronize() != hipSuccess || hipMemcpy(&bad, d_bad, sizeof(int),
                                                          hipMemcpyDeviceToHost) != hipSuccess) {
@@ -1038,7 +1038,7 @@ extern "C" int ling3_expert_ffn_dev(
     k_moe_gate_up_swiglu<<<(unsigned) ((n_ff + 63) / 64) * 64 * (unsigned) n_used, 64, 0, stream>>>(
         qtype, (const uint8_t *) gate, (const uint8_t *) up, rb_k,
         ids_d, xq, xd, ls1_moe_hs, limit, n_ff, n_expert, k, ls1_moe_rc);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     if ((rc = ls1_chk("moe gate/up")) != LING3_OK) return rc;
 
     rc = ling3_quant_q8(ls1_moe_hs, (int) nn, LS1_SLOT_MOE_H, stream);
@@ -1056,14 +1056,14 @@ extern "C" int ling3_expert_ffn_dev(
             qtype, (const uint8_t *) down, rb_ff, ids_d, weights_d,
             g_qs[LS1_SLOT_MOE_H], g_ds[LS1_SLOT_MOE_H], y, n_used, n_expert, k, n_ff,
             1 << 20, ls1_moe_rc);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         return ls1_chk("moe down rows");
     }
     k_moe_down_weighted<<<(unsigned) k, 64, 0, stream>>>(qtype, (const uint8_t *) down, rb_ff,
                                               ids_d, weights_d,
                                               g_qs[LS1_SLOT_MOE_H], g_ds[LS1_SLOT_MOE_H],
                                               y, n_used, n_expert, k, n_ff, ls1_moe_rc);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("moe down");
 }
 
@@ -1351,7 +1351,7 @@ static int ls1_quant_m(const float * x, int total, hipStream_t stream) {
     const int nb = total / 32;
     const int threads = 256;
     k_q8_1_quant<<<(nb + 7) / 8, threads, 0, stream>>>(x, g_qs_m, g_ds_m, nb);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("q8 quant m");
 }
 
@@ -1364,7 +1364,7 @@ extern "C" int ling3_gemv_q8_m(int qtype, const void * W, const int8_t * xq, con
     if (m < 1 || m > LS1_MAX_M || (k % 32) != 0) return LING3_ERR_ARG;
     if (qtype != LING3_Q4_0_ROCMFP4 && qtype != LING3_Q4_0_ROCMFP4_FAST) return LING3_ERR_ARG;
     k_gemv_wide_q8_m<<<(unsigned) n, 64, 0, stream>>>(qtype, (const uint8_t *) W, rb, xq, xd, y, k, n, m);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("gemv q8 m");
 }
 
@@ -1430,7 +1430,7 @@ extern "C" int ling3_expert_ffn_m(int qtype, const void * gate, const void * up,
                                                      ls1_moe_hs_m, limit,
                                                      n_used, n_expert, k, n_ff, n_slots,
                                                      ls1_moe_rc_m);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     if ((rc = ls1_chk("moe m gate/up")) != LING3_OK) return rc;
 
     rc = ls1_quant_m(ls1_moe_hs_m, (int) nn, stream);
@@ -1440,7 +1440,7 @@ extern "C" int ling3_expert_ffn_m(int qtype, const void * gate, const void * up,
                                        ids_d, weights_d, g_qs_m, g_ds_m, y,
                                        n_used, n_expert, k, n_ff, n_slots, n_tokens,
                                        ls1_moe_rc_m);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("moe m down");
 }
 
@@ -1486,7 +1486,7 @@ extern "C" int ling3_expert_ffn_shared_m(int qtype, const void * gate, const voi
         qtype, (const uint8_t *) gate, (const uint8_t *) up, rb_k,
         g_qs_m, g_ds_m, ids_d, ls1_moe_hs_m, limit, n_expert, k, n_ff, n_tokens,
         ls1_moe_rc_m);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     if ((rc = ls1_chk("shared m gate/up")) != LING3_OK) return rc;
 
     rc = ls1_quant_m(ls1_moe_hs_m, (int) nn, stream);
@@ -1495,7 +1495,7 @@ extern "C" int ling3_expert_ffn_shared_m(int qtype, const void * gate, const voi
     k_moe_down_one_m<<<(unsigned) k, 64, 0, stream>>>(
         qtype, (const uint8_t *) down, rb_ff, ids_d, weights_d, g_qs_m, g_ds_m, y,
         n_expert, k, n_ff, n_tokens, ls1_moe_rc_m);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("shared m down");
 }
 
@@ -1539,7 +1539,7 @@ extern "C" int ling3_expert_ffn_dev_tuned(int qtype, const void * gate, const vo
     k_moe_gate_up_swiglu<<<(unsigned) (((n_ff + 63) / 64) * 64 * n_used), 64, 0, stream>>>(
         qtype, (const uint8_t *) gate, (const uint8_t *) up, rb_k,
         ids_d, xq, xd, ls1_moe_hs, limit, n_ff, n_expert, k, ls1_moe_rc);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     if ((rc = ls1_chk("moe gate/up")) != LING3_OK) return rc;
     rc = ling3_quant_q8(ls1_moe_hs, (int) nn, LS1_SLOT_MOE_H, stream);
     if (rc != LING3_OK) return rc;
@@ -1548,7 +1548,7 @@ extern "C" int ling3_expert_ffn_dev_tuned(int qtype, const void * gate, const vo
         qtype, (const uint8_t *) down, rb_ff, ids_d, weights_d,
         g_qs[LS1_SLOT_MOE_H], g_ds[LS1_SLOT_MOE_H], y, n_used, n_expert, k, n_ff,
         1 << 20, ls1_moe_rc);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("moe down rows tuned");
 }
 
@@ -1563,7 +1563,7 @@ extern "C" int ling3_expert_ffn_dev_rows(int qtype, const void * down,
         qtype, (const uint8_t *) down, rb_ff, ids_d, weights_d,
         g_qs[LS1_SLOT_MOE_H], g_ds[LS1_SLOT_MOE_H], y, n_used, n_expert, k, n_ff,
         1 << 20, ls1_moe_rc);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls1_chk("moe down rows");
 }
 

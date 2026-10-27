@@ -56,7 +56,7 @@
 //              (tok_base+t)*g_tok + h, only for live t.
 //
 // WMMA fragment maps: the wave32 f16 builtin with the maps measured by LW1
-// (from gufo's qwen attention_wmma.hip) and LF1's impulse probe:
+// (from superroc's qwen attention_wmma.hip) and LF1's impulse probe:
 //   A frag: lane L is matrix row L%16, 16 contiguous K values.
 //   B frag: lane L is matrix column L%16, 16 contiguous K values from an
 //           [N][K]-major tile.

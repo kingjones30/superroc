@@ -1,12 +1,12 @@
-#ifndef GUFO_SERVER_LOGGING_HPP_
-#define GUFO_SERVER_LOGGING_HPP_
+#ifndef SUPERROC_SERVER_LOGGING_HPP_
+#define SUPERROC_SERVER_LOGGING_HPP_
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <string_view>
 
-namespace gufo::server {
+namespace superroc::server {
 
 /// Log verbosity, ordered from chattiest to quietest so a threshold test is a
 /// single comparison. `kDebug` must stay below `kInfo`: the process-wide filter
@@ -89,6 +89,6 @@ public:
   }
 };
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_LOGGING_HPP_
+#endif  // SUPERROC_SERVER_LOGGING_HPP_

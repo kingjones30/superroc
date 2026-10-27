@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace qfn = gufo::models::qwen38_flash_next;
+namespace qfn = superroc::models::qwen38_flash_next;
 using Lookup = qfn::PromptLookup;
 
 void Require(bool condition, const char* message) {

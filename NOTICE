@@ -1,7 +1,7 @@
 Super ROC
 Copyright (c) 2026 Myron Jones
 
-Super ROC's own code (ROCmFP4 serving and kernels, the gufo-quant quantizer, the ling3, flint, muse-glimmer,
+Super ROC's own code (ROCmFP4 serving and kernels, the superroc-quant quantizer, the ling3, flint, muse-glimmer,
 qwen35moe and lfm2moe model support, the DSpark/MTP drafting work and the serving hardening) is released under
 the MIT License in LICENSE.
 
@@ -21,7 +21,7 @@ Adapted code includes:
   2023-2026 The ggml authors (MIT).
 - DS4: Copyright (c) 2026 The ds4.c authors (MIT).
 - DS4 GB10/GX10 changes: Copyright (c) 2026 Marco Palaferri (MIT).
-- Qwen reference chat templates: Alibaba Cloud / Qwen (Apache-2.0); Gufo
+- Qwen reference chat templates: Alibaba Cloud / Qwen (Apache-2.0); SuperROC
   implements a separate bounded renderer with local validation and API wiring.
 - h3.c: Copyright (c) 2026 Salvatore Sanfilippo (MIT).
 - ccv ancestry through h3.c: Copyright (c) 2010 Liu Liu (BSD-3-Clause).
@@ -40,10 +40,10 @@ Copyright (c) 2026 notice is retained in licenses/strix-halo-llamacpp.txt
 
 This software is based in part on the work of the Independent JPEG Group.
 
-Gufo invokes FFmpeg/ffprobe as separate executables. Their license and source
+SuperROC invokes FFmpeg/ffprobe as separate executables. Their license and source
 obligations, and those of any other bundled dependency, remain applicable to
-redistributed packages. Gufo's MIT license does not replace those obligations.
+redistributed packages. SuperROC's MIT license does not replace those obligations.
 
 Model weights are not included. Operators acquire them separately under the
 publisher's terms. Python reference/evaluation tools and their models belong
-to the development environment, not the production Gufo installation.
+to the development environment, not the production SuperROC installation.

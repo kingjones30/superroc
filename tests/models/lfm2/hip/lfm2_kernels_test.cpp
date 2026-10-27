@@ -153,7 +153,7 @@ void CaseDecode(std::mt19937& rng) {
     alloc_ok = HipOk(hipMemcpy(d_bcx, bcx.data(), 3U * kH * sizeof(float),
                                hipMemcpyHostToDevice),
                      "copy bcx");
-    const auto st = gufo::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state,
+    const auto st = superroc::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state,
                                                          d_y, kH, kL, nullptr);
     if (!st.ok) {
       Report("decode", false, st.error != nullptr ? st.error : "launch");
@@ -231,9 +231,9 @@ void CasePrefillOne(std::mt19937& rng,
                       init_state.size() * sizeof(float), hipMemcpyHostToDevice),
             "copy state");
   const auto st =
-      ok ? gufo::hip::LaunchLfm2ShortConvPrefill(d_bcx, d_conv, d_state, d_y,
+      ok ? superroc::hip::LaunchLfm2ShortConvPrefill(d_bcx, d_conv, d_state, d_y,
                                                  kH, kL, n_tokens, nullptr)
-         : gufo::hip::Lfm2LaunchStatus{false, "alloc"};
+         : superroc::hip::Lfm2LaunchStatus{false, "alloc"};
   if (!st.ok) {
     hipFree(d_bcx);
     hipFree(d_conv);
@@ -309,7 +309,7 @@ void CasePrefillDecodeEquiv(std::mt19937& rng,
             "copy sd");
   bool launched = false;
   if (ok) {
-    const auto st = gufo::hip::LaunchLfm2ShortConvPrefill(
+    const auto st = superroc::hip::LaunchLfm2ShortConvPrefill(
         d_bcx, d_conv, d_sp, d_yp, kH, kL, kN, nullptr);
     launched = st.ok;
     if (!st.ok) {
@@ -325,7 +325,7 @@ void CasePrefillDecodeEquiv(std::mt19937& rng,
       launched = false;
       break;
     }
-    const auto st = gufo::hip::LaunchLfm2ShortConvDecode(d_bd, d_conv, d_sd,
+    const auto st = superroc::hip::LaunchLfm2ShortConvDecode(d_bd, d_conv, d_sd,
                                                          d_yd, kH, kL, nullptr);
     if (!st.ok) {
       Report("prefill37_vs_decode", false,
@@ -434,10 +434,10 @@ void CaseRouteOne(std::mt19937& rng,
     ok = HipOk(
         hipMemcpy(d_x, x.data(), kK * sizeof(float), hipMemcpyHostToDevice),
         "copy x");
-    const auto st = ok ? gufo::hip::LaunchLfm2MoeRoute(
+    const auto st = ok ? superroc::hip::LaunchLfm2MoeRoute(
                              d_x, d_gate, d_bias, kK, n_expert, n_used,
                              d_logits, d_ids, d_w, nullptr)
-                       : gufo::hip::Lfm2LaunchStatus{false, "copy"};
+                       : superroc::hip::Lfm2LaunchStatus{false, "copy"};
     if (!st.ok) {
       Report("route_E" + std::to_string(n_expert), false,
              st.error != nullptr ? st.error : "launch");
@@ -545,10 +545,10 @@ void CaseRouteTies(std::mt19937& rng,
     ok = HipOk(
         hipMemcpy(d_x, x.data(), kK * sizeof(float), hipMemcpyHostToDevice),
         "copy x");
-    const auto st = ok ? gufo::hip::LaunchLfm2MoeRoute(
+    const auto st = ok ? superroc::hip::LaunchLfm2MoeRoute(
                              d_x, d_gate, d_bias, kK, n_expert, n_used,
                              d_logits, d_ids, d_w, nullptr)
-                       : gufo::hip::Lfm2LaunchStatus{false, "copy"};
+                       : superroc::hip::Lfm2LaunchStatus{false, "copy"};
     if (!st.ok) {
       ok = false;
       break;
@@ -628,10 +628,10 @@ void CaseRouteBatchOne(std::mt19937& rng,
       HipOk(hipMemcpy(d_bias, bias.data(), bias.size() * sizeof(float),
                       hipMemcpyHostToDevice),
             "copy bias");
-  const auto bst = ok ? gufo::hip::LaunchLfm2MoeRouteBatch(
+  const auto bst = ok ? superroc::hip::LaunchLfm2MoeRouteBatch(
                             d_x, d_gate, d_bias, kK, kE, n_tokens, kU, d_logits,
                             d_ids, d_w, nullptr)
-                      : gufo::hip::Lfm2LaunchStatus{false, "alloc"};
+                      : superroc::hip::Lfm2LaunchStatus{false, "alloc"};
   if (!bst.ok) {
     Report("routebatch_n" + std::to_string(n_tokens), false,
            bst.error != nullptr ? bst.error : "batch launch");
@@ -659,9 +659,9 @@ void CaseRouteBatchOne(std::mt19937& rng,
                          hipMemcpyHostToDevice),
                "copy row x");
     const auto sst =
-        ok ? gufo::hip::LaunchLfm2MoeRoute(s_x, d_gate, d_bias, kK, kE, kU,
+        ok ? superroc::hip::LaunchLfm2MoeRoute(s_x, d_gate, d_bias, kK, kE, kU,
                                            s_logits, s_ids, s_w, nullptr)
-           : gufo::hip::Lfm2LaunchStatus{false, "copy"};
+           : superroc::hip::Lfm2LaunchStatus{false, "copy"};
     if (!sst.ok) {
       ok = false;
       break;
@@ -707,7 +707,7 @@ void CaseRouteBatchOne(std::mt19937& rng,
 }
 // Case e: refusals return ok == false and launch nothing (buffers untouched,
 // no HIP error).
-void CheckRefused(const std::string& cas, gufo::hip::Lfm2LaunchStatus st,
+void CheckRefused(const std::string& cas, superroc::hip::Lfm2LaunchStatus st,
                   bool untouched) {
   const bool pass = !st.ok && st.error != nullptr && untouched &&
                     hipGetLastError() == hipSuccess;
@@ -769,9 +769,9 @@ void CaseAddRMSNorm(std::mt19937& rng,
       const std::string cas =
           "addrmsnorm_d" + std::to_string(dim) + (with_weight ? "_w" : "_now");
       if (ok) {
-        gufo::hip::LaunchResidualAdd(d_h1, d_a, d_h1, dim, nullptr);
-        gufo::hip::LaunchRMSNorm(d_h1, weight, d_o1, dim, 1e-5F, nullptr);
-        const auto st = gufo::hip::LaunchLfm2AddRMSNorm(d_h2, d_a, weight, d_o2,
+        superroc::hip::LaunchResidualAdd(d_h1, d_a, d_h1, dim, nullptr);
+        superroc::hip::LaunchRMSNorm(d_h1, weight, d_o1, dim, 1e-5F, nullptr);
+        const auto st = superroc::hip::LaunchLfm2AddRMSNorm(d_h2, d_a, weight, d_o2,
                                                         dim, 1e-5F, nullptr);
         ok = st.ok && HipOk(hipDeviceSynchronize(), "sync addrmsnorm");
       }
@@ -887,32 +887,32 @@ void CaseRefusals(std::mt19937& rng) {
   }
   hipGetLastError();
   CheckRefused("refuse_n_used9",
-               gufo::hip::LaunchLfm2MoeRoute(d_x, d_gate, d_bias, kK, kE, 9U,
+               superroc::hip::LaunchLfm2MoeRoute(d_x, d_gate, d_bias, kK, kE, 9U,
                                              d_logits, d_ids, d_w, nullptr),
                DeviceUnchanged(d_w, weights));
   hipGetLastError();
   CheckRefused("refuse_n_expert0",
-               gufo::hip::LaunchLfm2MoeRoute(d_x, d_gate, d_bias, kK, 0U, kU,
+               superroc::hip::LaunchLfm2MoeRoute(d_x, d_gate, d_bias, kK, 0U, kU,
                                              d_logits, d_ids, d_w, nullptr),
                DeviceUnchanged(d_w, weights));
   hipGetLastError();
   CheckRefused("refuse_l_cache1",
-               gufo::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state, d_y,
+               superroc::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state, d_y,
                                                     kH, 1U, nullptr),
                DeviceUnchanged(d_y, y) && DeviceUnchanged(d_state, state));
   hipGetLastError();
   CheckRefused("refuse_l_cache9",
-               gufo::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state, d_y,
+               superroc::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state, d_y,
                                                     kH, 9U, nullptr),
                DeviceUnchanged(d_y, y) && DeviceUnchanged(d_state, state));
   hipGetLastError();
   CheckRefused("refuse_hidden2047",
-               gufo::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state, d_y,
+               superroc::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state, d_y,
                                                     2047U, 3U, nullptr),
                DeviceUnchanged(d_y, y) && DeviceUnchanged(d_state, state));
   hipGetLastError();
   CheckRefused("refuse_null",
-               gufo::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state,
+               superroc::hip::LaunchLfm2ShortConvDecode(d_bcx, d_conv, d_state,
                                                     nullptr, kH, 3U, nullptr),
                DeviceUnchanged(d_y, y) && DeviceUnchanged(d_state, state));
   hipFree(d_bcx);
@@ -930,8 +930,8 @@ void CaseRefusals(std::mt19937& rng) {
 }  // namespace
 
 int main() {
-  const int gate = gufo::test::GateHipDevice(
-      gufo::test::HipDeviceRequirement::kOptional, "lfm2_kernels_test");
+  const int gate = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional, "lfm2_kernels_test");
   if (gate != 0) {
     return gate;
   }

@@ -8,7 +8,7 @@
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<std::size_t CachedDim = 0>
 __global__ void RMSNormKernel(const float* __restrict__ x,
@@ -107,10 +107,10 @@ void LaunchRMSNorm(const float* x, const float* weight, float* out,
   // in registers, including its weights, without changing the sum tree.
   if (dim == 5120) {
     RMSNormKernel<5120><<<1, 256, 0, stream>>>(x, weight, out, dim, eps);
-    GUFO_CHECK_LAUNCH("RMSNormKernel<5120>");
+    SUPERROC_CHECK_LAUNCH("RMSNormKernel<5120>");
   } else {
     RMSNormKernel<><<<1, 256, 0, stream>>>(x, weight, out, dim, eps);
-    GUFO_CHECK_LAUNCH("RMSNormKernel<>");
+    SUPERROC_CHECK_LAUNCH("RMSNormKernel<>");
   }
 }
 void LaunchPerHeadRMSNorm(const float* x, const float* weight, float* out,
@@ -118,7 +118,7 @@ void LaunchPerHeadRMSNorm(const float* x, const float* weight, float* out,
                           float eps, hipStream_t stream) {
   PerHeadRMSNormKernel<<<num_heads, 256, 0, stream>>>(x, weight, out, num_heads,
                                                       head_dim, eps);
-  GUFO_CHECK_LAUNCH("PerHeadRMSNormKernel");
+  SUPERROC_CHECK_LAUNCH("PerHeadRMSNormKernel");
 }
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

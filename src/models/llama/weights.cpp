@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace gufo::models {
+namespace superroc::models {
 namespace {
 
 QwenTensorRef ExtractTensorRef(const core::GgufReader& reader,
@@ -90,7 +90,7 @@ bool ValidateTensor(const QwenTensorRef& tensor, std::size_t expected_elements,
                          tensor.type != core::GgmlType::kF16 &&
                          tensor.type != core::GgmlType::kBF16;
   if (quantized && row_elements != 0 &&
-      gufo::quant::QuantizedRowBytes(tensor.type, row_elements) == 0) {
+      superroc::quant::QuantizedRowBytes(tensor.type, row_elements) == 0) {
     if (error_msg != nullptr) {
       *error_msg =
           "Quantized tensor row is not block aligned: " + std::string(name);
@@ -225,4 +225,4 @@ std::optional<QwenModelWeights> BindLlamaWeights(
   return weights;
 }
 
-}  // namespace gufo::models
+}  // namespace superroc::models

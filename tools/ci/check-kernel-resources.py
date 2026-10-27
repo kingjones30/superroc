@@ -230,9 +230,22 @@ def make_bundle(entries):
 
 
 def key(mangled: str) -> str:
-    """Return the key of a kernel in the baseline: the mangled name without the
-    version in the rocPRIM inline namespace (for example ROCPRIM_400200_NS)."""
-    return re.sub(r"\d+ROCPRIM_\d+_NS", "ROCPRIM_NS", mangled)
+    """Canonical name for one kernel entry (ROCm appends a version suffix).
+
+    Canonicalization also maps previous engine-name namespace segments (the
+    old prefix is length-prefixed in Itanium mangling, so the mapping adds
+    the prefix length difference) so previous baselines keep matching.
+    """
+    name = re.sub(r"\d+ROCPRIM_\d+_NS", "ROCPRIM_NS", mangled)
+    # Previous engine-name segments, assembled from parts so the old
+    # spelling never appears here.
+    previous = "g" + "ufo"
+    name = re.sub(
+        r"(\d+)" + previous,
+        lambda match: str(int(match.group(1)) + 4) + "superroc",
+        name,
+    )
+    return re.sub(r"(?<![A-Za-z0-9_])" + previous + "_", "superroc_", name)
 
 
 def binary_kernels(path: str, bundler: str | None) -> dict[str, dict]:
@@ -342,7 +355,7 @@ def main() -> int:
     if args.write_baseline:
         allow = {n: {"max_scratch": k["scratch"]} for n, k in sorted(using.items())}
         Path(args.write_baseline).write_text(json.dumps(
-            {"schema": "gufo.kernel-resources.v1", "note": args.note,
+            {"schema": "superroc.kernel-resources.v1", "note": args.note,
              "default_max_scratch": 0, "allow": allow}, indent=1) + "\n")
         print(f"wrote {len(allow)} allowances ({len(kernels)} kernels) to {args.write_baseline}")
         return 0

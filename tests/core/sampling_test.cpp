@@ -11,13 +11,13 @@
 
 namespace {
 
-using gufo::sampling::ConstraintVocabulary;
-using gufo::sampling::JsonConstraint;
-using gufo::sampling::ReasoningBudget;
-using gufo::sampling::SamplerState;
-using gufo::sampling::SamplingConfig;
-using gufo::sampling::TokenConstraint;
-using gufo::sampling::TokenId;
+using superroc::sampling::ConstraintVocabulary;
+using superroc::sampling::JsonConstraint;
+using superroc::sampling::ReasoningBudget;
+using superroc::sampling::SamplerState;
+using superroc::sampling::SamplingConfig;
+using superroc::sampling::TokenConstraint;
+using superroc::sampling::TokenId;
 
 void Expect(bool condition, std::string_view message) {
   if (!condition) {
@@ -155,7 +155,7 @@ void TestReasoningBudgetKeepsLiteralAnswer() {
     } else {
       sampler.Accept(std::vector<TokenId>{1, 4, 3});
     }
-    // Token 0 stands for a literal <think> inside answer/tool data. Gufo's
+    // Token 0 stands for a literal <think> inside answer/tool data. SuperROC's
     // framing recognizes reasoning markup only in the initial phase.
     sampler.Accept(std::vector<TokenId>{6, 0, 1, 2, 1, 2, 1, 2});
     Expect(!sampler.ForcedToken() && sampler.Sample(Logits(6)) == 6,
@@ -163,11 +163,11 @@ void TestReasoningBudgetKeepsLiteralAnswer() {
   }
 
   const std::vector<TokenId> thinking{1};
-  Expect(gufo::sampling::BuildDistribution(Logits(1), config, {}, thinking)
+  Expect(superroc::sampling::BuildDistribution(Logits(1), config, {}, thinking)
                  .best_token() == 4,
          "distribution construction enforces an exhausted reasoning budget");
   const std::vector<TokenId> answer{1, 4, 3, 6, 0, 1, 2};
-  Expect(gufo::sampling::BuildDistribution(Logits(1), config, {}, answer)
+  Expect(superroc::sampling::BuildDistribution(Logits(1), config, {}, answer)
                  .best_token() == 1,
          "distribution construction preserves literal answer content");
 }

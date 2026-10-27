@@ -21,6 +21,7 @@
 #include "tests/models/qwen/hip/support/comparisons.hpp"
 #include "tests/models/qwen/hip/support/device.hpp"
 #include "tests/models/qwen/hip/support/device_buffer.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -46,7 +47,7 @@ enum class Route { kScalar, kWave, kTiled, kSplit };
 // Independent equations from z-lab/dflash model_mlx.py, pinned in eval/README.
 // Keep these small operator checks with the ring/attention checks.
 void TestDynamicConvolution() {
-  using gufo::test::DeviceBuffer;
+  using superroc::test::DeviceBuffer;
   constexpr std::uint32_t tokens = 8, hidden = 5120, taps = 2, group_size = 16;
   constexpr std::uint32_t groups = hidden / group_size;
   std::vector<float> input(tokens * hidden),
@@ -60,7 +61,7 @@ void TestDynamicConvolution() {
   DeviceBuffer<float> d_input(input), d_dynamic(dynamic), d_base(base),
       d_output(input.size());
   for (std::uint32_t side = 0; side < 2; ++side) {
-    gufo::hip::kernels::LaunchDFlashGroupedDynamicConv(
+    superroc::hip::kernels::LaunchDFlashGroupedDynamicConv(
         d_input.data(), d_dynamic.data(), d_base.data(), d_output.data(),
         tokens, hidden, taps, group_size, side, nullptr);
     const auto output = d_output.CopyToHost();
@@ -74,7 +75,7 @@ void TestDynamicConvolution() {
                                channel / group_size] *
                        value;
         }
-        gufo::test::Expect(
+        superroc::test::Expect(
             std::isfinite(output[token * hidden + channel]) &&
                 std::abs(output[token * hidden + channel] - reference) < 2e-7,
             "DFlash grouped convolution differs from the causal equation");
@@ -85,8 +86,8 @@ void TestDynamicConvolution() {
 
 void TestProposalVerification(std::span<const std::uint32_t> ids,
                               std::span<const float> q, std::uint32_t vocab) {
-  using gufo::test::DeviceBuffer;
-  using gufo::test::Expect;
+  using superroc::test::DeviceBuffer;
+  using superroc::test::Expect;
   Expect(std::ranges::find(ids, 0U) == ids.end() &&
              std::ranges::find(ids, 1U) == ids.end(),
          "residual fixture must include tokens outside draft top-k");
@@ -98,18 +99,18 @@ void TestProposalVerification(std::span<const std::uint32_t> ids,
   logits[ids[2]] = std::log(0.15F);
   DeviceBuffer<float> d_logits(logits);
   DeviceBuffer<std::uint32_t> d_token(1), d_accepted(1);
-  gufo::hip::GpuSamplingWorkspace workspace;
-  gufo::hip::AllocateGpuSamplingWorkspace(&workspace, vocab, ids.size());
+  superroc::hip::GpuSamplingWorkspace workspace;
+  superroc::hip::AllocateGpuSamplingWorkspace(&workspace, vocab, ids.size());
   for (const bool filtered : {false, true}) {
-    gufo::sampling::SamplingConfig config;
+    superroc::sampling::SamplingConfig config;
     config.temperature = filtered ? 0.8F : 1.0F;
     config.top_k = filtered ? 4 : 0;
     config.top_p = filtered ? 0.95F : 1.0F;
     config.min_p = filtered ? 0.05F : 0.0F;
     config.repeat_penalty = filtered ? 1.2F : 1.0F;
     const std::vector<std::uint32_t> history = {ids[0], ids[0]};
-    const auto p = gufo::sampling::BuildDistribution(logits, config, history);
-    std::vector<gufo::sampling::Probability> residual;
+    const auto p = superroc::sampling::BuildDistribution(logits, config, history);
+    std::vector<superroc::sampling::Probability> residual;
     double rejection_mass = 0;
     for (const auto& entry : p.entries()) {
       const auto found = std::ranges::find(ids, entry.token);
@@ -123,20 +124,20 @@ void TestProposalVerification(std::span<const std::uint32_t> ids,
     // Linear GPU sampling walks token IDs; the filtered route walks sorted
     // target logits. Select a midpoint in every nonempty residual interval.
     if (!filtered)
-      std::ranges::sort(residual, {}, &gufo::sampling::Probability::token);
-    gufo::hip::GpuSamplingParameters parameters{
+      std::ranges::sort(residual, {}, &superroc::sampling::Probability::token);
+    superroc::hip::GpuSamplingParameters parameters{
         .temperature = config.temperature,
         .top_k = config.top_k,
         .top_p = config.top_p,
         .min_p = config.min_p,
         .repeat_penalty = config.repeat_penalty,
     };
-    const std::array<gufo::sampling::TokenPenalty, 1> penalties{
+    const std::array<superroc::sampling::TokenPenalty, 1> penalties{
         {{ids[0], 0, 1}}};
     const auto verify = [&](std::size_t candidate, double accept_u,
                             double residual_u, bool accepted,
                             std::uint32_t expected) {
-      gufo::hip::LaunchGPUSpeculativeSampling(
+      superroc::hip::LaunchGPUSpeculativeSampling(
           d_logits.data(), d_token.data(), d_accepted.data(), vocab, parameters,
           ids[candidate], q[candidate], ids.data(), q.data(), ids.size(),
           accept_u, residual_u, penalties.data(), filtered ? 1 : 0, &workspace);
@@ -170,11 +171,11 @@ void TestProposalVerification(std::span<const std::uint32_t> ids,
              "selector plus verifier must recover the complete target "
              "distribution");
   }
-  gufo::hip::FreeGpuSamplingWorkspace(&workspace);
+  superroc::hip::FreeGpuSamplingWorkspace(&workspace);
 }
 
 void TestSelector(std::uint32_t vocab) {
-  using gufo::test::DeviceBuffer;
+  using superroc::test::DeviceBuffer;
   // Cross a partial-top-k partition boundary and leave a short final partition.
   constexpr std::uint32_t rank = 256, anchor = 3;
   std::vector<float> logits(vocab), projected(rank);
@@ -204,7 +205,7 @@ void TestSelector(std::uint32_t vocab) {
   DeviceBuffer<std::uint32_t> d_anchor(std::vector<std::uint32_t>{anchor}),
       d_selected(1);
   const auto scratch_size =
-      gufo::hip::kernels::DFlashSelectorScratchElements(vocab);
+      superroc::hip::kernels::DFlashSelectorScratchElements(vocab);
   DeviceBuffer<float> d_scores(scratch_size);
   DeviceBuffer<std::uint32_t> d_ids(scratch_size);
   std::vector<std::uint32_t> sorted(vocab);
@@ -227,14 +228,14 @@ void TestSelector(std::uint32_t vocab) {
       // Unwritten partial slots must never enter the candidate set.
       d_scores.CopyFrom(std::vector<float>(scratch_size, 1e20F));
       d_ids.CopyFrom(std::vector<std::uint32_t>(scratch_size, vocab - 1));
-      gufo::hip::kernels::LaunchDFlashSelectorStep(
+      superroc::hip::kernels::LaunchDFlashSelectorStep(
           d_logits.data(), d_projected.data(), d_predecessors.data(),
           d_successors.data(), d_anchor.data(), d_selected.data(),
           d_confidence.data(), d_scores.data(), d_ids.data(), temperature,
           d_uniform.data(), d_candidates.data(), d_probabilities.data(), vocab,
           rank, top_k, nullptr);
       const auto candidates = d_candidates.CopyToHost();
-      gufo::test::Expect(
+      superroc::test::Expect(
           std::equal(candidates.begin(), candidates.end(), sorted.begin()),
           "DFlash selector top-k differs from full vocabulary sort");
       const auto probabilities = d_probabilities.CopyToHost();
@@ -257,7 +258,7 @@ void TestSelector(std::uint32_t vocab) {
                       << " actual=" << probabilities[c] << " expected=" << p
                       << '\n';
           }
-          gufo::test::Expect(std::isfinite(probabilities[c]) &&
+          superroc::test::Expect(std::isfinite(probabilities[c]) &&
                                  std::abs(probabilities[c] - p) < 2e-6,
                              "DFlash sparse proposal probability is incorrect");
           const double previous = cumulative;
@@ -266,7 +267,7 @@ void TestSelector(std::uint32_t vocab) {
             selected = c;
         }
       }
-      gufo::test::Expect(d_selected.CopyToHost()[0] == sorted[selected],
+      superroc::test::Expect(d_selected.CopyToHost()[0] == sorted[selected],
                          "DFlash selector chose the wrong candidate");
       const double confidence =
           temperature > 0
@@ -274,10 +275,10 @@ void TestSelector(std::uint32_t vocab) {
               : 1.0;
       if (temperature == 0) {
         for (std::size_t c = 0; c < top_k; ++c)
-          gufo::test::Expect(probabilities[c] == (c == selected ? 1.0F : 0.0F),
+          superroc::test::Expect(probabilities[c] == (c == selected ? 1.0F : 0.0F),
                              "greedy proposal probabilities must be one-hot");
       }
-      gufo::test::Expect(
+      superroc::test::Expect(
           std::abs(d_confidence.CopyToHost()[0] - confidence) < 2e-6,
           "DFlash selected-token probability is incorrect");
       if (vocab == 2065 && top_k == 16 && temperature == 0.8F)
@@ -287,7 +288,7 @@ void TestSelector(std::uint32_t vocab) {
 }
 
 void TestSelectorZeroUniform() {
-  using gufo::test::DeviceBuffer;
+  using superroc::test::DeviceBuffer;
   const auto bf16 = [](float value) {
     return static_cast<std::uint16_t>(std::bit_cast<std::uint32_t>(value) >>
                                       16);
@@ -301,23 +302,23 @@ void TestSelectorZeroUniform() {
       successors(std::vector<std::uint16_t>{bf16(-1000), bf16(0), bf16(0)});
   DeviceBuffer<std::uint32_t> anchor(std::vector<std::uint32_t>{2}),
       selected(1), candidates(2);
-  const auto size = gufo::hip::kernels::DFlashSelectorScratchElements(3);
+  const auto size = superroc::hip::kernels::DFlashSelectorScratchElements(3);
   DeviceBuffer<float> scores(size);
   DeviceBuffer<std::uint32_t> ids(size);
-  gufo::hip::kernels::LaunchDFlashSelectorStep(
+  superroc::hip::kernels::LaunchDFlashSelectorStep(
       logits.data(), projected.data(), predecessors.data(), successors.data(),
       anchor.data(), selected.data(), confidence.data(), scores.data(),
       ids.data(), 1.0F, uniform.data(), candidates.data(), probabilities.data(),
       3, 1, 2, nullptr);
-  gufo::test::Expect(
+  superroc::test::Expect(
       selected.CopyToHost()[0] == 1 && confidence.CopyToHost()[0] == 1.0F,
       "a zero random draw must not select zero probability");
 }
 
 void TestBatchedSelector() {
-  using gufo::hip::kernels::DFlashSelectorSequence;
-  using gufo::test::DeviceBuffer;
-  using gufo::test::Expect;
+  using superroc::hip::kernels::DFlashSelectorSequence;
+  using superroc::test::DeviceBuffer;
+  using superroc::test::Expect;
   constexpr std::uint32_t vocab = 2065, rank = 32;
   std::vector<std::uint16_t> predecessor(vocab * rank), successor(vocab * rank);
   for (std::size_t index = 0; index < predecessor.size(); ++index) {
@@ -361,7 +362,7 @@ void TestBatchedSelector() {
         d_uniforms(uniforms), d_confidences(rows);
     DeviceBuffer<std::uint32_t> d_tokens(tokens);
     const auto partials =
-        gufo::hip::kernels::DFlashSelectorScratchElements(vocab);
+        superroc::hip::kernels::DFlashSelectorScratchElements(vocab);
     DeviceBuffer<float> d_scores(rows * partials);
     DeviceBuffer<std::uint32_t> d_ids(rows * partials);
     for (const auto top_k : {1U, 7U, 16U}) {
@@ -374,7 +375,7 @@ void TestBatchedSelector() {
         const auto sequence = sequences[index];
         for (std::uint32_t step = 0; step < sequence.count; ++step) {
           const auto row = first_row + step;
-          gufo::hip::kernels::LaunchDFlashSelectorStep(
+          superroc::hip::kernels::LaunchDFlashSelectorStep(
               d_logits.data() + row * vocab, d_hidden.data() + row * rank,
               d_predecessor.data(), d_successor.data(),
               d_tokens.data() + row + index, d_tokens.data() + row + index + 1U,
@@ -396,7 +397,7 @@ void TestBatchedSelector() {
       d_confidences.CopyFrom(std::vector<float>(rows, -1.0F));
       d_scores.CopyFrom(std::vector<float>(rows * partials, 1e20F));
       d_ids.CopyFrom(std::vector<std::uint32_t>(rows * partials, vocab - 1));
-      gufo::hip::kernels::LaunchDFlashSelectorBatch(
+      superroc::hip::kernels::LaunchDFlashSelectorBatch(
           d_logits.data(), d_hidden.data(), d_predecessor.data(),
           d_successor.data(), d_tokens.data(), d_confidences.data(),
           d_scores.data(), d_ids.data(), d_uniforms.data(), d_candidates.data(),
@@ -496,34 +497,34 @@ float MaxRouteDifference(Route route, std::uint32_t current_pos,
   HIP_CHECK(hipMemset(d_wave_out, 0, q_elements * sizeof(float)));
 
   const float scale = 1.0F / std::sqrt(static_cast<float>(kHeadDim));
-  gufo::hip::kernels::LaunchDFlashNonCausalAttentionScalar(
+  superroc::hip::kernels::LaunchDFlashNonCausalAttentionScalar(
       d_q, d_injected_k, d_injected_v, d_block_k, d_block_v, d_scalar_out,
       current_pos, history_length, block_count, window, kNumQueryHeads,
       kNumKvHeads, kHeadDim, scale, nullptr, current_pos + block_count);
   if (route == Route::kWave) {
-    gufo::hip::kernels::LaunchDFlashNonCausalAttentionWave(
+    superroc::hip::kernels::LaunchDFlashNonCausalAttentionWave(
         d_q, d_ring_k, d_ring_v, d_block_k, d_block_v, d_wave_out, current_pos,
         history_length, block_count, window, kNumQueryHeads, kNumKvHeads,
         kHeadDim, scale, nullptr, window);
   }
   if (route == Route::kScalar) {
-    gufo::hip::kernels::LaunchDFlashNonCausalAttentionScalar(
+    superroc::hip::kernels::LaunchDFlashNonCausalAttentionScalar(
         d_q, d_ring_k, d_ring_v, d_block_k, d_block_v, d_wave_out, current_pos,
         history_length, block_count, window, kNumQueryHeads, kNumKvHeads,
         kHeadDim, scale, nullptr, window);
   }
   if (route == Route::kTiled) {
-    gufo::hip::kernels::LaunchDFlashNonCausalAttentionTiled(
+    superroc::hip::kernels::LaunchDFlashNonCausalAttentionTiled(
         d_q, d_ring_k, d_ring_v, d_block_k, d_block_v, d_wave_out, current_pos,
         history_length, block_count, window, kNumQueryHeads, kNumKvHeads,
         kHeadDim, scale, nullptr, window, tile_keys);
   }
   if (route == Route::kSplit) {
     const std::size_t scratch_elements =
-        gufo::hip::kernels::DFlashAttentionSplitScratchElements(
+        superroc::hip::kernels::DFlashAttentionSplitScratchElements(
             block_count, kNumQueryHeads, kHeadDim);
-    gufo::test::DeviceBuffer<float> d_scratch(scratch_elements);
-    gufo::hip::kernels::LaunchDFlashNonCausalAttentionSplit(
+    superroc::test::DeviceBuffer<float> d_scratch(scratch_elements);
+    superroc::hip::kernels::LaunchDFlashNonCausalAttentionSplit(
         d_q, d_ring_k, d_ring_v, d_block_k, d_block_v, d_wave_out, current_pos,
         history_length, block_count, window, kNumQueryHeads, kNumKvHeads,
         kHeadDim, scale, nullptr, window, d_scratch.data(), scratch_elements,
@@ -551,7 +552,7 @@ float MaxRouteDifference(Route route, std::uint32_t current_pos,
 
   float max_difference = 0.0F;
   for (std::size_t index = 0; index < q_elements; ++index) {
-    gufo::test::Expect(std::isfinite(wave_out[index]),
+    superroc::test::Expect(std::isfinite(wave_out[index]),
                        "DFlash candidate attention produced a non-finite "
                        "output");
     max_difference =
@@ -593,7 +594,7 @@ float MaxRouteDifference(Route route, std::uint32_t current_pos,
           reference +=
               scores[key] * values[row * kv_dim + kv_head * kHeadDim + d];
         }
-        gufo::test::Expect(
+        superroc::test::Expect(
             std::abs(wave_out[q_offset + d] - reference / denominator) < 1e-5,
             "DFlash attention differs from the windowed softmax equation");
       }
@@ -605,20 +606,20 @@ float MaxRouteDifference(Route route, std::uint32_t current_pos,
 void TestRouteEquivalence(std::uint32_t current_pos,
                           std::uint32_t history_length, const char* label,
                           std::uint32_t block_count = kBlockCount) {
-  gufo::test::Expect(MaxRouteDifference(Route::kScalar, current_pos,
+  superroc::test::Expect(MaxRouteDifference(Route::kScalar, current_pos,
                                         history_length, block_count) == 0.0F,
                      "ring addressing must preserve scalar attention exactly");
   const float wave = MaxRouteDifference(Route::kWave, current_pos,
                                         history_length, block_count);
   std::cout << "DFlash non-causal attention " << label
             << ": max |scalar - wave| = " << wave << "\n";
-  gufo::test::Expect(wave < 1e-5F,
+  superroc::test::Expect(wave < 1e-5F,
                      "DFlash wave attention diverges from the reference");
   const float tiled = MaxRouteDifference(Route::kTiled, current_pos,
                                          history_length, block_count);
   std::cout << "DFlash non-causal attention " << label
             << ": max |scalar - tiled| = " << tiled << "\n";
-  gufo::test::Expect(tiled < 1e-5F,
+  superroc::test::Expect(tiled < 1e-5F,
                      "DFlash tiled attention diverges from the reference");
   // Forced short ranges, then the production range length.
   for (const auto split_keys : {kTestSplitKeys, 0U}) {
@@ -628,7 +629,7 @@ void TestRouteEquivalence(std::uint32_t current_pos,
     std::cout << "DFlash non-causal attention " << label
               << ": max |scalar - split(" << split_keys << ")| = " << split
               << "\n";
-    gufo::test::Expect(split < 1e-5F,
+    superroc::test::Expect(split < 1e-5F,
                        "DFlash split attention diverges from the reference");
   }
 }
@@ -668,24 +669,24 @@ void TestLongHistory(std::uint32_t history_length, std::uint32_t block_count,
     history_k[i] = Sample(i, 24);
     history_v[i] = Sample(i, 25);
   }
-  gufo::test::DeviceBuffer<float> d_q(q), d_block_k(block_k),
+  superroc::test::DeviceBuffer<float> d_q(q), d_block_k(block_k),
       d_block_v(block_v), d_history_k(history_k), d_history_v(history_v),
       d_out(q.size());
   const float scale = 1.0F / std::sqrt(static_cast<float>(kLongHeadDim));
   const std::size_t scratch_elements =
-      gufo::hip::kernels::DFlashAttentionSplitScratchElements(
+      superroc::hip::kernels::DFlashAttentionSplitScratchElements(
           block_count, kLongQueryHeads, kLongHeadDim);
-  gufo::test::DeviceBuffer<float> d_scratch(scratch_elements);
+  superroc::test::DeviceBuffer<float> d_scratch(scratch_elements);
   try {
     if (route == LongRoute::kSplitForced) {
-      gufo::hip::kernels::LaunchDFlashNonCausalAttentionSplit(
+      superroc::hip::kernels::LaunchDFlashNonCausalAttentionSplit(
           d_q.data(), d_history_k.data(), d_history_v.data(), d_block_k.data(),
           d_block_v.data(), d_out.data(), history_length, history_length,
           block_count, kLongWindow, kLongQueryHeads, kLongKvHeads, kLongHeadDim,
           scale, nullptr, kLongCapacity, d_scratch.data(), scratch_elements,
           split_keys);
     } else {
-      gufo::hip::kernels::LaunchDFlashNonCausalAttention(
+      superroc::hip::kernels::LaunchDFlashNonCausalAttention(
           d_q.data(), d_history_k.data(), d_history_v.data(), d_block_k.data(),
           d_block_v.data(), d_out.data(), history_length, history_length,
           block_count, kLongWindow, kLongQueryHeads, kLongKvHeads, kLongHeadDim,
@@ -696,12 +697,12 @@ void TestLongHistory(std::uint32_t history_length, std::uint32_t block_count,
   } catch (const std::exception& error) {
     std::cerr << "DFlash long-history attention " << label << ": "
               << error.what() << "\n";
-    gufo::test::Expect(false, "DFlash attention must launch at any history");
+    superroc::test::Expect(false, "DFlash attention must launch at any history");
   }
   HIP_CHECK(hipDeviceSynchronize());
   const auto out = d_out.CopyToHost();
   for (const float value : out) {
-    gufo::test::Expect(std::isfinite(value),
+    superroc::test::Expect(std::isfinite(value),
                        "DFlash long-history attention produced a non-finite "
                        "output");
   }
@@ -745,7 +746,7 @@ void TestLongHistory(std::uint32_t history_length, std::uint32_t block_count,
   }
   std::cout << "DFlash long-history attention " << label
             << ": max |gpu - double| = " << max_error << "\n";
-  gufo::test::Expect(max_error < 1e-5,
+  superroc::test::Expect(max_error < 1e-5,
                      "DFlash long-history attention differs from the softmax "
                      "equation");
 }
@@ -771,17 +772,17 @@ void TestRouterShortHistoryUnchanged(std::uint32_t history_length,
     history_k[i] = Sample(i, 34);
     history_v[i] = Sample(i, 35);
   }
-  gufo::test::DeviceBuffer<float> d_q(q), d_block_k(block_k),
+  superroc::test::DeviceBuffer<float> d_q(q), d_block_k(block_k),
       d_block_v(block_v), d_history_k(history_k), d_history_v(history_v),
       d_plain(q.size()), d_with_scratch(q.size());
   const std::size_t scratch_elements =
-      gufo::hip::kernels::DFlashAttentionSplitScratchElements(
+      superroc::hip::kernels::DFlashAttentionSplitScratchElements(
           block_count, kLongQueryHeads, kLongHeadDim);
-  gufo::test::DeviceBuffer<float> d_scratch(scratch_elements);
+  superroc::test::DeviceBuffer<float> d_scratch(scratch_elements);
   const float scale = 1.0F / std::sqrt(static_cast<float>(kLongHeadDim));
   const auto capacity = std::max<std::uint32_t>(history_length, 1);
   for (const bool scratch : {false, true}) {
-    gufo::hip::kernels::LaunchDFlashNonCausalAttention(
+    superroc::hip::kernels::LaunchDFlashNonCausalAttention(
         d_q.data(), d_history_k.data(), d_history_v.data(), d_block_k.data(),
         d_block_v.data(), scratch ? d_with_scratch.data() : d_plain.data(),
         history_length, history_length, block_count, kLongWindow,
@@ -791,13 +792,13 @@ void TestRouterShortHistoryUnchanged(std::uint32_t history_length,
   HIP_CHECK(hipDeviceSynchronize());
   const auto plain = d_plain.CopyToHost();
   const auto with_scratch = d_with_scratch.CopyToHost();
-  gufo::test::Expect(
+  superroc::test::Expect(
       std::memcmp(plain.data(), with_scratch.data(),
                   plain.size() * sizeof(float)) == 0,
       "DFlash attention below the split threshold must be bit-identical");
 }
 
-/// Opt-in (GUFO_DFLASH_ATTN_BENCH=1) timing of the DSpark drafter attention:
+/// Opt-in (SUPERROC_DFLASH_ATTN_BENCH=1) timing of the DSpark drafter attention:
 /// the routes without scratch against the split route, per history length.
 void BenchLongHistory() {
   constexpr std::uint32_t block_count = 4;
@@ -811,13 +812,13 @@ void BenchLongHistory() {
     block_k[i] = Sample(i, 42);
   for (std::size_t i = 0; i < history.size(); ++i)
     history[i] = Sample(i, 43);
-  gufo::test::DeviceBuffer<float> d_q(q), d_block_k(block_k),
+  superroc::test::DeviceBuffer<float> d_q(q), d_block_k(block_k),
       d_block_v(block_k), d_history_k(history), d_history_v(history),
       d_out(q.size());
   const std::size_t scratch_elements =
-      gufo::hip::kernels::DFlashAttentionSplitScratchElements(
+      superroc::hip::kernels::DFlashAttentionSplitScratchElements(
           block_count, kLongQueryHeads, kLongHeadDim);
-  gufo::test::DeviceBuffer<float> d_scratch(scratch_elements);
+  superroc::test::DeviceBuffer<float> d_scratch(scratch_elements);
   const float scale = 1.0F / std::sqrt(static_cast<float>(kLongHeadDim));
   hipEvent_t begin, end;
   HIP_CHECK(hipEventCreate(&begin));
@@ -838,7 +839,7 @@ void BenchLongHistory() {
   for (const std::uint32_t history_length :
        {1566U, 2048U, 4096U, 8192U, 13384U, 26821U}) {
     const float plain = time([&] {
-      gufo::hip::kernels::LaunchDFlashNonCausalAttention(
+      superroc::hip::kernels::LaunchDFlashNonCausalAttention(
           d_q.data(), d_history_k.data(), d_history_v.data(), d_block_k.data(),
           d_block_v.data(), d_out.data(), history_length, history_length,
           block_count, kLongWindow, kLongQueryHeads, kLongKvHeads, kLongHeadDim,
@@ -848,7 +849,7 @@ void BenchLongHistory() {
               << " route=plain us=" << plain << "\n";
     for (const std::uint32_t split_keys : {0U, 128U, 256U, 512U, 1024U}) {
       const float split = time([&] {
-        gufo::hip::kernels::LaunchDFlashNonCausalAttentionSplit(
+        superroc::hip::kernels::LaunchDFlashNonCausalAttentionSplit(
             d_q.data(), d_history_k.data(), d_history_v.data(),
             d_block_k.data(), d_block_v.data(), d_out.data(), history_length,
             history_length, block_count, kLongWindow, kLongQueryHeads,
@@ -870,9 +871,9 @@ void BenchLongHistory() {
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
   const int device_status =
-      gufo::test::GateHipDevice(gufo::test::HipDeviceRequirement::kOptional,
+      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
                                 "Qwen DFlash non-causal attention ops test");
-  if (device_status != gufo::test::kHipTestSuccess) {
+  if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }
 
@@ -902,7 +903,7 @@ int main() {
   // tile, which the online softmax must cancel once a visible key raises the
   // running maximum.
   for (const auto rows : {4U, 7U}) {
-    gufo::test::Expect(
+    superroc::test::Expect(
         MaxRouteDifference(Route::kTiled, 2051, 2051, rows, 1) < 1e-5F,
         "DFlash tiled attention with one-key tiles diverges");
   }
@@ -925,17 +926,17 @@ int main() {
   // One-key ranges under a window of eight: for draft row t the first t
   // ranges hold only masked keys, which must enter the combine with weight 0.
   for (const auto rows : {1U, 4U, 7U}) {
-    gufo::test::Expect(MaxRouteDifference(Route::kSplit, 20, 20, rows,
+    superroc::test::Expect(MaxRouteDifference(Route::kSplit, 20, 20, rows,
                                           kTestTileKeys, 1, 8) < 1e-5F,
                        "DFlash split attention with masked ranges diverges");
   }
   // Below the threshold the router is unchanged, bit for bit.
   for (const auto history :
-       {0U, 1566U, gufo::hip::kernels::kDFlashSplitMinKeys - 5U}) {
+       {0U, 1566U, superroc::hip::kernels::kDFlashSplitMinKeys - 5U}) {
     TestRouterShortHistoryUnchanged(history, 4);
     TestRouterShortHistoryUnchanged(history, 1);
   }
-  if (const char* bench = std::getenv("GUFO_DFLASH_ATTN_BENCH");
+  if (const char* bench = ::superroc::core::GetEnvCompat("SUPERROC_DFLASH_ATTN_BENCH");
       bench != nullptr && bench[0] == '1') {
     BenchLongHistory();
   }

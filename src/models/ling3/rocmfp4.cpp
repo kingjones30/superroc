@@ -2,7 +2,7 @@
 
 #include <cstring>
 
-namespace gufo::models::ling3::rocmfp4 {
+namespace superroc::models::ling3::rocmfp4 {
 namespace {
 
 using core::GgmlType;
@@ -94,4 +94,4 @@ void DequantizeRow(GgmlType type, const void* src, float* dst, std::size_t k) {
   }
 }
 
-}  // namespace gufo::models::ling3::rocmfp4
+}  // namespace superroc::models::ling3::rocmfp4

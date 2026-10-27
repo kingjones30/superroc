@@ -13,7 +13,7 @@
 #include "src/models/qwen/hip/ops/token.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::size_t kSamplingThreads = 256;
@@ -958,7 +958,7 @@ __global__ void ArgmaxKernel(const float* __restrict__ logits,
 void LaunchGPUArgmax(const float* logits, std::uint32_t* out_token,
                      std::size_t vocab_size, hipStream_t stream) {
   ArgmaxKernel<<<1, 256, 0, stream>>>(logits, out_token, vocab_size);
-  GUFO_CHECK_LAUNCH("ArgmaxKernel");
+  SUPERROC_CHECK_LAUNCH("ArgmaxKernel");
 }
 
 template<bool Partial = false, bool MapIndices = false>
@@ -1050,16 +1050,16 @@ void LaunchBatchedGPUArgmax(const float* logits, std::uint32_t* out_tokens,
                                      static_cast<unsigned>(batch_size)),
                                 256, 0, stream>>>(
         logits, out_tokens, vocab_size, scratch.data(), indices);
-    GUFO_CHECK_LAUNCH("BatchedArgmaxKernel<true>");
+    SUPERROC_CHECK_LAUNCH("BatchedArgmaxKernel<true>");
     BatchedArgmaxKernel<false, true>
         <<<static_cast<unsigned>(batch_size), 256, 0, stream>>>(
             scratch.data(), out_tokens, partials, nullptr, indices);
-    GUFO_CHECK_LAUNCH("BatchedArgmaxKernel<false, true>");
+    SUPERROC_CHECK_LAUNCH("BatchedArgmaxKernel<false, true>");
   } else {
     BatchedArgmaxKernel<>
         <<<static_cast<unsigned int>(batch_size), 256, 0, stream>>>(
             logits, out_tokens, vocab_size);
-    GUFO_CHECK_LAUNCH("BatchedArgmaxKernel<>");
+    SUPERROC_CHECK_LAUNCH("BatchedArgmaxKernel<>");
   }
 }
 
@@ -1148,7 +1148,7 @@ void LaunchGPUSortLogits(const float* logits, GpuSamplingWorkspace* workspace,
       static_cast<unsigned>((size + kSamplingThreads - 1) / kSamplingThreads),
       kSamplingThreads, 0, stream>>>(logits, workspace->adjusted_logits,
                                      workspace->token_ids, size);
-  GUFO_CHECK_LAUNCH("PrepareCandidateLogitsKernel");
+  SUPERROC_CHECK_LAUNCH("PrepareCandidateLogitsKernel");
   HIP_CHECK(hipcub::DeviceRadixSort::SortPairsDescending(
       workspace->sort_temp_storage, workspace->sort_temp_storage_bytes,
       workspace->adjusted_logits, workspace->sorted_logits,
@@ -1182,7 +1182,7 @@ void LaunchGPUSampling(const float* logits, std::uint32_t* out_token,
     PrepareSamplingKernel<<<static_cast<unsigned int>(blocks), kSamplingThreads,
                             0, stream>>>(logits, workspace->adjusted_logits,
                                          workspace->token_ids, vocab_size);
-    GUFO_CHECK_LAUNCH("PrepareSamplingKernel");
+    SUPERROC_CHECK_LAUNCH("PrepareSamplingKernel");
     sampling_logits = workspace->adjusted_logits;
   }
   if (has_penalties) {
@@ -1196,7 +1196,7 @@ void LaunchGPUSampling(const float* logits, std::uint32_t* out_token,
         workspace->adjusted_logits, workspace->penalties, penalty_count,
         vocab_size, parameters.repeat_penalty, parameters.frequency_penalty,
         parameters.presence_penalty);
-    GUFO_CHECK_LAUNCH("ApplySparsePenaltiesKernel");
+    SUPERROC_CHECK_LAUNCH("ApplySparsePenaltiesKernel");
   }
 
   if (parameters.temperature <= 0.0F) {
@@ -1211,7 +1211,7 @@ void LaunchGPUSampling(const float* logits, std::uint32_t* out_token,
     LinearSamplingKernel<<<1, kSamplingThreads, 0, stream>>>(
         sampling_logits, out_token, vocab_size, parameters.temperature,
         parameters.min_p, parameters.uniform);
-    GUFO_CHECK_LAUNCH("LinearSamplingKernel");
+    SUPERROC_CHECK_LAUNCH("LinearSamplingKernel");
     return;
   }
 
@@ -1224,7 +1224,7 @@ void LaunchGPUSampling(const float* logits, std::uint32_t* out_token,
       workspace->sorted_logits, workspace->sorted_token_ids, out_token,
       vocab_size, parameters.temperature, parameters.top_k, parameters.top_p,
       parameters.min_p, parameters.min_keep, parameters.uniform);
-  GUFO_CHECK_LAUNCH("SortedSamplingKernel");
+  SUPERROC_CHECK_LAUNCH("SortedSamplingKernel");
 }
 
 void LaunchGPUSpeculativeSampling(
@@ -1272,7 +1272,7 @@ void LaunchGPUSpeculativeSampling(
     PrepareSamplingKernel<<<static_cast<unsigned int>(blocks), kSamplingThreads,
                             0, stream>>>(logits, workspace->adjusted_logits,
                                          workspace->token_ids, vocab_size);
-    GUFO_CHECK_LAUNCH("PrepareSamplingKernel");
+    SUPERROC_CHECK_LAUNCH("PrepareSamplingKernel");
     sampling_logits = workspace->adjusted_logits;
   }
   if (has_penalties) {
@@ -1286,7 +1286,7 @@ void LaunchGPUSpeculativeSampling(
         workspace->adjusted_logits, workspace->penalties, penalty_count,
         vocab_size, parameters.repeat_penalty, parameters.frequency_penalty,
         parameters.presence_penalty);
-    GUFO_CHECK_LAUNCH("ApplySparsePenaltiesKernel");
+    SUPERROC_CHECK_LAUNCH("ApplySparsePenaltiesKernel");
   }
 
   if (needs_ordering) {
@@ -1307,7 +1307,7 @@ void LaunchGPUSpeculativeSampling(
       kSamplingThreads, 0, stream>>>(
       workspace->draft_candidate_ids, workspace->draft_candidate_probabilities,
       draft_candidate_count, draft_probabilities, vocab_size);
-  GUFO_CHECK_LAUNCH("ScatterDraftProbabilitiesKernel");
+  SUPERROC_CHECK_LAUNCH("ScatterDraftProbabilitiesKernel");
   if (!needs_ordering) {
     // Avoid multi-kernel overhead for small vocabularies and cap per-block
     // shared memory at 16 KiB. Production vocabularies use this parallel path.
@@ -1323,22 +1323,22 @@ void LaunchGPUSpeculativeSampling(
       SpeculativeSegmentMaxKernel<<<kSamplingThreads,
                                     kSpeculativeSegmentThreads, 0, stream>>>(
           sampling_logits, scratch, vocab_size);
-      GUFO_CHECK_LAUNCH("SpeculativeSegmentMaxKernel");
+      SUPERROC_CHECK_LAUNCH("SpeculativeSegmentMaxKernel");
       SpeculativeSegmentWeightsKernel<<<
           kSamplingThreads, kSpeculativeSegmentThreads, shared_bytes, stream>>>(
           sampling_logits, weights, scratch, vocab_size, parameters.temperature,
           parameters.min_p);
-      GUFO_CHECK_LAUNCH("SpeculativeSegmentWeightsKernel");
+      SUPERROC_CHECK_LAUNCH("SpeculativeSegmentWeightsKernel");
       SpeculativeSegmentResidualKernel<<<
           kSamplingThreads, kSpeculativeSegmentThreads, shared_bytes, stream>>>(
           weights, draft_probabilities, scratch, vocab_size, draft_token,
           draft_token_probability, acceptance_uniform, out_token, out_accepted);
-      GUFO_CHECK_LAUNCH("SpeculativeSegmentResidualKernel");
+      SUPERROC_CHECK_LAUNCH("SpeculativeSegmentResidualKernel");
       SpeculativeSegmentSelectKernel<<<1, kSamplingThreads, shared_bytes,
                                        stream>>>(
           weights, draft_probabilities, scratch, vocab_size, residual_uniform,
           out_token, out_accepted);
-      GUFO_CHECK_LAUNCH("SpeculativeSegmentSelectKernel");
+      SUPERROC_CHECK_LAUNCH("SpeculativeSegmentSelectKernel");
       return;
     }
     LinearSpeculativeSamplingKernel<<<1, kSamplingThreads, 0, stream>>>(
@@ -1346,7 +1346,7 @@ void LaunchGPUSpeculativeSampling(
         parameters.temperature, parameters.min_p, draft_token,
         draft_token_probability, draft_probabilities, acceptance_uniform,
         residual_uniform);
-    GUFO_CHECK_LAUNCH("LinearSpeculativeSamplingKernel");
+    SUPERROC_CHECK_LAUNCH("LinearSpeculativeSamplingKernel");
     return;
   }
 
@@ -1356,8 +1356,8 @@ void LaunchGPUSpeculativeSampling(
       parameters.top_p, parameters.min_p, parameters.min_keep, draft_token,
       draft_token_probability, draft_probabilities, acceptance_uniform,
       residual_uniform);
-  GUFO_CHECK_LAUNCH("SortedSpeculativeSamplingKernel");
+  SUPERROC_CHECK_LAUNCH("SortedSpeculativeSamplingKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

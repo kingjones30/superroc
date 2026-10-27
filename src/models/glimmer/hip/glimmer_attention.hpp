@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_GLIMMER_HIP_GLIMMER_ATTENTION_HPP_
-#define GUFO_MODELS_GLIMMER_HIP_GLIMMER_ATTENTION_HPP_
+#ifndef SUPERROC_MODELS_GLIMMER_HIP_GLIMMER_ATTENTION_HPP_
+#define SUPERROC_MODELS_GLIMMER_HIP_GLIMMER_ATTENTION_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +10,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // LGA: the fp16 KV plane layout. The fp32 cache stays head-major
 // ((layer*nkv+kv)*maxctx+pos)*hd+d (decode and the reference read it). The
@@ -76,8 +76,8 @@ namespace gufo::hip {
     std::size_t out_elems, std::span<float> packed_k_workspace,
     std::span<float> packed_v_workspace, hipStream_t stream);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_GLIMMER_HIP_GLIMMER_ATTENTION_HPP_
+#endif  // SUPERROC_MODELS_GLIMMER_HIP_GLIMMER_ATTENTION_HPP_

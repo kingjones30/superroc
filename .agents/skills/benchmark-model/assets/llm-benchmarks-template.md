@@ -1,7 +1,7 @@
 # <Model> benchmarks
 
-<Hardware, model/quantization, Gufo/reference versions and sampling setup.>
-Positive gain favors Gufo. **TODO** means unmeasured.
+<Hardware, model/quantization, SuperROC/reference versions and sampling setup.>
+Positive gain favors SuperROC. **TODO** means unmeasured.
 Quality and measurement details belong in `QUALITY.md`.
 
 ## Single user, autoregressive

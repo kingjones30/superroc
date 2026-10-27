@@ -28,18 +28,18 @@ int main(int argc, char** argv) {
   const std::string path = configured;
   try {
     std::string err;
-    auto opened = gufo::core::GgufReader::OpenFile(path, &err);
+    auto opened = superroc::core::GgufReader::OpenFile(path, &err);
     if (opened == nullptr) {
       std::cerr << "SKIP glimmer_s2_prefill: " << path << " unreadable: " << err
                 << '\n';
       return 77;
     }
-    std::shared_ptr<const gufo::core::GgufReader> reader(std::move(opened));
-    gufo::hip::QwenExecutionPolicy policy;
-    policy.kv_cache_storage = gufo::hip::QwenKvCacheStorage::kFp32;
+    std::shared_ptr<const superroc::core::GgufReader> reader(std::move(opened));
+    superroc::hip::QwenExecutionPolicy policy;
+    policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
     constexpr std::uint32_t kContext = 512;
-    auto executor = gufo::hip::QwenGpuExecutor::CreateFromGguf(
+    auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
         reader, &err, kContext, policy);
     if (executor == nullptr) {
       std::cerr << "FAIL load " << err << '\n';
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
       std::cerr << "FAIL bos out of range\n";
       return 1;
     }
-    const gufo::tokenization::TokenId one[] = {bos};
+    const superroc::tokenization::TokenId one[] = {bos};
     const auto prefill_one = executor->ForwardPromptBatch(one, 0, true);
     executor->Reset();
     const auto decode_one = executor->ForwardToken(bos, 0, true);
@@ -63,10 +63,10 @@ int main(int argc, char** argv) {
     }
 
     executor->Reset();
-    std::vector<gufo::tokenization::TokenId> tokens(32);
+    std::vector<superroc::tokenization::TokenId> tokens(32);
     for (std::size_t i = 0; i < tokens.size(); ++i) {
-      tokens[i] = static_cast<gufo::tokenization::TokenId>(
-          (bos + static_cast<gufo::tokenization::TokenId>(i)) %
+      tokens[i] = static_cast<superroc::tokenization::TokenId>(
+          (bos + static_cast<superroc::tokenization::TokenId>(i)) %
           config.vocab_size);
     }
     const auto next = executor->ForwardPromptBatch(tokens, 0, true);

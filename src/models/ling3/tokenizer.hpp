@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_TOKENIZER_HPP_
-#define GUFO_MODELS_LING3_TOKENIZER_HPP_
+#ifndef SUPERROC_MODELS_LING3_TOKENIZER_HPP_
+#define SUPERROC_MODELS_LING3_TOKENIZER_HPP_
 
 #include <cstdint>
 #include <optional>
@@ -11,7 +11,7 @@
 
 #include "src/core/gguf_reader.hpp"
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 
 /// GPT-2 style byte-level BPE as the fork configures it for Ling-3.0
 /// (`tokenizer.ggml.model = gpt2`, `tokenizer.ggml.pre = bailingmoe2`).
@@ -114,6 +114,6 @@ private:
   std::int32_t pad_{-1};
 };
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3
 
-#endif  // GUFO_MODELS_LING3_TOKENIZER_HPP_
+#endif  // SUPERROC_MODELS_LING3_TOKENIZER_HPP_

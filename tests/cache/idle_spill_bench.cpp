@@ -12,8 +12,8 @@
 #include "src/core/hip/committed_backing.hpp"
 #include "src/core/hip/transfer_pool.hpp"
 
-using namespace gufo;
-using namespace gufo::cache;
+using namespace superroc;
+using namespace superroc::cache;
 using Clock = std::chrono::steady_clock;
 namespace {
 void Check(hipError_t status) {

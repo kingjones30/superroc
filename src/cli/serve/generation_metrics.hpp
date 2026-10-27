@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_GENERATION_METRICS_HPP_
-#define GUFO_SERVER_GENERATION_METRICS_HPP_
+#ifndef SUPERROC_SERVER_GENERATION_METRICS_HPP_
+#define SUPERROC_SERVER_GENERATION_METRICS_HPP_
 
 #include <algorithm>
 #include <atomic>
@@ -10,7 +10,7 @@
 #include "src/cli/serve/text_generation_backend.hpp"
 #include "src/core/json.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 // Process-wide `/metrics` values. Token counters advance per prefill chunk and
 // per generated token, so scrapes see work while requests are still running.
@@ -252,6 +252,6 @@ inline json::Value PromptProgressJson(
   return value;
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_GENERATION_METRICS_HPP_
+#endif  // SUPERROC_SERVER_GENERATION_METRICS_HPP_

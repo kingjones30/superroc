@@ -12,8 +12,8 @@
 
 namespace {
 
-using gufo::json::parse;
-using gufo::json::Value;
+using superroc::json::parse;
+using superroc::json::Value;
 
 void ExpectInvalid(std::string_view input) {
   try {

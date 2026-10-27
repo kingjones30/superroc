@@ -10,7 +10,7 @@
 
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void RoPENormPtrKernel(float* __restrict__ q, float* __restrict__ k,
                                   std::uint32_t num_heads,
@@ -71,7 +71,7 @@ void LaunchRoPENorm(float* q, float* k, std::uint32_t num_heads,
   const std::size_t grid_size = (total_pairs + block_size - 1) / block_size;
   RoPENormPtrKernel<<<grid_size, block_size, 0, stream>>>(
       q, k, num_heads, num_kv_heads, head_dim, rotary_dim, d_pos, rope_theta);
-  GUFO_CHECK_LAUNCH("RoPENormPtrKernel");
+  SUPERROC_CHECK_LAUNCH("RoPENormPtrKernel");
 }
 
 __global__ void BatchedRoPENormKernel(float* __restrict__ q,
@@ -150,8 +150,8 @@ void LaunchBatchedRoPENorm(float* q, float* k, std::size_t batch_size,
                           stream>>>(q, k, batch_size, num_heads, num_kv_heads,
                                     head_dim, rotary_dim, start_pos,
                                     rope_theta);
-  GUFO_CHECK_LAUNCH("BatchedRoPENormKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedRoPENormKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

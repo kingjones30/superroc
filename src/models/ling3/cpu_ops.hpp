@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_CPU_OPS_HPP_
-#define GUFO_MODELS_LING3_CPU_OPS_HPP_
+#ifndef SUPERROC_MODELS_LING3_CPU_OPS_HPP_
+#define SUPERROC_MODELS_LING3_CPU_OPS_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +10,7 @@
 /// Scalar CPU operators for the Ling-3.0 reference model. One row at a time,
 /// every format decoded on the fly. Correctness oracle only; nothing here is
 /// tuned, and no transcendental is reassociated.
-namespace gufo::models::ling3::cpu {
+namespace superroc::models::ling3::cpu {
 
 /// Decodes one row of `t` (expert `e`) into `out` (t.cols floats).
 void DequantizeRow(const TensorRef& t, std::uint64_t e, std::uint64_t row,
@@ -71,6 +71,6 @@ void Rope(float* x, std::uint32_t heads, std::uint32_t head_dim,
 void SwigluClamped(const float* gate, const float* up, float* out,
                    std::size_t n, float limit);
 
-}  // namespace gufo::models::ling3::cpu
+}  // namespace superroc::models::ling3::cpu
 
-#endif  // GUFO_MODELS_LING3_CPU_OPS_HPP_
+#endif  // SUPERROC_MODELS_LING3_CPU_OPS_HPP_

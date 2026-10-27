@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_DETAIL_ATTENTION_POLICY_HPP_
-#define GUFO_MODELS_QWEN_HIP_DETAIL_ATTENTION_POLICY_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_DETAIL_ATTENTION_POLICY_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_DETAIL_ATTENTION_POLICY_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +7,7 @@
 
 #include "src/models/qwen/hip/execution_policy.hpp"
 
-namespace gufo::hip::detail {
+namespace superroc::hip::detail {
 
 inline constexpr std::size_t kOptimizedAttentionMinBatch{1024};
 inline constexpr std::uint32_t kTiledAttentionQueryHeads{24};
@@ -179,6 +179,6 @@ inline void DispatchPrefillAttention(std::size_t visible_context,
   std::forward<BaselineLauncher>(launch_baseline)();
 }
 
-}  // namespace gufo::hip::detail
+}  // namespace superroc::hip::detail
 
-#endif  // GUFO_MODELS_QWEN_HIP_DETAIL_ATTENTION_POLICY_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_DETAIL_ATTENTION_POLICY_HPP_

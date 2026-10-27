@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_MINIMAX_H3_AUDIO_VAE_OPS_HIP_HPP_
-#define GUFO_MODELS_MINIMAX_H3_AUDIO_VAE_OPS_HIP_HPP_
+#ifndef SUPERROC_MODELS_MINIMAX_H3_AUDIO_VAE_OPS_HIP_HPP_
+#define SUPERROC_MODELS_MINIMAX_H3_AUDIO_VAE_OPS_HIP_HPP_
 
 #include <hip/hip_runtime.h>
 
@@ -8,7 +8,7 @@
 
 #include "src/models/minimax_h3/audio_vae.hpp"
 
-namespace gufo::minimax_h3::audio_vae_ops {
+namespace superroc::minimax_h3::audio_vae_ops {
 
 static __global__ void PrepareLatentKernel(const float* normalized,
                                            const float* mean,
@@ -607,6 +607,6 @@ inline void LaunchClipAndReorder(const float* input, float* channel_major,
                      0, stream, input, channel_major, samples);
 }
 
-}  // namespace gufo::minimax_h3::audio_vae_ops
+}  // namespace superroc::minimax_h3::audio_vae_ops
 
-#endif  // GUFO_MODELS_MINIMAX_H3_AUDIO_VAE_OPS_HIP_HPP_
+#endif  // SUPERROC_MODELS_MINIMAX_H3_AUDIO_VAE_OPS_HIP_HPP_

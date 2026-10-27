@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_WEIGHTS_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_WEIGHTS_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_WEIGHTS_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_WEIGHTS_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +12,7 @@
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen38_flash_next/config.hpp"
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 
 /// Optional host destinations for independent predictor qualification.
 /// Every populated span contains the final complete row of its stage.
@@ -157,6 +157,6 @@ struct MtpWeights {
       std::string* error_msg = nullptr);
 };
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next
 
-#endif  // GUFO_MODELS_QWEN38_FLASH_NEXT_WEIGHTS_HPP_
+#endif  // SUPERROC_MODELS_QWEN38_FLASH_NEXT_WEIGHTS_HPP_

@@ -13,7 +13,7 @@
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip::kernels {
+namespace superroc::hip::kernels {
 namespace {
 
 constexpr std::uint32_t kDsparkThreads = 256;
@@ -310,13 +310,13 @@ void LaunchDSparkMarkovSelect(
       logits, static_cast<const hip_bfloat16*>(markov_w1_bf16),
       static_cast<const hip_bfloat16*>(markov_w2_bf16), tokens, partial_scores,
       partial_ids, vocab_size, markov_rank, top_k);
-  GUFO_CHECK_LAUNCH("dspark_markov_partial_kernel");
+  SUPERROC_CHECK_LAUNCH("dspark_markov_partial_kernel");
   dspark_markov_finalize_kernel<<<rows, kDsparkThreads, 0, stream>>>(
       partial_scores, partial_ids, hidden,
       static_cast<const hip_bfloat16*>(markov_w1_bf16), conf_proj, conf_bias,
       tokens, confidences, uniforms, candidate_ids, candidate_probabilities,
       hidden_size, markov_rank, top_k, grid_x, temperature);
-  GUFO_CHECK_LAUNCH("dspark_markov_finalize_kernel");
+  SUPERROC_CHECK_LAUNCH("dspark_markov_finalize_kernel");
 }
 
 __device__ __forceinline__ void DsparkGridBarrier(int* barrier,
@@ -546,8 +546,8 @@ void LaunchDSparkMarkovChain(
       tokens, confidences, partial_scores, partial_ids, uniforms, candidate_ids,
       candidate_probabilities, barrier, n_slots, vocab_size, hidden_size,
       markov_rank, top_k, partial_count, temperature);
-  GUFO_CHECK_LAUNCH("dspark_markov_chain_kernel");
+  SUPERROC_CHECK_LAUNCH("dspark_markov_chain_kernel");
 }
 
-}  // namespace gufo::hip::kernels
+}  // namespace superroc::hip::kernels
 #endif  // defined(ENGINE_ENABLE_HIP)

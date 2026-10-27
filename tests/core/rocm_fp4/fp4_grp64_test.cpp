@@ -1,7 +1,7 @@
 // MG64 SPEC1 step 5: 64-token grouped FP4 GEMM must be bit-identical to the
 // 16-token path. Random ROCmFP4 weights (n = 1792, k = 2048, 8 experts) and
-// int8 activations via gufo_fp4_wmma_quant; group arrays built exactly like
-// gufo_fp4_moe_group_batch makes them (counting-sort slot order, grp_zp from
+// int8 activations via superroc_fp4_wmma_quant; group arrays built exactly like
+// superroc_fp4_moe_group_batch makes them (counting-sort slot order, grp_zp from
 // the (cnt+15)/16 prefix). For each layout: gemm_grp_bk(..., 4) vs
 // gemm_grp64 on the same inputs, memcmp the outputs.
 #include <hip/hip_runtime.h>
@@ -11,9 +11,9 @@
 #include <cstring>
 #include <vector>
 
-#include "src/core/rocm_fp4/gufo_fp4_moe_group.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_wmma.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_moe_group.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_wmma.hpp"
 
 namespace {
 
@@ -31,7 +31,7 @@ int g_failures = 0;
 
 #define MG64_CHECK_RC(rc, what)                 \
   do {                                          \
-    if ((rc) != GUFO_FP4_OK) {                  \
+    if ((rc) != SUPERROC_FP4_OK) {                  \
       std::printf("FAIL %s rc=%d\n", what, rc); \
       return 1;                                 \
     }                                           \
@@ -48,7 +48,7 @@ int RunLayout(const std::vector<int>& counts, std::uint32_t seed) {
   const int kN = 1792;
   const int kK = 2048;
   const int kExperts = 8;
-  const int kQtype = GUFO_FP4_Q4_0_ROCMFP4;
+  const int kQtype = SUPERROC_FP4_Q4_0_ROCMFP4;
   const int n_groups = static_cast<int>(counts.size());
   int slots = 0;
   for (int c : counts)
@@ -80,7 +80,7 @@ int RunLayout(const std::vector<int>& counts, std::uint32_t seed) {
   }
 
   // Random weights: any byte is a valid FP4 nibble / ue4m3 scale byte.
-  const std::size_t rb = gufo_fp4_row_bytes(kQtype, kK);
+  const std::size_t rb = superroc_fp4_row_bytes(kQtype, kK);
   const std::size_t stride = static_cast<std::size_t>(kN) * rb;
   std::vector<std::uint8_t> weights(static_cast<std::size_t>(kExperts) *
                                     stride);
@@ -142,7 +142,7 @@ int RunLayout(const std::vector<int>& counts, std::uint32_t seed) {
 
   // The real block prefix from the device builder.
   MG64_CHECK_RC(
-      gufo_fp4_moe_group_blocks(d_grp_cnt, n_groups, 64, d_grp_zb, nullptr),
+      superroc_fp4_moe_group_blocks(d_grp_cnt, n_groups, 64, d_grp_zb, nullptr),
       "blocks");
   std::vector<int> grp_zb(n_groups + 1, -1);
   MG64_CHECK_HIP(hipMemcpy(grp_zb.data(), d_grp_zb,
@@ -165,17 +165,17 @@ int RunLayout(const std::vector<int>& counts, std::uint32_t seed) {
     return 1;
   }
 
-  MG64_CHECK_RC(gufo_fp4_wmma_quant(d_x, nullptr, d_slot_dest, d_q8, slots, kK),
+  MG64_CHECK_RC(superroc_fp4_wmma_quant(d_x, nullptr, d_slot_dest, d_q8, slots, kK),
                 "quant");
   MG64_CHECK_HIP(hipMemset(d_y_ref, 0, y_bytes));
   MG64_CHECK_HIP(hipMemset(d_y_tst, 0, y_bytes));
   MG64_CHECK_RC(
-      gufo_fp4_wmma_gemm_grp_bk(kQtype, d_w, stride, d_grp_e, d_grp_off,
+      superroc_fp4_wmma_gemm_grp_bk(kQtype, d_w, stride, d_grp_e, d_grp_off,
                                 d_grp_cnt, d_grp_zp, n_groups, total_tiles,
                                 d_q8, d_y_ref, nullptr, kK, kN, /*bk=*/4),
       "gemm_grp_bk");
   MG64_CHECK_RC(
-      gufo_fp4_wmma_gemm_grp64(kQtype, d_w, stride, d_grp_e, d_grp_off,
+      superroc_fp4_wmma_gemm_grp64(kQtype, d_w, stride, d_grp_e, d_grp_off,
                                d_grp_cnt, d_grp_zp, n_groups, total_tiles, d_q8,
                                d_y_tst, nullptr, kK, kN, d_grp_zb),
       "gemm_grp64");

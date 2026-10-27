@@ -1,12 +1,12 @@
-#ifndef GUFO_MODELS_LLAMA_HIP_LLAMA_ROPE_HPP_
-#define GUFO_MODELS_LLAMA_HIP_LLAMA_ROPE_HPP_
+#ifndef SUPERROC_MODELS_LLAMA_HIP_LLAMA_ROPE_HPP_
+#define SUPERROC_MODELS_LLAMA_HIP_LLAMA_ROPE_HPP_
 
 #include <cstdint>
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 /// Adjacent-pair (llama.cpp ROPE_TYPE_NORM) RoPE: rotate dims 2i and 2i+1
 /// with theta_i = freq_base^(-2i/rotary_dim), angle = pos * theta_i.
@@ -22,8 +22,8 @@ void LaunchBatchedRoPENorm(float* q, float* k, std::size_t batch_size,
                            std::uint32_t start_pos, float rope_theta,
                            hipStream_t stream);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_LLAMA_HIP_LLAMA_ROPE_HPP_
+#endif  // SUPERROC_MODELS_LLAMA_HIP_LLAMA_ROPE_HPP_

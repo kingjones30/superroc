@@ -16,7 +16,7 @@
 #include "src/models/qwen/hip/fp4_launch.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<std::uint32_t WavesPerBlock>
 __launch_bounds__(WavesPerBlock * 32, 4) __global__
@@ -275,14 +275,14 @@ void LaunchFusedSSMInputProjections(
       IsRocmFp4(beta_type) && RocmFp4ShapeOk(qkv_size, hidden_size) &&
       RocmFp4ShapeOk(inner_size, hidden_size) &&
       RocmFp4ShapeOk(time_step_rank, hidden_size) &&
-      PrepareRocmFp4Act(x, hidden_size, GUFO_FP4_Q8_SLOT_ATTN_NORM, stream) &&
-      TryLaunchRocmFp4GemvSlot(qkv_type, qkv_w, GUFO_FP4_Q8_SLOT_ATTN_NORM,
+      PrepareRocmFp4Act(x, hidden_size, SUPERROC_FP4_Q8_SLOT_ATTN_NORM, stream) &&
+      TryLaunchRocmFp4GemvSlot(qkv_type, qkv_w, SUPERROC_FP4_Q8_SLOT_ATTN_NORM,
                                qkv_out, qkv_size, hidden_size, stream) &&
-      TryLaunchRocmFp4GemvSlot(gate_type, gate_w, GUFO_FP4_Q8_SLOT_ATTN_NORM,
+      TryLaunchRocmFp4GemvSlot(gate_type, gate_w, SUPERROC_FP4_Q8_SLOT_ATTN_NORM,
                                gate_out, inner_size, hidden_size, stream) &&
-      TryLaunchRocmFp4GemvSlot(alpha_type, alpha_w, GUFO_FP4_Q8_SLOT_ATTN_NORM,
+      TryLaunchRocmFp4GemvSlot(alpha_type, alpha_w, SUPERROC_FP4_Q8_SLOT_ATTN_NORM,
                                alpha_out, time_step_rank, hidden_size, stream) &&
-      TryLaunchRocmFp4GemvSlot(beta_type, beta_w, GUFO_FP4_Q8_SLOT_ATTN_NORM,
+      TryLaunchRocmFp4GemvSlot(beta_type, beta_w, SUPERROC_FP4_Q8_SLOT_ATTN_NORM,
                                beta_out, time_step_rank, hidden_size, stream)) {
     return;
   }
@@ -296,7 +296,7 @@ void LaunchFusedSSMInputProjections(
             qkv_w, qkv_type, gate_w, gate_type, alpha_w, alpha_type, beta_w,
             beta_type, x, qkv_out, gate_out, alpha_out, beta_out, hidden_size,
             qkv_size, inner_size, time_step_rank);
-    GUFO_CHECK_LAUNCH("Wave32FusedSSMInputProjectionsKernel_1Row<kWavesPerBlock>");
+    SUPERROC_CHECK_LAUNCH("Wave32FusedSSMInputProjectionsKernel_1Row<kWavesPerBlock>");
     return;
   }
 
@@ -304,8 +304,8 @@ void LaunchFusedSSMInputProjections(
       qkv_w, qkv_type, gate_w, gate_type, alpha_w, alpha_type, beta_w,
       beta_type, x, qkv_out, gate_out, alpha_out, beta_out, hidden_size,
       qkv_size, inner_size, time_step_rank);
-  GUFO_CHECK_LAUNCH("FusedSSMInputProjectionsKernel");
+  SUPERROC_CHECK_LAUNCH("FusedSSMInputProjectionsKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

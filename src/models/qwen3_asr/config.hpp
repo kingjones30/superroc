@@ -1,12 +1,12 @@
-#ifndef GUFO_MODELS_QWEN3_ASR_CONFIG_HPP_
-#define GUFO_MODELS_QWEN3_ASR_CONFIG_HPP_
+#ifndef SUPERROC_MODELS_QWEN3_ASR_CONFIG_HPP_
+#define SUPERROC_MODELS_QWEN3_ASR_CONFIG_HPP_
 
 #include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
 
-namespace gufo::models::qwen3_asr {
+namespace superroc::models::qwen3_asr {
 
 struct AudioEncoderConfig {
   std::uint32_t num_mel_bins{128};
@@ -63,6 +63,6 @@ struct ModelConfig {
 /// intentionally outside this implementation.
 [[nodiscard]] bool IsSupportedModelConfig(const ModelConfig& config);
 
-}  // namespace gufo::models::qwen3_asr
+}  // namespace superroc::models::qwen3_asr
 
-#endif  // GUFO_MODELS_QWEN3_ASR_CONFIG_HPP_
+#endif  // SUPERROC_MODELS_QWEN3_ASR_CONFIG_HPP_

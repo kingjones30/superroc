@@ -1,7 +1,7 @@
 // LFM2 tiled fp32 flash-attention prefill for head_dim 64 / GQA (SPEC2, lane
 // LFS). // LFM2
-#ifndef GUFO_MODELS_LFM2_HIP_LFM2_PREFILL_ATTENTION_HPP_
-#define GUFO_MODELS_LFM2_HIP_LFM2_PREFILL_ATTENTION_HPP_
+#ifndef SUPERROC_MODELS_LFM2_HIP_LFM2_PREFILL_ATTENTION_HPP_
+#define SUPERROC_MODELS_LFM2_HIP_LFM2_PREFILL_ATTENTION_HPP_
 
 #include "src/models/lfm2/hip/lfm2_kernels.hpp"  // LFM2 (Lfm2LaunchStatus)
 
@@ -19,4 +19,4 @@
 
 #endif  // defined(ENGINE_ENABLE_HIP)  // LFM2
 
-#endif  // GUFO_MODELS_LFM2_HIP_LFM2_PREFILL_ATTENTION_HPP_  // LFM2
+#endif  // SUPERROC_MODELS_LFM2_HIP_LFM2_PREFILL_ATTENTION_HPP_  // LFM2

@@ -1,5 +1,5 @@
-#ifndef GUFO_TESTS_MODELS_QWEN_HIP_SUPPORT_DEVICE_BUFFER_HPP_
-#define GUFO_TESTS_MODELS_QWEN_HIP_SUPPORT_DEVICE_BUFFER_HPP_
+#ifndef SUPERROC_TESTS_MODELS_QWEN_HIP_SUPPORT_DEVICE_BUFFER_HPP_
+#define SUPERROC_TESTS_MODELS_QWEN_HIP_SUPPORT_DEVICE_BUFFER_HPP_
 
 #include <cstddef>
 #include <cstdlib>
@@ -12,7 +12,7 @@
 
 #include "src/core/hip/hip_utils.hpp"
 
-namespace gufo::test {
+namespace superroc::test {
 
 /// Small move-only owner for test-only HIP allocations.
 template<typename T>
@@ -86,7 +86,7 @@ private:
   std::size_t size_{0};
 };
 
-}  // namespace gufo::test
+}  // namespace superroc::test
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_TESTS_MODELS_QWEN_HIP_SUPPORT_DEVICE_BUFFER_HPP_
+#endif  // SUPERROC_TESTS_MODELS_QWEN_HIP_SUPPORT_DEVICE_BUFFER_HPP_

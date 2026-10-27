@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_STOP_SEQUENCES_HPP_
-#define GUFO_SERVER_STOP_SEQUENCES_HPP_
+#ifndef SUPERROC_SERVER_STOP_SEQUENCES_HPP_
+#define SUPERROC_SERVER_STOP_SEQUENCES_HPP_
 
 #include <algorithm>
 #include <cstddef>
@@ -12,7 +12,7 @@
 
 #include "src/core/json.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 inline constexpr std::size_t kMaxStopSequences = 64;
 inline constexpr std::size_t kMaxStopSequenceBytes = 4096;
@@ -128,6 +128,6 @@ private:
   std::optional<std::size_t> match_;
 };
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_STOP_SEQUENCES_HPP_
+#endif  // SUPERROC_SERVER_STOP_SEQUENCES_HPP_

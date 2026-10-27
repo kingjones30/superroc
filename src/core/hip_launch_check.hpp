@@ -1,11 +1,11 @@
-#ifndef GUFO_CORE_HIP_LAUNCH_CHECK_HPP_
-#define GUFO_CORE_HIP_LAUNCH_CHECK_HPP_
+#ifndef SUPERROC_CORE_HIP_LAUNCH_CHECK_HPP_
+#define SUPERROC_CORE_HIP_LAUNCH_CHECK_HPP_
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
 #include <stdexcept>
 #include <string>
-namespace gufo::hip_check {
+namespace superroc::hip_check {
 // audit F04: a launch whose configuration is invalid never enqueues;
 // hipGetLastError reports it here instead of later stale data.
 inline void ThrowIfLaunchFailed(const char* what, const char* file, int line) {
@@ -19,8 +19,8 @@ inline void ThrowIfLaunchFailed(const char* what, const char* file, int line) {
 [[nodiscard]] inline bool LaunchFailed() noexcept {
   return hipGetLastError() != hipSuccess;
 }
-}  // namespace gufo::hip_check
-#define GUFO_CHECK_LAUNCH(what) \
-  ::gufo::hip_check::ThrowIfLaunchFailed((what), __FILE__, __LINE__)
+}  // namespace superroc::hip_check
+#define SUPERROC_CHECK_LAUNCH(what) \
+  ::superroc::hip_check::ThrowIfLaunchFailed((what), __FILE__, __LINE__)
 #endif
 #endif

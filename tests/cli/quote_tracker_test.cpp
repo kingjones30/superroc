@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace {
-using gufo::server::QuoteTracker;
+using superroc::server::QuoteTracker;
 void Expect(bool condition, std::string_view message) {
   if (!condition) {
     std::cerr << message << '\n';

@@ -17,10 +17,10 @@
 #include "src/models/qwen/chat_template.hpp"
 #include "src/models/qwen/vision/prompt.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 namespace {
 
-namespace lgchat = gufo::models::ling3::chat;
+namespace lgchat = superroc::models::ling3::chat;
 
 /// Stability identity for a saved Ling continuation. The recurrent state and
 /// the MLA latent cache are both layout-sensitive, so this covers the model
@@ -106,7 +106,7 @@ TextRunnerDescriptor Ling3TextRunner::Descriptor() const {
   // override DecodeBatch, and advertising it would let the scheduler take a
   // path that has no implementation here.
   d.capabilities.multi_token_decode = models::ling3::mtp::SpeculativeEnabled();
-  // Jay 2026-10-01: no persistence -- gufo's ValidateRunner refuses persistence
+  // Jay 2026-10-01: no persistence -- superroc's ValidateRunner refuses persistence
   // without snapshot+fork ("text runner persistence requires snapshot and fork
   // support"), which is exactly what this runner declares false above. Leave it
   // std::nullopt.
@@ -602,4 +602,4 @@ void Ling3TextRunner::SetPromptContext(
       std::move(prepared)));
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

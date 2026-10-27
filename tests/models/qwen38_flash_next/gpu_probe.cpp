@@ -30,14 +30,14 @@
 #include "src/models/qwen38_flash_next/reference.hpp"
 #include "src/models/qwen38_flash_next/weights.hpp"
 
-namespace q = gufo::models::qwen38_flash_next;
+namespace q = superroc::models::qwen38_flash_next;
 
 void AuditMtp(q::rocm::Executor& executor, const q::rocm::DeviceModel& device,
               const q::ModelWeights& weights, const q::MtpWeights& mtp,
-              const gufo::tokenization::QwenTokenizer& tokenizer,
+              const superroc::tokenization::QwenTokenizer& tokenizer,
               const std::filesystem::path& path);
 void AuditMtpCosts(q::rocm::Executor& executor,
-                   const gufo::tokenization::QwenTokenizer& tokenizer,
+                   const superroc::tokenization::QwenTokenizer& tokenizer,
                    std::span<const std::uint32_t> depths,
                    std::uint32_t concurrency);
 
@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(model_path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(model_path, &error);
   if (!reader) {
     std::fprintf(stderr, "open failed: %s\n", error.c_str());
     return 1;
@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
     return 1;
   }
   auto tokenizer =
-      gufo::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
+      superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
   if (!tokenizer) {
     std::fprintf(stderr, "tokenizer failed: %s\n", error.c_str());
     return 1;
@@ -223,10 +223,10 @@ int main(int argc, char** argv) {
     }
   }
 
-  std::shared_ptr<gufo::core::GgufReader> mtp_reader;
+  std::shared_ptr<superroc::core::GgufReader> mtp_reader;
   std::optional<q::MtpWeights> mtp_weights;
   if (!mtp_path.empty()) {
-    mtp_reader = gufo::core::GgufReader::OpenFile(mtp_path, &error);
+    mtp_reader = superroc::core::GgufReader::OpenFile(mtp_path, &error);
     if (mtp_reader)
       mtp_weights = q::MtpWeights::Bind(*mtp_reader, c, &error);
     if (!mtp_weights) {
@@ -281,7 +281,7 @@ int main(int argc, char** argv) {
     }
   }
   auto session = executor->CreateSession(
-      gufo::core::SessionMode::kAutoregressive, context, &error);
+      superroc::core::SessionMode::kAutoregressive, context, &error);
   if (!session) {
     std::fprintf(stderr, "session failed: %s\n", error.c_str());
     return 1;

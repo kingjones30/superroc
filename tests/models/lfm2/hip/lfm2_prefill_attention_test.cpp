@@ -161,8 +161,8 @@ void CaseOne(std::mt19937& rng, const std::vector<float>& kc_host,  // LFM2
                   "copy q");                                         // LFM2
   hipStream_t stream = nullptr;                                      // LFM2
   if (ok) {                                                          // LFM2
-    const gufo::hip::Lfm2LaunchStatus mine =                         // LFM2
-        gufo::hip::LaunchLfm2PrefillAttention(                       // LFM2
+    const superroc::hip::Lfm2LaunchStatus mine =                         // LFM2
+        superroc::hip::LaunchLfm2PrefillAttention(                       // LFM2
             d_q, d_kc, d_vc, d_out, kLayer, start_pos, batch, kMaxCtx,
             kHeads,             // LFM2
             kKvHeads, stream);  // LFM2
@@ -174,8 +174,8 @@ void CaseOne(std::mt19937& rng, const std::vector<float>& kc_host,  // LFM2
     }  // LFM2
   }  // LFM2
   if (ok) {                                        // LFM2
-    const gufo::hip::GlimmerLaunchStatus ref =     // LFM2
-        gufo::hip::LaunchGlimmerPrefillAttention(  // LFM2
+    const superroc::hip::GlimmerLaunchStatus ref =     // LFM2
+        superroc::hip::LaunchGlimmerPrefillAttention(  // LFM2
             d_q, nullptr, d_kc, d_vc, d_ref, kLayer, start_pos, batch,
             0,  // LFM2
             kMaxCtx, kHeads, kKvHeads, kHeadDim, q_elems, 0,
@@ -243,11 +243,11 @@ void TimeBoth(std::mt19937& rng, const float* d_kc,
   constexpr int kIters = 5;                                       // LFM2
   float mine_ms = 0.0F, ref_ms = 0.0F;                            // LFM2
   if (ok) {                                                       // LFM2
-    ok = gufo::hip::LaunchLfm2PrefillAttention(                   // LFM2
+    ok = superroc::hip::LaunchLfm2PrefillAttention(                   // LFM2
              d_q, d_kc, d_vc, d_out, kLayer, 0, kBatch, kMaxCtx,  // LFM2
              kHeads, kKvHeads, stream)              // LFM2 (warmup)
              .ok &&                                 // LFM2
-         gufo::hip::LaunchGlimmerPrefillAttention(  // LFM2
+         superroc::hip::LaunchGlimmerPrefillAttention(  // LFM2
              d_q, nullptr, d_kc, d_vc, d_out, kLayer, 0, kBatch, 0,  // LFM2
              kMaxCtx, kHeads, kKvHeads, kHeadDim, q_elems, 0,        // LFM2
              cache_elems, q_elems, stream)              // LFM2 (warmup)
@@ -257,7 +257,7 @@ void TimeBoth(std::mt19937& rng, const float* d_kc,
   for (int i = 0; i < kIters && ok; ++i) {                        // LFM2
     float ms = 0.0F;                                              // LFM2
     ok = HipOk(hipEventRecord(start, stream), "record start") &&  // LFM2
-         (gufo::hip::LaunchLfm2PrefillAttention(
+         (superroc::hip::LaunchLfm2PrefillAttention(
               d_q, d_kc, d_vc, d_out, kLayer,                      // LFM2
               0, kBatch, kMaxCtx, kHeads,                          // LFM2
               kKvHeads, stream)                                    // LFM2
@@ -270,7 +270,7 @@ void TimeBoth(std::mt19937& rng, const float* d_kc,
   for (int i = 0; i < kIters && ok; ++i) {                            // LFM2
     float ms = 0.0F;                                                  // LFM2
     ok = HipOk(hipEventRecord(start, stream), "record start") &&      // LFM2
-         (gufo::hip::LaunchGlimmerPrefillAttention(                   // LFM2
+         (superroc::hip::LaunchGlimmerPrefillAttention(                   // LFM2
               d_q, nullptr, d_kc, d_vc, d_out, kLayer, 0, kBatch, 0,  // LFM2
               kMaxCtx, kHeads, kKvHeads, kHeadDim, q_elems, 0,        // LFM2
               cache_elems, q_elems, stream)                           // LFM2
@@ -296,8 +296,8 @@ void TimeBoth(std::mt19937& rng, const float* d_kc,
 }  // namespace
 
 int main() {                                        // LFM2
-  const int gate = gufo::test::GateHipDevice(       // LFM2
-      gufo::test::HipDeviceRequirement::kOptional,  // LFM2
+  const int gate = superroc::test::GateHipDevice(       // LFM2
+      superroc::test::HipDeviceRequirement::kOptional,  // LFM2
       "lfm2_prefill_attention_test");               // LFM2
   if (gate != 0) {                                  // LFM2
     return gate;                                    // LFM2

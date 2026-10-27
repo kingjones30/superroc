@@ -17,7 +17,7 @@
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::uint32_t kMaxPromptBatch = 4096;
@@ -1420,7 +1420,7 @@ void QwenGpuArena::SnapVerifyStage(const char* tag, std::uint32_t layer,
     if (!warned) {
       warned = true;
       std::fprintf(stderr,
-                   "GUFO_VERIFY_DEBUG: snapshot cap %zu bytes exceeded at "
+                   "SUPERROC_VERIFY_DEBUG: snapshot cap %zu bytes exceeded at "
                    "stage %s layer %u; further stages dropped\n",
                    detail::VerifyDebugMaxBytes(), tag, layer);
     }
@@ -1447,5 +1447,5 @@ void QwenGpuArena::ClearVerifyDebug() {
   verify_debug_bytes_ = 0;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

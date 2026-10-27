@@ -1,5 +1,5 @@
-#ifndef GUFO_CLI_SAMPLING_OPTIONS_HPP_
-#define GUFO_CLI_SAMPLING_OPTIONS_HPP_
+#ifndef SUPERROC_CLI_SAMPLING_OPTIONS_HPP_
+#define SUPERROC_CLI_SAMPLING_OPTIONS_HPP_
 
 #include <stdexcept>
 #include <string_view>
@@ -8,7 +8,7 @@
 #include "src/core/sampling.hpp"
 #include "src/core/text_sampling_defaults.hpp"
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 inline sampling::SamplingOverrides SamplingOptionsSupplied(
     const ArgParser& parser) {
@@ -95,6 +95,6 @@ inline void RegisterSamplingOptions(ArgParser& parser,
       group, &config->presence_penalty);
 }
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli
 
-#endif  // GUFO_CLI_SAMPLING_OPTIONS_HPP_
+#endif  // SUPERROC_CLI_SAMPLING_OPTIONS_HPP_

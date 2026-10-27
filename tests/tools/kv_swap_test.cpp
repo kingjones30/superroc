@@ -1,6 +1,6 @@
 // kv_swap_test — SPEC7 item 2(b): tests for the kv_swap tool.
 //
-// kv_swap (tools/gufo-quant/kv_swap.cpp) writes a GGUF whose KV/metadata block
+// kv_swap (tools/superroc-quant/kv_swap.cpp) writes a GGUF whose KV/metadata block
 // comes verbatim from a template file and whose tensor payloads come verbatim
 // from a data file. It is what produced both v0.4 `-servedkv` drop-ins.
 //
@@ -29,7 +29,7 @@
 
 #include "gguf.hpp"
 
-namespace gqt = gufo::quant_tool;
+namespace gqt = superroc::quant_tool;
 
 namespace {
 
@@ -71,8 +71,8 @@ std::string WriteFixture(const std::filesystem::path& path, const Fixture& fx,
                          std::uint8_t kv_marker) {
   gqt::GgufFile f;
   f.alignment = 32;
-  f.kv.emplace_back("general.architecture", KvStr("gufo-kvswap-test"));
-  f.kv.emplace_back("gufo.test.marker", KvU32(kv_marker));
+  f.kv.emplace_back("general.architecture", KvStr("superroc-kvswap-test"));
+  f.kv.emplace_back("superroc.test.marker", KvU32(kv_marker));
   for (auto& [k, v] : fx.kv)
     f.kv.emplace_back(k, v);
 
@@ -148,7 +148,7 @@ int main(int argc, char** argv) {
     dir = argv[2];
   } else {
     dir = std::filesystem::temp_directory_path() /
-          ("gufo-kv-swap-test-" + std::to_string((long)getpid()));
+          ("superroc-kv-swap-test-" + std::to_string((long)getpid()));
   }
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
@@ -158,13 +158,13 @@ int main(int argc, char** argv) {
   const std::string log = (dir / "kvswap.log").string();
 
   const Fixture tpl_fx = {
-      {{"gufo.test.tpl_only", KvStr("template-side")}},
+      {{"superroc.test.tpl_only", KvStr("template-side")}},
       {{"blk.0.attn_q.weight", {64, 2, 1, 1}, 100, 11},
        {"blk.0.attn_v.weight", {64, 2, 1, 1}, 101, 29},
        {"output_norm.weight", {8, 1, 1, 1}, 0, 53}},
   };
   const Fixture dat_fx = {
-      {{"gufo.test.data_only",
+      {{"superroc.test.data_only",
         KvStr("data-side")}},  // must NOT appear in the output
       {{"blk.0.attn_q.weight", {64, 2, 1, 1}, 100, 200},
        {"blk.0.attn_v.weight", {64, 2, 1, 1}, 101, 201},
@@ -209,14 +209,14 @@ int main(int argc, char** argv) {
       Expect(ho.kv[i].first == ht.kv[i].first,
              "success: template KV order at " + std::to_string(i));
     const std::vector<std::string> prov = {
-        "gufo.quant.tool", "gufo.quant.kv_template", "gufo.quant.tensor_source",
-        "gufo.quant.format_version"};
+        "superroc.quant.tool", "superroc.quant.kv_template", "superroc.quant.tensor_source",
+        "superroc.quant.format_version"};
     for (std::size_t i = 0; i < prov.size(); ++i)
       Expect(ho.kv[ht.kv.size() + i].first == prov[i],
              "success: provenance key at +" + std::to_string(i));
     // The data file's own KV must not leak in.
     for (auto& [k, v] : ho.kv)
-      Expect(k != "gufo.test.data_only", "success: data-file KV leaked");
+      Expect(k != "superroc.test.data_only", "success: data-file KV leaked");
 
     // Tensor infos are the template's, payloads are the data file's.
     Expect(ho.tensors.size() == ht.tensors.size(), "success: tensor count");

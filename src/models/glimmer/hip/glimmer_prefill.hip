@@ -17,7 +17,7 @@
 #include "src/models/qwen/hip/ops/swiglu.hpp"
 #include "src/models/qwen/hip/ops/token.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 void CheckGpu(const char* what) {
@@ -714,5 +714,5 @@ void QwenGpuExecutor::MaterializeGlimmerRowLogits(std::size_t row) {
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

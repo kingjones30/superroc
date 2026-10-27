@@ -1,6 +1,6 @@
 # Ornith-1.5-35B-A3B, ROCmFP4 LEAN v1 with the embedded MTP block
 
-The base model is described in its Hugging Face card as a 35B mixture-of-experts model with 256 experts. These files are ROCmFP4 LEAN v1 quantizations for Strix Halo built with gufo-quant, with the output and embedding kept at Q6_K and the inline draft block at Q8_0. Drafting uses the MTP block embedded at block 40.
+The base model is described in its Hugging Face card as a 35B mixture-of-experts model with 256 experts. These files are ROCmFP4 LEAN v1 quantizations for Strix Halo built with superroc-quant, with the output and embedding kept at Q6_K and the inline draft block at Q8_0. Drafting uses the MTP block embedded at block 40.
 
 | | |
 |---|---|

@@ -4,13 +4,13 @@
 // agree on argmax and be bit-identical on logits. Widths 9-16 run as a
 // two-session ForwardVerificationBatch (one item is capped at 8 rows); the
 // ForwardTokenBatch path serve uses is covered with N sessions against
-// single ForwardToken references. With GUFO_VERIFY_DEBUG=1 the first
+// single ForwardToken references. With SUPERROC_VERIFY_DEBUG=1 the first
 // differing per-stage snapshot is also reported.
-// Forced modes (SPEC2 S2-1): GUFO_FP4_FORCE_REFUSE=1 declines every FP4
-// GEMV intercept (decode and verify alike); GUFO_VERIFY_DISCARD_WARMUP=1
+// Forced modes (SPEC2 S2-1): SUPERROC_FP4_FORCE_REFUSE=1 declines every FP4
+// GEMV intercept (decode and verify alike); SUPERROC_VERIFY_DISCARD_WARMUP=1
 // drops the FP4 warm mark after load so every ShapeOk fails. Both must give
 // verify == decode, bit for bit, with no exception.
-// GUFO_VERIFY_SMOKE=1 runs the ticket-smoke subset (widths 1,2,8,9, forms
+// SUPERROC_VERIFY_SMOKE=1 runs the ticket-smoke subset (widths 1,2,8,9, forms
 // at 9, batch N=2); default runs everything.
 #include <algorithm>
 #include <chrono>
@@ -31,17 +31,18 @@
 #include <vector>
 
 #include "src/core/gguf_reader.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
 #include "src/models/qwen/hip/detail/verify_debug.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/fp4_launch.hpp"
 #include "src/testing/compare/logit_comparator.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
-using Token = gufo::tokenization::TokenId;
-using Executor = gufo::hip::QwenGpuExecutor;
-using Model = gufo::hip::QwenGpuModel;
-using Stage = gufo::hip::detail::VerifyDebugStage;
+using Token = superroc::tokenization::TokenId;
+using Executor = superroc::hip::QwenGpuExecutor;
+using Model = superroc::hip::QwenGpuModel;
+using Stage = superroc::hip::detail::VerifyDebugStage;
 
 constexpr int kSkipped = 77;
 constexpr std::uint32_t kPromptSize = 24;
@@ -57,7 +58,7 @@ constexpr std::string_view kText =
     "across many instructions at once.";
 
 bool EnvOn(const char* name) {
-  const char* env = std::getenv(name);
+  const char* env = ::superroc::core::GetEnvCompat(name);
   return env != nullptr && env[0] == '1';
 }
 
@@ -230,7 +231,7 @@ bool CheckRow(std::size_t width, std::size_t row, std::span<const float> dd,
   if (same_argmax && same_gpu && same_bits) {
     return true;
   }
-  const auto cmp = gufo::testing::CompareLogits(dd, vv);
+  const auto cmp = superroc::testing::CompareLogits(dd, vv);
   std::cout << "width=" << width << " row=" << row
             << " argmax_decode=" << Argmax(dd)
             << " argmax_verify=" << Argmax(vv) << " gpu_decode=" << decode_pred
@@ -259,32 +260,32 @@ bool CheckRow(std::size_t width, std::size_t row, std::span<const float> dd,
 
 int main(int argc, const char* const* argv) {
   try {
-    const char* model = argc > 1 ? argv[1] : std::getenv("GUFO_VERIFY_MODEL");
+    const char* model = argc > 1 ? argv[1] : ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_MODEL");
     if (model == nullptr) {
-      std::cout << "Set GUFO_VERIFY_MODEL for verify_equals_decode.\n";
+      std::cout << "Set SUPERROC_VERIFY_MODEL for verify_equals_decode.\n";
       return kSkipped;
     }
-    const bool smoke = EnvOn("GUFO_VERIFY_SMOKE");
-    const bool force_refuse = EnvOn("GUFO_FP4_FORCE_REFUSE");
-    const bool discard_warmup = EnvOn("GUFO_VERIFY_DISCARD_WARMUP");
+    const bool smoke = EnvOn("SUPERROC_VERIFY_SMOKE");
+    const bool force_refuse = EnvOn("SUPERROC_FP4_FORCE_REFUSE");
+    const bool discard_warmup = EnvOn("SUPERROC_VERIFY_DISCARD_WARMUP");
     std::string error;
-    auto owner = gufo::core::GgufReader::OpenFile(model, &error);
+    auto owner = superroc::core::GgufReader::OpenFile(model, &error);
     Expect(owner != nullptr, error);
     // One model, up to four sessions: widths 9-16 need two executors (one
     // verification item is capped at 8 rows) and the token-batch section
     // needs N.
     auto shared = Model::CreateFromGguf(
-        std::shared_ptr<const gufo::core::GgufReader>(std::move(owner)),
+        std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)),
         &error);
     Expect(shared != nullptr, error);
     const std::size_t kSessions = 4;
     // Serve sizes one slot set per session stream; the test needs one per
     // executor or the later Creates refuse their attach (and every FP4
     // launch on those streams then fails).
-    Expect(gufo_fp4_slot_sets_configure(static_cast<int>(kSessions)) ==
-               GUFO_FP4_OK,
+    Expect(superroc_fp4_slot_sets_configure(static_cast<int>(kSessions)) ==
+               SUPERROC_FP4_OK,
            "FP4 slot sets configure refused");
-    std::cout << "slot sets=" << gufo_fp4_slot_sets_count() << "\n";
+    std::cout << "slot sets=" << superroc_fp4_slot_sets_count() << "\n";
     std::vector<std::unique_ptr<Executor>> exec;
     for (std::size_t i = 0; i < kSessions; ++i) {
       auto e = Executor::Create(shared, &error, 512);
@@ -302,7 +303,7 @@ int main(int argc, const char* const* argv) {
     if (discard_warmup) {
       // After every Create (Create re-warms): every RocmFp4ShapeOk now
       // fails, so decode and verify both serve their fp32 fallbacks.
-      gufo::hip::DiscardRocmFp4Warmup();
+      superroc::hip::DiscardRocmFp4Warmup();
       std::cout << "warmup discarded (forced shape fallback)\n";
     }
     if (force_refuse) {
@@ -320,7 +321,7 @@ int main(int argc, const char* const* argv) {
     auto snapshot = exec[0]->SaveSnapshot(kPromptSize);
     Expect(snapshot != nullptr, "snapshot at prompt end");
 
-    const bool debug_on = gufo::hip::detail::VerifyDebugEnabled();
+    const bool debug_on = superroc::hip::detail::VerifyDebugEnabled();
     std::cout << "stage snapshots: " << (debug_on ? "on" : "off") << "\n";
     std::vector<std::size_t> widths;
     if (smoke) {
@@ -375,7 +376,7 @@ int main(int argc, const char* const* argv) {
         exec[1]->RestoreSnapshot(*snapshot);
         exec[0]->ClearVerifyDebug();
         exec[1]->ClearVerifyDebug();
-        const gufo::hip::QwenGpuVerificationItem items[2] = {
+        const superroc::hip::QwenGpuVerificationItem items[2] = {
             {exec[0].get(),
              std::span<const Token>(tokens).subspan(kPromptSize, w1),
              kPromptSize, true},
@@ -438,13 +439,13 @@ int main(int argc, const char* const* argv) {
       double perrow_ms = 0.0;
       for (int form = 0; form < 2; ++form) {
         if (form == 1) {
-          (void)::setenv("GUFO_VERIFY_NO_CHUNK", "1", 1);
+          (void)::setenv("SUPERROC_VERIFY_NO_CHUNK", "1", 1);
         }
         double best = 0.0;
         for (int rep = 0; rep < 3; ++rep) {
           exec[0]->RestoreSnapshot(*snapshot);
           exec[1]->RestoreSnapshot(*snapshot);
-          const gufo::hip::QwenGpuVerificationItem items[2] = {
+          const superroc::hip::QwenGpuVerificationItem items[2] = {
               {exec[0].get(),
                std::span<const Token>(tokens).subspan(kPromptSize, w1),
                kPromptSize, true},
@@ -476,7 +477,7 @@ int main(int argc, const char* const* argv) {
           chunked_ms = best;
         } else {
           perrow_ms = best;
-          (void)::unsetenv("GUFO_VERIFY_NO_CHUNK");
+          (void)::unsetenv("SUPERROC_VERIFY_NO_CHUNK");
         }
       }
       bool forms_ok = chunked_logits.size() == perrow_logits.size();
@@ -485,7 +486,7 @@ int main(int argc, const char* const* argv) {
         for (std::size_t i = 0; i < chunked_logits.size(); ++i) {
           if (!ByteEqual(chunked_logits[i], perrow_logits[i])) {
             forms_ok = false;
-            const auto cmp = gufo::testing::CompareLogits(chunked_logits[i],
+            const auto cmp = superroc::testing::CompareLogits(chunked_logits[i],
                                                           perrow_logits[i]);
             max_abs = cmp.max_abs_diff;
             std::cout << "forms width=" << width << " row=" << i
@@ -503,7 +504,7 @@ int main(int argc, const char* const* argv) {
     // single ForwardToken references from identical per-session states.
     const std::size_t batch_n = smoke ? 2 : 4;
     {
-      std::vector<std::unique_ptr<gufo::hip::QwenGpuSnapshot>> snaps;
+      std::vector<std::unique_ptr<superroc::hip::QwenGpuSnapshot>> snaps;
       for (std::size_t i = 0; i < batch_n; ++i) {
         exec[i]->RestoreSnapshot(*snapshot);
         for (std::size_t j = 0; j < i; ++j) {
@@ -515,7 +516,7 @@ int main(int argc, const char* const* argv) {
             exec[i]->SaveSnapshot(kPromptSize + static_cast<std::uint32_t>(i)));
         Expect(snaps.back() != nullptr, "batch session snapshot");
       }
-      std::vector<gufo::hip::QwenGpuBatchItem> items;
+      std::vector<superroc::hip::QwenGpuBatchItem> items;
       for (std::size_t i = 0; i < batch_n; ++i) {
         items.push_back({exec[i].get(), tokens[kPromptSize + i],
                          kPromptSize + static_cast<std::uint32_t>(i)});
@@ -538,7 +539,7 @@ int main(int argc, const char* const* argv) {
             (ref == batch_pred[i]) && ByteEqual(logits, batch_logits[i]);
         if (!same) {
           batch_ok = false;
-          const auto cmp = gufo::testing::CompareLogits(
+          const auto cmp = superroc::testing::CompareLogits(
               std::span<const float>(logits.data(), logits.size()),
               batch_logits[i]);
           std::cout << "tokenbatch row=" << i << " gpu_single=" << ref

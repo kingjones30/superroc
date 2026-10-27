@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_JSON_SCHEMA_LEXEME_HPP_
-#define GUFO_CORE_JSON_SCHEMA_LEXEME_HPP_
+#ifndef SUPERROC_CORE_JSON_SCHEMA_LEXEME_HPP_
+#define SUPERROC_CORE_JSON_SCHEMA_LEXEME_HPP_
 
 #include <bitset>
 #include <memory>
@@ -9,7 +9,7 @@
 
 #include "src/core/json.hpp"
 
-namespace gufo::sampling {
+namespace superroc::sampling {
 
 class JsonSchemaEmpty : public std::invalid_argument {
 public:
@@ -66,5 +66,5 @@ private:
   std::bitset<256> alphabet_;
 };
 
-}  // namespace gufo::sampling
+}  // namespace superroc::sampling
 #endif

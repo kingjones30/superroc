@@ -1,5 +1,5 @@
-#ifndef GUFO_CLI_DIAGNOSE_H_
-#define GUFO_CLI_DIAGNOSE_H_
+#ifndef SUPERROC_CLI_DIAGNOSE_H_
+#define SUPERROC_CLI_DIAGNOSE_H_
 
 #include <span>
 #include <string_view>
@@ -7,7 +7,7 @@
 #include "src/core/diagnostics/linux_sysfs.h"
 #include "src/core/diagnostics/report.h"
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 [[nodiscard]] diagnostics::DiagnosticReport CollectDiagnostics(
     const diagnostics::LinuxSysfs& sysfs = diagnostics::LinuxSysfs(),
@@ -16,6 +16,6 @@ namespace gufo::cli {
 int RunDiagnose(std::span<const char* const> args);
 int RunProbe(std::span<const char* const> args);
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli
 
-#endif  // GUFO_CLI_DIAGNOSE_H_
+#endif  // SUPERROC_CLI_DIAGNOSE_H_

@@ -1,6 +1,6 @@
 function(add_flint_cpu_test target source)
   add_executable(${target} ${PROJECT_SOURCE_DIR}/${source})
-  target_link_libraries(${target} PRIVATE gufo_core)
+  target_link_libraries(${target} PRIVATE superroc_core)
   add_test(NAME ${target} COMMAND ${target})
   set_tests_properties(${target} PROPERTIES LABELS "cpu;models;flint")
 endfunction()
@@ -24,7 +24,7 @@ if (ENGINE_ENABLE_HIP)
   function(add_flint_hip_test target source labels)
     add_executable(${target} ${PROJECT_SOURCE_DIR}/${source})
     target_link_libraries(${target} PRIVATE
-      gufo_core hip::host roc::hipblas roc::rocblas)
+      superroc_core hip::host roc::hipblas roc::rocblas)
     add_test(NAME ${target} COMMAND ${target})
     set_tests_properties(${target} PROPERTIES
       LABELS "${labels}"

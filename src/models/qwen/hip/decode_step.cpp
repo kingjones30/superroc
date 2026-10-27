@@ -5,8 +5,8 @@
 
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"  // KAT:
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"    // KAT:
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // KAT:
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"    // KAT:
 #include "src/models/flint/hip/flint_decode.hpp"
 #include "src/models/glimmer/hip/glimmer_decode.hpp"  // GLIMMER
 #include "src/models/lfm2/hip/lfm2_decode.hpp"        // LFM2
@@ -18,7 +18,7 @@
 #include "src/models/qwen/moe/qwen_moe_ffn.hpp"    // KAT:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"  // KAT:
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 void EmitDecodeRouteTelemetry(const models::QwenModelWeights& weights,
                               const QwenExecutionPolicy& policy) {
@@ -109,7 +109,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
     const auto& layer = weights.layers[l];
     const auto route_plan = ResolveQwenLayerRoute(
         policy, QwenExecutionMode::kDecode, layer.is_full_attention);
-    const gufo::models::qwen::HipModuleContext module_ctx(
+    const superroc::models::qwen::HipModuleContext module_ctx(
         static_cast<void*>(arena.stream), l, pos);
 
     {
@@ -117,8 +117,8 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
       // kernel, same args, same arena slices (d_hidden in, d_normed out);
       // behavior identical to the former inline `LaunchRMSNorm` call.
       const auto norm_view =
-          gufo::models::qwen::MakeAttnNormView(layer, config);
-      gufo::models::qwen::NormForward(
+          superroc::models::qwen::MakeAttnNormView(layer, config);
+      superroc::models::qwen::NormForward(
           module_ctx, norm_view, decode_scratch.hidden, decode_scratch.normed);
     }
     arena.SnapVerifyStage("attn_norm", l, decode_scratch.normed.data(),
@@ -236,7 +236,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
       // Output projection, routed through the quant_gemm module (HIP
       // backend). Same kernel, same args, same arena slices (d_ssm_out in,
       // d_attn_out out); behavior-identical to the former inline `LaunchGEMV`.
-      gufo::models::qwen::QuantGemm(
+      superroc::models::qwen::QuantGemm(
           module_ctx, layer.attn_output, ssm_scratch.out.first(attention_size),
           hidden_size, attention_size, attention_scratch.output);
       arena.SnapVerifyStage("mix_proj", l, attention_scratch.output.data(),
@@ -285,7 +285,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
     }
 
     {
-      gufo::models::qwen::ResidualAdd(module_ctx, decode_scratch.hidden,
+      superroc::models::qwen::ResidualAdd(module_ctx, decode_scratch.hidden,
                                       attention_scratch.output);
 
       {
@@ -323,23 +323,23 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
               arena.d_moe_sig, arena.stream) != 0) {
         throw std::runtime_error("qwen35moe decode route launch failed");
       }
-      if (gufo_fp4_expert_ffn_dev(
+      if (superroc_fp4_expert_ffn_dev(
               static_cast<int>(layer.ffn_gate_exps.type),
               layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
               layer.ffn_down_exps.data, decode_scratch.normed.data(),
               arena.d_moe_ids, arena.d_moe_weights, moe_used, moe_expert,
               moe_hidden, moe_ff, 0.0F, arena.d_moe_y,
-              arena.stream) != GUFO_FP4_OK) {
+              arena.stream) != SUPERROC_FP4_OK) {
         throw std::runtime_error("qwen35moe decode experts failed");
       }
       // QSM: same normed x on the same stream as the routed call above, so
       // the shared expert reuses its Q8 copy (bit-identical, one launch less).
-      if (gufo_fp4_expert_ffn_dev_xq(
+      if (superroc_fp4_expert_ffn_dev_xq(
               static_cast<int>(layer.ffn_gate_shexp.type),
               layer.ffn_gate_shexp.data, layer.ffn_up_shexp.data,
               layer.ffn_down_shexp.data, decode_scratch.normed.data(),
               arena.d_moe_zero_ids, arena.d_moe_sig, 1, 1, moe_hidden, moe_ffs,
-              0.0F, arena.d_moe_shexp_y, arena.stream) != GUFO_FP4_OK) {
+              0.0F, arena.d_moe_shexp_y, arena.stream) != SUPERROC_FP4_OK) {
         throw std::runtime_error("qwen35moe decode shared expert failed");
       }
       if (LaunchQwenMoeCombine(arena.d_moe_y, arena.d_moe_shexp_y, moe_hidden,
@@ -347,8 +347,8 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
         throw std::runtime_error("qwen35moe decode combine failed");
       }
     } else {
-      const auto ffn_view = gufo::models::qwen::MakeFfnView(layer, config);
-      gufo::models::qwen::FfnForward(
+      const auto ffn_view = superroc::models::qwen::MakeFfnView(layer, config);
+      superroc::models::qwen::FfnForward(
           module_ctx, ffn_view, decode_scratch.normed, ffn_scratch.activation,
           ffn_scratch.activation, ffn_scratch.activation, ffn_scratch.out);
     }
@@ -356,7 +356,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
                           ffn_scratch.out.size(), 1);
 
     // Residual Add
-    gufo::models::qwen::ResidualAdd(module_ctx, decode_scratch.hidden,
+    superroc::models::qwen::ResidualAdd(module_ctx, decode_scratch.hidden,
                                     ffn_scratch.out);
     arena.SnapVerifyStage("hidden", l, decode_scratch.hidden.data(),
                           decode_scratch.hidden.size(), 1);
@@ -377,15 +377,15 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
     // SQ10: name this stream's set, so concurrent sessions check only theirs.
     // SPEC2 (R2): a refusal fails the step loudly; it cannot happen in
     // serve (the session stream pre-attached at load).
-    const int slot_set = gufo_fp4_slot_stream_attach_at(
+    const int slot_set = superroc_fp4_slot_stream_attach_at(
         arena.stream, __func__, static_cast<long>(hidden_size));
     if (slot_set < 0) {
       throw std::runtime_error("qwen35moe decode slot set refused");
     }
     // SPEC2 (R6): stream-ordered check (the bare read proved stale on the
     // box: STALE_STATUS missed 1/200).
-    if (gufo_fp4_moe_dev_check_set_on_stream(slot_set, arena.stream) !=
-        GUFO_FP4_OK) {
+    if (superroc_fp4_moe_dev_check_set_on_stream(slot_set, arena.stream) !=
+        SUPERROC_FP4_OK) {
       throw std::runtime_error("qwen35moe decode expert device status");
     }
   }
@@ -414,5 +414,5 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

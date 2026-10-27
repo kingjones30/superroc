@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_EXECUTOR_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_EXECUTOR_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_EXECUTOR_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_EXECUTOR_HPP_
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -27,7 +27,7 @@
 #include "src/models/qwen38_flash_next/mtp_sampling.hpp"
 #include "src/models/qwen38_flash_next/ngram.hpp"
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 
 class Executor;
 class SnapshotAllocator;
@@ -140,7 +140,7 @@ public:
 private:
   friend class Executor;
   friend struct PrefillCheckpoint;
-  friend class gufo::models::qwen38_flash_next::ContinuationAdapter;
+  friend class superroc::models::qwen38_flash_next::ContinuationAdapter;
   Session() = default;
 
   struct LinearState {
@@ -600,7 +600,7 @@ private:
     void* gdn_q8_1;  ///< by the GDN epilogue (ssm_out's input)
     void* ctx_q8_1;  ///< by the attention output gate (attn_out's input)
     void* x_q8t;     ///< tiled Q8 activations of a wide batch (W8A8 route)
-    // FLASHNEXT: S8 -- gufo_fp4's own 576-byte Q8_1 tile layout (NOT x_q8t's).
+    // FLASHNEXT: S8 -- superroc_fp4's own 576-byte Q8_1 tile layout (NOT x_q8t's).
     void* fp4_q8_act;  ///< dense FP4 prefill activations
     void* fp4_q8_e;    ///< routed gate/up activations (group tile order)
     void* fp4_q8_h;    ///< routed SwiGLU rows for the down projection
@@ -659,7 +659,7 @@ private:
     std::int32_t* rows_slot;
     std::int32_t* routed_tiles;  ///< (expert | tile << 16) per launched tile
     // FLASHNEXT: S8 -- the grouped FP4 routed-expert prefill
-    // (gufo_fp4_moe_group_batch -> gufo_fp4_{wmma_,}gemm_grp ->
+    // (superroc_fp4_moe_group_batch -> superroc_fp4_{wmma_,}gemm_grp ->
     // slot_gather_sum). Slot maps, the 16-token tile prefix and the identity
     // row map the float grouped GEMM needs. Sized in Create; never grown
     // mid-capture.
@@ -697,12 +697,12 @@ private:
   };
   mutable Scratch s_{};
   // FLASHNEXT: S7 -- device all-ones router weights so the MoE epilogue can
-  // fold the gufo_fp4 expert path's already-weighted expert sum with used=1.
+  // fold the superroc_fp4 expert path's already-weighted expert sum with used=1.
   // Sized for max_batch (S8 prefill folds a whole chunk through it).
   mutable float* moe_ones_ = nullptr;
   mutable std::uint32_t moe_ones_cap_ = 0;
   // FLASHNEXT: S8 -- bounds for the grouped FP4 prefill buffers, and the
-  // event that orders gufo_fp4's NULL-stream entry points against stream_.
+  // event that orders superroc_fp4's NULL-stream entry points against stream_.
   std::uint32_t fp4_group_cap_{256};
   std::uint32_t fp4_tiles_cap_{0};
   hipEvent_t fp4_order_{nullptr};
@@ -753,7 +753,7 @@ private:
   void ProfHead(int which) const;
   void ProfAccumulate(std::uint32_t pos) const;
   void ProfEnsureBytes() const;
-  /// Wide-batch FP4 dense projection on the gufo_fp4 W8A8 WMMA route
+  /// Wide-batch FP4 dense projection on the superroc_fp4 W8A8 WMMA route
   /// (fallback: the float SmallGemm leg).
   bool Fp4DensePrefill(const DeviceTensor& w, const float* x, float* out,
                        std::uint32_t n_tokens, std::string* error_msg) const;
@@ -768,7 +768,7 @@ private:
   /// Ensures `moe_ones_` holds at least `n` ones.
   bool Fp4Ones(std::uint32_t n, std::string* error_msg) const;
   /// Drains stream_, runs `body` (which launches on the NULL stream), then
-  /// makes stream_ wait for it. The gufo_fp4 grouped/WMMA entry points have
+  /// makes stream_ wait for it. The superroc_fp4 grouped/WMMA entry points have
   /// no stream parameter; this keeps them ordered with the executor's work
   /// without a device-wide sync.
   bool Fp4NullStream(const std::function<bool()>& body,
@@ -886,6 +886,6 @@ private:
   mutable ReadyRows mixed_q8_ready_;
 };
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm
 
-#endif  // GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_EXECUTOR_HPP_
+#endif  // SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_EXECUTOR_HPP_

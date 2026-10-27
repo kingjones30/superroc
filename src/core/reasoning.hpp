@@ -1,12 +1,12 @@
-#ifndef GUFO_CORE_REASONING_HPP_
-#define GUFO_CORE_REASONING_HPP_
+#ifndef SUPERROC_CORE_REASONING_HPP_
+#define SUPERROC_CORE_REASONING_HPP_
 
 #include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
 
-namespace gufo {
+namespace superroc {
 
 /// Provider-neutral reasoning levels accepted by the HTTP and CLI surfaces.
 ///
@@ -31,6 +31,6 @@ struct ReasoningOptions {
   std::optional<std::size_t> budget_tokens;
 };
 
-}  // namespace gufo
+}  // namespace superroc
 
-#endif  // GUFO_CORE_REASONING_HPP_
+#endif  // SUPERROC_CORE_REASONING_HPP_

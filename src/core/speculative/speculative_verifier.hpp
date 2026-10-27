@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_SPECULATIVE_SPECULATIVE_VERIFIER_HPP_
-#define GUFO_CORE_SPECULATIVE_SPECULATIVE_VERIFIER_HPP_
+#ifndef SUPERROC_CORE_SPECULATIVE_SPECULATIVE_VERIFIER_HPP_
+#define SUPERROC_CORE_SPECULATIVE_SPECULATIVE_VERIFIER_HPP_
 
 #include <cstdint>
 #include <deque>
@@ -20,7 +20,7 @@
 #include "src/models/qwen/hip/executor.hpp"
 #endif
 
-namespace gufo::speculative {
+namespace superroc::speculative {
 
 /// One measured plain-decode rate at a context length, for the guard floor.
 struct PlainDecodeRatePoint {
@@ -489,6 +489,6 @@ private:
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-}  // namespace gufo::speculative
+}  // namespace superroc::speculative
 
-#endif  // GUFO_CORE_SPECULATIVE_SPECULATIVE_VERIFIER_HPP_
+#endif  // SUPERROC_CORE_SPECULATIVE_SPECULATIVE_VERIFIER_HPP_

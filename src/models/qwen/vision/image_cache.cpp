@@ -6,7 +6,7 @@
 
 #include "src/models/qwen/vision/prompt.hpp"
 
-namespace gufo::models::qwen::vision {
+namespace superroc::models::qwen::vision {
 
 std::shared_ptr<const core::Image> ImageCache::Get(
     const std::shared_ptr<const std::vector<std::uint8_t>>& encoded) {
@@ -63,4 +63,4 @@ ImageCache::Stats ImageCache::GetStats() const {
   return stats;
 }
 
-}  // namespace gufo::models::qwen::vision
+}  // namespace superroc::models::qwen::vision

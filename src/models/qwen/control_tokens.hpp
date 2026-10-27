@@ -1,11 +1,11 @@
-#ifndef GUFO_TOKENIZATION_QWEN_CONTROL_TOKENS_HPP_
-#define GUFO_TOKENIZATION_QWEN_CONTROL_TOKENS_HPP_
+#ifndef SUPERROC_TOKENIZATION_QWEN_CONTROL_TOKENS_HPP_
+#define SUPERROC_TOKENIZATION_QWEN_CONTROL_TOKENS_HPP_
 
 #include <algorithm>
 #include <array>
 #include <string_view>
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 
 /// Shared Qwen framing, also used by Qwen-Image, audio models and MiniMax H3.
 /// Other token families remain with their models. See AGENTS.md for guidance.
@@ -33,6 +33,6 @@ consteval auto ConcatControlText() {
   return text;
 }
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization
 
-#endif  // GUFO_TOKENIZATION_QWEN_CONTROL_TOKENS_HPP_
+#endif  // SUPERROC_TOKENIZATION_QWEN_CONTROL_TOKENS_HPP_

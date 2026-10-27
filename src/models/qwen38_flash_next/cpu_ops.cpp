@@ -6,7 +6,7 @@
 
 #include "src/core/quant/ggml_dequant.hpp"
 
-namespace gufo::models::qwen38_flash_next::cpu {
+namespace superroc::models::qwen38_flash_next::cpu {
 namespace {
 
 using core::GgmlType;
@@ -23,8 +23,8 @@ void DequantizeQ5_1(const std::uint8_t* src, float* dst, std::size_t k) {
   for (std::size_t b = 0; b < k / 32; ++b) {
     BlockQ5_1 blk;
     std::memcpy(&blk, src + b * sizeof(BlockQ5_1), sizeof(BlockQ5_1));
-    const float d = gufo::quant::Fp16ToFloat(blk.d);
-    const float m = gufo::quant::Fp16ToFloat(blk.m);
+    const float d = superroc::quant::Fp16ToFloat(blk.d);
+    const float m = superroc::quant::Fp16ToFloat(blk.m);
     float* y = dst + b * 32;
     for (int j = 0; j < 16; ++j) {
       const int xh0 = ((blk.qh >> j) & 1U) << 4;
@@ -49,7 +49,7 @@ void DequantizeRow(const TensorRef& t, std::uint64_t e, std::uint64_t row,
       for (std::size_t i = 0; i < k; ++i) {
         std::uint16_t h = 0;
         std::memcpy(&h, src + 2 * i, 2);
-        out[i] = gufo::quant::Fp16ToFloat(h);
+        out[i] = superroc::quant::Fp16ToFloat(h);
       }
       break;
     case GgmlType::kBF16:
@@ -61,30 +61,30 @@ void DequantizeRow(const TensorRef& t, std::uint64_t e, std::uint64_t row,
       }
       break;
     case GgmlType::kQ8_0:
-      gufo::quant::DequantizeQ8_0(src, out, k);
+      superroc::quant::DequantizeQ8_0(src, out, k);
       break;
     case GgmlType::kQ5_1:
       DequantizeQ5_1(src, out, k);
       break;
     case GgmlType::kIQ4_NL:
-      gufo::quant::DequantizeIQ4_NL(src, out, k);
+      superroc::quant::DequantizeIQ4_NL(src, out, k);
       break;
     case GgmlType::kQ4_K:
-      gufo::quant::DequantizeQ4_K(src, out, k);
+      superroc::quant::DequantizeQ4_K(src, out, k);
       break;
     case GgmlType::kQ5_K:
-      gufo::quant::DequantizeQ5_K(src, out, k);
+      superroc::quant::DequantizeQ5_K(src, out, k);
       break;
     case GgmlType::kQ6_K:
-      gufo::quant::DequantizeQ6_K(src, out, k);
+      superroc::quant::DequantizeQ6_K(src, out, k);
       break;
     // FLASHNEXT: the shared oracle (lqw-s2) decodes the ROCmFP4 pair; its
     // semantics match the fork's rocmfp4_dequantize_row_q4_0[_fast].
     case GgmlType::kQ4_0_ROCMFP4:
-      gufo::quant::DequantizeROCMFP4_Dual(src, out, k);
+      superroc::quant::DequantizeROCMFP4_Dual(src, out, k);
       break;
     case GgmlType::kQ4_0_ROCMFP4_FAST:
-      gufo::quant::DequantizeROCMFP4_Fast(src, out, k);
+      superroc::quant::DequantizeROCMFP4_Fast(src, out, k);
       break;
     default:
       std::memset(out, 0, k * sizeof(float));
@@ -174,4 +174,4 @@ void Rope(float* x, std::uint32_t heads, std::uint32_t head_dim,
   }
 }
 
-}  // namespace gufo::models::qwen38_flash_next::cpu
+}  // namespace superroc::models::qwen38_flash_next::cpu

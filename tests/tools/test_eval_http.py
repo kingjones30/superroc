@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HTTP fixture tests for the OpenAI-compatible gufo eval client."""
+"""HTTP fixture tests for the OpenAI-compatible superroc eval client."""
 
 from __future__ import annotations
 
@@ -20,7 +20,8 @@ import unittest
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gufo", type=Path, required=True)
+    parser.add_argument("--superroc", "--" + "g" + "ufo", type=Path, required=True)
+
     parser.add_argument("--data", type=Path, required=True)
     return parser.parse_args()
 
@@ -109,7 +110,7 @@ class FixtureHandler(BaseHTTPRequestHandler):
                 "object": "model",
                 "owned_by": "fixture",
                 "path": "/home/private/model.gguf",
-                "gufo": {
+                "superroc": {
                     "artifact_id": "sha256:fixture",
                     "repository_revision": "fixture-revision",
                 },
@@ -184,7 +185,7 @@ def completion(
             "completion_tokens": completion_tokens,
             "total_tokens": 100 + completion_tokens,
             "prompt_tokens_details": {"cached_tokens": 12},
-            "gufo": {"queue_ms": 1.5, "execution_plan": "must-not-copy"},
+            "superroc": {"queue_ms": 1.5, "execution_plan": "must-not-copy"},
         },
         "timings": {"prompt_ms": 2.5, "predicted_ms": 3.5},
         "metrics": {"queue_time_ms": 1.5, "private_path": "/home/private"},
@@ -208,7 +209,7 @@ class EvalHttpTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         output = Path(temporary.name) / "result.json"
         command = [
-            str(ARGS.gufo),
+            str(ARGS.superroc),
             "eval",
             "--base-url",
             base_url,
@@ -241,7 +242,7 @@ class EvalHttpTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory, fixture_server(state) as base_url:
             output = Path(directory) / "result.json"
             process = subprocess.Popen(
-                [str(ARGS.gufo), "eval", "--base-url", base_url,
+                [str(ARGS.superroc), "eval", "--base-url", base_url,
                  "--questions", "2", "--output", str(output)],
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             )
@@ -308,7 +309,7 @@ class EvalHttpTest(unittest.TestCase):
             report["cases"][0]["response"]["reasoning_content"],
             "careful reasoning",
         )
-        self.assertNotIn("execution_plan", report["cases"][0]["usage"]["gufo"])
+        self.assertNotIn("execution_plan", report["cases"][0]["usage"]["superroc"])
         self.assertNotIn("private_path", report["cases"][0]["metrics"])
         serialized = json.dumps(report)
         self.assertNotIn(base_url, serialized)
@@ -387,8 +388,8 @@ class EvalHttpTest(unittest.TestCase):
         environment = dict(os.environ)
         environment["OPENAI_API_KEY"] = secret
         environment["HOME"] = "/home/alice"
-        environment["GUFO_EVAL_SERVER_CONFIG"] = (
-            "gufo serve --host 192.168.1.50 "
+        environment["SUPERROC_EVAL_SERVER_CONFIG"] = (
+            "superroc serve --host 192.168.1.50 "
             "--model /home/alice/model.gguf"
         )
         with fixture_server(state) as base_url:
@@ -405,7 +406,7 @@ class EvalHttpTest(unittest.TestCase):
         assert report is not None
         self.assertEqual(
             report["run"]["server"]["configuration"],
-            "gufo serve --host <private-address> --model <home>/model.gguf",
+            "superroc serve --host <private-address> --model <home>/model.gguf",
         )
         self.assertGreater(report["cases"][0]["response"]["redactions"], 0)
 

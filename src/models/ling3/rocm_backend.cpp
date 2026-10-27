@@ -1,7 +1,7 @@
 // Compiled in EVERY configuration, but the body only exists when the HIP
 // backend is on: a CPU build must not need hip/hip_runtime.h. The stub below
-// refuses, which is what `gufo serve` reports on a CPU-only build.
-// Unconditional: the header itself pulls only gufo's GGUF reader and the weight
+// refuses, which is what `superroc serve` reports on a CPU-only build.
+// Unconditional: the header itself pulls only superroc's GGUF reader and the weight
 // structs, no HIP.
 #include "src/models/ling3/rocm_backend.hpp"
 
@@ -19,7 +19,7 @@
 
 #if defined(LING3_WITH_ROCM)
 // LK's and LX's kernels live in the GLOBAL namespace `ling3`, which
-// collides with this package's own `gufo::models::ling3`; every
+// collides with this package's own `superroc::models::ling3`; every
 // reference below is therefore `::ling3::`.
 #include "src/models/ling3/kernels/ling3_gemv_q8.hpp"
 #include "src/models/ling3/kernels/ling3_kda.hpp"
@@ -31,7 +31,7 @@
 // LS3: the tiled grouped GEMM + batched router for batched prefill.
 #include "src/models/ling3/kernels/ling3_gemm.hpp"
 #include "src/models/ling3/kernels/ling3_moe_group.hpp"
-// LS3 P3: the W8A8 int8-WMMA grouped GEMM (gufo skeleton, fork numerics).
+// LS3 P3: the W8A8 int8-WMMA grouped GEMM (superroc skeleton, fork numerics).
 #include "src/models/ling3/kernels/ling3_wmma.hpp"
 // LW1 (wave 2): the two-pass WMMA prefill attention, LING3_MLA_WMMA2=1.
 #include "src/models/ling3/kernels/ling3_mla_w2.hpp"
@@ -49,7 +49,7 @@
 #define LING3_SKIP_DEVICE_MEMORY_CHECK 1
 #endif
 
-namespace gufo::models::ling3::rocm {
+namespace superroc::models::ling3::rocm {
 namespace {
 
 /// LX's mandatory readable pad past the last byte of any allocation: the
@@ -152,7 +152,7 @@ void DevPoison(void* p, std::size_t bytes) {
 bool DevCopy(const void* d, const void* s, std::size_t n) {
   // Jay 2026-10-01 (hotfix, for LG to adopt): a plain hipMemcpy straight out of
   // the GGUF mmap stalled the 65 GB Ling load at ~45 GB of GTT on amdaimax2 --
-  // main thread spinning inside libhsa, GPU 0 % busy, no new page faults, `gufo
+  // main thread spinning inside libhsa, GPU 0 % busy, no new page faults, `superroc
   // serve` never answered /health in 10 min. HIP pins pageable sources for the
   // DMA; pinning tens of GB of file-backed pages on a 128 GB unified-memory box
   // while the device copy grows is what wedged it. Copy through ONE pinned 64
@@ -1494,7 +1494,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
                              g.vocab, st->tok_in, 1, st->x, stream);
   GpuTrace(st, static_cast<std::uint32_t>(-1), "inp_embd", st->x, H);
 
-  gufo::models::ling3::vision::OnHidden(st->x, static_cast<int>(st->pos), 1,
+  superroc::models::ling3::vision::OnHidden(st->x, static_cast<int>(st->pos), 1,
                                         static_cast<int>(H), stream);
 
   const ::ling3::KdaShape ks = MakeKdaShape();
@@ -2077,7 +2077,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
                              g.vocab, B->tok, n, B->x, stream);
   eend();
 
-  gufo::models::ling3::vision::OnHidden(B->x, pos0, n, static_cast<int>(H),
+  superroc::models::ling3::vision::OnHidden(B->x, pos0, n, static_cast<int>(H),
                                         stream);
 
   // LING3_GPU_TRACE hook: same tensor names as Step, taken at the traced
@@ -2500,7 +2500,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
       const std::size_t stride_ff =
           static_cast<std::size_t>(g.hidden) * L.rb_ff;
       sec(kSecMoeGemm);
-      // P3: the W8A8 int8-WMMA path (gufo's kernel skeleton, fork numerics:
+      // P3: the W8A8 int8-WMMA path (superroc's kernel skeleton, fork numerics:
       // Q8_1 activations, FP4->int8 weights, per-half block scales in the
       // epilogue). LING3_PREFILL_W8A8=0 keeps the phase-2 float tiled GEMM
       // -- now on the compacted per-group grid (same arithmetic, so both
@@ -3205,7 +3205,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
                              g.vocab, S.tok_in, mm, S.x, stream);
   GpuTrace(st, static_cast<std::uint32_t>(-1), "inp_embd", S.x, H);
 
-  gufo::models::ling3::vision::OnHidden(S.x, pos0, mm, static_cast<int>(H),
+  superroc::models::ling3::vision::OnHidden(S.x, pos0, mm, static_cast<int>(H),
                                         stream);
 
   // g_dev.experts holds MoE layers only, so index it with its own counter
@@ -3584,11 +3584,11 @@ bool ReadHidden(const State* state, std::span<float> out,
   return true;
 }
 
-}  // namespace gufo::models::ling3::rocm
+}  // namespace superroc::models::ling3::rocm
 
 #else  // !LING3_WITH_ROCM
 
-namespace gufo::models::ling3::rocm {
+namespace superroc::models::ling3::rocm {
 namespace {
 struct Plan {
   bool ready{false};
@@ -3645,6 +3645,6 @@ bool BatchCapable() noexcept {
   return false;
 }
 
-}  // namespace gufo::models::ling3::rocm
+}  // namespace superroc::models::ling3::rocm
 
 #endif  // LING3_WITH_ROCM

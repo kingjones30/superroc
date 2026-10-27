@@ -44,11 +44,11 @@ static unsigned long long JayHash(unsigned long long h, const float* p, std::siz
 
 namespace {
 
-namespace l3 = ::gufo::models::ling3;
+namespace l3 = ::superroc::models::ling3;
 using l3::Model;
 using l3::ModelOptions;
 using l3::BackendKind;
-using SessionMode = ::gufo::core::SessionMode;
+using SessionMode = ::superroc::core::SessionMode;
 
 int ArgmaxOf(const float* v, std::size_t n) {
     std::size_t best = 0;

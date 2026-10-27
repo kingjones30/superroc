@@ -28,7 +28,7 @@ def messages_tool_result(client, body):
         "usage": {"prompt_tokens": usage["input_tokens"] + usage["cache_read_input_tokens"],
                   "cached_tokens": usage["cache_read_input_tokens"],
                   "completion_tokens": usage["output_tokens"],
-                  "gufo": {"prefill_tokens": timings["prompt_n"]}},
+                  "superroc": {"prefill_tokens": timings["prompt_n"]}},
     }
 
 
@@ -79,7 +79,7 @@ def check_messages_tools(client, model, checks, chat_result):
     def work(result):
         usage = result["usage"]
         total, reused, prefilled = (usage["prompt_tokens"], usage["cached_tokens"],
-                                    usage["gufo"]["prefill_tokens"])
+                                    usage["superroc"]["prefill_tokens"])
         assert reused + prefilled == total, usage
         return total, reused, prefilled
 

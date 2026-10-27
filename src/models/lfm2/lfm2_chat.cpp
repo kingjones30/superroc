@@ -9,7 +9,7 @@
 #include "src/core/json.hpp"
 #include "src/models/qwen/chat_json.hpp"
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 namespace {
 
 // Message text is text. Content spans are tokenized without special matching,
@@ -105,7 +105,7 @@ void AppendPythonReprString(std::string& output, std::string_view value) {
 
 // NOLINTNEXTLINE(misc-no-recursion)
 // Python repr() of a JSON value for sequence tool arguments.
-void AppendPythonRepr(std::string& output, const gufo::json::Value& v) {
+void AppendPythonRepr(std::string& output, const superroc::json::Value& v) {
   if (v.is_string()) {
     AppendPythonReprString(output, v.str());
     return;
@@ -199,7 +199,7 @@ void AppendArgValue(std::string& output, const ChatMessage::ToolArgument& arg,
   } else if (!arg.value.empty() && arg.value.front() == '[') {
     if (variant.python_repr_sequences) {
       try {
-        AppendPythonRepr(output, gufo::json::parse(arg.value));
+        AppendPythonRepr(output, superroc::json::parse(arg.value));
       } catch (const std::exception&) {
         output.append(PythonJsonSpacing(arg.value));
       }
@@ -297,7 +297,7 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
     }
     sys.push_back(']');
     if (options.require_tool_call) {
-      // LFM2: gufo extension, the pinned template has no "required"; same
+      // LFM2: superroc extension, the pinned template has no "required"; same
       // sentence as the Qwen renderer.
       sys.append(
           "\nYou must call at least one available function. Do not answer the "
@@ -387,7 +387,7 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
 
   if (options.add_generation_prompt) {
     if (options.require_tool_call) {
-      // LFM2: gufo extension, the pinned template has no "required"; prefill
+      // LFM2: superroc extension, the pinned template has no "required"; prefill
       // past thinking into a tool call so a required call cannot be skipped.
       // Super ROC: stop at <|tool_call_start|>. The vocabulary merges "[" and
       // "(" with the following letters ("[get", "[search", "(x"), so a
@@ -405,7 +405,7 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
       if (variant.generation_opens_think) {
         out.append("<|im_start|>assistant\n<think>");
         if (!options.enable_thinking) {
-          // gufo extension: the pinned template has no think-off switch.
+          // superroc extension: the pinned template has no think-off switch.
           out.append("</think>");
         }
       } else {
@@ -436,4 +436,4 @@ std::optional<std::vector<TokenId>> Lfm2RenderAndTokenize(
                                           rendered->size(), spans, tok_opts);
 }
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization

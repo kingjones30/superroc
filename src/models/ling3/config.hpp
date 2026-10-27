@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_CONFIG_HPP_
-#define GUFO_MODELS_LING3_CONFIG_HPP_
+#ifndef SUPERROC_MODELS_LING3_CONFIG_HPP_
+#define SUPERROC_MODELS_LING3_CONFIG_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +10,7 @@
 
 #include "src/core/gguf_reader.hpp"
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 
 /// Architecture parameters of a `bailingmoe3` GGUF artifact (Ling-3.0).
 ///
@@ -113,6 +113,6 @@ struct Config {
       const core::GgufReader& reader, std::string* error_msg = nullptr);
 };
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3
 
-#endif  // GUFO_MODELS_LING3_CONFIG_HPP_
+#endif  // SUPERROC_MODELS_LING3_CONFIG_HPP_

@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_TEXT_MODEL_RUNNER_HPP_
-#define GUFO_SERVER_TEXT_MODEL_RUNNER_HPP_
+#ifndef SUPERROC_SERVER_TEXT_MODEL_RUNNER_HPP_
+#define SUPERROC_SERVER_TEXT_MODEL_RUNNER_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -23,7 +23,7 @@
 #include "src/cli/serve/text_publication_wait.hpp"
 #include "src/core/sampling.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 struct ComponentCacheResources;
 
@@ -764,6 +764,6 @@ private:
   return !is_llama;
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_TEXT_MODEL_RUNNER_HPP_
+#endif  // SUPERROC_SERVER_TEXT_MODEL_RUNNER_HPP_

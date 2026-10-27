@@ -17,7 +17,7 @@
 #include "src/models/qwen/hip/kernels/q4_0_gemv.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<std::uint32_t WavesPerBlock>
 __launch_bounds__(WavesPerBlock * 32, 4) __global__
@@ -501,11 +501,11 @@ void LaunchFusedSwiGLUGEMV(const void* gate_w, core::GgmlType gate_type,
     float* up_scratch = nullptr;
     if (RocmFp4SwigluScratch(intermediate_size, gate_scratch, up_scratch,
                              stream) &&
-        PrepareRocmFp4Act(x, hidden_size, GUFO_FP4_Q8_SLOT_FFN_X, stream) &&
-        TryLaunchRocmFp4GemvSlot(gate_type, gate_w, GUFO_FP4_Q8_SLOT_FFN_X,
+        PrepareRocmFp4Act(x, hidden_size, SUPERROC_FP4_Q8_SLOT_FFN_X, stream) &&
+        TryLaunchRocmFp4GemvSlot(gate_type, gate_w, SUPERROC_FP4_Q8_SLOT_FFN_X,
                                  gate_scratch, intermediate_size, hidden_size,
                                  stream) &&
-        TryLaunchRocmFp4GemvSlot(up_type, up_w, GUFO_FP4_Q8_SLOT_FFN_X,
+        TryLaunchRocmFp4GemvSlot(up_type, up_w, SUPERROC_FP4_Q8_SLOT_FFN_X,
                                  up_scratch, intermediate_size, hidden_size,
                                  stream)) {
       LaunchBatchedSwiGLUActivation(gate_scratch, up_scratch, out, nullptr,
@@ -532,7 +532,7 @@ void LaunchFusedSwiGLUGEMV(const void* gate_w, core::GgmlType gate_type,
               static_cast<const hip_bfloat16*>(gate_w),
               static_cast<const hip_bfloat16*>(up_w), x, out, intermediate_size,
               hidden_size);
-      GUFO_CHECK_LAUNCH("Wave32FusedSwiGLUGEMVKernel_2Rows<kWavesPerBlock>");
+      SUPERROC_CHECK_LAUNCH("Wave32FusedSwiGLUGEMVKernel_2Rows<kWavesPerBlock>");
       return;
     }
 
@@ -543,7 +543,7 @@ void LaunchFusedSwiGLUGEMV(const void* gate_w, core::GgmlType gate_type,
             static_cast<const hip_bfloat16*>(gate_w),
             static_cast<const hip_bfloat16*>(up_w), x, out, intermediate_size,
             hidden_size);
-    GUFO_CHECK_LAUNCH("Wave32FusedSwiGLUGEMVKernel_1Row<kWavesPerBlock>");
+    SUPERROC_CHECK_LAUNCH("Wave32FusedSwiGLUGEMVKernel_1Row<kWavesPerBlock>");
     return;
   }
 
@@ -563,7 +563,7 @@ void LaunchFusedSwiGLUGEMV(const void* gate_w, core::GgmlType gate_type,
             <<<grid, kBlockThreads, 0, stream>>>(
                 gate_w, gate_type, up_w, up_type, x, out, intermediate_size,
                 hidden_size);
-        GUFO_CHECK_LAUNCH("Wave32FusedQuantSwiGLUGEMVKernel_2Rows<kWavesPerBlock, StaticType, StaticUpType>");
+        SUPERROC_CHECK_LAUNCH("Wave32FusedQuantSwiGLUGEMVKernel_2Rows<kWavesPerBlock, StaticType, StaticUpType>");
       };
       if (gate_type == up_type) {
         switch (gate_type) {
@@ -616,14 +616,14 @@ void LaunchFusedSwiGLUGEMV(const void* gate_w, core::GgmlType gate_type,
         <<<grid, kBlockThreads, 0, stream>>>(gate_w, gate_type, up_w, up_type,
                                              x, out, intermediate_size,
                                              hidden_size);
-    GUFO_CHECK_LAUNCH("Wave32FusedQuantSwiGLUGEMVKernel_1Row<kWavesPerBlock>");
+    SUPERROC_CHECK_LAUNCH("Wave32FusedQuantSwiGLUGEMVKernel_1Row<kWavesPerBlock>");
     return;
   }
 
   FastFusedSwiGLUGEMVBlockKernel<<<intermediate_size, 512, 0, stream>>>(
       gate_w, gate_type, up_w, up_type, x, out, intermediate_size, hidden_size);
-  GUFO_CHECK_LAUNCH("FastFusedSwiGLUGEMVBlockKernel");
+  SUPERROC_CHECK_LAUNCH("FastFusedSwiGLUGEMVBlockKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

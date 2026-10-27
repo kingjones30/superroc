@@ -22,7 +22,7 @@ void Check(bool condition, std::string_view message) {
 }
 
 void TestDispatchThresholdAndFallbackOrder() {
-  using gufo::hip::detail::DispatchPrefillAttention;
+  using superroc::hip::detail::DispatchPrefillAttention;
   for (const std::size_t length : {1023U, 1024U}) {
     for (const bool supported : {false, true}) {
       std::vector<Attempt> attempts;
@@ -43,8 +43,8 @@ void TestDispatchThresholdAndFallbackOrder() {
 }
 
 void TestBackendSupportPredicates() {
-  using gufo::hip::detail::AttentionSupportParams;
-  using gufo::hip::detail::IsTiledAttentionSupported;
+  using superroc::hip::detail::AttentionSupportParams;
+  using superroc::hip::detail::IsTiledAttentionSupported;
   const AttentionSupportParams valid{.batch_size = 1024,
                                      .start_pos = 0,
                                      .max_context = 4096,
@@ -87,12 +87,12 @@ void TestBackendSupportPredicates() {
 }
 
 void TestDecodeSplitPolicy() {
-  using gufo::hip::detail::DecodeAttentionScratchElements;
-  using gufo::hip::detail::IsFusedQkNormSupported;
-  using gufo::hip::detail::IsSplitKDecodeAttentionSupported;
-  using gufo::hip::detail::kKatGqa8MaxSplits;
-  using gufo::hip::detail::SelectDecodeAttentionSplitCount;
-  using gufo::hip::detail::SelectKatGqa8SplitCount;
+  using superroc::hip::detail::DecodeAttentionScratchElements;
+  using superroc::hip::detail::IsFusedQkNormSupported;
+  using superroc::hip::detail::IsSplitKDecodeAttentionSupported;
+  using superroc::hip::detail::kKatGqa8MaxSplits;
+  using superroc::hip::detail::SelectDecodeAttentionSplitCount;
+  using superroc::hip::detail::SelectKatGqa8SplitCount;
 
   Check(SelectDecodeAttentionSplitCount(1) == 1,
         "the first decode token uses one online-softmax partition");

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_MINIMAX_H3_GENERATION_HPP_
-#define GUFO_MODELS_MINIMAX_H3_GENERATION_HPP_
+#ifndef SUPERROC_MODELS_MINIMAX_H3_GENERATION_HPP_
+#define SUPERROC_MODELS_MINIMAX_H3_GENERATION_HPP_
 
 #include <cstdint>
 #include <filesystem>
@@ -16,10 +16,10 @@
 #include "src/models/minimax_h3/runtime.hpp"
 #include "src/models/minimax_h3/video_vae.hpp"
 
-namespace gufo::minimax_h3 {
+namespace superroc::minimax_h3 {
 
 inline constexpr std::string_view kH3GenerationSchema =
-    "gufo.minimax-h3-text-generation.v1";
+    "superroc.minimax-h3-text-generation.v1";
 
 struct GenerationParameters {
   std::string preset;
@@ -104,6 +104,6 @@ using GenerationProgress = void (*)(std::string_view phase, int completed,
 [[nodiscard]] std::string GenerationTelemetryJson(
     const GenerationTelemetry& telemetry);
 
-}  // namespace gufo::minimax_h3
+}  // namespace superroc::minimax_h3
 
-#endif  // GUFO_MODELS_MINIMAX_H3_GENERATION_HPP_
+#endif  // SUPERROC_MODELS_MINIMAX_H3_GENERATION_HPP_

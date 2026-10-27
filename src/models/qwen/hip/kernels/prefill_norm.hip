@@ -12,7 +12,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<std::size_t CachedDim = 0>
 __global__ void BatchedRMSNormKernel(const float* __restrict__ x,
@@ -114,13 +114,13 @@ void LaunchBatchedRMSNorm(const float* x, const float* weight, float* out,
     BatchedRMSNormKernel<5120><<<batch_size, 256, 0, stream>>>(
         x, weight, out, static_cast<hip_bfloat16*>(out_bf16), batch_size, dim,
         eps);
-    GUFO_CHECK_LAUNCH("BatchedRMSNormKernel<5120>");
+    SUPERROC_CHECK_LAUNCH("BatchedRMSNormKernel<5120>");
     return;
   }
   BatchedRMSNormKernel<><<<batch_size, 256, 0, stream>>>(
       x, weight, out, static_cast<hip_bfloat16*>(out_bf16), batch_size, dim,
       eps);
-  GUFO_CHECK_LAUNCH("BatchedRMSNormKernel<>");
+  SUPERROC_CHECK_LAUNCH("BatchedRMSNormKernel<>");
 }
 
 __global__ void BatchedPerHeadRMSNormKernel(const float* __restrict__ x,
@@ -175,7 +175,7 @@ void LaunchBatchedPerHeadRMSNorm(const float* x, const float* weight,
   const dim3 grid(num_heads, static_cast<unsigned int>(batch_size));
   BatchedPerHeadRMSNormKernel<<<grid, 256, 0, stream>>>(
       x, weight, out, batch_size, num_heads, head_dim, eps);
-  GUFO_CHECK_LAUNCH("BatchedPerHeadRMSNormKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedPerHeadRMSNormKernel");
 }
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_QUANT_GGML_DEQUANT_HPP_
-#define GUFO_CORE_QUANT_GGML_DEQUANT_HPP_
+#ifndef SUPERROC_CORE_QUANT_GGML_DEQUANT_HPP_
+#define SUPERROC_CORE_QUANT_GGML_DEQUANT_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +8,7 @@
 
 #include "src/core/gguf_reader.hpp"
 
-namespace gufo::quant {
+namespace superroc::quant {
 
 // Canonical quantized block layouts. These are the authoritative field
 // layouts for the dequant/dot paths. Relocated verbatim from the internal
@@ -227,6 +227,6 @@ float DotProductROCMFP4_Dual(const void* row, std::span<const float> vec,
 float DotProductROCMFP4_Fast(const void* row, std::span<const float> vec,
                              std::size_t k);
 
-}  // namespace gufo::quant
+}  // namespace superroc::quant
 
-#endif  // GUFO_CORE_QUANT_GGML_DEQUANT_HPP_
+#endif  // SUPERROC_CORE_QUANT_GGML_DEQUANT_HPP_

@@ -1,13 +1,13 @@
 // ling3_tokenize_dump.cpp — LQ1's tokenizer parity probe.
 //
-// Prints gufo's token ids for a text file so they can be diffed against
+// Prints superroc's token ids for a text file so they can be diffed against
 // llama.cpp's `llama-tokenize`. Loads ONLY the vocabulary from the GGUF: no
 // weights are read, no engine is constructed, no GPU is touched. The ids come
 // from LingTokenizer::Encode with exactly the arguments tools/ling3_batch_test.cpp
 // uses (defaults: no BOS, parse_special on), so what is compared here is what
 // the perplexity gate actually feeds the model.
 //
-//   gufo_ling3_tokenize <gguf> <text-file> [mode] [flags]
+//   superroc_ling3_tokenize <gguf> <text-file> [mode] [flags]
 //
 //   modes (default is --lines)
 //     --lines        one id per line
@@ -37,7 +37,7 @@
 
 namespace {
 
-namespace l3 = ::gufo::models::ling3;
+namespace l3 = ::superroc::models::ling3;
 
 enum class Mode { kLines, kIds, kCount, kPieces, kDumpVocab };
 
@@ -72,7 +72,7 @@ bool ReadWholeFile(const std::filesystem::path& path, std::string* out,
 
 void PrintUsage() {
   std::fprintf(stderr,
-               "usage: gufo_ling3_tokenize <gguf> <text-file> "
+               "usage: superroc_ling3_tokenize <gguf> <text-file> "
                "[--lines|--ids|--count|--pieces|--dump-vocab] "
                "[--no-parse-special] [--add-bos]\n");
 }
@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
 
   std::string err;
   std::fprintf(stderr, "reading vocabulary from %s\n", gguf_path.c_str());
-  auto reader = gufo::core::GgufReader::OpenFile(gguf_path, &err);
+  auto reader = superroc::core::GgufReader::OpenFile(gguf_path, &err);
   if (!reader) {
     std::fprintf(stderr, "FAIL open gguf: %s\n", err.c_str());
     return 1;

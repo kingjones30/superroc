@@ -16,7 +16,7 @@
 namespace {
 
 int g_fail = 0;
-std::vector<std::unique_ptr<gufo::core::GgufReader>> g_readers;
+std::vector<std::unique_ptr<superroc::core::GgufReader>> g_readers;
 
 void Check(bool ok, const std::string& name, const std::string& why = "") {
   if (ok) {
@@ -27,9 +27,9 @@ void Check(bool ok, const std::string& name, const std::string& why = "") {
   }
 }
 
-const gufo::core::GgufReader* Open(const std::string& path, std::string* err,
+const superroc::core::GgufReader* Open(const std::string& path, std::string* err,
                                    const std::string& tag) {
-  auto reader = gufo::core::GgufReader::OpenFile(path, err);
+  auto reader = superroc::core::GgufReader::OpenFile(path, err);
   if (reader == nullptr) {
     Check(false, tag, path + " unreadable: " + *err);
     return nullptr;
@@ -119,7 +119,7 @@ int main() {
         Check(c.IsValidQwen(), "A-valid", "IsValidQwen false");
       }
       auto weights =
-          gufo::models::QwenModelWeights::LoadFromGguf(*reader, &err);
+          superroc::models::QwenModelWeights::LoadFromGguf(*reader, &err);
       Check(weights.has_value(), "A-bind", err);
       if (weights.has_value()) {
         Check(weights->output_tied_to_token_embd, "A-tied", "head is not tied");
@@ -137,7 +137,7 @@ int main() {
                   " probs=" + std::to_string(l2.exp_probs_b.num_elements));
         const auto& l3 = weights->layers[3];
         Check(l3.is_shortconv && l3.is_moe &&
-                  l3.shortconv_conv.type == gufo::core::GgmlType::kF32 &&
+                  l3.shortconv_conv.type == superroc::core::GgmlType::kF32 &&
                   l3.shortconv_conv.num_elements == 3U * 2048U,
               "A-layer3",
               "is_conv=" + std::to_string(l3.is_shortconv) +
@@ -160,7 +160,7 @@ int main() {
       const auto config = reader->ExtractModelConfig(&err);
       Check(config.has_value(), "B-config", err);
       auto weights =
-          gufo::models::QwenModelWeights::LoadFromGguf(*reader, &err);
+          superroc::models::QwenModelWeights::LoadFromGguf(*reader, &err);
       Check(!weights.has_value() &&
                 err.find("must be ROCmFP4") != std::string::npos,
             "B-bind-fails-fp4", err);
@@ -173,7 +173,7 @@ int main() {
     const auto* reader = Open(q_path, &err, "Q-open");
     if (reader != nullptr) {
       auto weights =
-          gufo::models::QwenModelWeights::LoadFromGguf(*reader, &err);
+          superroc::models::QwenModelWeights::LoadFromGguf(*reader, &err);
       Check(!weights.has_value() &&
                 err.find("must be ROCmFP4") != std::string::npos,
             "Q-bind-fails-fp4", err);
@@ -192,7 +192,7 @@ int main() {
         Check(config->IsValidQwen(), "QWEN-valid", "IsValidQwen false");
       }
       auto weights =
-          gufo::models::QwenModelWeights::LoadFromGguf(*reader, &err);
+          superroc::models::QwenModelWeights::LoadFromGguf(*reader, &err);
       Check(weights.has_value(), "QWEN-bind", err);
     }
   }

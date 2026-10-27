@@ -8,8 +8,8 @@
 
 #include "tests/cache/fake_adapter.hpp"
 #include "tests/cache/prefix_index_fixture.hpp"
-using namespace gufo::cache;
-using namespace gufo::cache::testing;
+using namespace superroc::cache;
+using namespace superroc::cache::testing;
 namespace {
 struct Log final : RetentionEventSink {
   std::vector<RetentionEvent> events;

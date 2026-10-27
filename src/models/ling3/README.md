@@ -12,13 +12,13 @@ below was the first part of the port and is still the oracle for the GPU kernels
 | `config.{hpp,cpp}` | fail-closed `bailingmoe3.*` metadata validator |
 | `weights.{hpp,cpp}` | tensor binding for 100/101, Q8_0, Q6_K, F32 |
 | `tokenizer.{hpp,cpp}` | GPT-2 byte-level BPE, `pre = bailingmoe2` |
-| `chat_template.{hpp,cpp}` | the Bailing-V3 template in C++ (gufo has no Jinja) |
+| `chat_template.{hpp,cpp}` | the Bailing-V3 template in C++ (superroc has no Jinja) |
 | `cpu_ops.{hpp,cpp}` | scalar operators, every format decoded on the fly |
 | `reference.{hpp,cpp}` | the single-token float32 forward — the oracle |
 
 ## The one core change this port required
 
-gufo could not open this artifact at all. `GgmlReader` rejects any tensor whose
+superroc could not open this artifact at all. `GgmlReader` rejects any tensor whose
 type `quant::QuantizedBlockElements()` does not recognise, and ROCmFP4 (100/101)
 was absent — which is *every weight tensor in the file*. The change is additive
 and touches three lines' worth of shared code:
@@ -82,10 +82,10 @@ packages.
 
 ## Tests
 
-Everything below runs on a laptop: no model file, no GPU, no `gufo_core`.
+Everything below runs on a laptop: no model file, no GPU, no `superroc_core`.
 
 ```
-cmake --build build-lg --target gufo_ling3_semantics   # the four operator tests
+cmake --build build-lg --target superroc_ling3_semantics   # the four operator tests
 cmake --build build-lg --target ling3_step_test        # structural wiring
 ```
 
@@ -114,17 +114,17 @@ End-to-end token equality on the real artifact is checked by
 
 ```bash
 # greedy decode, printing token ids
-./build-lg/src/models/ling3/gufo_ling3_ref <model.gguf> --prompt "hello" --tokens 32
+./build-lg/src/models/ling3/superroc_ling3_ref <model.gguf> --prompt "hello" --tokens 32
 
 # tokenization only, for a differential test against the fork
-./build-lg/src/models/ling3/gufo_ling3_ref <model.gguf> \
+./build-lg/src/models/ling3/superroc_ling3_ref <model.gguf> \
     --prompt-file p.txt --tokenize-only
 
 # render the gate-(b) chat prompt with this package's own template
-./build-lg/src/models/ling3/gufo_ling3_ref <model.gguf> --render-chat
+./build-lg/src/models/ling3/superroc_ling3_ref <model.gguf> --render-chat
 
 # per-layer trace, to diff against llama-eval-callback
-./build-lg/src/models/ling3/gufo_ling3_ref <model.gguf> \
+./build-lg/src/models/ling3/superroc_ling3_ref <model.gguf> \
     --prompt-file p.txt --tokens 1 --trace
 ```
 
@@ -133,7 +133,7 @@ runs at roughly a second per token on a dozen threads.
 
 ## Not done
 
-- **No ROCm session.** The kernels need gufo's `hip::DeviceModel` / `Executor` /
+- **No ROCm session.** The kernels need superroc's `hip::DeviceModel` / `Executor` /
   `Session`, which do not exist for `ling3`. LK's and LX's headers are ready and
   LK's KDA state layout already matches this package's byte for byte, so the
   remaining work is the runtime plumbing, not the semantics.

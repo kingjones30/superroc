@@ -15,7 +15,7 @@
 #include "src/models/qwen/hip/ops/attention.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void SyncTiledAttentionKvPrefixKernel(
     const float* __restrict__ k_cache, const float* __restrict__ v_cache,
@@ -459,14 +459,14 @@ bool LaunchBatchedAttentionTile(
         k_cache, v_cache, static_cast<__half*>(k_cache_f16),
         static_cast<__half*>(v_cache_f16), layer_idx, start_pos, max_context,
         num_kv_heads, head_dim);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   }
   if (!skip_kv_write) {
     PackTiledAttentionKvKernel<<<pack_grid, block_size, 0, stream>>>(
         k, v, static_cast<__half*>(k_cache_f16),
         static_cast<__half*>(v_cache_f16), k_cache, v_cache, layer_idx,
         start_pos, batch_size, max_context);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   }
 
   const dim3 attention_grid(
@@ -478,7 +478,7 @@ bool LaunchBatchedAttentionTile(
   QwenTiledAttentionKernel<<<attention_grid, attention_block, 0, stream>>>(
       q, gate, layer_k, layer_v, out_context, start_pos, batch_size, lse_out,
       key_begin);
-  if (::gufo::hip_check::LaunchFailed()) return false;
+  if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
 
@@ -514,7 +514,7 @@ bool LaunchPackTiledAttentionKv(
         k_cache, v_cache, static_cast<__half*>(k_cache_f16),
         static_cast<__half*>(v_cache_f16), layer_idx, start_pos, max_context,
         num_kv_heads, head_dim);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   }
   const dim3 pack_grid(
       static_cast<unsigned int>((kv_width + block_size - 1) / block_size),
@@ -523,7 +523,7 @@ bool LaunchPackTiledAttentionKv(
       k, v, static_cast<__half*>(k_cache_f16),
       static_cast<__half*>(v_cache_f16), k_cache, v_cache, layer_idx, start_pos,
       batch_size, max_context);
-  if (::gufo::hip_check::LaunchFailed()) return false;
+  if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
 
@@ -568,5 +568,5 @@ template __global__ void PackTiledAttentionKvKernel<
     __half* __restrict__, float* __restrict__, float* __restrict__,
     std::uint32_t, std::uint32_t, std::size_t, std::uint32_t);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

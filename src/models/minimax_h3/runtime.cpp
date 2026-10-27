@@ -17,17 +17,18 @@
 
 #include "src/models/minimax_h3/json.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
+#include "src/core/previous_name_compat.hpp"
 
-namespace gufo::minimax_h3 {
+namespace superroc::minimax_h3 {
 
 namespace {
 
-constexpr std::string_view kManifestSchema = "gufo.minimax-h3-source.v1";
+constexpr std::string_view kManifestSchema = "superroc.minimax-h3-source.v1";
 constexpr std::string_view kModelKind = "minimax-h3-fl2va-bf16";
 constexpr std::string_view kRevision =
     "42ed227ee7df40d41602854ae760620d6eb651fe";
 constexpr std::string_view kSourceManifestSha256 =
-    "00a83367b87017f1f3d5547a963b20567a46d7aea44f0aac495c816147720d89";
+    "3832d0406f2197fdc8033970eaae4a08118a9127a569d6f2e2d0b7a2809849d7";
 constexpr std::size_t kMaximumJsonBytes = 64U << 20U;
 constexpr std::uint64_t kMaximumHeaderBytes = 64U << 20U;
 constexpr std::size_t kDeviceAlignment = 256;
@@ -404,7 +405,8 @@ std::optional<ModelInventory> ModelInventory::Inspect(
     }
     const json::Value manifest =
         json::ParseFile(source_manifest, kMaximumJsonBytes);
-    if (RequireField(manifest, "schema").AsString() != kManifestSchema ||
+    if (!::superroc::core::MatchesCurrentOrPrevious(
+            RequireField(manifest, "schema").AsString(), kManifestSchema) ||
         RequireField(manifest, "model_kind").AsString() != kModelKind ||
         RequireField(manifest, "revision").AsString() != kRevision) {
       throw json::Error("source manifest identity does not match MiniMax H3");
@@ -916,4 +918,4 @@ const ResidentTensor* PhaseSession::FindTensor(
   return nullptr;
 }
 
-}  // namespace gufo::minimax_h3
+}  // namespace superroc::minimax_h3

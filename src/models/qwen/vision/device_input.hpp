@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_VISION_DEVICE_INPUT_HPP_
-#define GUFO_MODELS_QWEN_VISION_DEVICE_INPUT_HPP_
+#ifndef SUPERROC_MODELS_QWEN_VISION_DEVICE_INPUT_HPP_
+#define SUPERROC_MODELS_QWEN_VISION_DEVICE_INPUT_HPP_
 
 #include <hip/hip_runtime.h>
 
@@ -11,7 +11,7 @@
 #include "src/models/qwen/vision/prompt.hpp"
 #include "src/models/qwen/vision/rope.hpp"
 
-namespace gufo::models::qwen::vision {
+namespace superroc::models::qwen::vision {
 
 /// Per-session image inputs. The stable device descriptor lets captured
 /// decode graphs follow a new request without capturing its image pointers.
@@ -53,5 +53,5 @@ private:
   Encoder::CancellationCheck is_cancelled_;
 };
 
-}  // namespace gufo::models::qwen::vision
+}  // namespace superroc::models::qwen::vision
 #endif

@@ -14,7 +14,7 @@
 #include "src/models/qwen_image_21/hip/runtime.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::models::qwen_image_21::hip {
+namespace superroc::models::qwen_image_21::hip {
 namespace {
 
 using B = hip_bfloat16;
@@ -602,22 +602,22 @@ void NormalizeRows(const std::uint16_t* input, std::uint16_t* output,
     if (silu) {
       WaveNorm<true><<<(rows + 7) / 8, 256, 0, stream>>>(
           x, y, w, b, rows, cols, static_cast<int>(kind), epsilon);
-      GUFO_CHECK_LAUNCH("WaveNorm<true>");
+      SUPERROC_CHECK_LAUNCH("WaveNorm<true>");
     }
     else
       WaveNorm<false><<<(rows + 7) / 8, 256, 0, stream>>>(
           x, y, w, b, rows, cols, static_cast<int>(kind), epsilon);
-      GUFO_CHECK_LAUNCH("WaveNorm<false>");
+      SUPERROC_CHECK_LAUNCH("WaveNorm<false>");
   } else {
     if (silu) {
       NormKernel<true><<<rows, 256, 0, stream>>>(
           x, y, w, b, cols, static_cast<int>(kind), epsilon);
-      GUFO_CHECK_LAUNCH("NormKernel<true>");
+      SUPERROC_CHECK_LAUNCH("NormKernel<true>");
     }
     else
       NormKernel<false><<<rows, 256, 0, stream>>>(
           x, y, w, b, cols, static_cast<int>(kind), epsilon);
-      GUFO_CHECK_LAUNCH("NormKernel<false>");
+      SUPERROC_CHECK_LAUNCH("NormKernel<false>");
   }
 }
 
@@ -628,7 +628,7 @@ void NormalizeRotary128(const std::uint16_t* input, std::uint16_t* output,
   RmsRotary128<<<(rows * heads + 7) / 8, 256, 0, stream>>>(
       reinterpret_cast<const B*>(input), reinterpret_cast<B*>(output),
       reinterpret_cast<const B*>(weight), frequencies, rows, heads, epsilon);
-  GUFO_CHECK_LAUNCH("RmsRotary128");
+  SUPERROC_CHECK_LAUNCH("RmsRotary128");
 }
 
 void ReorderHeads(const std::uint16_t* input, std::uint16_t* output, int rows,
@@ -641,16 +641,16 @@ void ReorderHeads(const std::uint16_t* input, std::uint16_t* output, int rows,
     if (inverse) {
       HeadLayout128<true>
           <<<grid, 256, 0, stream>>>(x, y, rows, heads, kv_heads);
-      GUFO_CHECK_LAUNCH("HeadLayout128<true>");
+      SUPERROC_CHECK_LAUNCH("HeadLayout128<true>");
     }
     else
       HeadLayout128<false>
           <<<grid, 256, 0, stream>>>(x, y, rows, heads, kv_heads);
-      GUFO_CHECK_LAUNCH("HeadLayout128<false>");
+      SUPERROC_CHECK_LAUNCH("HeadLayout128<false>");
   } else {
     HeadLayout<<<Blocks(static_cast<std::size_t>(rows) * heads * dim), 256, 0,
                  stream>>>(x, y, rows, heads, kv_heads, dim, inverse);
-    GUFO_CHECK_LAUNCH("HeadLayout");
+    SUPERROC_CHECK_LAUNCH("HeadLayout");
   }
 }
 
@@ -851,7 +851,7 @@ Matrix Runtime::Weight(std::string_view name) {
     UploadMapped(raw.data, w.data, w.bytes);
     FloatToBf16<<<Blocks(count), 256, 0, stream_>>>(
         reinterpret_cast<const float*>(raw.data), Ptr(m), count);
-    GUFO_CHECK_LAUNCH("FloatToBf16");
+    SUPERROC_CHECK_LAUNCH("FloatToBf16");
   }
   const bool packed_convolution = w.shape.size() == 4 && w.shape[2] == 3 &&
                                   w.shape[3] == 3 &&
@@ -926,13 +926,13 @@ void Runtime::Matmul(const Matrix& x, const Matrix& w, Matrix& output,
       Bias<true><<<Blocks(output.size()), 256, 0, stream_>>>(
           reinterpret_cast<float*>(accumulation.data), Ptr(*bias), Ptr(output),
           output.cols, output.size());
-      GUFO_CHECK_LAUNCH("Bias<true>");
+      SUPERROC_CHECK_LAUNCH("Bias<true>");
     }
     else
       Bias<false><<<Blocks(output.size()), 256, 0, stream_>>>(
           reinterpret_cast<float*>(accumulation.data), Ptr(*bias), Ptr(output),
           output.cols, output.size());
-      GUFO_CHECK_LAUNCH("Bias<false>");
+      SUPERROC_CHECK_LAUNCH("Bias<false>");
   }
   Check(hipGetLastError());
 }
@@ -1125,7 +1125,7 @@ Matrix Runtime::Attention(const Matrix& q, const Matrix& k, const Matrix& v,
   auto vf = Raw(vh.size() * 4), of = Raw(oh.size() * 4);
   Bf16ToFloat<<<Blocks(vh.size()), 256, 0, stream_>>>(
       Ptr(vh), reinterpret_cast<float*>(vf.data), vh.size());
-  GUFO_CHECK_LAUNCH("Bf16ToFloat");
+  SUPERROC_CHECK_LAUNCH("Bf16ToFloat");
   const int tile = std::min(128, q.rows);
   auto scores = Raw(static_cast<std::size_t>(heads) * tile * k.rows * 4);
   auto probabilities = Raw(static_cast<std::size_t>(heads) * tile * k.rows * 4);
@@ -1150,21 +1150,21 @@ Matrix Runtime::Attention(const Matrix& q, const Matrix& k, const Matrix& v,
           reinterpret_cast<float*>(scores.data),
           reinterpret_cast<float*>(probabilities.data), k.rows, count, start,
           reinterpret_cast<int*>(limits.data), 1.0F / std::sqrt(float(dim)));
-      GUFO_CHECK_LAUNCH("SoftmaxCached<17>");
+      SUPERROC_CHECK_LAUNCH("SoftmaxCached<17>");
     }
     else if (k.rows > 4352 && k.rows <= 8448) {
       SoftmaxCached<33><<<heads * count, 256, 0, stream_>>>(
           reinterpret_cast<float*>(scores.data),
           reinterpret_cast<float*>(probabilities.data), k.rows, count, start,
           reinterpret_cast<int*>(limits.data), 1.0F / std::sqrt(float(dim)));
-      GUFO_CHECK_LAUNCH("SoftmaxCached<33>");
+      SUPERROC_CHECK_LAUNCH("SoftmaxCached<33>");
     }
     else
       Softmax<<<heads * count, 256, 0, stream_>>>(
           reinterpret_cast<float*>(scores.data),
           reinterpret_cast<float*>(probabilities.data), k.rows, count, start,
           reinterpret_cast<int*>(limits.data), 1.0F / std::sqrt(float(dim)));
-      GUFO_CHECK_LAUNCH("Softmax");
+      SUPERROC_CHECK_LAUNCH("Softmax");
     BlasCheck(hipblasGemmStridedBatchedEx(
         blas_, HIPBLAS_OP_N, HIPBLAS_OP_N, dim, count, k.rows, &alpha, vf.data,
         HIP_R_32F, dim, static_cast<hipblasStride>(k.rows) * dim,
@@ -1288,7 +1288,7 @@ Matrix Runtime::Conv(const Matrix& x, int height, int width,
       Im2col<<<Blocks(input.size()), 256, 0, stream_>>>(
           Ptr(x), Ptr(input), height, width, x.cols, kernel, stride,
           std::max(0, padding), upscale, out_width, start, count);
-      GUFO_CHECK_LAUNCH("Im2col");
+      SUPERROC_CHECK_LAUNCH("Im2col");
     Matmul(input, w, output, bias.data ? &bias : nullptr, true);
   }
   Check(hipGetLastError());
@@ -1348,7 +1348,7 @@ std::vector<float> Runtime::Download(const Matrix& matrix) {
   auto tmp = Raw(matrix.size() * 4);
   Bf16ToFloat<<<Blocks(matrix.size()), 256, 0, stream_>>>(
       Ptr(matrix), reinterpret_cast<float*>(tmp.data), matrix.size());
-  GUFO_CHECK_LAUNCH("Bf16ToFloat");
+  SUPERROC_CHECK_LAUNCH("Bf16ToFloat");
   std::vector<float> result(matrix.size());
   Check(hipMemcpyAsync(result.data(), tmp.data, result.size() * 4,
                        hipMemcpyDeviceToHost, stream_));
@@ -1366,4 +1366,4 @@ void Runtime::Synchronize() {
   Check(hipStreamSynchronize(stream_));
 }
 
-}  // namespace gufo::models::qwen_image_21::hip
+}  // namespace superroc::models::qwen_image_21::hip

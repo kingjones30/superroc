@@ -48,7 +48,7 @@ bool HipOk(hipError_t err, const char* what) {
   return false;
 }
 
-bool CheckOk(const gufo::hip::Lfm2LaunchStatus& st, const char* what,
+bool CheckOk(const superroc::hip::Lfm2LaunchStatus& st, const char* what,
              const std::string& cas) {
   if (st.ok) {
     return true;
@@ -147,8 +147,8 @@ bool Download(std::vector<T>& dst, const T* src, const char* what) {
 }  // namespace
 
 int main() {
-  const int gate = gufo::test::GateHipDevice(
-      gufo::test::HipDeviceRequirement::kOptional, "lfm2_kv_f16_test");
+  const int gate = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional, "lfm2_kv_f16_test");
   if (gate != 0) {
     return gate;
   }
@@ -229,13 +229,13 @@ int main() {
         char cas[128];
         std::snprintf(cas, sizeof(cas), "decode f16 layer=%u pos=%u splits=%u",
                       layer, pos, ns);
-        if (!CheckOk(gufo::hip::LaunchLfm2DecodeAttention(
+        if (!CheckOk(superroc::hip::LaunchLfm2DecodeAttention(
                          d_q, d_kr, d_vr, d_o32, layer, d_pos, kMaxCtx, kHeads,
                          kKvHeads, kHeadDim, ns, d_partial, nullptr),
                      "fp32", cas) ||
             !HipOk(hipDeviceSynchronize(), "sync32") ||
             !Download(h_o32, d_o32, "down o32") ||
-            !CheckOk(gufo::hip::LaunchLfm2DecodeAttentionF16(
+            !CheckOk(superroc::hip::LaunchLfm2DecodeAttentionF16(
                          d_q, d_k16, d_v16, d_o16, layer, d_pos, kMaxCtx,
                          kHeads, kKvHeads, kHeadDim, ns, d_partial, nullptr),
                      "fp16", cas) ||
@@ -278,13 +278,13 @@ int main() {
                    "up pq")) {
           return 1;
         }
-        if (!CheckOk(gufo::hip::LaunchLfm2PrefillAttention(
+        if (!CheckOk(superroc::hip::LaunchLfm2PrefillAttention(
                          d_q, d_kr, d_vr, d_o32, layer, start, batch, kMaxCtx,
                          kHeads, kKvHeads, nullptr),
                      "fp32", cas) ||
             !HipOk(hipDeviceSynchronize(), "psync32") ||
             !Download(o32, d_o32, "down p32") ||
-            !CheckOk(gufo::hip::LaunchLfm2PrefillAttentionF16(
+            !CheckOk(superroc::hip::LaunchLfm2PrefillAttentionF16(
                          d_q, d_k16, d_v16, d_o16, layer, start, batch, kMaxCtx,
                          kHeads, kKvHeads, nullptr),
                      "fp16", cas) ||
@@ -364,12 +364,12 @@ int main() {
             "up wpos")) {
       return 1;
     }
-    const gufo::hip::Lfm2LaunchStatus st =
+    const superroc::hip::Lfm2LaunchStatus st =
         w.single
-            ? gufo::hip::LaunchLfm2WriteKvDevF16(d_k, d_v, d_k16, d_v16,
+            ? superroc::hip::LaunchLfm2WriteKvDevF16(d_k, d_v, d_k16, d_v16,
                                                  w.layer, d_pos, kMaxCtx,
                                                  kKvHeads, kHeadDim, nullptr)
-            : gufo::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16,
+            : superroc::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16,
                                                      w.layer, w.start, w.batch,
                                                      kMaxCtx, kKv, nullptr);
     if (!CheckOk(st, "launch", cas) ||
@@ -412,12 +412,12 @@ int main() {
                  "sat up pos")) {
         return 1;
       }
-      const gufo::hip::Lfm2LaunchStatus st =
+      const superroc::hip::Lfm2LaunchStatus st =
           single
-              ? gufo::hip::LaunchLfm2WriteKvDevF16(d_k, d_v, d_k16, d_v16,
+              ? superroc::hip::LaunchLfm2WriteKvDevF16(d_k, d_v, d_k16, d_v16,
                                                    layer, d_pos, kMaxCtx,
                                                    kKvHeads, kHeadDim, nullptr)
-              : gufo::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16,
+              : superroc::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16,
                                                        layer, start, 1, kMaxCtx,
                                                        kKv, nullptr);
       const char* cas =
@@ -449,8 +449,8 @@ int main() {
 
   // 4. Refusals: batched write past the context end.
   {
-    const gufo::hip::Lfm2LaunchStatus st =
-        gufo::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16, 0, 4000,
+    const superroc::hip::Lfm2LaunchStatus st =
+        superroc::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16, 0, 4000,
                                                300, kMaxCtx, kKv, nullptr);
     Report("write f16 batched refuses range", !st.ok,
            st.error != nullptr ? st.error : "(accepted)");

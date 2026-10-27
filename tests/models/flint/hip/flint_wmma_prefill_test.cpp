@@ -64,8 +64,8 @@ void Report(const std::string& cas, float gap) {
 }  // namespace
 
 int main() {
-  const int gate = gufo::test::GateHipDevice(
-      gufo::test::HipDeviceRequirement::kOptional, "flint_wmma_prefill_test");
+  const int gate = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional, "flint_wmma_prefill_test");
   if (gate != 0) {
     return gate;
   }
@@ -129,14 +129,14 @@ int main() {
   std::vector<float> ref(q_elems);
   for (std::uint32_t start_pos : kStart) {
     for (std::uint32_t window : kWin) {
-      const auto glim = gufo::hip::LaunchGlimmerPrefillAttention(
+      const auto glim = superroc::hip::LaunchGlimmerPrefillAttention(
           d_q, nullptr, d_cache, d_v, d_ref, kLayer, start_pos, kBatch, window,
           kMaxCtx, kHeads, kKv, kHeadDim, q_elems, 0, cache_elems, q_elems,
           nullptr, d_sinks);
-      const auto cast = gufo::hip::LaunchGlimmerCastKvFp16(
+      const auto cast = superroc::hip::LaunchGlimmerCastKvFp16(
           d_cache, d_f16, /*layers=*/1, kMaxCtx, kKv, kHeadDim,
           start_pos + kBatch, nullptr, kLayer, /*plane_layers=*/1);
-      const bool wmma = gufo::hip::LaunchQwenWmmaAttention(
+      const bool wmma = superroc::hip::LaunchQwenWmmaAttention(
           d_q, nullptr, nullptr, nullptr, nullptr, nullptr, d_f16, v_f16, d_out,
           kLayer, start_pos, kBatch, kMaxCtx, kHeads, kKv, kHeadDim, nullptr,
           nullptr, 0, /*skip_kv_write=*/true, {}, {}, window, d_sinks);
@@ -217,18 +217,18 @@ int main() {
   const std::span<float> k_span{d_kwork, k_floats};
   const std::span<float> v_span{d_vwork, v_floats};
   for (std::uint32_t window : kWin) {
-    const auto glim = gufo::hip::LaunchGlimmerPrefillAttention(
+    const auto glim = superroc::hip::LaunchGlimmerPrefillAttention(
         d_pq, nullptr, d_cache, d_v, d_glim, kLayer, 0, kPackedBatch, window,
         kMaxCtx, kHeads, kKv, kHeadDim, packed_q_elems, 0, cache_elems,
         packed_q_elems, nullptr, d_sinks);
-    const auto cast = gufo::hip::LaunchGlimmerCastKvFp16(
+    const auto cast = superroc::hip::LaunchGlimmerCastKvFp16(
         d_cache, d_f16, /*layers=*/1, kMaxCtx, kKv, kHeadDim, kPackedBatch,
         nullptr, kLayer, /*plane_layers=*/1);
-    const bool unpacked = gufo::hip::LaunchQwenWmmaAttention(
+    const bool unpacked = superroc::hip::LaunchQwenWmmaAttention(
         d_pq, nullptr, nullptr, nullptr, nullptr, nullptr, d_f16, v_f16, d_punp,
         kLayer, 0, kPackedBatch, kMaxCtx, kHeads, kKv, kHeadDim, nullptr,
         nullptr, 0, /*skip_kv_write=*/true, {}, {}, window, d_sinks);
-    const bool packed = gufo::hip::LaunchQwenWmmaAttention(
+    const bool packed = superroc::hip::LaunchQwenWmmaAttention(
         d_pq, nullptr, nullptr, nullptr, nullptr, nullptr, d_f16, v_f16, d_pout,
         kLayer, 0, kPackedBatch, kMaxCtx, kHeads, kKv, kHeadDim, nullptr,
         nullptr, 0, /*skip_kv_write=*/true, k_span, v_span, window, d_sinks);

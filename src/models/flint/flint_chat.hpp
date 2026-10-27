@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_FLINT_FLINT_CHAT_HPP_
-#define GUFO_MODELS_FLINT_FLINT_CHAT_HPP_
+#ifndef SUPERROC_MODELS_FLINT_FLINT_CHAT_HPP_
+#define SUPERROC_MODELS_FLINT_FLINT_CHAT_HPP_
 
 #include <optional>
 #include <span>
@@ -9,7 +9,7 @@
 
 #include "src/models/qwen/chat_template.hpp"
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 
 /// Pinned sha256 of ref/chat_template.jinja (RecursiveSI/flint).
 inline constexpr std::string_view kFlintChatTemplateSha256 =
@@ -39,6 +39,6 @@ struct FlintToolCallScan {
 
 [[nodiscard]] FlintToolCallScan ScanFlintToolCall(std::string_view text);
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization
 
-#endif  // GUFO_MODELS_FLINT_FLINT_CHAT_HPP_
+#endif  // SUPERROC_MODELS_FLINT_FLINT_CHAT_HPP_

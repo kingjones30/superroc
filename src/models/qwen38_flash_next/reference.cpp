@@ -8,7 +8,7 @@
 #include "src/core/quant/ggml_dequant.hpp"
 #include "src/models/qwen38_flash_next/cpu_ops.hpp"
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 
 using cpu::Sigmoid;
 using cpu::Silu;
@@ -207,7 +207,7 @@ bool ReferenceModel::Ple(const LayerWeights& l, std::int32_t token,
     conv_w_f16.resize(taps);
     const auto* bits = static_cast<const std::uint16_t*>(l.ple_conv1d.data);
     for (std::size_t i = 0; i < taps; ++i) {
-      conv_w_f16[i] = gufo::quant::Fp16ToFloat(bits[i]);
+      conv_w_f16[i] = superroc::quant::Fp16ToFloat(bits[i]);
     }
     conv_w = conv_w_f16.data();
   } else {
@@ -711,4 +711,4 @@ bool ReferenceModel::MtpStep(const MtpWeights& mtp, std::int32_t token,
   return true;
 }
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next

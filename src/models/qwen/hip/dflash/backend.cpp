@@ -19,12 +19,13 @@
 
 #include "src/core/sampling.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 [[nodiscard]] float DsparkEnvFloat(const char* name, float fallback) {
-  const char* value = std::getenv(name);
+  const char* value = ::superroc::core::GetEnvCompat(name);
   if (value == nullptr || value[0] == '\0') {
     return fallback;
   }
@@ -37,7 +38,7 @@ namespace {
 }
 
 [[nodiscard]] bool DsparkEnvOn(const char* name) {
-  const char* value = std::getenv(name);
+  const char* value = ::superroc::core::GetEnvCompat(name);
   return value != nullptr && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -53,7 +54,7 @@ struct DsparkInjectProf {
       return;
     }
     inited = true;
-    on = DsparkEnvOn("GUFO_DSPARK_STEP_PROF");
+    on = DsparkEnvOn("SUPERROC_DSPARK_STEP_PROF");
   }
 
   void Dump() const {
@@ -587,7 +588,7 @@ speculative::DraftProposal QwenDFlashGpuDraftBackend::ProposeImpl(
       temperature > 0.0F ? &proposal.candidate_probabilities : nullptr);
 
   if (gate_confidence) {
-    const float p_min = DsparkEnvFloat("GUFO_DSPARK_CONF_MIN", 0.5F);
+    const float p_min = DsparkEnvFloat("SUPERROC_DSPARK_CONF_MIN", 0.5F);
     if (p_min > 0.0F) {
       std::size_t keep = proposed_tokens_.size();
       for (std::size_t i = 0; i < confidences.size() && i < keep; ++i) {
@@ -815,5 +816,5 @@ void QwenDFlashGpuDraftBackend::Reset() noexcept {
   proposal_active_ = false;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

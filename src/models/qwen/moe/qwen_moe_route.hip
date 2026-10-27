@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <cstdio>
 
-#include "src/core/rocm_fp4/gufo_fp4_moe_group.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_route.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_moe_group.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_route.hpp"
 
 namespace {
 
@@ -266,7 +266,7 @@ int ValidateRouteArgs(const float* x, const float* gate, int k, int n_expert,
       n_used <= 0 || n_used > n_expert || n_used > kMaxUsed) {
     return 1;
   }
-  if (gufo_fp4_pow2_ge(n_expert) > kMaxExpert) {
+  if (superroc_fp4_pow2_ge(n_expert) > kMaxExpert) {
     return 1;
   }
   const std::size_t cells =
@@ -338,8 +338,8 @@ int LaunchQwenMoeRouteBatch(const float* x, const float* gate, int k,
   // ordered after the writes to x and before the head without the two host
   // synchronisations it needed on the null stream (80 per 40-layer prefill
   // chunk). Same kernel, same arithmetic.
-  if (gufo_fp4_route_logits_gemm_launch(x, gate, k, n_expert, n_tokens,
-                                        logits, stream) != GUFO_FP4_OK) {
+  if (superroc_fp4_route_logits_gemm_launch(x, gate, k, n_expert, n_tokens,
+                                        logits, stream) != SUPERROC_FP4_OK) {
     return 2;
   }
   const int head_blocks =

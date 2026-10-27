@@ -1,12 +1,13 @@
-#ifndef GUFO_MODELS_QWEN_HIP_EXECUTION_POLICY_HPP_
-#define GUFO_MODELS_QWEN_HIP_EXECUTION_POLICY_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_EXECUTION_POLICY_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_EXECUTION_POLICY_HPP_
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 enum class QwenKvCacheStorage : std::uint8_t {
   kFp32,
@@ -25,9 +26,9 @@ enum class QwenRecurrentStateStorage : std::uint8_t {
 }
 
 // LFM2 (SPEC3): token-major fp16 KV (the production plane) unless
-// GUFO_LFM2_KV=fp32 selects the fp32 head-major reference cache.
+// SUPERROC_LFM2_KV=fp32 selects the fp32 head-major reference cache.
 [[nodiscard]] inline QwenKvCacheStorage Lfm2KvCacheStorage() noexcept {
-  const char* env = std::getenv("GUFO_LFM2_KV");
+  const char* env = ::superroc::core::GetEnvCompat("SUPERROC_LFM2_KV");
   return env != nullptr && std::strcmp(env, "fp32") == 0
              ? QwenKvCacheStorage::kFp32
              : QwenKvCacheStorage::kFp16;
@@ -190,6 +191,6 @@ constexpr QwenGraphRejection& operator|=(QwenGraphRejection& lhs,
   return rejected;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
-#endif  // GUFO_MODELS_QWEN_HIP_EXECUTION_POLICY_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_EXECUTION_POLICY_HPP_

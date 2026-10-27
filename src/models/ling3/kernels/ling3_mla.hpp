@@ -1,6 +1,6 @@
 // ling3_mla.hpp — gated-MLA attention block of a Ling-3.0 `bailingmoe3` layer.
-// Lane: LK (MiMo) — Ling-on-gufo overnight build. Do not confuse with LG's
-// drafts. Lane LK, phase 2 of the Ling-on-gufo build. Phase-1 companion:
+// Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with LG's
+// drafts. Lane LK, phase 2 of the Ling-on-superroc build. Phase-1 companion:
 // ling3_kda.hpp.
 //
 // The fork's code is the spec:
@@ -139,7 +139,7 @@ struct MlaInputs {
 };
 
 // ---------------------------------------------------------------------------
-// The pieces (each independently callable so gufo can schedule/fuse).
+// The pieces (each independently callable so superroc can schedule/fuse).
 // ---------------------------------------------------------------------------
 
 // RoPE, GGML_ROPE_TYPE_NORM, applied over `rot` dims of one head's rope
@@ -191,7 +191,7 @@ void mla_pre_fused(const MlaShape& sh, const MlaScalars& sc,
 bool mla_decode_fused();
 
 /// The wo Q8_1 pair the Q2-MLA epilogue writes and the wo GEMV reads
-/// (qs[o_dim] int8 + ds[o_dim/32] float, gufo's internal layout). Allocated on
+/// (qs[o_dim] int8 + ds[o_dim/32] float, superroc's internal layout). Allocated on
 /// first use; `mla_wo_q8_qs()` stays null until then or if allocation failed,
 /// which is the caller's signal to fall back to quantising `out` itself.
 bool mla_wo_q8_prepare(int o_dim);
