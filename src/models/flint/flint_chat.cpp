@@ -5,7 +5,7 @@
 
 #include "src/core/json.hpp"
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 namespace {
 
 constexpr std::string_view kToolsHeader =
@@ -256,4 +256,4 @@ FlintToolCallScan ScanFlintToolCall(std::string_view text) {
   return result;
 }
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization

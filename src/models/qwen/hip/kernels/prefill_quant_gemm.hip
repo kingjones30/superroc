@@ -2,7 +2,7 @@
 #include "src/models/qwen/hip/kernels/prefill_quant_gemm.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<bool StoreActivationSum, typename T>
 __global__ void QuantizeActivationToQ8_1Kernel(const T* __restrict__ x,
@@ -943,7 +943,7 @@ void LaunchZeroQ8ActTail(void* q8_1_out, std::size_t batch, std::size_t k,
   ZeroQ8ActTailKernel<StoreActivationSum>
       <<<static_cast<unsigned int>((work + 255) / 256), 256, 0, stream>>>(
           q8_1_out, batch, num_blocks);
-  GUFO_CHECK_LAUNCH("ZeroQ8ActTailKernel<StoreActivationSum>");
+  SUPERROC_CHECK_LAUNCH("ZeroQ8ActTailKernel<StoreActivationSum>");
 }
 
 }  // namespace
@@ -963,7 +963,7 @@ void LaunchQuantizeActivationQ8_1(const void* bf16_x, void* q8_1_out,
   QuantizeActivationToQ8_1Kernel<true>
       <<<static_cast<unsigned int>(quant_grid), quant_threads, 0, stream>>>(
           reinterpret_cast<const hip_bfloat16*>(bf16_x), q8_1_out, batch, k);
-  GUFO_CHECK_LAUNCH("QuantizeActivationToQ8_1Kernel<true>");
+  SUPERROC_CHECK_LAUNCH("QuantizeActivationToQ8_1Kernel<true>");
   LaunchZeroQ8ActTail<true>(q8_1_out, batch, k, stream);
 }
 
@@ -987,7 +987,7 @@ void LaunchBatchedFusedSSMPostNormGateQuantizeQ8_1(
   BatchedFusedSSMPostNormGateQuantizeQ8_1Kernel<true>
       <<<grid, 128, 0, stream>>>(raw_out, ssm_norm, gate, q8_1_out, batch_size,
                                  inner_size, num_heads, val_dim);
-  GUFO_CHECK_LAUNCH("BatchedFusedSSMPostNormGateQuantizeQ8_1Kernel<true>");
+  SUPERROC_CHECK_LAUNCH("BatchedFusedSSMPostNormGateQuantizeQ8_1Kernel<true>");
   LaunchZeroQ8ActTail<true>(q8_1_out, batch_size, inner_size, stream);
 }
 
@@ -1009,7 +1009,7 @@ void LaunchBatchedFusedRMSNormQuantizeQ8_1(
   BatchedFusedRMSNormQuantizeQ8_1Kernel<true>
       <<<static_cast<unsigned int>(batch_size), 256, lds_bytes, stream>>>(
           x, residual, weight, sum_out, q8_1_out, batch_size, dim, eps);
-  GUFO_CHECK_LAUNCH("BatchedFusedRMSNormQuantizeQ8_1Kernel<true>");
+  SUPERROC_CHECK_LAUNCH("BatchedFusedRMSNormQuantizeQ8_1Kernel<true>");
   LaunchZeroQ8ActTail<true>(q8_1_out, batch_size, dim, stream);
 }
 
@@ -1028,7 +1028,7 @@ void LaunchQuantizeActivationQ8_1FromFp32(const float* fp32_x, void* q8_1_out,
   QuantizeActivationToQ8_1Kernel<true>
       <<<static_cast<unsigned int>(quant_grid), quant_threads, 0, stream>>>(
           fp32_x, q8_1_out, batch, k);
-  GUFO_CHECK_LAUNCH("QuantizeActivationToQ8_1Kernel<true>");
+  SUPERROC_CHECK_LAUNCH("QuantizeActivationToQ8_1Kernel<true>");
   LaunchZeroQ8ActTail<true>(q8_1_out, batch, k, stream);
 }
 
@@ -1047,7 +1047,7 @@ void LaunchBatchedFusedSwiGLUQuantizeQ8_1(const float* gate, const float* up,
   BatchedFusedSwiGLUQuantizeQ8_1Kernel<true>
       <<<static_cast<unsigned int>(quant_grid), quant_threads, 0, stream>>>(
           gate, up, q8_1_out, batch, k);
-  GUFO_CHECK_LAUNCH("BatchedFusedSwiGLUQuantizeQ8_1Kernel<true>");
+  SUPERROC_CHECK_LAUNCH("BatchedFusedSwiGLUQuantizeQ8_1Kernel<true>");
   LaunchZeroQ8ActTail<true>(q8_1_out, batch, k, stream);
 }
 
@@ -1105,7 +1105,7 @@ void LaunchKQuantSmallBatchTyped(const void* w, const float* fp32_x, float* y,
       if (reuse_four_rows) {
         SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, 1, 4, 1, true>
             <<<(m + 63) / 64, 512, 0, stream>>>(w, fp32_x, y, m, k);
-        GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, 1, 4, 1, true>");
+        SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, 1, 4, 1, true>");
         return;
       }
     }
@@ -1119,7 +1119,7 @@ void LaunchKQuantSmallBatchTyped(const void* w, const float* fp32_x, float* y,
           SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, Tiles, 4, 1,
                                               true>
               <<<(m + 63) / 64, 512, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, Tiles, 4, 1, true>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, Tiles, 4, 1, true>");
         };
         if constexpr (Batch == 3) {
           if (up) {
@@ -1137,7 +1137,7 @@ void LaunchKQuantSmallBatchTyped(const void* w, const float* fp32_x, float* y,
       if ((ffn_up) || (m == 5120 && k == 17408)) {
         SmallBatchKQuantExactFp32GEMMKernel<8, Batch, 4, WType, 1, 4, 1, true>
             <<<(m + 31) / 32, 256, 0, stream>>>(w, fp32_x, y, m, k);
-        GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<8, Batch, 4, WType, 1, 4, 1, true>");
+        SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<8, Batch, 4, WType, 1, 4, 1, true>");
         return;
       }
     }
@@ -1154,7 +1154,7 @@ void LaunchKQuantSmallBatchTyped(const void* w, const float* fp32_x, float* y,
             SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, 2, 4, 1,
                                                 true>
                 <<<(m + 63) / 64, 512, 0, stream>>>(w, fp32_x, y, m, k);
-            GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, 2, 4, 1, true>");
+            SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<16, Batch, 4, WType, 2, 4, 1, true>");
             return;
           }
         }
@@ -1166,7 +1166,7 @@ void LaunchKQuantSmallBatchTyped(const void* w, const float* fp32_x, float* y,
                                                 4, 1, true, TokensPerStep>
                 <<<(m + Waves * 4 - 1) / (Waves * 4), Waves * 32, 0, stream>>>(
                     w, fp32_x, y, m, k);
-            GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<Waves, Batch, 4, WType, Tiles, 4, 1, true, TokensPerStep>");
+            SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<Waves, Batch, 4, WType, Tiles, 4, 1, true, TokensPerStep>");
           };
           // Short adaptive blocks frequently use these medium projections.
           // Reuse four rows only at widths/shapes with measured gains.
@@ -1229,7 +1229,7 @@ void LaunchKQuantSmallBatchTyped(const void* w, const float* fp32_x, float* y,
                                                 true, TokensPerStep>
                 <<<(m + Waves * 4 - 1) / (Waves * 4), Waves * 32, 0, stream>>>(
                     w, fp32_x, y, m, k);
-            GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<Waves, Batch, 4, WType, 1, 4, 1, true, TokensPerStep>");
+            SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<Waves, Batch, 4, WType, 1, 4, 1, true, TokensPerStep>");
           };
           // These batch-8 projections finish one token's dots at a time.
           // The long FFN down projection shares staging across more waves.
@@ -1257,14 +1257,14 @@ void LaunchKQuantSmallBatchTyped(const void* w, const float* fp32_x, float* y,
                                                   RowsPerWave, WType, 2, 12, 1,
                                                   true>
                   <<<grid, block, 0, stream>>>(w, fp32_x, y, m, k);
-              GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, RowsPerWave, WType, 2, 12, 1, true>");
+              SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, RowsPerWave, WType, 2, 12, 1, true>");
               return;
             }
           }
           SmallBatchKQuantExactFp32GEMMKernel<
               kKQuantSmallBatchWarps, Batch, RowsPerWave, WType, 1, 12, 1, true>
               <<<grid, block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel< kKQuantSmallBatchWarps, Batch, RowsPerWave, WType, 1, 12, 1, true>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel< kKQuantSmallBatchWarps, Batch, RowsPerWave, WType, 1, 12, 1, true>");
           return;
         }
       }
@@ -1281,32 +1281,32 @@ void LaunchKQuantSmallBatchTyped(const void* w, const float* fp32_x, float* y,
         SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch,
                                             RowsPerWave, WType, 2>
             <<<grid, block, 0, stream>>>(w, fp32_x, y, m, k);
-        GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, RowsPerWave, WType, 2>");
+        SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, RowsPerWave, WType, 2>");
         return;
       }
     }
     SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch,
                                         RowsPerWave, WType>
         <<<grid, block, 0, stream>>>(w, fp32_x, y, m, k);
-    GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, RowsPerWave, WType>");
+    SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, RowsPerWave, WType>");
   };
-#define GUFO_KQUANT_SMALL_BATCH(N)   \
+#define SUPERROC_KQUANT_SMALL_BATCH(N)   \
   case N:                            \
     launch.template operator()<N>(); \
     return;
   switch (batch) {
-    GUFO_KQUANT_SMALL_BATCH(1)
-    GUFO_KQUANT_SMALL_BATCH(2)
-    GUFO_KQUANT_SMALL_BATCH(3)
-    GUFO_KQUANT_SMALL_BATCH(4)
-    GUFO_KQUANT_SMALL_BATCH(5)
-    GUFO_KQUANT_SMALL_BATCH(6)
-    GUFO_KQUANT_SMALL_BATCH(7)
-    GUFO_KQUANT_SMALL_BATCH(8)
+    SUPERROC_KQUANT_SMALL_BATCH(1)
+    SUPERROC_KQUANT_SMALL_BATCH(2)
+    SUPERROC_KQUANT_SMALL_BATCH(3)
+    SUPERROC_KQUANT_SMALL_BATCH(4)
+    SUPERROC_KQUANT_SMALL_BATCH(5)
+    SUPERROC_KQUANT_SMALL_BATCH(6)
+    SUPERROC_KQUANT_SMALL_BATCH(7)
+    SUPERROC_KQUANT_SMALL_BATCH(8)
     default:
       return;
   }
-#undef GUFO_KQUANT_SMALL_BATCH
+#undef SUPERROC_KQUANT_SMALL_BATCH
 }
 
 void LaunchKQuantSmallBatchByType(core::GgmlType type, const void* w,
@@ -1326,7 +1326,7 @@ void LaunchKQuantSmallBatchByType(core::GgmlType type, const void* w,
                                             RowsPerWave, core::GgmlType::kQ4_K,
                                             1, 12, 2, true>
             <<<((m + 47) / 48) * 2, block, 0, stream>>>(w, fp32_x, y, m, k);
-        GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, 4, RowsPerWave, core::GgmlType::kQ4_K, 1, 12, 2, true>");
+        SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, 4, RowsPerWave, core::GgmlType::kQ4_K, 1, 12, 2, true>");
         return;
       }
       LaunchKQuantSmallBatchTyped<RowsPerWave, core::GgmlType::kQ4_K>(
@@ -1346,7 +1346,7 @@ void LaunchKQuantSmallBatchByType(core::GgmlType type, const void* w,
                                               core::GgmlType::kQ6_K, 2, 1, 1,
                                               true>
               <<<(m + 47) / 48, block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, 3, core::GgmlType::kQ6_K, 2, 1, 1, true>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, 3, core::GgmlType::kQ6_K, 2, 1, 1, true>");
         };
         switch (batch) {
           case 5:
@@ -1378,7 +1378,7 @@ void LaunchKQuantSmallBatchByType(core::GgmlType type, const void* w,
                                                 1, Narrow>
                 <<<(m + kHeadRows - 1) / kHeadRows, block, 0, stream>>>(
                     w, fp32_x, y, m, k);
-            GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, 3, core::GgmlType::kQ6_K, 2, 1, 1, Narrow>");
+            SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<kKQuantSmallBatchWarps, Batch, 3, core::GgmlType::kQ6_K, 2, 1, 1, Narrow>");
           };
           if constexpr (Batch <= 6) {
             // These widths enter only for the bounded Qwen27B head above.
@@ -1471,11 +1471,11 @@ void LaunchKQuantWmmaGEMMTyped(const void* w, const void* q8_1_x, float* y,
     if (m >= (3 * k)) {
       WKQuantA8BlockedWmmaGEMMKernel<kBM, 32, 4, 4, 2, WType>
           <<<grid, 256, 0, stream>>>(w, q8_1_x, y, batch, m, k);
-      GUFO_CHECK_LAUNCH("WKQuantA8BlockedWmmaGEMMKernel<kBM, 32, 4, 4, 2, WType>");
+      SUPERROC_CHECK_LAUNCH("WKQuantA8BlockedWmmaGEMMKernel<kBM, 32, 4, 4, 2, WType>");
     } else {
       WKQuantA8BlockedWmmaGEMMKernel<kBM, 16, 4, 8, 1, WType>
           <<<grid, 256, 0, stream>>>(w, q8_1_x, y, batch, m, k);
-      GUFO_CHECK_LAUNCH("WKQuantA8BlockedWmmaGEMMKernel<kBM, 16, 4, 8, 1, WType>");
+      SUPERROC_CHECK_LAUNCH("WKQuantA8BlockedWmmaGEMMKernel<kBM, 16, 4, 8, 1, WType>");
     }
     return;
   }
@@ -1490,7 +1490,7 @@ void LaunchKQuantWmmaGEMMTyped(const void* w, const void* q8_1_x, float* y,
     // subtiles per wave hold twice the A-fragment and scale state.
     WKQuantA8BlockedWmmaGEMMKernel<kBM, kBN, 2, 4, 2, WType>
         <<<grid, 256, 0, stream>>>(w, q8_1_x, y, batch, m, k);
-    GUFO_CHECK_LAUNCH("WKQuantA8BlockedWmmaGEMMKernel<kBM, kBN, 2, 4, 2, WType>");
+    SUPERROC_CHECK_LAUNCH("WKQuantA8BlockedWmmaGEMMKernel<kBM, kBN, 2, 4, 2, WType>");
     return;
   }
   constexpr int kBM = 128;
@@ -1499,7 +1499,7 @@ void LaunchKQuantWmmaGEMMTyped(const void* w, const void* q8_1_x, float* y,
                   static_cast<unsigned int>((m + kBM - 1) / kBM));
   WKQuantA8BlockedWmmaGEMMKernel<kBM, kBN, 4, 8, 1, WType>
       <<<grid, 256, 0, stream>>>(w, q8_1_x, y, batch, m, k);
-  GUFO_CHECK_LAUNCH("WKQuantA8BlockedWmmaGEMMKernel<kBM, kBN, 4, 8, 1, WType>");
+  SUPERROC_CHECK_LAUNCH("WKQuantA8BlockedWmmaGEMMKernel<kBM, kBN, 4, 8, 1, WType>");
 }
 
 void LaunchKQuantWmmaGEMM(core::GgmlType type, const void* w,
@@ -1563,7 +1563,7 @@ void LaunchBatchedQuantGEMMPreQuantized(core::GgmlType type, const void* w,
   // BatchedQuantGEMVKernel, one warp per (row, token), which re-reads the whole
   // weight matrix once per token and is unusable at prefill batch.
   if (type != core::GgmlType::kQ8_0) {
-    if (::gufo::quant::QuantizedBlockElements(type) != 0) {
+    if (::superroc::quant::QuantizedBlockElements(type) != 0) {
       LaunchKQuantWmmaGEMM(type, w, q8_1_x, y, batch, m, k, stream);
     }
     return;
@@ -1574,11 +1574,11 @@ void LaunchBatchedQuantGEMMPreQuantized(core::GgmlType type, const void* w,
     if (m >= (3 * k)) {
       W8A8BlockedWmmaGEMMKernel<kBM, 32, 4, 4, 2>
           <<<grid, 256, 0, stream>>>(w, q8_1_x, y, batch, m, k);
-      GUFO_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, 32, 4, 4, 2>");
+      SUPERROC_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, 32, 4, 4, 2>");
     } else {
       W8A8BlockedWmmaGEMMKernel<kBM, 16, 4, 8, 1>
           <<<grid, 256, 0, stream>>>(w, q8_1_x, y, batch, m, k);
-      GUFO_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, 16, 4, 8, 1>");
+      SUPERROC_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, 16, 4, 8, 1>");
     }
     return;
   }
@@ -1596,7 +1596,7 @@ void LaunchBatchedQuantGEMMPreQuantized(core::GgmlType type, const void* w,
     // body needed 500 bytes/lane of scratch and ran 4.3x slower.
     W8A8BlockedWmmaGEMMKernel<kBM, kBN, 2, 4, 2>
         <<<grid, 256, 0, stream>>>(w, q8_1_x, y, batch, m, k);
-    GUFO_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, kBN, 2, 4, 2>");
+    SUPERROC_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, kBN, 2, 4, 2>");
   } else {
     constexpr int kBM = 128;
     constexpr int kBN = 64;
@@ -1604,7 +1604,7 @@ void LaunchBatchedQuantGEMMPreQuantized(core::GgmlType type, const void* w,
                     static_cast<unsigned int>((m + kBM - 1) / kBM));
     W8A8BlockedWmmaGEMMKernel<kBM, kBN, 4, 8, 1>
         <<<grid, 256, 0, stream>>>(w, q8_1_x, y, batch, m, k);
-    GUFO_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, kBN, 4, 8, 1>");
+    SUPERROC_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, kBN, 4, 8, 1>");
   }
 }
 
@@ -1643,7 +1643,7 @@ void LaunchFusedSwiGluTile(const void* w_up, const void* q8_1_x,
   W8A8BlockedWmmaGEMMKernel<kBM, BN, 2, 4, 2, true, true>
       <<<grid, 256, 0, stream>>>(w_up, q8_1_x, nullptr, batch, m, k, gate,
                                  q8_1_out);
-  GUFO_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, BN, 2, 4, 2, true, true>");
+  SUPERROC_CHECK_LAUNCH("W8A8BlockedWmmaGEMMKernel<kBM, BN, 2, 4, 2, true, true>");
 }
 
 }  // namespace
@@ -1707,7 +1707,7 @@ void LaunchBatchedQuantGEMM(core::GgmlType type, const void* w,
   const dim3 block(static_cast<unsigned int>(kWarp * warps_per_block));
   BatchedQuantGEMVKernel<hip_bfloat16><<<grid, block, 0, stream>>>(
       type, w, reinterpret_cast<const hip_bfloat16*>(bf16_x), y, m, k);
-  GUFO_CHECK_LAUNCH("BatchedQuantGEMVKernel<hip_bfloat16>");
+  SUPERROC_CHECK_LAUNCH("BatchedQuantGEMVKernel<hip_bfloat16>");
 }
 
 void LaunchBatchedQuantGEMMBf16(core::GgmlType type, const void* w,
@@ -1732,15 +1732,15 @@ void LaunchBatchedQuantGEMMBf16(core::GgmlType type, const void* w,
     if (tokens_per_wave == 2) {
       TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 2><<<grid, block, 0, stream>>>(
           w, reinterpret_cast<const hip_bfloat16*>(bf16_x), y, batch, m, k);
-      GUFO_CHECK_LAUNCH("TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 2>");
+      SUPERROC_CHECK_LAUNCH("TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 2>");
     } else if (tokens_per_wave == 4) {
       TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 4><<<grid, block, 0, stream>>>(
           w, reinterpret_cast<const hip_bfloat16*>(bf16_x), y, batch, m, k);
-      GUFO_CHECK_LAUNCH("TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 4>");
+      SUPERROC_CHECK_LAUNCH("TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 4>");
     } else {
       TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 8><<<grid, block, 0, stream>>>(
           w, reinterpret_cast<const hip_bfloat16*>(bf16_x), y, batch, m, k);
-      GUFO_CHECK_LAUNCH("TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 8>");
+      SUPERROC_CHECK_LAUNCH("TiledBatchedQ8_0GEMMKernel<kWarpsPerBlock, 8>");
     }
     return;
   }
@@ -1751,7 +1751,7 @@ void LaunchBatchedQuantGEMMBf16(core::GgmlType type, const void* w,
   const dim3 block(static_cast<unsigned int>(kWarp * kWarpsPerBlock));
   BatchedQuantGEMVKernel<hip_bfloat16><<<grid, block, 0, stream>>>(
       type, w, reinterpret_cast<const hip_bfloat16*>(bf16_x), y, m, k);
-  GUFO_CHECK_LAUNCH("BatchedQuantGEMVKernel<hip_bfloat16>");
+  SUPERROC_CHECK_LAUNCH("BatchedQuantGEMVKernel<hip_bfloat16>");
 }
 
 void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
@@ -1809,7 +1809,7 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
       SmallBatchQ8_0ExactFp32VecGEMMKernel<16, Batch, rows, true, true>
           <<<(m + 16 * rows - 1) / (16 * rows), 512, 0, stream>>>(w, input,
                                                                   output, m, k);
-      GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<16, Batch, rows, true, true>");
+      SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<16, Batch, rows, true, true>");
     };
     // Cross-request verification can contain up to 64 rows. Reuse weights in
     // wider exact groups where measured, and keep the established small-batch
@@ -1888,7 +1888,7 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
   const std::size_t num_blocks_x = (m + kWarpsPerBlock - 1) / kWarpsPerBlock;
   // opt-q4kxl: K-quant/IQ formats share one weight stream across the whole
   // draft block instead of re-reading it per token.
-  if (::gufo::hip::detail::IsNativeWmmaQuant(type) && batch <= 8) {
+  if (::superroc::hip::detail::IsNativeWmmaQuant(type) && batch <= 8) {
     // Exact width instantiations: a padded Batch would stage and multiply
     // activations that no output consumes.
     constexpr std::size_t kKWarpsPerBlock = kKQuantSmallBatchWarps;
@@ -1918,7 +1918,7 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
         SmallBatchQ8_0ExactFp32VecGEMMKernel<8, 1, 1>
             <<<dim3((m + 7) / 8, static_cast<unsigned>(batch)), 256, 0,
                stream>>>(w, fp32_x, y, m, k);
-        GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<8, 1, 1>");
+        SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<8, 1, 1>");
         return;
       }
       constexpr std::size_t kVecWarpsPerBlock = 16;
@@ -1929,7 +1929,7 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
         const auto launch_packed = [&]<std::size_t Batch>() {
           SmallBatchQ8_0ExactFp32VecGEMMKernel<16, Batch, 3, true>
               <<<(m + 47) / 48, 512, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<16, Batch, 3, true>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<16, Batch, 3, true>");
         };
         switch (batch) {
           case 2:
@@ -1950,7 +1950,7 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
       if (batch == 7 && m == 5120 && k == 17408) {
         SmallBatchQ8_0ExactFp32VecGEMMKernel<32, 7, 2>
             <<<(m + 63) / 64, 1024, 0, stream>>>(w, fp32_x, y, m, k);
-        GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<32, 7, 2>");
+        SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<32, 7, 2>");
         return;
       }
       // Reuse the long FFN-down input across three output rows.
@@ -1959,7 +1959,7 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
         SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 8, 3>
             <<<(m + kDownRows - 1) / kDownRows, kVecWarpsPerBlock * 32, 0,
                stream>>>(w, fp32_x, y, m, k);
-        GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 8, 3>");
+        SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 8, 3>");
         return;
       }
       constexpr std::size_t kVecRowsPerWave = 2;
@@ -1974,49 +1974,49 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
           SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 1,
                                                kVecRowsPerWave>
               <<<vec_blocks, vec_block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 1, kVecRowsPerWave>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 1, kVecRowsPerWave>");
           return;
         case 2:
           SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 2,
                                                kVecRowsPerWave>
               <<<vec_blocks, vec_block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 2, kVecRowsPerWave>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 2, kVecRowsPerWave>");
           return;
         case 3:
           SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 3,
                                                kVecRowsPerWave>
               <<<vec_blocks, vec_block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 3, kVecRowsPerWave>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 3, kVecRowsPerWave>");
           return;
         case 4:
           SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 4,
                                                kVecRowsPerWave>
               <<<vec_blocks, vec_block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 4, kVecRowsPerWave>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 4, kVecRowsPerWave>");
           return;
         case 5:
           SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 5,
                                                kVecRowsPerWave>
               <<<vec_blocks, vec_block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 5, kVecRowsPerWave>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 5, kVecRowsPerWave>");
           return;
         case 6:
           SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 6,
                                                kVecRowsPerWave>
               <<<vec_blocks, vec_block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 6, kVecRowsPerWave>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 6, kVecRowsPerWave>");
           return;
         case 7:
           SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 7,
                                                kVecRowsPerWave>
               <<<vec_blocks, vec_block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 7, kVecRowsPerWave>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 7, kVecRowsPerWave>");
           return;
         default:
           SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 8,
                                                kVecRowsPerWave>
               <<<vec_blocks, vec_block, 0, stream>>>(w, fp32_x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 8, kVecRowsPerWave>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchQ8_0ExactFp32VecGEMMKernel<kVecWarpsPerBlock, 8, kVecRowsPerWave>");
           return;
       }
     }
@@ -2026,22 +2026,22 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
       SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 1>
           <<<static_cast<unsigned int>(num_blocks_x), block, 0, stream>>>(
               w, fp32_x, y, batch, m, k);
-      GUFO_CHECK_LAUNCH("SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 1>");
+      SUPERROC_CHECK_LAUNCH("SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 1>");
     } else if (batch <= 2) {
       SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 2>
           <<<static_cast<unsigned int>(num_blocks_x), block, 0, stream>>>(
               w, fp32_x, y, batch, m, k);
-      GUFO_CHECK_LAUNCH("SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 2>");
+      SUPERROC_CHECK_LAUNCH("SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 2>");
     } else if (batch <= 4) {
       SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 4>
           <<<static_cast<unsigned int>(num_blocks_x), block, 0, stream>>>(
               w, fp32_x, y, batch, m, k);
-      GUFO_CHECK_LAUNCH("SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 4>");
+      SUPERROC_CHECK_LAUNCH("SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 4>");
     } else {
       SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 8>
           <<<static_cast<unsigned int>(num_blocks_x), block, 0, stream>>>(
               w, fp32_x, y, batch, m, k);
-      GUFO_CHECK_LAUNCH("SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 8>");
+      SUPERROC_CHECK_LAUNCH("SmallBatchQ8KFp32GEMMKernel<kWarpsPerBlock, 8>");
     }
     return;
   }
@@ -2051,8 +2051,8 @@ void LaunchBatchedQuantGEMMFp32(core::GgmlType type, const void* w,
   const dim3 block(static_cast<unsigned int>(kWarp * kWarpsPerBlock));
   BatchedQuantGEMVKernel<float>
       <<<grid, block, 0, stream>>>(type, w, fp32_x, y, m, k);
-  GUFO_CHECK_LAUNCH("BatchedQuantGEMVKernel<float>");
+  SUPERROC_CHECK_LAUNCH("BatchedQuantGEMVKernel<float>");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

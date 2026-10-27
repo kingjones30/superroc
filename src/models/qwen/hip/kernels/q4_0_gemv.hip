@@ -6,7 +6,7 @@
 #include "src/core/hip_launch_check.hpp"
 #endif
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 __device__ inline float Q4_0DotBlock(const std::uint8_t* block, const float* x) {
@@ -113,7 +113,7 @@ void LaunchQ4_0Gemv(const void* weights, const float* x, float* y,
   const std::size_t grid = (rows + kWaves - 1) / kWaves;
   Q4_0GemvKernel<kWaves><<<grid, kWaves * 32, 0, stream>>>(
       static_cast<const std::uint8_t*>(weights), x, y, rows, cols);
-  GUFO_CHECK_LAUNCH("Q4_0GemvKernel<kWaves>");
+  SUPERROC_CHECK_LAUNCH("Q4_0GemvKernel<kWaves>");
 }
 
 void LaunchQ4_0Swiglu(const void* gate, const void* up, const float* x,
@@ -124,7 +124,7 @@ void LaunchQ4_0Swiglu(const void* gate, const void* up, const float* x,
   Q4_0SwigluKernel<kWaves><<<grid, kWaves * 32, 0, stream>>>(
       static_cast<const std::uint8_t*>(gate),
       static_cast<const std::uint8_t*>(up), x, out, rows, cols);
-  GUFO_CHECK_LAUNCH("Q4_0SwigluKernel<kWaves>");
+  SUPERROC_CHECK_LAUNCH("Q4_0SwigluKernel<kWaves>");
 }
 
 void LaunchDequantQ4_0ToBf16(const void* src, void* dst, std::size_t elements,
@@ -134,8 +134,8 @@ void LaunchDequantQ4_0ToBf16(const void* src, void* dst, std::size_t elements,
   DequantQ4_0ToBf16Kernel<<<grid, kThreads, 0, stream>>>(
       static_cast<const std::uint8_t*>(src), static_cast<std::uint16_t*>(dst),
       elements);
-  GUFO_CHECK_LAUNCH("DequantQ4_0ToBf16Kernel");
+  SUPERROC_CHECK_LAUNCH("DequantQ4_0ToBf16Kernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

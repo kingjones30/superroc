@@ -23,9 +23,9 @@ void Expect(bool ok, const std::string& msg) {
   }
 }
 
-bool IsFp4(gufo::core::GgmlType type) {
-  return type == gufo::core::GgmlType::kQ4_0_ROCMFP4 ||
-         type == gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST;
+bool IsFp4(superroc::core::GgmlType type) {
+  return type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ||
+         type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST;
 }
 
 }  // namespace
@@ -41,13 +41,13 @@ int main() {
   }
 
   std::string error;
-  auto lean_reader = gufo::core::GgufReader::OpenFile(lean_env, &error);
+  auto lean_reader = superroc::core::GgufReader::OpenFile(lean_env, &error);
   if (lean_reader == nullptr) {
     std::cerr << "SKIP kat_expert_types_test: " << lean_env
               << " unreadable: " << error << "\n";
     return 77;
   }
-  auto stock_reader = gufo::core::GgufReader::OpenFile(stock_env, &error);
+  auto stock_reader = superroc::core::GgufReader::OpenFile(stock_env, &error);
   if (stock_reader == nullptr) {
     std::cerr << "SKIP kat_expert_types_test: " << stock_env
               << " unreadable: " << error << "\n";
@@ -56,7 +56,7 @@ int main() {
 
   error.clear();
   auto lean =
-      gufo::models::QwenModelWeights::LoadFromGguf(*lean_reader, &error);
+      superroc::models::QwenModelWeights::LoadFromGguf(*lean_reader, &error);
   Expect(lean.has_value(), "lean loads: " + error);
   if (lean.has_value() && !lean->layers.empty()) {
     Expect(IsFp4(lean->layers[0].ffn_gate_exps.type), "lean trunk is ROCmFP4");
@@ -64,7 +64,7 @@ int main() {
 
   error.clear();
   auto stock =
-      gufo::models::QwenModelWeights::LoadFromGguf(*stock_reader, &error);
+      superroc::models::QwenModelWeights::LoadFromGguf(*stock_reader, &error);
   Expect(!stock.has_value(), "stock refused");
   Expect(
       !stock.has_value() && error.find("must be ROCmFP4") != std::string::npos,
@@ -73,19 +73,19 @@ int main() {
   if (mtp_env == nullptr) {
     std::cout << "SKIP mtp case: QWEN_MTP_GGUF is not set\n";
   } else {
-    auto mtp_reader = gufo::core::GgufReader::OpenFile(mtp_env, &error);
+    auto mtp_reader = superroc::core::GgufReader::OpenFile(mtp_env, &error);
     if (mtp_reader == nullptr) {
       std::cout << "SKIP mtp case: " << mtp_env << " unreadable: " << error
                 << "\n";
     } else {
       error.clear();
       auto mtp =
-          gufo::models::QwenModelWeights::LoadFromGguf(*mtp_reader, &error);
+          superroc::models::QwenModelWeights::LoadFromGguf(*mtp_reader, &error);
       Expect(mtp.has_value(), "mtp loads: " + error);
       if (mtp.has_value()) {
         Expect(mtp->mtp.has_value(), "mtp block bound");
         if (mtp->mtp.has_value()) {
-          Expect(mtp->mtp->ffn_gate_exps.type == gufo::core::GgmlType::kQ8_0,
+          Expect(mtp->mtp->ffn_gate_exps.type == superroc::core::GgmlType::kQ8_0,
                  "mtp draft experts stay Q8_0");
         }
       }

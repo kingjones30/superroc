@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_TEXT_GENERATION_SCHEDULER_HPP_
-#define GUFO_SERVER_TEXT_GENERATION_SCHEDULER_HPP_
+#ifndef SUPERROC_SERVER_TEXT_GENERATION_SCHEDULER_HPP_
+#define SUPERROC_SERVER_TEXT_GENERATION_SCHEDULER_HPP_
 
 #include <chrono>
 #include <cstddef>
@@ -13,7 +13,7 @@
 #include "src/cli/serve/text_generation_backend.hpp"
 #include "src/cli/serve/text_model_runner.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 enum class TextRequestPhase : std::uint8_t {
   kQueued,
@@ -166,6 +166,6 @@ private:
 
 using TextRequestMetadata = TextGenerationScheduler::RequestMetadata;
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_TEXT_GENERATION_SCHEDULER_HPP_
+#endif  // SUPERROC_SERVER_TEXT_GENERATION_SCHEDULER_HPP_

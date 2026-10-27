@@ -19,8 +19,8 @@
 
 namespace {
 
-namespace qwen3_tts = gufo::models::qwen3_tts;
-namespace qwen3_tts_hip = gufo::models::qwen3_tts::hip;
+namespace qwen3_tts = superroc::models::qwen3_tts;
+namespace qwen3_tts_hip = superroc::models::qwen3_tts::hip;
 
 struct NpyHeader {
   std::vector<std::size_t> shape;

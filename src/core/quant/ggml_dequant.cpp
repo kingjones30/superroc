@@ -5,7 +5,7 @@
 #include <cstring>
 #include <limits>
 
-namespace gufo::quant {
+namespace superroc::quant {
 
 // Standard half-precision float to single-precision float conversion
 float Fp16ToFloat(std::uint16_t h) noexcept {
@@ -788,4 +788,4 @@ float DotProductROCMFP4_Fast(const void* row, std::span<const float> vec,
   return sum;
 }
 
-}  // namespace gufo::quant
+}  // namespace superroc::quant

@@ -8,10 +8,10 @@
 
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R3): detach.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R3): detach.
 #include "src/models/llama/spm_tokenizer.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 const QwenGpuModel& RequireModel(
@@ -82,7 +82,7 @@ QwenGpuExecutor::~QwenGpuExecutor() {
   (void)hipStreamSynchronize(arena_.stream);
   // SQ10 SPEC2 (R3): release this session's slot set (and any helper alias
   // pointing at it) before the arena destroys the stream.
-  (void)gufo_fp4_slot_stream_detach(arena_.stream);
+  (void)superroc_fp4_slot_stream_detach(arena_.stream);
   for (const auto event : prefill_events_) {
     if (event)
       (void)hipEventDestroy(event);
@@ -574,5 +574,5 @@ std::vector<tokenization::TokenId> QwenGpuExecutor::GenerateFromPrefix(
   return output_tokens;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

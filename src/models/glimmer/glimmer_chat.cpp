@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 namespace {
 
 constexpr std::string_view kToolError =
@@ -267,4 +267,4 @@ std::optional<std::vector<TokenId>> GlimmerRenderAndTokenize(
                                           rendered->size(), spans, tok_opts);
 }
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization

@@ -8,7 +8,7 @@
 #include <span>
 #include <string_view>
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 namespace {
 
@@ -64,4 +64,4 @@ void PrintStartupBanner(std::string_view version,
             << std::flush;
 }
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli

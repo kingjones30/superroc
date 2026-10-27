@@ -14,7 +14,7 @@
 #include "src/cli/serve/audio_stream.hpp"
 #include "src/core/utf8.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 namespace {
 constexpr std::size_t kMaximumMessage = 4U << 20;
 constexpr std::size_t kMaximumQueue = 8U << 20;
@@ -326,4 +326,4 @@ void WebSocket::ReadLoop() {
   MarkClosed();
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

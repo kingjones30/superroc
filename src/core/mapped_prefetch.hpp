@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_MAPPED_PREFETCH_HPP_
-#define GUFO_CORE_MAPPED_PREFETCH_HPP_
+#ifndef SUPERROC_CORE_MAPPED_PREFETCH_HPP_
+#define SUPERROC_CORE_MAPPED_PREFETCH_HPP_
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -15,7 +15,7 @@
 #include <thread>
 #include <vector>
 
-namespace gufo::core {
+namespace superroc::core {
 
 /// Populate an existing readable mapping before HIP registration or upload.
 /// Parallel faults expose disk queue depth without making another weight copy.
@@ -63,6 +63,6 @@ inline void PrefaultMappedRange(const void* data, std::size_t bytes) {
                             "cannot read mapped weights");
 }
 
-}  // namespace gufo::core
+}  // namespace superroc::core
 
-#endif  // GUFO_CORE_MAPPED_PREFETCH_HPP_
+#endif  // SUPERROC_CORE_MAPPED_PREFETCH_HPP_

@@ -1,12 +1,12 @@
-#ifndef GUFO_CORE_DIAGNOSTICS_GPU_QUEUES_H_
-#define GUFO_CORE_DIAGNOSTICS_GPU_QUEUES_H_
+#ifndef SUPERROC_CORE_DIAGNOSTICS_GPU_QUEUES_H_
+#define SUPERROC_CORE_DIAGNOSTICS_GPU_QUEUES_H_
 
 #include <cstdint>
 #include <filesystem>
 #include <string>
 #include <string_view>
 
-namespace gufo::diagnostics {
+namespace superroc::diagnostics {
 
 /// Hardware compute queues the gfx1151 command processor keeps mapped without
 /// time-slicing. Past this total, counted across every process on the device,
@@ -94,6 +94,6 @@ void ApplyQueuePlan(const QueuePlan& plan);
 /// Renders the warning shown when the device is already at its budget.
 [[nodiscard]] std::string DescribeQueuePressure(const QueuePlan& plan);
 
-}  // namespace gufo::diagnostics
+}  // namespace superroc::diagnostics
 
-#endif  // GUFO_CORE_DIAGNOSTICS_GPU_QUEUES_H_
+#endif  // SUPERROC_CORE_DIAGNOSTICS_GPU_QUEUES_H_

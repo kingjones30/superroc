@@ -12,7 +12,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void BatchedFusedSSMInputProjectionsKernel(
     const void* __restrict__ qkv_w, bool qkv_is_bf16,
@@ -146,7 +146,7 @@ void LaunchBatchedFusedSSMInputProjections(
       qkv_w, qkv_is_bf16, gate_w, gate_is_bf16, alpha_w, alpha_is_bf16, beta_w,
       beta_is_bf16, X, qkv_out, gate_out, alpha_out, beta_out, batch_size,
       hidden_size, qkv_size, inner_size, time_step_rank);
-  GUFO_CHECK_LAUNCH("BatchedFusedSSMInputProjectionsKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedFusedSSMInputProjectionsKernel");
 }
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

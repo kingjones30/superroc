@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_MODEL_CONFIG_HPP_
-#define GUFO_CORE_MODEL_CONFIG_HPP_
+#ifndef SUPERROC_CORE_MODEL_CONFIG_HPP_
+#define SUPERROC_CORE_MODEL_CONFIG_HPP_
 
 #include <array>
 #include <cstddef>
@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-namespace gufo::core {
+namespace superroc::core {
 
 /// GLIMMER: attention output gate is a separate GEMV, not the fused 2× q|gate.
 enum class AttnGateMode : std::uint8_t { kFused = 0, kSeparate = 1 };
@@ -261,6 +261,6 @@ struct ModelConfig {
   }
 };
 
-}  // namespace gufo::core
+}  // namespace superroc::core
 
-#endif  // GUFO_CORE_MODEL_CONFIG_HPP_
+#endif  // SUPERROC_CORE_MODEL_CONFIG_HPP_

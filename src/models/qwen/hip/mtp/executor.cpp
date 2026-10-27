@@ -22,8 +22,9 @@
 #include "src/models/qwen/hip/mtp/kat_moe_ffn.hpp"
 #include "src/models/qwen/hip/mtp/kat_mtp_pmin.hpp"
 #include "src/models/qwen/hip/ops.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 template<typename T>
@@ -32,14 +33,14 @@ void AllocateBuffer(T*& pointer, std::size_t elements) {
 }
 
 // lqw:spec5-prof. One speculative draft forward, split with HIP events.
-// GUFO_MTP_PROFILE=1. Events are recorded on the draft stream and read after
+// SUPERROC_MTP_PROFILE=1. Events are recorded on the draft stream and read after
 // the step's existing sync, so the spans are GPU time.
 struct DraftStepProf {
   bool on{false};
   hipEvent_t ev[8]{};
 
   DraftStepProf() {
-    const char* env = std::getenv("GUFO_MTP_PROFILE");
+    const char* env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PROFILE");
     on = env != nullptr && env[0] != '\0' && env[0] != '0';
     if (!on) {
       return;
@@ -126,14 +127,14 @@ QwenMtpGpuExecutor::QwenMtpGpuExecutor(
 
 // SQ10 SPEC2 (R3): declared locally (not via the rocm_fp4 header) so this
 // TU's include block stays untouched.
-extern "C" int gufo_fp4_slot_stream_detach(hipStream_t stream);
+extern "C" int superroc_fp4_slot_stream_detach(hipStream_t stream);
 
 QwenMtpGpuExecutor::~QwenMtpGpuExecutor() {
   if (stream_ != nullptr) {
     (void)hipStreamSynchronize(stream_);
     // Remove this helper stream's alias (and any set it owns) before
     // Free() destroys the stream.
-    (void)gufo_fp4_slot_stream_detach(stream_);
+    (void)superroc_fp4_slot_stream_detach(stream_);
   }
   Free();
 }
@@ -149,15 +150,15 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
   draft_tail_start_ = 0;
   draft_rows_ = 0;
   // Default N = 98304 (lane DVT, KAT on MAX1: draft counts unchanged, decode
-  // +8-11 %). GUFO_MTP_DRAFT_VOCAB=0 keeps the full head; another N trims to N.
-  const char* env = std::getenv("GUFO_MTP_DRAFT_VOCAB");
+  // +8-11 %). SUPERROC_MTP_DRAFT_VOCAB=0 keeps the full head; another N trims to N.
+  const char* env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_DRAFT_VOCAB");
   const bool env_set = env != nullptr && env[0] != '\0';
   const auto& weights = model_->GetWeights();
   const std::size_t vocab = weights.config.vocab_size;
   const std::size_t hidden = weights.config.hidden_size;
   // HT2 (Muse Wonder W2 DVT-1): the default was measured on the Qwen3.5 BPE
   // vocab of 248,320 tokens only (frequent tokens at low ids); any other vocab
-  // trims only when GUFO_MTP_DRAFT_VOCAB asks for it.
+  // trims only when SUPERROC_MTP_DRAFT_VOCAB asks for it.
   if (!env_set && vocab != 248320) {
     std::fprintf(stderr,
                  "MTP draft vocab: full head (vocab %zu; the default trim is "
@@ -167,13 +168,13 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
   }
   // HT2 (W2 DVT-2, W6 D-2): p-min and the TF dump read the draft
   // distribution, so either keeps the full head, and wins over an explicit
-  // GUFO_MTP_DRAFT_VOCAB. Same parser as the p-min gate (kat_mtp_pmin.hpp).
-  const bool tf_dump = std::getenv("GUFO_MTP_TF_DUMP") != nullptr;
+  // SUPERROC_MTP_DRAFT_VOCAB. Same parser as the p-min gate (kat_mtp_pmin.hpp).
+  const bool tf_dump = ::superroc::core::GetEnvCompat("SUPERROC_MTP_TF_DUMP") != nullptr;
   if (MtpPMinFromEnv() > 0.0F || tf_dump) {
     std::fprintf(
         stderr,
         "MTP draft vocab: full head (%s reads the draft distribution)\n",
-        tf_dump ? "GUFO_MTP_TF_DUMP" : "GUFO_MTP_PMIN");
+        tf_dump ? "SUPERROC_MTP_TF_DUMP" : "SUPERROC_MTP_PMIN");
     return;
   }
   long requested = 98304L;
@@ -182,7 +183,7 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
     requested = std::strtol(env, &parsed_end, 10);
     if (parsed_end == env || *parsed_end != '\0') {
       std::fprintf(stderr,
-                   "MTP draft vocab: GUFO_MTP_DRAFT_VOCAB='%s' is not a whole "
+                   "MTP draft vocab: SUPERROC_MTP_DRAFT_VOCAB='%s' is not a whole "
                    "number; full head\n",
                    env);
       return;
@@ -205,7 +206,7 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
   }
   if (refused != nullptr) {
     std::fprintf(stderr, "MTP draft vocab: %s %ld refused (%s); full head\n",
-                 env_set ? "GUFO_MTP_DRAFT_VOCAB" : "default", requested,
+                 env_set ? "SUPERROC_MTP_DRAFT_VOCAB" : "default", requested,
                  refused);
     return;
   }
@@ -1047,5 +1048,5 @@ void QwenMtpGpuExecutor::RestorePersistentSnapshot(
   f16_prefix_packed_ = valid;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

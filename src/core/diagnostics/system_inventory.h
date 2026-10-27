@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_DIAGNOSTICS_SYSTEM_INVENTORY_H_
-#define GUFO_CORE_DIAGNOSTICS_SYSTEM_INVENTORY_H_
+#ifndef SUPERROC_CORE_DIAGNOSTICS_SYSTEM_INVENTORY_H_
+#define SUPERROC_CORE_DIAGNOSTICS_SYSTEM_INVENTORY_H_
 
 #include <cstdint>
 #include <map>
@@ -8,7 +8,7 @@
 
 #include "src/core/diagnostics/linux_sysfs.h"
 
-namespace gufo::diagnostics {
+namespace superroc::diagnostics {
 
 struct CpuInventory {
   std::string model_name;
@@ -67,6 +67,6 @@ struct SystemInventory {
 [[nodiscard]] SystemInventory CollectSystemInventory(
     const LinuxSysfs& sysfs = LinuxSysfs());
 
-}  // namespace gufo::diagnostics
+}  // namespace superroc::diagnostics
 
-#endif  // GUFO_CORE_DIAGNOSTICS_SYSTEM_INVENTORY_H_
+#endif  // SUPERROC_CORE_DIAGNOSTICS_SYSTEM_INVENTORY_H_

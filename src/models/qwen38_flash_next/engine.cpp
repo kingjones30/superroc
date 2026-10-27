@@ -21,7 +21,7 @@
 #include "src/models/qwen38_flash_next/ngram.hpp"
 #include "src/models/qwen38_flash_next/weights.hpp"
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 namespace {
 
 // gfx1151, served repository prompts: 4096-token chunks prefill 24K-102K
@@ -1716,4 +1716,4 @@ bool Session::EvaluateBatchImpl(std::span<const AdvanceRequest> requests,
   return true;
 }
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next

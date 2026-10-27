@@ -5,7 +5,7 @@
 #include "src/models/qwen_image_21/hip/runtime.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::models::qwen_image_21::hip {
+namespace superroc::models::qwen_image_21::hip {
 namespace {
 
 using Fragment = __attribute__((ext_vector_type(16))) unsigned short;
@@ -194,13 +194,13 @@ void FusedAttention128(const std::uint16_t* queries, const std::uint16_t* keys,
     FusedAttention<true><<<grid, 256, 0, stream>>>(
         queries, keys, values, reinterpret_cast<hip_bfloat16*>(output), heads,
         rows, count, query_start, query_count, limits);
-    GUFO_CHECK_LAUNCH("FusedAttention<true>");
+    SUPERROC_CHECK_LAUNCH("FusedAttention<true>");
   }
   else
     FusedAttention<false><<<grid, 256, 0, stream>>>(
         queries, keys, values, reinterpret_cast<hip_bfloat16*>(output), heads,
         rows, count, query_start, query_count, nullptr);
-    GUFO_CHECK_LAUNCH("FusedAttention<false>");
+    SUPERROC_CHECK_LAUNCH("FusedAttention<false>");
 }
 
-}  // namespace gufo::models::qwen_image_21::hip
+}  // namespace superroc::models::qwen_image_21::hip

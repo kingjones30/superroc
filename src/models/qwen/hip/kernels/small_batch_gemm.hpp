@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_KERNELS_SMALL_BATCH_GEMM_HPP_
-#define GUFO_MODELS_QWEN_HIP_KERNELS_SMALL_BATCH_GEMM_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_KERNELS_SMALL_BATCH_GEMM_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_KERNELS_SMALL_BATCH_GEMM_HPP_
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
@@ -11,7 +11,7 @@
 
 #include "src/models/qwen/hip/quant_ops.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // Bound weight byte offsets and activation/output element offsets before
 // selecting 32-bit device indexing. Division avoids overflow in the check.
@@ -725,6 +725,6 @@ __launch_bounds__(WavesPerBlock * 32, (MinWaves * 32 / HardwareWaveSize > 0
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
-#endif  // GUFO_MODELS_QWEN_HIP_KERNELS_SMALL_BATCH_GEMM_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_KERNELS_SMALL_BATCH_GEMM_HPP_

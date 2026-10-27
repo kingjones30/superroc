@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_GEMM_ROUTE_HPP_
-#define GUFO_MODELS_QWEN_GEMM_ROUTE_HPP_
+#ifndef SUPERROC_MODELS_QWEN_GEMM_ROUTE_HPP_
+#define SUPERROC_MODELS_QWEN_GEMM_ROUTE_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include "src/core/gguf_reader.hpp"
 #include "src/core/quant/ggml_dequant.hpp"
 
-namespace gufo::models::qwen {
+namespace superroc::models::qwen {
 
 enum class QwenGemmMode : std::uint8_t {
   kCpu,
@@ -85,7 +85,7 @@ struct QwenGemmFormatCapabilities {
     case core::GgmlType::kQ6_K:
     case core::GgmlType::kQ8_K:
       return {.quantized = true,
-              .block_elements = ::gufo::quant::QuantizedBlockElements(type),
+              .block_elements = ::superroc::quant::QuantizedBlockElements(type),
               .cpu_direct = true,
               .hip_decode_direct = true,
               .hip_prefill_direct = true};
@@ -240,6 +240,6 @@ struct QwenGemmResolution {
                                       : QwenGemmRoute::kHipBf16Baseline256};
 }
 
-}  // namespace gufo::models::qwen
+}  // namespace superroc::models::qwen
 
-#endif  // GUFO_MODELS_QWEN_GEMM_ROUTE_HPP_
+#endif  // SUPERROC_MODELS_QWEN_GEMM_ROUTE_HPP_

@@ -17,7 +17,7 @@
 #include <unordered_set>
 #include <utility>
 
-namespace gufo::hip::detail {
+namespace superroc::hip::detail {
 namespace {
 
 struct DatabasePublication {
@@ -373,4 +373,4 @@ const HipblasLtPlanRecord* FindHipblasLtPlanRecord(
   return found == database.records.end() ? nullptr : &*found;
 }
 
-}  // namespace gufo::hip::detail
+}  // namespace superroc::hip::detail

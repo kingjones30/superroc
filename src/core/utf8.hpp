@@ -1,11 +1,11 @@
-#ifndef GUFO_CORE_UTF8_HPP_
-#define GUFO_CORE_UTF8_HPP_
+#ifndef SUPERROC_CORE_UTF8_HPP_
+#define SUPERROC_CORE_UTF8_HPP_
 
 #include <cstddef>
 #include <string>
 #include <string_view>
 
-namespace gufo::core {
+namespace superroc::core {
 
 // Token pieces can split a Unicode scalar or contain malformed byte fallback
 // output. JSON events must contain complete UTF-8; incomplete valid prefixes
@@ -60,6 +60,6 @@ private:
   std::string pending_;
 };
 
-}  // namespace gufo::core
+}  // namespace superroc::core
 
-#endif  // GUFO_CORE_UTF8_HPP_
+#endif  // SUPERROC_CORE_UTF8_HPP_

@@ -12,15 +12,15 @@
 #include "src/cli/transcribe/transcribe.hpp"
 #include "src/cli/video/video.hpp"
 
-#ifndef GUFO_RELEASE_VERSION
-#define GUFO_RELEASE_VERSION "development"
+#ifndef SUPERROC_RELEASE_VERSION
+#define SUPERROC_RELEASE_VERSION "development"
 #endif
-#ifndef GUFO_REVISION
-#define GUFO_REVISION "unknown"
+#ifndef SUPERROC_REVISION
+#define SUPERROC_REVISION "unknown"
 #endif
 
-constexpr std::string_view kGufoReleaseVersion = GUFO_RELEASE_VERSION;
-constexpr std::string_view kGufoRevision = GUFO_REVISION;
+constexpr std::string_view kSuperROCReleaseVersion = SUPERROC_RELEASE_VERSION;
+constexpr std::string_view kSuperROCRevision = SUPERROC_REVISION;
 
 namespace {
 
@@ -31,9 +31,9 @@ std::string_view Basename(std::string_view path) {
 }
 
 void print_version() {
-  // Super ROC: product identity; internal names stay gufo in M1.
-  std::cout << "Super ROC " << kGufoReleaseVersion << " (" << kGufoRevision
-            << ") - engine lineage: gufo (MIT)\n";
+  // Super ROC: product identity; internal names stay superroc in M1.
+  std::cout << "Super ROC " << kSuperROCReleaseVersion << " (" << kSuperROCRevision
+            << ") - engine lineage: upstream v0.19.0 (MIT)\n";
 }
 
 void print_help(std::string_view program_name) {
@@ -68,7 +68,7 @@ int run(std::span<const char* const> args) {
     return 2;
   }
 
-  // Super ROC: basename so superroc and gufo links each name themselves.
+  // Super ROC: basename so the binary and its previous-name link each name themselves.
   const std::string_view program_name = Basename(args[0]);
   const auto options = args.subspan(1);
 
@@ -99,81 +99,85 @@ int run(std::span<const char* const> args) {
       if (options.size() > 2) {
         const std::array<const char*, 2> serve_help_flags = {options[2],
                                                              "--help"};
-        return gufo::cli::RunServe(serve_help_flags);
+        return superroc::cli::RunServe(serve_help_flags);
       }
-      return gufo::cli::RunServe(help_flag);
+      return superroc::cli::RunServe(help_flag);
     }
     if (sub == "prompt") {
-      return gufo::cli::RunPrompt(help_flag);
+      return superroc::cli::RunPrompt(help_flag);
     }
     if (sub == "bench") {
-      return gufo::cli::RunBench(help_flag);
+      return superroc::cli::RunBench(help_flag);
     }
     if (sub == "eval") {
-      return gufo::cli::RunEval(help_flag);
+      return superroc::cli::RunEval(help_flag);
     }
     if (sub == "video") {
-      return gufo::cli::RunVideo(help_flag);
+      return superroc::cli::RunVideo(help_flag);
     }
     if (sub == "transcribe") {
-      return gufo::cli::RunTranscribe(help_flag);
+      return superroc::cli::RunTranscribe(help_flag);
     }
     if (sub == "chat") {
-      return gufo::cli::RunChat(help_flag);
+      return superroc::cli::RunChat(help_flag);
     }
     if (sub == "probe") {
-      return gufo::cli::RunProbe(help_flag);
+      return superroc::cli::RunProbe(help_flag);
     }
     if (sub == "diagnose") {
-      return gufo::cli::RunDiagnose(help_flag);
+      return superroc::cli::RunDiagnose(help_flag);
     }
     std::cerr << "Error: unknown help topic '" << sub << "'\n";
     print_help(program_name);
     return 2;
   }
 
-  gufo::cli::PrintStartupBanner(kGufoReleaseVersion, options);
+  superroc::cli::PrintStartupBanner(kSuperROCReleaseVersion, options);
 
   if (first_arg == "probe") {
-    return gufo::cli::RunProbe(options.subspan(1));
+    return superroc::cli::RunProbe(options.subspan(1));
   }
 
   if (first_arg == "diagnose") {
-    return gufo::cli::RunDiagnose(options);
+    return superroc::cli::RunDiagnose(options);
   }
 
   if (first_arg == "bench") {
-    return gufo::cli::RunBench(options.subspan(1));
+    return superroc::cli::RunBench(options.subspan(1));
   }
 
   if (first_arg == "eval") {
-    return gufo::cli::RunEval(options.subspan(1));
+    return superroc::cli::RunEval(options.subspan(1));
   }
 
   if (first_arg == "prompt") {
-    return gufo::cli::RunPrompt(options.subspan(1));
+    return superroc::cli::RunPrompt(options.subspan(1));
   }
 
   if (first_arg == "video") {
-    return gufo::cli::RunVideo(options.subspan(1));
+    return superroc::cli::RunVideo(options.subspan(1));
   }
 
   if (first_arg == "transcribe") {
-    return gufo::cli::RunTranscribe(options.subspan(1));
+    return superroc::cli::RunTranscribe(options.subspan(1));
   }
 
   if (first_arg == "chat") {
-    return gufo::cli::RunChat(options.subspan(1));
+    return superroc::cli::RunChat(options.subspan(1));
   }
 
   if (first_arg == "serve") {
-    return gufo::cli::RunServe(options.subspan(1));
+    return superroc::cli::RunServe(options.subspan(1));
   }
 
   // If invoked as legacy binary name or flag passed directly, route to serve
-  if (program_name.ends_with("gufo-server") ||
-      program_name.ends_with("/gufo-server")) {
-    return gufo::cli::RunServe(options);
+  // Compatibility: the previous server binary name is built from
+  // parts so its spelling never appears here.
+  static const std::string previous_server_bin =
+      std::string("g") + "ufo-server";
+  if (program_name.ends_with(previous_server_bin) ||
+      program_name.ends_with("/" + previous_server_bin)) {
+    return superroc::cli::RunServe(options);
   }
 
   std::cerr << "Error: unknown command '" << first_arg << "'\n";

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_MTP_HPP_
-#define GUFO_MODELS_QWEN_HIP_MTP_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_MTP_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_MTP_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -18,7 +18,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 /// Immutable GPU-visible MTP layer weights. Current GGUF K-quant matrices are
 /// expanded once to BF16; the tied embedding and LM head remain shared with
@@ -179,7 +179,7 @@ private:
                                           bool compute_logits);
   void Allocate();
   void Free() noexcept;
-  /// Super ROC DVT (draft vocab trim), read once from GUFO_MTP_DRAFT_VOCAB.
+  /// Super ROC DVT (draft vocab trim), read once from SUPERROC_MTP_DRAFT_VOCAB.
   void ConfigureDraftVocab();
 
   std::shared_ptr<const QwenMtpGpuModel> model_;
@@ -259,10 +259,10 @@ private:
   std::vector<float> h_last_hidden_;
   std::vector<float> h_logits_;
 
-  /// Super ROC DVT. GUFO_MTP_DRAFT_VOCAB=N (N >= 1024) scores only the
+  /// Super ROC DVT. SUPERROC_MTP_DRAFT_VOCAB=N (N >= 1024) scores only the
   /// head's rows [0, N) and the tail [draft_tail_start_, vocab) that holds
   /// the special tokens; the draft logits buffer is packed head then tail.
-  /// Default N = 98304; GUFO_MTP_DRAFT_VOCAB=0 (draft_rows_ == 0) keeps the
+  /// Default N = 98304; SUPERROC_MTP_DRAFT_VOCAB=0 (draft_rows_ == 0) keeps the
   /// full head. Drafts are proposals only:
   /// the target verifies every token with its full head, so greedy output
   /// does not depend on this.
@@ -439,7 +439,7 @@ private:
   std::vector<TfDraftRecord> tf_pending_;
 };
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_QWEN_HIP_MTP_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_MTP_HPP_

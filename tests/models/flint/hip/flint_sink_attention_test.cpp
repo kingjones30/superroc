@@ -108,8 +108,8 @@ void Report(const std::string& cas, float gap) {
 }  // namespace
 
 int main() {
-  const int gate = gufo::test::GateHipDevice(
-      gufo::test::HipDeviceRequirement::kOptional, "flint_sink_attention_test");
+  const int gate = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional, "flint_sink_attention_test");
   if (gate != 0) {
     return gate;
   }
@@ -168,7 +168,7 @@ int main() {
     for (std::uint32_t window : kWin) {
       CpuAttend(h_q.data(), h_k.data(), h_v.data(), h_sinks.data(), pos, window,
                 ref.data());
-      const auto st = gufo::hip::LaunchGlimmerWindowAttention(
+      const auto st = superroc::hip::LaunchGlimmerWindowAttention(
           d_q, nullptr, d_k, d_v, d_out, kLayer, pos, window, kMaxCtx, kHeads,
           kKv, kHeadDim, q_elems, 0, cache_elems, q_elems, nullptr, d_sinks);
       if (!st.ok || !HipOk(hipDeviceSynchronize(), "decode sync") ||
@@ -205,7 +205,7 @@ int main() {
   std::vector<float> pgot(prefill_elems);
   const std::uint32_t kCheck[] = {0, 350, 699};
   for (std::uint32_t window : kWin) {
-    const auto st = gufo::hip::LaunchGlimmerPrefillAttention(
+    const auto st = superroc::hip::LaunchGlimmerPrefillAttention(
         d_pq, nullptr, d_k, d_v, d_pout, kLayer, kStart, kBatch, window,
         kMaxCtx, kHeads, kKv, kHeadDim, prefill_elems, 0, cache_elems,
         prefill_elems, nullptr, d_sinks);
@@ -230,7 +230,7 @@ int main() {
   }
 
   CpuAttend(h_q.data(), h_k.data(), h_v.data(), nullptr, 600, 513, ref.data());
-  const auto nosink = gufo::hip::LaunchGlimmerWindowAttention(
+  const auto nosink = superroc::hip::LaunchGlimmerWindowAttention(
       d_q, nullptr, d_k, d_v, d_out, kLayer, 600, 513, kMaxCtx, kHeads, kKv,
       kHeadDim, q_elems, 0, cache_elems, q_elems, nullptr, nullptr);
   if (!nosink.ok || !HipOk(hipDeviceSynchronize(), "nosink sync") ||

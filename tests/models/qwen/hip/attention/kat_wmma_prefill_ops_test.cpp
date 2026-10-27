@@ -206,7 +206,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
   if (use_baseline) {
     // Reference: the baseline batched attention, which also writes the cache.
     HIP_CHECK(hipMemset(d_out_ref, 0, q_elements * sizeof(float)));
-    gufo::hip::LaunchBatchedAttention(
+    superroc::hip::LaunchBatchedAttention(
         d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
         d_out_ref, /*layer_idx=*/0, start_pos, batch_size, kMaxContext,
         kNumHeads, kNumKvHeads, kHeadDim, nullptr,
@@ -224,7 +224,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
   // Candidate: the WMMA kernel over the same range, packing the FP16 cache
   // with the new <16,2> pack kernel.
   HIP_CHECK(hipMemset(d_out_new, 0, q_elements * sizeof(float)));
-  if (!gufo::hip::LaunchQwenWmmaAttention(
+  if (!superroc::hip::LaunchQwenWmmaAttention(
           d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
           d_out_new, /*layer_idx=*/0, start_pos, batch_size, kMaxContext,
           kNumHeads, kNumKvHeads, kHeadDim, nullptr, lse_new, key_begin,
@@ -315,7 +315,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
   // Same launch again: the prefetch must not let a register from one tile reach
   // another, which would show up here as run-to-run drift.
   HIP_CHECK(hipMemset(d_out_new, 0, q_elements * sizeof(float)));
-  if (!gufo::hip::LaunchQwenWmmaAttention(
+  if (!superroc::hip::LaunchQwenWmmaAttention(
           d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
           d_out_new, /*layer_idx=*/0, start_pos, batch_size, kMaxContext,
           kNumHeads, kNumKvHeads, kHeadDim, nullptr, lse_new, key_begin,
@@ -346,7 +346,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
     for (const std::size_t budget : {std::size_t{31}, std::size_t{512}}) {
       for (std::size_t offset = 0; offset < batch_size; offset += budget) {
         const auto count = std::min(budget, batch_size - offset);
-        if (!gufo::hip::LaunchQwenWmmaAttention(
+        if (!superroc::hip::LaunchQwenWmmaAttention(
                 d_q + offset * attention_size, d_k, d_v,
                 d_gate + offset * attention_size, d_cache, v_cache, d_cache_f16,
                 cache_f16_v, d_out_new + offset * attention_size, 0,
@@ -399,7 +399,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
                       : words[1] / kNumKvHeads - 1};
       const auto k_work = work[0].first(sizes[0]);
       const auto v_work = work[1].first(sizes[1]);
-      if (!gufo::hip::LaunchQwenWmmaAttention(
+      if (!superroc::hip::LaunchQwenWmmaAttention(
               d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
               d_out_new, 0, start_pos, batch_size, kMaxContext, kNumHeads,
               kNumKvHeads, kHeadDim, nullptr, lse_new, key_begin, true, k_work,
@@ -544,7 +544,7 @@ void BenchTiming() {
     };
     // Pack once so timed runs read a packed cache (skip=true), like the
     // second and later layers of a chunk.
-    if (!gufo::hip::LaunchQwenWmmaAttention(
+    if (!superroc::hip::LaunchQwenWmmaAttention(
             d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
             d_out, 0, start_pos, batch_size, kMaxContext, kNumHeads,
             kNumKvHeads, kHeadDim, nullptr, nullptr, 0, false))
@@ -557,14 +557,14 @@ void BenchTiming() {
     float base_ms = 0;
     if (baseline_fits) {
       base_ms = time_it("baseline", 3, [&] {
-        gufo::hip::LaunchBatchedAttention(
+        superroc::hip::LaunchBatchedAttention(
             d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
             d_out, 0, start_pos, batch_size, kMaxContext, kNumHeads,
             kNumKvHeads, kHeadDim, nullptr, true);
       });
     }
     const float canon_ms = time_it("wmma_canonical", 10, [&] {
-      if (!gufo::hip::LaunchQwenWmmaAttention(
+      if (!superroc::hip::LaunchQwenWmmaAttention(
               d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16, cache_f16_v,
               d_out, 0, start_pos, batch_size, kMaxContext, kNumHeads,
               kNumKvHeads, kHeadDim, nullptr, nullptr, 0, true))
@@ -573,7 +573,7 @@ void BenchTiming() {
     float packed_ms = 0, grouped_ms = 0;
     if (batch_size >= 1024) {
       packed_ms = time_it("wmma_packed", 10, [&] {
-        if (!gufo::hip::LaunchQwenWmmaAttention(
+        if (!superroc::hip::LaunchQwenWmmaAttention(
                 d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16,
                 cache_f16_v, d_out, 0, start_pos, batch_size, kMaxContext,
                 kNumHeads, kNumKvHeads, kHeadDim, nullptr, nullptr, 0, true,
@@ -581,7 +581,7 @@ void BenchTiming() {
           std::abort();
       });
       grouped_ms = time_it("wmma_grouped", 10, [&] {
-        if (!gufo::hip::LaunchQwenWmmaAttention(
+        if (!superroc::hip::LaunchQwenWmmaAttention(
                 d_q, d_k, d_v, d_gate, d_cache, v_cache, d_cache_f16,
                 cache_f16_v, d_out, 0, start_pos, batch_size, kMaxContext,
                 kNumHeads, kNumKvHeads, kHeadDim, nullptr, nullptr, 0, true,
@@ -631,7 +631,7 @@ void CheckDispatch() {
   HIP_CHECK(hipMemset(d_cache, 0, 2 * kMaxTotalKv * sizeof(float)));
   HIP_CHECK(hipMemset(d_cache_f16, 0, 2 * kMaxTotalKv * sizeof(std::uint16_t)));
   const auto wmma = [&](std::uint32_t hq, std::uint32_t hkv) {
-    return gufo::hip::LaunchQwenWmmaAttention(
+    return superroc::hip::LaunchQwenWmmaAttention(
         d_q, d_k, d_v, d_gate, d_cache, d_cache + kMaxTotalKv, d_cache_f16,
         static_cast<std::uint16_t*>(d_cache_f16) + kMaxTotalKv, d_out, 0, 0,
         kBatch, kCtx, hq, hkv, kHeadDim);
@@ -644,7 +644,7 @@ void CheckDispatch() {
     std::cerr << "WMMA launcher accepted an unsupported head config\n";
     std::abort();
   }
-  if (gufo::hip::LaunchBatchedAttentionTile(
+  if (superroc::hip::LaunchBatchedAttentionTile(
           d_q, d_k, d_v, d_gate, d_cache, d_cache + kMaxTotalKv, d_cache_f16,
           static_cast<std::uint16_t*>(d_cache_f16) + kMaxTotalKv, d_out, 0, 0,
           kBatch, kCtx, 16, 2, kHeadDim)) {
@@ -673,7 +673,7 @@ void CheckBaselineGuard() {
   const auto span = static_cast<std::size_t>(lds_limit) / sizeof(float);
   bool threw = false;
   try {
-    gufo::hip::LaunchBatchedAttention(
+    superroc::hip::LaunchBatchedAttention(
         nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
         nullptr, /*layer_idx=*/0, /*start_pos=*/0, span,
         /*max_context=*/262144, /*num_heads=*/16, /*num_kv_heads=*/4,
@@ -719,7 +719,7 @@ void CheckBaselineGuard() {
   HIP_CHECK(hipMemset(f_cache, 0, fit_total * 2 * sizeof(float)));
   HIP_CHECK(hipMemset(f_cache_f16, 0, fit_total * 2 * sizeof(std::uint16_t)));
   try {
-    gufo::hip::LaunchBatchedAttention(
+    superroc::hip::LaunchBatchedAttention(
         f_q, f_k, f_v, f_gate, f_cache, f_cache + fit_total, f_cache_f16,
         static_cast<std::uint16_t*>(f_cache_f16) + fit_total, f_out,
         /*layer_idx=*/0, /*start_pos=*/0, kFitBatch, kFitContext, kFitHeads,
@@ -739,7 +739,7 @@ void CheckBaselineGuard() {
 
 }  // namespace
 
-constexpr gufo::hip::detail::AttentionSupportParams kKatDispatchParams{
+constexpr superroc::hip::detail::AttentionSupportParams kKatDispatchParams{
     .batch_size = 1024,
     .start_pos = 0,
     .max_context = 32768,
@@ -748,14 +748,14 @@ constexpr gufo::hip::detail::AttentionSupportParams kKatDispatchParams{
     .head_dim = 256,
     .has_k_cache_f16 = true,
     .has_v_cache_f16 = true};
-static_assert(!gufo::hip::detail::IsTiledAttentionSupported(kKatDispatchParams),
+static_assert(!superroc::hip::detail::IsTiledAttentionSupported(kKatDispatchParams),
               "the shared tiled gate must keep rejecting KAT");
 static_assert(
-    gufo::hip::detail::IsWmmaAttentionSupportedFor<16, 2>(kKatDispatchParams),
+    superroc::hip::detail::IsWmmaAttentionSupportedFor<16, 2>(kKatDispatchParams),
     "the WMMA gate must accept KAT");
 
 // SQ17: MiMo (16,4) dispatch contract at compile time.
-constexpr gufo::hip::detail::AttentionSupportParams kMimoDispatchParams{
+constexpr superroc::hip::detail::AttentionSupportParams kMimoDispatchParams{
     .batch_size = 1024,
     .start_pos = 0,
     .max_context = 32768,
@@ -765,10 +765,10 @@ constexpr gufo::hip::detail::AttentionSupportParams kMimoDispatchParams{
     .has_k_cache_f16 = true,
     .has_v_cache_f16 = true};
 static_assert(
-    !gufo::hip::detail::IsTiledAttentionSupported(kMimoDispatchParams),
+    !superroc::hip::detail::IsTiledAttentionSupported(kMimoDispatchParams),
     "the shared tiled gate must keep rejecting MiMo");
 static_assert(
-    gufo::hip::detail::IsWmmaAttentionSupportedFor<16, 4>(kMimoDispatchParams),
+    superroc::hip::detail::IsWmmaAttentionSupportedFor<16, 4>(kMimoDispatchParams),
     "the WMMA gate must accept MiMo");
 
 #endif  // defined(ENGINE_ENABLE_HIP)
@@ -776,9 +776,9 @@ static_assert(
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
   const int device_status =
-      gufo::test::GateHipDevice(gufo::test::HipDeviceRequirement::kOptional,
+      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
                                 "KAT WMMA prefill attention ops test");
-  if (device_status != gufo::test::kHipTestSuccess) {
+  if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }
 

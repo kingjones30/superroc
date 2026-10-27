@@ -59,7 +59,7 @@ class EvalDatasetTest(unittest.TestCase):
         cls.document = json.loads(cls.path.read_text(encoding="utf-8"))
 
     def test_source_identity_and_counts(self) -> None:
-        self.assertEqual(self.document["schema"], "gufo.eval-cases.v2")
+        self.assertEqual(self.document["schema"], "superroc.eval-cases.v2")
         self.assertEqual(
             self.document["source_revision"],
             "84cc882352757baf628a1776badf7cc54d584e28",
@@ -164,7 +164,7 @@ class EvalDatasetTest(unittest.TestCase):
         data = self.path.with_name("official-0731.json").read_bytes()
         self.assertEqual(
             hashlib.sha256(data).hexdigest(),
-            "0ec57ef24cc0cb5838a4c0ccacf806edc12cbe09f27f0c13efdf90eb33591a4d",
+            "c53fce9c783c24c5dcc46452ec743d7ed3cae39bcea08cf4d272ea29853d77c5",
         )
         document = json.loads(data)
         self.assertEqual(document["checkpoint"], "0731")

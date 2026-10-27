@@ -52,7 +52,7 @@ std::vector<float> CpuAttention(
     bool apply_window) {
   std::vector<float> out(static_cast<std::size_t>(num_heads) * head_dim, 0.0F);
   const std::uint32_t begin =
-      apply_window ? gufo::models::GlimmerSwaBegin(pos, window) : 0U;
+      apply_window ? superroc::models::GlimmerSwaBegin(pos, window) : 0U;
   const double scale = 1.0 / std::sqrt(static_cast<double>(head_dim));
   const std::uint32_t group = num_heads / num_kv_heads;
   for (std::uint32_t h = 0; h < num_heads; ++h) {
@@ -146,7 +146,7 @@ int CheckSpan(const char* label, std::uint32_t ctx, std::uint32_t pos,
              "span copy v")) {
     return 1;
   }
-  const auto attn = gufo::hip::LaunchGlimmerWindowAttention(
+  const auto attn = superroc::hip::LaunchGlimmerWindowAttention(
       d_q, d_gate, d_k, d_v, d_out, 0, pos, window, ctx, kHeads, kKv, kDim,
       q_elems, q_elems, cache_elems, q_elems, nullptr);
   std::vector<float> got(q.size());
@@ -221,7 +221,7 @@ int CheckPrefillBatch() {
              "batch copy v")) {
     return 1;
   }
-  const auto attn = gufo::hip::LaunchGlimmerPrefillAttention(
+  const auto attn = superroc::hip::LaunchGlimmerPrefillAttention(
       d_q, d_gate, d_k, d_v, d_out, 0, kStart, kBatch, kWindow, kCtx, kHeads,
       kKv, kDim, q_elems, q_elems, cache_elems, q_elems, nullptr);
   std::vector<float> got(q.size());
@@ -259,9 +259,9 @@ int CheckPrefillBatch() {
 }  // namespace
 
 int main() {
-  using gufo::hip::detail::AttentionSupportParams;
-  using gufo::hip::detail::IsSplitKDecodeAttentionSupported;
-  using gufo::hip::detail::IsTiledAttentionSupported;
+  using superroc::hip::detail::AttentionSupportParams;
+  using superroc::hip::detail::IsSplitKDecodeAttentionSupported;
+  using superroc::hip::detail::IsTiledAttentionSupported;
   // Sequence length is past the split-k minimum so the head_dim gate is
   // the reason head_dim 128 is refused. A short sequence would hide that.
   AttentionSupportParams params;
@@ -291,7 +291,7 @@ int main() {
   }
   std::vector<float> rope_ref = rope;
   for (std::uint32_t h = 0; h < kHeads; ++h) {
-    gufo::models::GlimmerNormRope(
+    superroc::models::GlimmerNormRope(
         std::span<float>(rope_ref.data() + static_cast<std::size_t>(h) * kDim,
                          kDim),
         kDim, 7, 500000.0F);
@@ -303,7 +303,7 @@ int main() {
              "copy rope")) {
     return 1;
   }
-  const auto rope_status = gufo::hip::LaunchGlimmerNormRope(
+  const auto rope_status = superroc::hip::LaunchGlimmerNormRope(
       d_rope, kHeads, kDim, kDim, 7, 500000.0F, nullptr);
   if (!rope_status.ok) {
     std::cerr << rope_status.error << '\n';
@@ -353,7 +353,7 @@ int main() {
       !HipOk(hipMemset(d_wvc, 0, write_cache * sizeof(float)), "clear wvc")) {
     return 1;
   }
-  const auto wrote = gufo::hip::LaunchGlimmerWriteKv(
+  const auto wrote = superroc::hip::LaunchGlimmerWriteKv(
       d_wk, d_wv, d_wkc, d_wvc, kWriteLayer, kWritePos, kWriteCtx, kWriteKv,
       kWriteDim, write_src, write_cache, nullptr);
   std::vector<float> back_k(write_cache), back_v(write_cache);
@@ -384,7 +384,7 @@ int main() {
   if (!(kv_gap < 1.0e-6F)) {
     return Fail("fp32 kv write");
   }
-  const auto kv_oob = gufo::hip::LaunchGlimmerWriteKv(
+  const auto kv_oob = superroc::hip::LaunchGlimmerWriteKv(
       d_wk, d_wv, d_wkc, d_wvc, kWriteLayer, kWriteCtx, kWriteCtx, kWriteKv,
       kWriteDim, write_src, write_cache, nullptr);
   hipFree(d_wk);
@@ -446,7 +446,7 @@ int main() {
              "copy v")) {
     return 1;
   }
-  const auto attn = gufo::hip::LaunchGlimmerWindowAttention(
+  const auto attn = superroc::hip::LaunchGlimmerWindowAttention(
       d_q, d_gate, d_k, d_v, d_out, 0, kPos, kWindow, kCtx, kAttnHeads, kKv,
       kHead, q_elems, q_elems, cache_elems, q_elems, nullptr);
   if (!attn.ok) {
@@ -468,7 +468,7 @@ int main() {
     return Fail("windowed attention");
   }
 
-  const auto oob = gufo::hip::LaunchGlimmerWindowAttention(
+  const auto oob = superroc::hip::LaunchGlimmerWindowAttention(
       d_q, d_gate, d_k, d_v, d_out, 0, kCtx, kWindow, kCtx, kAttnHeads, kKv,
       kHead, q_elems, q_elems, cache_elems, q_elems, nullptr);
   if (oob.ok) {
@@ -476,7 +476,7 @@ int main() {
   }
   std::cout << "S1 oob_refused=" << oob.error << '\n';
 
-  const std::uint32_t tile = gufo::hip::GlimmerScoreTileElems();
+  const std::uint32_t tile = superroc::hip::GlimmerScoreTileElems();
   std::cout << "S1 score_tile_elems=" << tile
             << " score_tile_bytes=" << (tile * sizeof(float)) << '\n';
   if (tile * sizeof(float) != 48U * 1024U) {
@@ -501,14 +501,14 @@ int main() {
 
   float logits[4] = {40.0F, -40.0F, 1.0F, 0.0F};
   float expect[4] = {40.0F, -40.0F, 1.0F, 0.0F};
-  gufo::models::GlimmerScaleSoftcap(expect, 0.1961161345243454F, 20.0F);
+  superroc::models::GlimmerScaleSoftcap(expect, 0.1961161345243454F, 20.0F);
   float* d_logits = nullptr;
   if (!HipOk(hipMalloc(&d_logits, sizeof(logits)), "malloc logits") ||
       !HipOk(hipMemcpy(d_logits, logits, sizeof(logits), hipMemcpyHostToDevice),
              "copy logits")) {
     return 1;
   }
-  const auto cap = gufo::hip::LaunchGlimmerScaleSoftcap(
+  const auto cap = superroc::hip::LaunchGlimmerScaleSoftcap(
       d_logits, 4, 0.1961161345243454F, 20.0F, nullptr);
   if (!cap.ok || !HipOk(hipDeviceSynchronize(), "sync cap") ||
       !HipOk(hipMemcpy(logits, d_logits, sizeof(logits), hipMemcpyDeviceToHost),

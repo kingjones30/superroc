@@ -65,17 +65,17 @@ void TestHipGraphDecodeStep() {
   HIP_CHECK(hipMemcpy(d_weight, h_w.data(), hidden_size * sizeof(float),
                       hipMemcpyHostToDevice));
 
-  gufo::hip::detail::HipGraphDecodeExecutor executor;
-  constexpr gufo::hip::detail::HipGraphCaptureKey graph_key{
+  superroc::hip::detail::HipGraphDecodeExecutor executor;
+  constexpr superroc::hip::detail::HipGraphCaptureKey graph_key{
       .execution_identity = 11,
       .workload_identity = 29,
   };
-  constexpr gufo::hip::detail::HipGraphCaptureKey mismatched_key{
+  constexpr superroc::hip::detail::HipGraphCaptureKey mismatched_key{
       .execution_identity = 11,
       .workload_identity = 31,
   };
-  gufo::test::Expect(executor.IsEnabled(), "HIP graph executor disabled");
-  gufo::test::Expect(!executor.IsCaptured(),
+  superroc::test::Expect(executor.IsEnabled(), "HIP graph executor disabled");
+  superroc::test::Expect(!executor.IsCaptured(),
                      "new HIP graph executor is already captured");
 
   bool threw = false;
@@ -85,10 +85,10 @@ void TestHipGraphDecodeStep() {
   } catch (const std::runtime_error&) {
     threw = true;
   }
-  gufo::test::Expect(threw, "capture failure must propagate");
+  superroc::test::Expect(threw, "capture failure must propagate");
   hipStreamCaptureStatus capture = hipStreamCaptureStatusActive;
   HIP_CHECK(hipStreamIsCapturing(stream, &capture));
-  gufo::test::Expect(capture == hipStreamCaptureStatusNone,
+  superroc::test::Expect(capture == hipStreamCaptureStatusNone,
                      "failed capture must release the stream");
 
   // Test across 5 consecutive tokens with graph replay
@@ -100,10 +100,10 @@ void TestHipGraphDecodeStep() {
                              hipMemcpyHostToDevice, stream));
 
     auto StepOps = [&]() {
-      gufo::hip::LaunchEmbeddingLookup(d_embd, gufo::core::GgmlType::kF32,
+      superroc::hip::LaunchEmbeddingLookup(d_embd, superroc::core::GgmlType::kF32,
                                        d_params + 0, d_hidden, hidden_size,
                                        stream);
-      gufo::hip::LaunchRMSNorm(d_hidden, d_weight, d_normed, hidden_size, 1e-6F,
+      superroc::hip::LaunchRMSNorm(d_hidden, d_weight, d_normed, hidden_size, 1e-6F,
                                stream);
     };
 
@@ -117,14 +117,14 @@ void TestHipGraphDecodeStep() {
           void* independent = nullptr;
           HIP_CHECK(hipMalloc(&independent, hidden_size * sizeof(float)));
           try {
-            gufo::hip::SnapshotTransfer transfer;
+            superroc::hip::SnapshotTransfer transfer;
             transfer.Copy(independent, h_w.data(), hidden_size * sizeof(float),
                           hipMemcpyHostToDevice);
             std::vector<float> restored(hidden_size);
             transfer.Copy2D(restored.data(), 64 * sizeof(float), independent,
                             64 * sizeof(float), 64 * sizeof(float),
                             hidden_size / 64);
-            gufo::test::Expect(restored == h_w,
+            superroc::test::Expect(restored == h_w,
                                "snapshot copy during capture changed values");
           } catch (...) {
             (void)hipFree(independent);
@@ -133,18 +133,18 @@ void TestHipGraphDecodeStep() {
           HIP_CHECK(hipFree(independent));
         }).get();
       });
-      gufo::test::Expect(ok, "HIP graph capture failed");
-      gufo::test::Expect(executor.IsCapturedFor(graph_key),
+      superroc::test::Expect(ok, "HIP graph capture failed");
+      superroc::test::Expect(executor.IsCapturedFor(graph_key),
                          "HIP graph capture key was not retained");
-      gufo::test::Expect(!executor.IsCapturedFor(mismatched_key),
+      superroc::test::Expect(!executor.IsCapturedFor(mismatched_key),
                          "mismatched HIP graph key was accepted");
-      gufo::test::Expect(!executor.Launch(stream, mismatched_key),
+      superroc::test::Expect(!executor.Launch(stream, mismatched_key),
                          "HIP graph replay accepted a mismatched key");
       const bool launch_ok = executor.Launch(stream, graph_key);
-      gufo::test::Expect(launch_ok, "HIP graph launch failed");
+      superroc::test::Expect(launch_ok, "HIP graph launch failed");
     } else {
       const bool ok = executor.Launch(stream, graph_key);
-      gufo::test::Expect(ok, "HIP graph replay failed");
+      superroc::test::Expect(ok, "HIP graph replay failed");
     }
 
     HIP_CHECK(hipStreamSynchronize(stream));
@@ -163,15 +163,15 @@ void TestHipGraphDecodeStep() {
         std::sqrt(sum_sq / static_cast<float>(hidden_size) + 1e-6F);
     for (std::size_t i = 0; i < hidden_size; ++i) {
       const float expected = (h_embd[token_id * hidden_size + i] / rms) * 1.5F;
-      gufo::test::ExpectNear(expected, h_out[i], 1e-4F,
+      superroc::test::ExpectNear(expected, h_out[i], 1e-4F,
                              "captured RMSNorm result mismatch");
     }
   }
 
   executor.Reset();
-  gufo::test::Expect(!executor.IsCaptured(),
+  superroc::test::Expect(!executor.IsCaptured(),
                      "HIP graph reset retained capture state");
-  gufo::test::Expect(!executor.IsCapturedFor(graph_key),
+  superroc::test::Expect(!executor.IsCapturedFor(graph_key),
                      "HIP graph reset retained capture identity");
 
   HIP_CHECK(hipFree(d_embd));
@@ -189,10 +189,10 @@ void TestHipGraphDecodeStep() {
 // reproduce the eager result bit for bit; the in-place pass between them has a
 // different identity and must miss.
 void TestHipGraphRecurrentFork() {
-  using gufo::hip::QwenGpuArena;
-  using gufo::test::DeviceBuffer;
-  using gufo::test::Expect;
-  const auto config = gufo::models::qwen::make_small_qwen_config();
+  using superroc::hip::QwenGpuArena;
+  using superroc::test::DeviceBuffer;
+  using superroc::test::Expect;
+  const auto config = superroc::models::qwen::make_small_qwen_config();
   const std::uint32_t heads = config.ssm_time_step_rank;
   const std::uint32_t key_heads = config.ssm_group_count;
   const std::uint32_t key_dim = config.ssm_state_size;
@@ -237,9 +237,9 @@ void TestHipGraphRecurrentFork() {
   // One decode row through every recurrent layer; the graph-captured part of
   // the decode step that touches the state.
   const auto step = [&](QwenGpuArena& arena,
-                        gufo::hip::QwenRecurrentStateIo state) {
+                        superroc::hip::QwenRecurrentStateIo state) {
     for (std::uint32_t layer = 0; layer < layers; ++layer) {
-      gufo::hip::LaunchSSMConvRecurrence(
+      superroc::hip::LaunchSSMConvRecurrence(
           input.data(), weights.data(), state, conv_output.data(), alpha.data(),
           beta.data(), decay.data(), dt.data(), norm.data(), gate.data(),
           output.data(), layer, qkv, key_heads, heads, key_dim, val_dim,
@@ -247,9 +247,9 @@ void TestHipGraphRecurrentFork() {
     }
   };
   const auto key_for = [](const QwenGpuArena& arena) {
-    return gufo::hip::detail::HipGraphCaptureKey{
+    return superroc::hip::detail::HipGraphCaptureKey{
         .execution_identity = 11,
-        .workload_identity = gufo::hip::ExtendQwenGraphWorkloadIdentity(
+        .workload_identity = superroc::hip::ExtendQwenGraphWorkloadIdentity(
             29, arena.RecurrentIoIdentity()),
     };
   };
@@ -260,7 +260,7 @@ void TestHipGraphRecurrentFork() {
   const auto expected = state_bytes(reference);
 
   QwenGpuArena arena(config, 16);
-  gufo::hip::detail::HipGraphDecodeExecutor executor;
+  superroc::hip::detail::HipGraphDecodeExecutor executor;
   seed(arena);
   const auto seeded = state_bytes(arena);
   arena.SaveState(1);
@@ -312,9 +312,9 @@ void TestHipGraphRecurrentFork() {
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int gate = gufo::test::GateHipDevice(
-      gufo::test::HipDeviceRequirement::kOptional, "Qwen graph ops test");
-  if (gate != gufo::test::kHipTestSuccess) {
+  const int gate = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional, "Qwen graph ops test");
+  if (gate != superroc::test::kHipTestSuccess) {
     return gate;
   }
 

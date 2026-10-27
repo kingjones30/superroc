@@ -5,7 +5,7 @@ set_tests_properties(qwen27b.tools PROPERTIES LABELS "cpu;qwen27b;tools")
 
 function(add_qwen27b_test target source labels)
   add_executable(${target} ${CMAKE_CURRENT_SOURCE_DIR}/${source})
-  target_link_libraries(${target} PRIVATE gufo_core)
+  target_link_libraries(${target} PRIVATE superroc_core)
   add_test(NAME ${target} COMMAND ${target})
   set_tests_properties(${target} PROPERTIES LABELS "qwen27b;${labels}"
     SKIP_RETURN_CODE 77)
@@ -22,10 +22,10 @@ if (ENGINE_ENABLE_HIP)
     "hip;gpu;sampling;correctness")
   target_link_libraries(qwen_sampling_hip_test PRIVATE hip::host)
   add_test(NAME qwen27b.cli-options COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/cli_test.py $<TARGET_FILE:gufo> --scope options)
+    ${CMAKE_CURRENT_SOURCE_DIR}/cli_test.py $<TARGET_FILE:superroc> --scope options)
   set_tests_properties(qwen27b.cli-options PROPERTIES LABELS "qwen27b;cpu;cli")
   add_test(NAME qwen27b.cli COMMAND ${Python3_EXECUTABLE}
-    ${CMAKE_CURRENT_SOURCE_DIR}/cli_test.py $<TARGET_FILE:gufo>)
+    ${CMAKE_CURRENT_SOURCE_DIR}/cli_test.py $<TARGET_FILE:superroc>)
   set_tests_properties(qwen27b.cli PROPERTIES
     LABELS "qwen27b;gpu;hip;cli;external-model" SKIP_RETURN_CODE 77)
   add_qwen27b_test(qwen27b_target_test target_test.cpp
@@ -36,10 +36,10 @@ if (ENGINE_ENABLE_HIP)
     "gpu;hip;rocm_fp4;external-model")
   # sq16 SPEC2 (S2-4): four KAT+MTP sessions at once, three fresh servers;
   # every client's text equals its one-session text. Skips (77) without
-  # GUFO_SQ16_KAT_MODEL, like the other external-model gates.
+  # SUPERROC_SQ16_KAT_MODEL, like the other external-model gates.
   add_test(NAME sq16_four_session
     COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/sq16_four_session.sh
-    $<TARGET_FILE:gufo>)
+    $<TARGET_FILE:superroc>)
   set_tests_properties(sq16_four_session PROPERTIES
     LABELS "qwen27b;gpu;hip;verify;external-model;slow"
     SKIP_RETURN_CODE 77)
@@ -51,10 +51,10 @@ if (ENGINE_ENABLE_HIP)
   target_link_libraries(qwen_dflash_noncausal_attention_ops_test PRIVATE hip::host)
   add_library(qwen_serving_test_support STATIC
     ${PROJECT_SOURCE_DIR}/src/cli/serve/component_text_cache.cpp
-    ${GUFO_SERVE_TEXT_SOURCES})
-  target_link_libraries(qwen_serving_test_support PUBLIC gufo_logging
-    gufo_core gufo_deepseek_v4_flash gufo_qwen38_flash_next gufo_cache_hip hip::host
-    ${GUFO_SERVE_TEXT_LIBRARIES})
+    ${SUPERROC_SERVE_TEXT_SOURCES})
+  target_link_libraries(qwen_serving_test_support PUBLIC superroc_logging
+    superroc_core superroc_deepseek_v4_flash superroc_qwen38_flash_next superroc_cache_hip hip::host
+    ${SUPERROC_SERVE_TEXT_LIBRARIES})
   add_executable(inference_backend_gpu_test serving_test.cpp)
   target_link_libraries(inference_backend_gpu_test PRIVATE qwen_serving_test_support)
   add_executable(qwen_vision_serving_test ../qwen/vision_serving_test.cpp)

@@ -5,7 +5,7 @@
 #include "src/models/qwen/hip/kernels/small_batch_quant16_wave64.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip::detail {
+namespace superroc::hip::detail {
 namespace {
 
 template<core::GgmlType Type, std::size_t Groups, bool FusedSwiGLU = false>
@@ -15,7 +15,7 @@ void Launch(const void* w, const float* x, float* y, std::size_t m,
     SmallBatchKQuantExactFp32GEMMKernel<8, 16, 6, Type, 1, 4, Groups, true, 1,
                                         64, 32, DistributedOutput, FusedSwiGLU>
         <<<((m + 47) / 48) * Groups, 256, 0, stream>>>(w, x, y, m, k);
-    GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<8, 16, 6, Type, 1, 4, Groups, true, 1, 64, 32, DistributedOutput, FusedSwiGLU>");
+    SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<8, 16, 6, Type, 1, 4, Groups, true, 1, 64, 32, DistributedOutput, FusedSwiGLU>");
   };
   const bool ffn =
       (k == 5120 && (m == 17408 || m == 34816)) || (m == 5120 && k == 17408);
@@ -77,5 +77,5 @@ void LaunchPackedSwiGLUSixteenWave64(core::GgmlType type, const void* w,
                                               groups);
 }
 
-}  // namespace gufo::hip::detail
+}  // namespace superroc::hip::detail
 #endif

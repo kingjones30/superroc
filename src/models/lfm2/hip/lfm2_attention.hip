@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::uint32_t kSplitBlock = 256U;    // kernel A width
@@ -468,5 +468,5 @@ Lfm2LaunchStatus LaunchLfm2DecodeAttentionF16(
       num_kv_heads, head_dim, n_splits, partial, stream);
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

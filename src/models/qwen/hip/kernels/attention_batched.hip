@@ -18,7 +18,7 @@
 #include "src/models/qwen/hip/ops/attention.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // SQ17: static LDS word count of BatchedAttentionKernel (s_scratch). The
 // launcher adds it to the dynamic score plane when checking the block limit.
@@ -284,7 +284,7 @@ void LaunchBatchedAttention(const float* q, const float* k, const float* v,
         k, v, k_cache, v_cache, static_cast<__half*>(k_cache_f16),
         static_cast<__half*>(v_cache_f16), layer_idx, start_pos, batch_size,
         max_context, num_kv_heads, head_dim);
-    GUFO_CHECK_LAUNCH("WriteBatchedKVCacheKernel");
+    SUPERROC_CHECK_LAUNCH("WriteBatchedKVCacheKernel");
   }
 
   const dim3 attn_grid(num_heads, static_cast<unsigned int>(batch_size));
@@ -296,7 +296,7 @@ void LaunchBatchedAttention(const float* q, const float* k, const float* v,
       static_cast<const __half*>(v_cache_f16), out_context,
       static_cast<hip_bfloat16*>(out_context_bf16), layer_idx, start_pos,
       batch_size, max_context, num_heads, num_kv_heads, head_dim);
-  GUFO_CHECK_LAUNCH("BatchedAttentionKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedAttentionKernel");
 }
 
 __global__ void CausalSoftmaxKernel(float* __restrict__ scores,
@@ -389,7 +389,7 @@ void LaunchBatchedAttentionGemm(
       k, v, k_cache, v_cache, static_cast<__half*>(k_cache_f16),
       static_cast<__half*>(v_cache_f16), layer_idx, start_pos, batch_size,
       max_context, num_kv_heads, head_dim);
-  GUFO_CHECK_LAUNCH("WriteBatchedKVCacheKernel");
+  SUPERROC_CHECK_LAUNCH("WriteBatchedKVCacheKernel");
 
   const float attention_scale = 1.0F / sqrtf(static_cast<float>(head_dim));
   constexpr float one = 1.0F;
@@ -424,7 +424,7 @@ void LaunchBatchedAttentionGemm(
       const dim3 softmax_grid(static_cast<unsigned int>(batch_size), 1);
       CausalSoftmaxKernel<<<softmax_grid, 256, 0, stream>>>(
           scores, start_pos, batch_size, sequence_length, score_matrix_stride);
-      GUFO_CHECK_LAUNCH("CausalSoftmaxKernel");
+      SUPERROC_CHECK_LAUNCH("CausalSoftmaxKernel");
 
       HIPBLAS_CHECK(hipblasGemmEx(
           handle, HIPBLAS_OP_N, HIPBLAS_OP_N, static_cast<int>(head_dim),
@@ -461,7 +461,7 @@ void LaunchBatchedAttentionGemm(
                               heads_per_kv);
       CausalSoftmaxKernel<<<softmax_grid, 256, 0, stream>>>(
           scores, start_pos, batch_size, sequence_length, score_matrix_stride);
-      GUFO_CHECK_LAUNCH("CausalSoftmaxKernel");
+      SUPERROC_CHECK_LAUNCH("CausalSoftmaxKernel");
 
       HIPBLAS_CHECK(hipblasGemmStridedBatchedEx(
           handle, HIPBLAS_OP_N, HIPBLAS_OP_N, static_cast<int>(head_dim),
@@ -481,9 +481,9 @@ void LaunchBatchedAttentionGemm(
     const std::size_t grid_size = (num_elements + block_size - 1) / block_size;
     ApplyAttentionGateKernel<<<grid_size, block_size, 0, stream>>>(
         gate, out_context, num_elements);
-    GUFO_CHECK_LAUNCH("ApplyAttentionGateKernel");
+    SUPERROC_CHECK_LAUNCH("ApplyAttentionGateKernel");
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

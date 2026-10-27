@@ -89,10 +89,10 @@ int main(int argc, char** argv) {
       f16row(probe.data(), theirs2.data(), 4096);
       for (int i = 0; i < 4096; ++i) {
         ++fp16_n;
-        if (gufo::models::ling3::cpu::FloatToFp16(probe[i]) != theirs2[i]) {
+        if (superroc::models::ling3::cpu::FloatToFp16(probe[i]) != theirs2[i]) {
           if (fp16_bad < 3) {
             std::printf("  fp16: lg=%04x fork=%04x for %.9g\n",
-                        gufo::models::ling3::cpu::FloatToFp16(probe[i]),
+                        superroc::models::ling3::cpu::FloatToFp16(probe[i]),
                         theirs2[i], static_cast<double>(probe[i]));
           }
           ++fp16_bad;
@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
         // ties-away-from-zero. Both sides must be fed the same blocks or this
         // test would report a mismatch that is really in the quantizer.
         const float id = amax != 0.0F ? 127.0F / amax : 0.0F;
-        y[i].d = gufo::models::ling3::cpu::FloatToFp16(d);
+        y[i].d = superroc::models::ling3::cpu::FloatToFp16(d);
         for (std::size_t j = 0; j < 32; ++j) {
           y[i].qs[j] = static_cast<std::int8_t>(std::nearbyintf(x[i * 32 + j] * id));
         }
@@ -159,15 +159,15 @@ int main(int argc, char** argv) {
                              y.data(), 0, 1);
 
     // LG's DotRow on the same packed row.
-    gufo::models::ling3::TensorRef tr;
+    superroc::models::ling3::TensorRef tr;
     tr.data = W.data();
-    tr.type = use_fast ? gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST
-                     : gufo::core::GgmlType::kQ4_0_ROCMFP4;
+    tr.type = use_fast ? superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST
+                     : superroc::core::GgmlType::kQ4_0_ROCMFP4;
     tr.cols = k;
     tr.rows = 1;
     tr.experts = 1;
     const float mine =
-        gufo::models::ling3::cpu::DotRow(tr, 0, 0, std::span<const float>(x));
+        superroc::models::ling3::cpu::DotRow(tr, 0, 0, std::span<const float>(x));
 
     if (std::memcmp(&mine, &theirs, sizeof(float)) != 0) {
       ++bad;

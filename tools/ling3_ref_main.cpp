@@ -1,7 +1,7 @@
 // ling3-ref — scalar CPU oracle for Ling-3.0-flash.
 //
 // Loads the GGUF, runs the reference forward one token at a time, and prints
-// the greedy token sequence. This is the process the Ling-on-gufo gate (a)
+// the greedy token sequence. This is the process the Ling-on-superroc gate (a)
 // compares against the fork's `llama-completion` output.
 //
 // Usage:
@@ -25,7 +25,7 @@
 #include "src/models/ling3/tokenizer.hpp"
 #include "src/models/ling3/weights.hpp"
 
-namespace chat = gufo::models::ling3::chat;
+namespace chat = superroc::models::ling3::chat;
 
 namespace {
 
@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
   if (render_chat) {
     // Renders the gate-(b) prompt with this package's own chat template and
     // writes it to stdout, so the gate feeds byte-identical text to both the
-    // fork and gufo and proves the template rather than a hand-written string.
+    // fork and superroc and proves the template rather than a hand-written string.
     std::vector<chat::Tool> tools;
     chat::Tool weather;
     weather.name = "get_weather";
@@ -127,16 +127,16 @@ int main(int argc, char** argv) {
   }
 
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(model_path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(model_path, &error);
   if (!reader) {
     return Fail("cannot open " + model_path + ": " + error);
   }
 
-  auto weights = gufo::models::ling3::ModelWeights::Bind(*reader, &error);
+  auto weights = superroc::models::ling3::ModelWeights::Bind(*reader, &error);
   if (!weights.has_value()) {
     return Fail("cannot bind " + model_path + ": " + error);
   }
-  const gufo::models::ling3::Config& c = weights->config;
+  const superroc::models::ling3::Config& c = weights->config;
   std::fprintf(stderr,
                "ling3-ref: bound %u trunk blocks (+%u MTP), hidden %u, vocab %u, "
                "%u MLA / %u KDA\n",
@@ -156,7 +156,7 @@ int main(int argc, char** argv) {
                  return n;
                }());
 
-  auto tokenizer = gufo::models::ling3::LingTokenizer::FromGguf(*reader, &error);
+  auto tokenizer = superroc::models::ling3::LingTokenizer::FromGguf(*reader, &error);
   if (!tokenizer.has_value()) {
     return Fail("cannot build the Ling tokenizer: " + error);
   }
@@ -202,7 +202,7 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  gufo::models::ling3::ReferenceModel model(*weights, c.context_length);
+  superroc::models::ling3::ReferenceModel model(*weights, c.context_length);
 
   std::vector<float> logits;
   std::vector<std::int32_t> generated;

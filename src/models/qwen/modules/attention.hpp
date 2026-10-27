@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_MODULES_ATTENTION_HPP_
-#define GUFO_MODELS_QWEN_MODULES_ATTENTION_HPP_
+#ifndef SUPERROC_MODELS_QWEN_MODULES_ATTENTION_HPP_
+#define SUPERROC_MODELS_QWEN_MODULES_ATTENTION_HPP_
 
 #include <cstdint>
 #include <span>
@@ -8,7 +8,7 @@
 #include "src/models/qwen/modules/module_ctx.hpp"
 #include "src/models/qwen/state.hpp"
 
-namespace gufo::models::qwen {
+namespace superroc::models::qwen {
 
 /// Full self-attention for one sequence position (gated GQA):
 /// QKV proj -> QK-norm -> RoPE -> KV-cache write -> score/softmax/context ->
@@ -23,6 +23,6 @@ void AttnForward(const CpuLayerContext& ctx, const AttnLayerView& view,
                  std::span<const float> x, QwenKvCache& kv, std::uint32_t pos,
                  std::span<float> out) noexcept;
 
-}  // namespace gufo::models::qwen
+}  // namespace superroc::models::qwen
 
-#endif  // GUFO_MODELS_QWEN_MODULES_ATTENTION_HPP_
+#endif  // SUPERROC_MODELS_QWEN_MODULES_ATTENTION_HPP_

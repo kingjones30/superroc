@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_CHAT_TEMPLATE_HPP_
-#define GUFO_MODELS_LING3_CHAT_TEMPLATE_HPP_
+#ifndef SUPERROC_MODELS_LING3_CHAT_TEMPLATE_HPP_
+#define SUPERROC_MODELS_LING3_CHAT_TEMPLATE_HPP_
 
 #include <optional>
 #include <string>
@@ -8,7 +8,7 @@
 /// C++ rendering of Ling-3.0's Bailing-V3 chat template.
 ///
 /// Transcribed from the model's own `tokenizer.chat_template` (and the matching
-/// `Ling-3.0-flash-*.jinja`), because gufo does not embed a Jinja engine. Only
+/// `Ling-3.0-flash-*.jinja`), because superroc does not embed a Jinja engine. Only
 /// the paths this package needs are implemented; anything else is an explicit
 /// error rather than a silent approximation.
 ///
@@ -19,7 +19,7 @@
 ///     ASCII spelling would not tokenize to it at all;
 ///   * `<think></think>` is emitted literally when thinking is off, and the
 ///     system turn always ends with `detailed thinking on|off`.
-namespace gufo::models::ling3::chat {
+namespace superroc::models::ling3::chat {
 
 /// A tool exposed to the model. `parameters_json` is the raw JSON of the
 /// parameter object; the renderer embeds it verbatim.
@@ -76,6 +76,6 @@ inline constexpr const char* kThinkOpen = "<think>";
 inline constexpr const char* kThinkClose = "</think>";
 }  // namespace markers
 
-}  // namespace gufo::models::ling3::chat
+}  // namespace superroc::models::ling3::chat
 
-#endif  // GUFO_MODELS_LING3_CHAT_TEMPLATE_HPP_
+#endif  // SUPERROC_MODELS_LING3_CHAT_TEMPLATE_HPP_

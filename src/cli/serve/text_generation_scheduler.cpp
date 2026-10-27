@@ -28,7 +28,7 @@
 #include "src/cli/serve/stop_sequences.hpp"
 #include "src/cli/serve/trace.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 namespace {
 
 constexpr std::size_t kDecodeProgressInterval = 50;
@@ -2506,4 +2506,4 @@ TextGenerationScheduler::Request TextGenerationScheduler::Submit(
                 publish_token_pieces, std::move(metadata));
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

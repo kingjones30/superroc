@@ -15,7 +15,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // opt-c010-qk-rope-kv: batched variant of FusedQKNormRoPEKvWriteKernel.
 // Block (h, b) handles token b; blocks [0, num_heads) process Q heads in place,
@@ -198,7 +198,7 @@ void LaunchBatchedFusedQKNormRoPEKvWrite(
       static_cast<__half*>(k_cache_f16), static_cast<__half*>(v_cache_f16),
       layer_idx, start_pos, batch_size, max_context, num_heads, num_kv_heads,
       head_dim, rotary_dim, rope_theta, eps, rope);
-  GUFO_CHECK_LAUNCH("BatchedFusedQKNormRoPEKvWriteKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedFusedQKNormRoPEKvWriteKernel");
 }
 
 __global__ void BatchedRoPEKernel(
@@ -271,7 +271,7 @@ void LaunchBatchedRoPE(float* q, float* k, std::size_t batch_size,
   BatchedRoPEKernel<<<grid, static_cast<unsigned int>(block_size), 0, stream>>>(
       q, k, batch_size, num_heads, num_kv_heads, head_dim, rotary_dim,
       start_pos, rope_theta, rope);
-  GUFO_CHECK_LAUNCH("BatchedRoPEKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedRoPEKernel");
 }
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

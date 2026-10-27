@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_DEVICE_MODEL_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_DEVICE_MODEL_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_DEVICE_MODEL_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_DEVICE_MODEL_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -11,7 +11,7 @@
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen38_flash_next/weights.hpp"
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 
 // LFX1B (RV53 F2/F5): the load-site gate for a Q6_K tensor reaching
 // copy_embedding, by role. Only an LM head consumed by Executor::Dense
@@ -152,6 +152,6 @@ private:
   std::size_t max_q8_cols_{32};
 };
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm
 
-#endif  // GUFO_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_DEVICE_MODEL_HPP_
+#endif  // SUPERROC_MODELS_QWEN38_FLASH_NEXT_KERNELS_ROCM_DEVICE_MODEL_HPP_

@@ -2,7 +2,7 @@
 #include "src/models/qwen/hip/kernels/prefill_quant_gemm.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip::detail {
+namespace superroc::hip::detail {
 
 bool TryLaunchQuantPrefillWave64(core::GgmlType type, const void* w,
                                  const void* x, float* y, std::size_t batch,
@@ -19,7 +19,7 @@ bool TryLaunchQuantPrefillWave64(core::GgmlType type, const void* w,
     WKQuantA8BlockedWmmaGEMMKernel<128, 128, 2, square ? 2 : 4, square ? 2 : 1,
                                    Type, 64>
         <<<grid, 256, 0, stream>>>(w, x, y, batch, m, k);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   };
   switch (type) {
     case core::GgmlType::kQ4_K:
@@ -51,5 +51,5 @@ bool TryLaunchQuantPrefillWave64(core::GgmlType type, const void* w,
   }
 }
 
-}  // namespace gufo::hip::detail
+}  // namespace superroc::hip::detail
 #endif

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_KERNELS_DFLASH_KERNELS_HPP_
-#define GUFO_MODELS_QWEN_HIP_KERNELS_DFLASH_KERNELS_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_KERNELS_DFLASH_KERNELS_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_KERNELS_DFLASH_KERNELS_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -8,7 +8,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip::kernels {
+namespace superroc::hip::kernels {
 
 void LaunchDFlashGroupedDynamicConv(
     const float* input, const float* dynamic_coefficients,
@@ -147,7 +147,7 @@ void LaunchDFlashSelectorBatch(
     std::uint32_t selector_rank, std::uint32_t selector_top_k,
     hipStream_t stream);
 
-}  // namespace gufo::hip::kernels
+}  // namespace superroc::hip::kernels
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_QWEN_HIP_KERNELS_DFLASH_KERNELS_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_KERNELS_DFLASH_KERNELS_HPP_

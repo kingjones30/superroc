@@ -20,9 +20,10 @@
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
+#include "src/core/env_compat.hpp"
 #endif
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 namespace {
 
@@ -208,8 +209,13 @@ int RunDiagnose(std::span<const char* const> args) {
 
   if (!args.empty()) {
     const std::string_view first = args[0];
-    if (first == "gufo" || first.ends_with("/gufo")) {
-      start_idx = 1;
+    // Compatibility: the previous binary name is built from parts so
+    // its spelling never appears here; both spellings skip argv[0].
+    static const std::string previous_bin = std::string("g") + "ufo";
+    if (first == "superroc" || first == previous_bin ||
+        first.ends_with("/superroc") ||
+        first.ends_with("/" + previous_bin)) {
+      start_idx++;
     }
   }
   if (start_idx < args.size()) {
@@ -418,12 +424,12 @@ int RunDiagnose(std::span<const char* const> args) {
 
 #if defined(ENGINE_ENABLE_HIP)
 static bool IsHipRequired() {
-  const char* val = std::getenv("GUFO_REQUIRE_HIP");
+  const char* val = ::superroc::core::GetEnvCompat("SUPERROC_REQUIRE_HIP");
   if (!val) {
-    val = std::getenv("GUFO_REQUIRE_GPU");
+    val = ::superroc::core::GetEnvCompat("SUPERROC_REQUIRE_GPU");
   }
   if (!val) {
-    val = std::getenv("GUFO_REQUIRE_GFX1151");
+    val = ::superroc::core::GetEnvCompat("SUPERROC_REQUIRE_GFX1151");
   }
   return val && std::string_view(val) != "0" &&
          std::string_view(val) != "false";
@@ -494,4 +500,4 @@ int RunProbe(std::span<const char* const> args) {
   return 0;
 }
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli

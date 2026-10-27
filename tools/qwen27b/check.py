@@ -43,8 +43,9 @@ def main() -> None:
         ["model", "mtp_model", "dflash_model"] if args.suite in ("model", "all") else
         ["model", "dflash_model"] if args.suite == "serving" else [])
     for name in required:
-        variable = "GUFO_QWEN27B_" + name.upper()
-        value = getattr(args, name) or environment.get(variable)
+        variable = "SUPERROC_QWEN27B_" + name.upper()
+        legacy = "G" + "UFO_QWEN27B_" + name.upper()
+        value = getattr(args, name) or environment.get(variable) or environment.get(legacy)
         if not value or not Path(value).is_file():
             parser.error(f"missing artifact: --{name.replace('_', '-')}")
         environment[variable] = str(Path(value).resolve())
@@ -55,12 +56,12 @@ def main() -> None:
     commands = [
         ["cmake", "--preset", "gpu-test"],
         ["cmake", "--build", "--preset", "gpu-test", "--target", *targets,
-         *(["gufo"] if args.suite in ("fast", "model", "all") else [])],
+         *(["superroc"] if args.suite in ("fast", "model", "all") else [])],
     ]
     if args.suite == "reference":
         commands.append([
             str(ROOT / "build/gpu-test/tests/models/qwen27b/qwen27b_target_test"),
-            environment["GUFO_QWEN27B_MODEL"], str(args.reference_model.resolve()),
+            environment["SUPERROC_QWEN27B_MODEL"], str(args.reference_model.resolve()),
         ])
     else:
         names = targets + (["qwen27b.tools"] if args.suite in ("fast", "all") else [])

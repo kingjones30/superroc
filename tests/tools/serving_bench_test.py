@@ -13,12 +13,12 @@ from unittest.mock import MagicMock, patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "tools"))
 
-from gufo import serving_bench
-from gufo.model_bench.charts import render_charts
-from gufo.model_bench.config import BenchConfig, load_config
-from gufo.model_bench.llm import Session, _measure_depth, run_loading, run_multi, run_single, run_table
-from gufo.model_bench.render import _serving_rate, layout_for, parse_table, render_table
-from gufo.model_bench.servers import HipMemory, Server
+from superroc import serving_bench
+from superroc.model_bench.charts import render_charts
+from superroc.model_bench.config import BenchConfig, load_config
+from superroc.model_bench.llm import Session, _measure_depth, run_loading, run_multi, run_single, run_table
+from superroc.model_bench.render import _serving_rate, layout_for, parse_table, render_table
+from superroc.model_bench.servers import HipMemory, Server
 
 
 def check(condition, message):
@@ -28,17 +28,17 @@ def check(condition, message):
 
 with tempfile.TemporaryDirectory() as temporary:
     directory = Path(temporary)
-    executable = directory / "gufo"
-    native = directory / ".gufo-wrapped"
-    link = directory / "result-gufo"
+    executable = directory / "superroc"
+    native = directory / ".superroc-wrapped"
+    link = directory / "result-superroc"
     library = directory / "libamdhip64.so"
     executable.write_bytes(b"#!/bin/sh\n")
     native.write_bytes(b"\x7fELF")
     library.touch()
     link.symlink_to(executable)
     output = MagicMock(stdout=f"libamdhip64.so => {library} (0x0)\n")
-    with patch("gufo.model_bench.servers.subprocess.run", return_value=output) as ldd, \
-            patch("gufo.model_bench.servers.ctypes.CDLL"):
+    with patch("superroc.model_bench.servers.subprocess.run", return_value=output) as ldd, \
+            patch("superroc.model_bench.servers.ctypes.CDLL"):
         check(HipMemory.for_binary(link).library == library, "wrapped HIP library resolution")
         check(ldd.call_args.args[0] == ["ldd", str(native.resolve())], "inspect the wrapped ELF")
         executable.write_bytes(b"\x7fELF")
@@ -51,14 +51,14 @@ with tempfile.TemporaryDirectory() as temporary:
         check(not ldd.called, "do not inspect shell scripts with ldd")
 
 
-GUFO_USAGE = {
+SUPERROC_USAGE = {
     "prompt_tokens": 12,
     "completion_tokens": 2,
     "total_tokens": 14,
     "draft_tokens": 8,
     "draft_tokens_accepted": 4,
     "prompt_tokens_details": {"cached_tokens": 2},
-    "gufo": {
+    "superroc": {
         "cache_hit": True,
         "prefill_tokens": 10,
         "prefill_ms": 20.0,
@@ -88,7 +88,7 @@ class FakeResponse:
     status = 200
 
     def __init__(self, usage=None, timings=None, content=("one", " two")):
-        usage = GUFO_USAGE if usage is None else usage
+        usage = SUPERROC_USAGE if usage is None else usage
         chunks = [
             {
                 "choices": [
@@ -171,7 +171,7 @@ finally:
     serving_bench.urllib.request.urlopen = original_urlopen
 
 check(report["artifactType"] == "servingBenchmark", "artifact type")
-check(report["benchmarkSchema"] == "gufo.serving-benchmark.v1", "schema")
+check(report["benchmarkSchema"] == "superroc.serving-benchmark.v1", "schema")
 check(
     sorted(report["results"]) == ["c1", "c2", "c4"],
     "C=1/C=2/C=4 summaries",
@@ -347,7 +347,7 @@ check(
     "concurrency parser",
 )
 
-# Endpoint profiles: plain OpenAI usage, llama-server timings, strict gufo.
+# Endpoint profiles: plain OpenAI usage, llama-server timings, strict superroc.
 def fake_urlopen_openai(request, timeout):
     del timeout
     body = json.loads(request.data)
@@ -461,11 +461,11 @@ check(
 check(llama.server_inter_token_ms == 10.0, "llama ITL derived from timings")
 
 try:
-    request_with(fake_urlopen_llama, endpoint_profile="gufo")
+    request_with(fake_urlopen_llama, endpoint_profile="superroc")
 except RuntimeError as exception:
-    check("incompatible schema" in str(exception), "gufo profile is strict")
+    check("incompatible schema" in str(exception), "superroc profile is strict")
 else:
-    raise AssertionError("gufo profile must reject a missing gufo block")
+    raise AssertionError("superroc profile must reject a missing superroc block")
 
 # Aggregate throughput: total completion tokens over the slowest request.
 fast = serving_bench.RequestObservation(
@@ -756,7 +756,7 @@ chart_config = BenchConfig("test", ROOT, {"tables": {
     "single-ar": {"title": "AR"}, "multi-mixed": {"title": "Mixed"},
 }})
 chart_document = """<!-- bench:single-ar -->
-| Depth | Gufo tg |
+| Depth | SuperROC tg |
 | ---: | ---: |
 | 0 | 12 |
 <!-- /bench -->
@@ -764,14 +764,14 @@ chart_document = """<!-- bench:single-ar -->
 ![AR](artifacts/charts/single-ar.svg)
 
 <!-- bench:multi-mixed -->
-| Users | Gufo AR |
+| Users | SuperROC AR |
 | ---: | ---: |
 | 2 | 24 |
 <!-- /bench -->
 
 ![Mixed](artifacts/charts/multi-mixed.svg)
 """
-with patch("gufo.model_bench.charts.chart_for", return_value=True) as draw:
+with patch("superroc.model_bench.charts.chart_for", return_value=True) as draw:
     updated, written = render_charts(chart_config, chart_document, {"multi-mixed"})
     check(updated == chart_document, "partial rendering preserves untouched chart links")
     check(written == ["multi-mixed"], "partial rendering updates only the selected chart")
@@ -789,7 +789,7 @@ with tempfile.TemporaryDirectory() as directory:
         ar = config.table(f"multi-ar-{quant}")
         check(ar.spec["modes"] == ["ar"], "one dedicated AR concurrency sweep")
         check([c.header for c in layout_for(config, ar).columns[1:]] ==
-              ["Gufo AR", "llama.cpp AR", "Gain"], "AR table has only AR columns")
+              ["SuperROC AR", "llama.cpp AR", "Gain"], "AR table has only AR columns")
         table = config.table(f"multi-dflash2-{quant}")
         workloads = table.workload_tables()
         check([w.id for w in workloads] == [f"multi-mixed-{quant}", f"multi-repetition-{quant}"],
@@ -797,15 +797,15 @@ with tempfile.TemporaryDirectory() as directory:
         layout = layout_for(config, table)
         check(f"Qwen27B {quant.upper()} DFlash2" in layout.columns[0].header,
               "first column identifies model, quantization and execution mode")
-        check(all(c.unit == "tok/s" for c in layout.columns if c.owner in ("gufo", "reference")),
+        check(all(c.unit == "tok/s" for c in layout.columns if c.owner in ("superroc", "reference")),
               "every throughput column states its unit")
         for workload in workloads:
             check(workload.spec["modes"] == ["dflash2"], "speculative tables never schedule AR")
-            path = config.artifacts_dir / f"{workload.id}-gufo-ar.json"
+            path = config.artifacts_dir / f"{workload.id}-superroc-ar.json"
             path.write_text(json.dumps({"results": {"c1": {"cases": {
                 case: {"completionHashes": ["a" * 64]} for case in workload.spec["cases"]
             }}}}))
-        # Only Gufo repetitive C4 and reference mixed C6 need new measurements.
+        # Only SuperROC repetitive C4 and reference mixed C6 need new measurements.
         body = "| " + " | ".join(c.label for c in layout.columns) + " |\n"
         body += "| " + " | ".join(c.align for c in layout.columns) + " |\n"
         for users in table.spec["concurrency"]:
@@ -813,17 +813,17 @@ with tempfile.TemporaryDirectory() as directory:
                      "TODO" if users == 4 else "40", "30", "33%"]
             body += "| " + " | ".join(cells) + " |\n"
         document = f"<!-- bench:{table.id} -->\n{body}<!-- /bench -->"
-        for target in ("gufo", "reference"):
+        for target in ("superroc", "reference"):
             session = Session(
-                config, target, gufo_binary=Path("gufo"), reference_binary="llama-server",
+                config, target, superroc_binary=Path("superroc"), reference_binary="llama-server",
                 source={"revision": "a" * 40, "dirty": False}, fingerprint={},
                 log_dir=Path(directory), document=document, todo_only=False, fresh=True,
             )
             session.server = MagicMock(return_value=MagicMock())
             session.reference_version = lambda mode: None
-            with patch("gufo.model_bench.llm.run_corpus_benchmark") as bench, \
-                    patch("gufo.model_bench.llm.wait_process_exit"), \
-                    patch("gufo.model_bench.llm.save_artifact"), \
+            with patch("superroc.model_bench.llm.run_corpus_benchmark") as bench, \
+                    patch("superroc.model_bench.llm.wait_process_exit"), \
+                    patch("superroc.model_bench.llm.save_artifact"), \
                     patch("sys.stdout", new=io.StringIO()):
                 bench.side_effect = lambda **kw: {
                     "artifactType": "servingBenchmark",
@@ -843,13 +843,13 @@ with tempfile.TemporaryDirectory() as directory:
                 bench.reset_mock()
                 run_multi(session, table)
                 check(bench.call_count == 1, "TODO refresh measures only the missing workload cell")
-                expected = (f"multi-repetition-{quant}", 4) if target == "gufo" else (f"multi-mixed-{quant}", 6)
+                expected = (f"multi-repetition-{quant}", 4) if target == "superroc" else (f"multi-mixed-{quant}", 6)
                 call = session.server.call_args
                 check((call.args[0].id, call.kwargs["sessions"]) == expected,
                       "merged TODO columns select the correct workload and concurrency")
             session.todo_only = False
             session.server.reset_mock()
-            with patch("gufo.model_bench.llm.load_reference_report", return_value={"hashes": {}}):
+            with patch("superroc.model_bench.llm.load_reference_report", return_value={"hashes": {}}):
                 try:
                     run_multi(session, table)
                 except RuntimeError as exception:
@@ -858,9 +858,9 @@ with tempfile.TemporaryDirectory() as directory:
                 else:
                     raise AssertionError("speculative runs require AR quality references")
             session.server.assert_not_called()
-        with patch("gufo.model_bench.render.load_artifact", return_value=None) as load:
+        with patch("superroc.model_bench.render.load_artifact", return_value=None) as load:
             rendered = render_table(config, table, None)
-            check("Gufo AR" not in rendered and "llama.cpp AR" not in rendered,
+            check("SuperROC AR" not in rendered and "llama.cpp AR" not in rendered,
                   "merged rendering cannot reintroduce AR performance columns")
             check(all(call.args[0].name.endswith("-dflash2.json") for call in load.call_args_list),
                   "performance rendering reads only the configured mode")
@@ -879,15 +879,15 @@ with tempfile.TemporaryDirectory() as directory:
             {"pp": 120, "pp_sd": 4, "tg": 20},
         ]
         for index, row in enumerate(data):
-            target = ("gufo", "reference")[index % 2]
+            target = ("superroc", "reference")[index % 2]
             path = config.artifacts_dir / f"{workloads[index // 2].id}-{target}.json"
             path.write_text(json.dumps({"rows": {"0": row}}))
         rendered = render_table(config, single_table, None)
         row = parse_table(rendered)["0"]
-        check((row["Gufo pp"], row["llama.cpp pp"], row["Gain pp"]) ==
+        check((row["SuperROC pp"], row["llama.cpp pp"], row["Gain pp"]) ==
               ("100.00 ± 2.00", "120.00 ± 4.00", "-16.7%"),
               "pp selects each engine's maximum and its own deviation before computing gain")
-        check((row["Gufo tg mixed"], row["Gain mixed"], row["Gufo tg repetitive"],
+        check((row["SuperROC tg mixed"], row["Gain mixed"], row["SuperROC tg repetitive"],
                row["Gain repetitive"]) == ("10.00", "+25.0%", "30.00", "+50.0%"),
               "generation and gains stay independent by text type")
         exclusions = config.artifacts_dir / "unavailable.json"
@@ -898,7 +898,7 @@ with tempfile.TemporaryDirectory() as directory:
               "explicit exclusions override retained rates and cannot supply the shared pp maximum")
         exclusions.unlink()
         for target, metric, expected in [
-            ("gufo", "Gufo tg repetitive", workloads[1]),
+            ("superroc", "SuperROC tg repetitive", workloads[1]),
             ("reference", "llama.cpp tg mixed", workloads[0]),
         ]:
             layout = layout_for(config, single_table)
@@ -910,7 +910,7 @@ with tempfile.TemporaryDirectory() as directory:
             ) + " |\n"
             document = f"<!-- bench:{single_table.id} -->\n{document}<!-- /bench -->"
             session = Session(
-                config, target, gufo_binary=Path("gufo"), reference_binary="llama-server",
+                config, target, superroc_binary=Path("superroc"), reference_binary="llama-server",
                 source={}, fingerprint={}, log_dir=Path(directory), document=document,
                 todo_only=True, depths=[0],
             )
@@ -923,9 +923,9 @@ with tempfile.TemporaryDirectory() as directory:
                 draft_acceptance=None, draft_tokens=0, draft_accepted_tokens=0,
                 completion_tokens=128, cached_prompt_tokens=0, prefill_tokens=2048,
             )
-            with patch("gufo.model_bench.llm.Tokenizer") as tokenizer, \
-                    patch("gufo.model_bench.llm._measure_depth", return_value=observation) as measure, \
-                    patch("gufo.model_bench.llm.wait_process_exit"), \
+            with patch("superroc.model_bench.llm.Tokenizer") as tokenizer, \
+                    patch("superroc.model_bench.llm._measure_depth", return_value=observation) as measure, \
+                    patch("superroc.model_bench.llm.wait_process_exit"), \
                     patch("sys.stdout", new=io.StringIO()):
                 tokenizer.return_value.words_for.return_value = 64
                 tokenizer.return_value.ratio = 1.0
@@ -944,7 +944,7 @@ with tempfile.TemporaryDirectory() as directory:
     config.artifacts_override = Path(directory)
     config.files = {"gguf": {"default": Path(__file__)}}
     session = Session(
-        config, "reference", gufo_binary=Path("gufo"), reference_binary="llama-server",
+        config, "reference", superroc_binary=Path("superroc"), reference_binary="llama-server",
         source={"revision": "a" * 40, "dirty": False}, fingerprint={},
         log_dir=Path(directory), document="", todo_only=False,
     )
@@ -953,8 +953,8 @@ with tempfile.TemporaryDirectory() as directory:
     session.server = MagicMock(return_value=server)
     session.reference_version = MagicMock(return_value="reference MTP version")
     session.store = MagicMock()
-    with patch("gufo.model_bench.llm.drop_file_cache"), \
-            patch("gufo.model_bench.llm.wait_process_exit"), \
+    with patch("superroc.model_bench.llm.drop_file_cache"), \
+            patch("superroc.model_bench.llm.wait_process_exit"), \
             patch("sys.stdout", new=io.StringIO()):
         run_loading(session, config.table("loading"))
     check(session.store.call_args.args[1]["mode"] == "mtp",
@@ -971,7 +971,7 @@ with tempfile.TemporaryDirectory() as directory:
     for task in ("prose", "repetition"):
         table.spec["workload"] = task
         session = Session(
-            config, "gufo", gufo_binary=Path("gufo"), reference_binary="llama-server",
+            config, "superroc", superroc_binary=Path("superroc"), reference_binary="llama-server",
             source={"revision": "a" * 40, "dirty": False}, fingerprint={},
             log_dir=Path(directory), document="", todo_only=False, fresh=True,
         )
@@ -987,10 +987,10 @@ with tempfile.TemporaryDirectory() as directory:
         report = {"artifactType": "servingBenchmark", "workload": {},
                   "results": {"c1": {"samples": [{"prompt_tokens": 2048, "prefill_tokens": 0,
                                                  "completion_tokens": 128}]}}}
-        with patch("gufo.model_bench.llm.Tokenizer", return_value=tokenizer), \
-                patch("gufo.model_bench.llm.run_corpus_benchmark", return_value=report) as bench, \
-                patch("gufo.model_bench.llm.wait_process_exit"), \
-                patch("gufo.model_bench.llm.save_artifact") as save, \
+        with patch("superroc.model_bench.llm.Tokenizer", return_value=tokenizer), \
+                patch("superroc.model_bench.llm.run_corpus_benchmark", return_value=report) as bench, \
+                patch("superroc.model_bench.llm.wait_process_exit"), \
+                patch("superroc.model_bench.llm.save_artifact") as save, \
                 patch("sys.stdout", new=io.StringIO()):
             run_multi(session, table)
             check(bench.call_args.kwargs["cases"][0].text == single_prompt,
@@ -1009,7 +1009,7 @@ with tempfile.TemporaryDirectory() as directory:
                 raise AssertionError("incomplete benchmark output must fail")
             check(not save.called, "invalid measurements are not published")
             table.spec["modes"] = ["mtp"]
-            ar_reference = Path(directory) / "multi-ar-gufo-ar.json"
+            ar_reference = Path(directory) / "multi-ar-superroc-ar.json"
             ar_reference.write_text(json.dumps({"results": {"c1": {"cases": {
                 f"synthetic_{task}_pp2048": {"completionHashes": ["a" * 64]}
             }}}}))
@@ -1032,7 +1032,7 @@ with tempfile.TemporaryDirectory() as directory:
     config = load_config(ROOT, "deepseek-v4-flash")
     config.files = {role: {"default": Path(directory) / role} for role in ("gguf", "dspark")}
     session = Session(
-        config, "reference", gufo_binary=Path("gufo"), reference_binary="ds4-server",
+        config, "reference", superroc_binary=Path("superroc"), reference_binary="ds4-server",
         source={"revision": "a" * 40, "dirty": False}, fingerprint={},
         log_dir=Path(directory), document="", todo_only=False,
     )
@@ -1055,7 +1055,7 @@ with tempfile.TemporaryDirectory() as directory:
         raise AssertionError("the pinned reference cannot batch DSpark")
     session.active_log = Path(directory) / "server.log"
     session.active_log.write_text("")
-    with patch("gufo.model_bench.llm.run_request") as request, \
+    with patch("superroc.model_bench.llm.run_request") as request, \
             patch("ds4.server_metrics.request_metrics"):
         session.request("http://unused", "prompt", 1)
         check(request.call_args.kwargs["extra_body"]["thinking"] == {"type": "disabled"},
@@ -1074,7 +1074,7 @@ with tempfile.TemporaryDirectory() as directory:
     config.files = {"gguf": {"default": Path(__file__)}}
     table = config.table("multi-ar")
     table.spec["concurrency"] = [2]
-    session.target = "gufo"
+    session.target = "superroc"
     session.server = MagicMock(return_value=MagicMock())
     session.reference_version = lambda mode: None
     phases = []
@@ -1085,13 +1085,13 @@ with tempfile.TemporaryDirectory() as directory:
     def prepared_cohort(**kwargs):
         phases.append("prepared cohort")
         check(kwargs["prefill_first"] and kwargs["preparation_tokens"] == 1,
-              "Gufo DS4 still prepares every session before timing decoding")
+              "SuperROC DS4 still prepares every session before timing decoding")
         return report
 
-    with patch("gufo.model_bench.llm.Tokenizer", return_value=MagicMock(overhead=4, ratio=1.143)), \
-            patch("gufo.model_bench.llm.run_corpus_benchmark", side_effect=prepared_cohort), \
-            patch("gufo.model_bench.llm.wait_process_exit"), \
-            patch("gufo.model_bench.llm.save_artifact"), \
+    with patch("superroc.model_bench.llm.Tokenizer", return_value=MagicMock(overhead=4, ratio=1.143)), \
+            patch("superroc.model_bench.llm.run_corpus_benchmark", side_effect=prepared_cohort), \
+            patch("superroc.model_bench.llm.wait_process_exit"), \
+            patch("superroc.model_bench.llm.save_artifact"), \
             patch("sys.stdout", new=io.StringIO()):
         run_multi(session, table)
     check(phases == ["C1 checkpoint", "prepared cohort"],
@@ -1104,11 +1104,11 @@ with tempfile.TemporaryDirectory() as directory:
 config = load_config(ROOT, "qwen3.8-flash-next")
 config.files = {"gguf": {"default": Path("target.gguf")}}
 session = Session(
-    config, "reference", gufo_binary=Path("gufo"), reference_binary="llama-server",
+    config, "reference", superroc_binary=Path("superroc"), reference_binary="llama-server",
     source={"revision": "a" * 40, "dirty": False}, fingerprint={},
     log_dir=Path("/tmp"), document="", todo_only=False,
 )
-with patch("gufo.model_bench.llm.shutil.which", return_value="/bin/llama-server") as which, \
+with patch("superroc.model_bench.llm.shutil.which", return_value="/bin/llama-server") as which, \
         patch.object(session, "reference_version"):
     session.server(config.table("single-ar"), mode="ar", context=4096, sessions=1, tag="test")
     which.assert_called_once_with("llama-server")

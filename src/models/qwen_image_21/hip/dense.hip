@@ -5,7 +5,7 @@
 #include "src/models/qwen_image_21/hip/runtime.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::models::qwen_image_21::hip {
+namespace superroc::models::qwen_image_21::hip {
 namespace {
 using Fragment = __attribute__((ext_vector_type(16))) unsigned short;
 using Accumulator = __attribute__((ext_vector_type(8))) float;
@@ -201,7 +201,7 @@ void PackDense16(const std::uint16_t* input, std::uint16_t* output, int rows,
                  int cols, hipStream_t stream) {
   PackDense<<<dim3((cols + 63) / 64, (rows + 63) / 64), 256, 0, stream>>>(
       input, output, rows, cols);
-  GUFO_CHECK_LAUNCH("PackDense");
+  SUPERROC_CHECK_LAUNCH("PackDense");
 }
 
 bool DenseBf16(const std::uint16_t* weights, const std::uint16_t* input,
@@ -215,26 +215,26 @@ bool DenseBf16(const std::uint16_t* weights, const std::uint16_t* input,
       DenseProjection<128, 32, 2, 2, true><<<grid, 128, 0, stream>>>(
           weights, input, reinterpret_cast<hip_bfloat16*>(output), rows,
           channels, inner);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     }
     else
       DenseProjection<128, 32, 2, 2, false><<<grid, 128, 0, stream>>>(
           weights, input, reinterpret_cast<hip_bfloat16*>(output), rows,
           channels, inner);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
   } else {
     const dim3 grid((rows + 127) / 128, channels / 256);
     if (rows % 128) {
       DenseProjection<256, 128, 4, 2, true><<<grid, 256, 0, stream>>>(
           weights, input, reinterpret_cast<hip_bfloat16*>(output), rows,
           channels, inner);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     }
     else
       DenseProjection<256, 128, 4, 2, false><<<grid, 256, 0, stream>>>(
           weights, input, reinterpret_cast<hip_bfloat16*>(output), rows,
           channels, inner);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
   }
   return true;
 }
@@ -250,13 +250,13 @@ bool DenseSwiGlu(const std::uint16_t* gate, const std::uint16_t* up,
     GatedProjection<128, 32, 4, 2>
         <<<dim3((rows + 31) / 32, channels / 128), 256, 0, stream>>>(
             gate, up, input, y, rows, channels, inner);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   }
   else
     GatedProjection<128, 128, 4, 2>
         <<<dim3((rows + 127) / 128, channels / 128), 256, 0, stream>>>(
             gate, up, input, y, rows, channels, inner);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
-}  // namespace gufo::models::qwen_image_21::hip
+}  // namespace superroc::models::qwen_image_21::hip

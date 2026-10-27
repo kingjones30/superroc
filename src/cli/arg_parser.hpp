@@ -1,5 +1,5 @@
-#ifndef GUFO_CLI_ARG_PARSER_HPP_
-#define GUFO_CLI_ARG_PARSER_HPP_
+#ifndef SUPERROC_CLI_ARG_PARSER_HPP_
+#define SUPERROC_CLI_ARG_PARSER_HPP_
 
 #include <algorithm>
 #include <charconv>
@@ -18,7 +18,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace gufo::cli {
+namespace superroc::cli {
 
 /// A lightweight, type-safe C++20 command-line argument parser.
 class ArgParser {
@@ -461,6 +461,6 @@ private:
   mutable bool help_requested_ = false;
 };
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli
 
-#endif  // GUFO_CLI_ARG_PARSER_HPP_
+#endif  // SUPERROC_CLI_ARG_PARSER_HPP_

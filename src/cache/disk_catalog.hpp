@@ -1,9 +1,9 @@
-#ifndef GUFO_CACHE_DISK_CATALOG_HPP_
-#define GUFO_CACHE_DISK_CATALOG_HPP_
+#ifndef SUPERROC_CACHE_DISK_CATALOG_HPP_
+#define SUPERROC_CACHE_DISK_CATALOG_HPP_
 
 #include "src/cache/prefix_index.hpp"
 
-namespace gufo::cache {
+namespace superroc::cache {
 // One global LRU catalog per store, including identities not currently loaded.
 // Construct at quiescence after startup discovery; Track every successful new
 // publication before exposing it through lookup. Operations are caller
@@ -34,5 +34,5 @@ private:
   struct Impl;
   std::unique_ptr<Impl> impl_;
 };
-}  // namespace gufo::cache
+}  // namespace superroc::cache
 #endif

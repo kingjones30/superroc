@@ -21,7 +21,7 @@
 #include "src/models/deepseek_v4_flash/chat_template.hpp"
 #include "src/models/qwen/control_tokens.hpp"
 
-using gufo::tokenization::kImEnd;
+using superroc::tokenization::kImEnd;
 
 namespace {
 
@@ -34,7 +34,7 @@ void Expect(bool condition, std::string_view message) {
   }
 }
 
-bool Accepts(const gufo::sampling::JsonConstraint& grammar,
+bool Accepts(const superroc::sampling::JsonConstraint& grammar,
              std::string_view text) {
   auto state = grammar.Start();
   for (const unsigned char byte : text) {
@@ -56,13 +56,13 @@ std::string Trimmed(const std::string& value) {
 
 /// Reports fixed prompt progress before delegating token generation.
 class ProgressRequest final
-    : public gufo::server::TextGenerationBackend::GenerationRequest {
+    : public superroc::server::TextGenerationBackend::GenerationRequest {
 public:
-  using Backend = gufo::server::TextGenerationBackend;
+  using Backend = superroc::server::TextGenerationBackend;
 
   ProgressRequest(std::shared_ptr<GenerationRequest> inner,
                   std::vector<Backend::PromptProgress> progress,
-                  std::optional<gufo::sampling::JsonConstraint::ToolFormat>
+                  std::optional<superroc::sampling::JsonConstraint::ToolFormat>
                       tool_format = {})
       : inner_(std::move(inner)),
         progress_(std::move(progress)),
@@ -80,7 +80,7 @@ public:
     return inner_->Wait(on_token, on_progress, on_start);
   }
   void Cancel() noexcept override { inner_->Cancel(); }
-  std::optional<gufo::sampling::JsonConstraint::ToolFormat> ToolFormat()
+  std::optional<superroc::sampling::JsonConstraint::ToolFormat> ToolFormat()
       const override {
     return tool_format_;
   }
@@ -88,21 +88,21 @@ public:
 private:
   std::shared_ptr<GenerationRequest> inner_;
   std::vector<Backend::PromptProgress> progress_;
-  const std::optional<gufo::sampling::JsonConstraint::ToolFormat> tool_format_;
+  const std::optional<superroc::sampling::JsonConstraint::ToolFormat> tool_format_;
 };
 
-class FakeBackend final : public gufo::server::TextGenerationBackend {
+class FakeBackend final : public superroc::server::TextGenerationBackend {
 public:
   [[nodiscard]] std::string model_id() const override { return "test-model"; }
   [[nodiscard]] bool ready() const override { return true; }
   [[nodiscard]] SamplingDefaults sampling_defaults() const override {
     return defaults;
   }
-  [[nodiscard]] gufo::ReasoningOptions reasoning_defaults() const override {
+  [[nodiscard]] superroc::ReasoningOptions reasoning_defaults() const override {
     return reasoning_defaults_value;
   }
   [[nodiscard]] InitialOutputState initial_output_state(
-      const gufo::server::ChatRequest& request) const override {
+      const superroc::server::ChatRequest& request) const override {
     if (initial_output_state_override)
       return *initial_output_state_override;
     return request.reasoning.enabled.value_or(false)
@@ -111,15 +111,15 @@ public:
   }
 
   Result complete(std::string_view, std::size_t,
-                  const gufo::sampling::SamplingConfig&,
+                  const superroc::sampling::SamplingConfig&,
                   const CancellationCheck&, const TokenCallback&,
                   std::string_view, const std::vector<std::string>&,
                   bool) override {
     return {};
   }
 
-  Result chat(const gufo::server::ChatRequest& request, std::size_t max_tokens,
-              const gufo::sampling::SamplingConfig& sampling,
+  Result chat(const superroc::server::ChatRequest& request, std::size_t max_tokens,
+              const superroc::sampling::SamplingConfig& sampling,
               const CancellationCheck& is_cancelled,
               const TokenCallback& on_token) override {
     ++chat_calls;
@@ -162,7 +162,7 @@ public:
       }
       result.text += piece;
       result.tokens.push_back(
-          static_cast<gufo::tokenization::TokenId>(result.tokens.size()));
+          static_cast<superroc::tokenization::TokenId>(result.tokens.size()));
       if (block_after_first_piece &&
           result.tokens.size() == static_cast<std::size_t>(1)) {
         {
@@ -182,11 +182,11 @@ public:
   }
 
   std::shared_ptr<GenerationRequest> start_chat(
-      const gufo::server::ChatRequest& request, std::size_t max_tokens,
-      const gufo::sampling::SamplingConfig& sampling,
+      const superroc::server::ChatRequest& request, std::size_t max_tokens,
+      const superroc::sampling::SamplingConfig& sampling,
       const CancellationCheck& is_cancelled, bool stream_output) override {
     if (reject_on_start.has_value()) {
-      throw gufo::server::TextGenerationError(*reject_on_start,
+      throw superroc::server::TextGenerationError(*reject_on_start,
                                               "injected admission rejection");
     }
     return std::make_shared<ProgressRequest>(
@@ -220,22 +220,22 @@ public:
 
   std::vector<std::string> pieces;
   std::vector<PromptProgress> progress;
-  std::optional<gufo::sampling::JsonConstraint::ToolFormat> tool_format;
+  std::optional<superroc::sampling::JsonConstraint::ToolFormat> tool_format;
   std::string cache_miss_reason;
   FinishReason finish_reason{FinishReason::kStop};
   std::string stop_sequence;
   bool block_after_first_piece{false};
   std::atomic<bool> completed{false};
   std::atomic<int> chat_calls{0};
-  gufo::server::ChatRequest last_request;
+  superroc::server::ChatRequest last_request;
   SamplingDefaults defaults;
-  gufo::ReasoningOptions reasoning_defaults_value;
+  superroc::ReasoningOptions reasoning_defaults_value;
   std::optional<InitialOutputState> initial_output_state_override;
   std::size_t last_max_tokens{0};
   std::size_t reasoning_tokens{0};
   float last_temperature{0.0F};
-  gufo::sampling::SamplingConfig last_sampling;
-  std::optional<gufo::server::TextGenerationErrorCode> reject_on_start;
+  superroc::sampling::SamplingConfig last_sampling;
+  std::optional<superroc::server::TextGenerationErrorCode> reject_on_start;
 
 private:
   std::mutex mutex;
@@ -244,7 +244,7 @@ private:
   bool released{false};
 };
 
-gufo::server::HttpRequest Request(
+superroc::server::HttpRequest Request(
     std::string body,
     std::vector<std::pair<std::string, std::string>> headers = {}) {
   return {
@@ -257,8 +257,8 @@ gufo::server::HttpRequest Request(
   };
 }
 
-void AppendToolDeltas(std::vector<gufo::json::Value>& calls,
-                      const gufo::json::Value& deltas, bool stream) {
+void AppendToolDeltas(std::vector<superroc::json::Value>& calls,
+                      const superroc::json::Value& deltas, bool stream) {
   for (const auto& delta : deltas.items()) {
     if (!stream) {
       calls.push_back(delta);
@@ -267,7 +267,7 @@ void AppendToolDeltas(std::vector<gufo::json::Value>& calls,
     const auto index = delta.member_size("index");
     Expect(index <= calls.size(), "tool indexes have no gaps");
     if (index == calls.size())
-      calls.push_back(gufo::json::Value::object());
+      calls.push_back(superroc::json::Value::object());
     auto& call = calls[index];
     if (!delta.member_str("id").empty()) {
       Expect(call.member_str("id").empty(), "tool ID is sent once");
@@ -285,10 +285,10 @@ void TestStreamingIsLive() {
   FakeBackend backend;
   backend.pieces = {"Hel<tool_call>", "lo"};
   backend.finish_reason =
-      gufo::server::TextGenerationBackend::FinishReason::kLength;
+      superroc::server::TextGenerationBackend::FinishReason::kLength;
   backend.block_after_first_piece = true;
 
-  auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"hello"}],
         "max_tokens":2,
@@ -367,7 +367,7 @@ void TestLessThanProseStreamsBeforeCompletion() {
   FakeBackend backend;
   backend.pieces = {"3 < 5 and x < y", " are comparisons."};
   backend.block_after_first_piece = true;
-  auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  auto response = superroc::server::HandleOpenAiChat(Request(R"({
     "model":"test-model","messages":[{"role":"user","content":"explain"}],
     "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}],
     "stream":true,"reasoning_effort":"none"
@@ -380,7 +380,7 @@ void TestLessThanProseStreamsBeforeCompletion() {
     response.streaming_body([&](std::string_view part) {
       if (part == "data: [DONE]\n\n")
         return true;
-      const auto event = gufo::json::parse(part.substr(6));
+      const auto event = superroc::json::parse(part.substr(6));
       {
         const std::lock_guard lock(mutex);
         for (const auto& choice : event.find("choices")->items()) {
@@ -412,7 +412,7 @@ void TestCachePromptOption() {
   for (bool stream : {false, true}) {
     for (const auto value : {"true", "false", "null", "0", "\"false\""}) {
       FakeBackend backend;
-      auto response = gufo::server::HandleOpenAiChat(
+      auto response = superroc::server::HandleOpenAiChat(
           Request(
               std::string(
                   R"({"model":"test-model","messages":[{"role":"user","content":"hello"}],"stream":)") +
@@ -441,7 +441,7 @@ void TestStreamingWithoutUsage() {
        {"", R"(,"stream_options":{"include_usage":false})"}) {
     FakeBackend backend;
     backend.pieces = {"ok"};
-    auto response = gufo::server::HandleOpenAiChat(
+    auto response = superroc::server::HandleOpenAiChat(
         Request(
             std::string(
                 R"({"model":"test-model","messages":[{"role":"user","content":"hello"}],"stream":true)") +
@@ -473,22 +473,22 @@ void TestUtf8Output() {
                         const std::string& expected, bool reasoning) {
     FakeBackend backend;
     backend.pieces = std::move(pieces);
-    auto body = gufo::json::parse(R"({
+    auto body = superroc::json::parse(R"({
       "model":"test-model","messages":[{"role":"user","content":"hello"}]
     })");
     body["chat_template_kwargs"]["enable_thinking"] = reasoning;
     const auto field = reasoning ? "reasoning_content" : "content";
     const auto complete =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(complete.status == 200, "Unicode completion succeeds");
-    const auto parsed = gufo::json::parse(complete.body);
+    const auto parsed = superroc::json::parse(complete.body);
     Expect(
         parsed.find("choices")->items().front().find("message")->member_str(
             field) == expected,
         "Non-streaming UTF-8 preserves scalars and replaces malformed bytes");
     body["stream"] = true;
     const auto stream =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(stream.status == 200 && stream.streaming_body,
            "Unicode stream succeeds");
     std::string text;
@@ -496,7 +496,7 @@ void TestUtf8Output() {
       if (chunk == "data: [DONE]\n\n")
         return true;
       Expect(chunk.starts_with("data: "), "SSE has a data prefix");
-      const auto event = gufo::json::parse(chunk.substr(6));
+      const auto event = superroc::json::parse(chunk.substr(6));
       for (const auto& choice : event.find("choices")->items()) {
         const auto* delta = choice.find("delta");
         if (delta)
@@ -534,12 +534,12 @@ void TestUtf8Output() {
 void TestCachedPrefillMetrics() {
   FakeBackend backend;
   backend.pieces = {"ok"};
-  const auto response = gufo::server::HandleOpenAiChat(
+  const auto response = superroc::server::HandleOpenAiChat(
       Request(
           R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})"),
       backend);
   Expect(response.status == 200, "Cached non-streaming response succeeds");
-  const auto body = gufo::json::parse(response.body);
+  const auto body = superroc::json::parse(response.body);
   const auto* usage = body.find("usage");
   const auto* timings = body.find("timings");
   Expect(body.find("metrics") == nullptr,
@@ -552,31 +552,31 @@ void TestCachedPrefillMetrics() {
              timings->member_double("prompt_per_token_ms") == 1.25,
          "Non-streaming timings report executed prefill work");
 
-  gufo::server::TextGenerationBackend::Result cached;
+  superroc::server::TextGenerationBackend::Result cached;
   cached.prompt_tokens = cached.cached_prompt_tokens = 1024;
   cached.prefill_ms = 0.01;
-  Expect(gufo::server::PrefillTokensPerSecond(cached) == 0,
+  Expect(superroc::server::PrefillTokensPerSecond(cached) == 0,
          "Full cache hits cannot report artificial prefill throughput");
   cached.prefill_tokens = 10;
   cached.prefill_ms = 0;
-  Expect(gufo::server::PrefillTokensPerSecond(cached) == 0,
+  Expect(superroc::server::PrefillTokensPerSecond(cached) == 0,
          "Untimed work does not divide by zero");
   cached.component_cache.emplace();
   cached.component_cache->borrowed_capacity_bytes = 4096;
-  const auto component_timings = gufo::server::GenerationTimings(cached);
+  const auto component_timings = superroc::server::GenerationTimings(cached);
   const auto* component = component_timings.find("component_cache");
   Expect(component && component->member_str("schema") == "component-cache-v1" &&
              component->member_size("borrowed_capacity_bytes") == 4096,
          "Shared Chat/Responses/Messages timings retain component cache work");
 
   backend.cache_miss_reason = "prefix_changed";
-  const auto miss = gufo::server::HandleOpenAiChat(
+  const auto miss = superroc::server::HandleOpenAiChat(
       Request(
           R"({"model":"test-model","messages":[{"role":"user","content":"changed"}]})"),
       backend);
-  const auto miss_body = gufo::json::parse(miss.body);
+  const auto miss_body = superroc::json::parse(miss.body);
   const auto* miss_usage = miss_body.find("usage");
-  const auto* metrics = miss_usage ? miss_usage->find("gufo") : nullptr;
+  const auto* metrics = miss_usage ? miss_usage->find("superroc") : nullptr;
   Expect(metrics &&
              metrics->member_str("cache_miss_reason") == "prefix_changed" &&
              metrics->member_size("cache_common_prefix_tokens") == 2 &&
@@ -591,7 +591,7 @@ void TestToolCallsAreStructured() {
       "</parameter>\n</function>\n</tool_call>",
   };
 
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"weather in Rome"}],
         "tools":[{
@@ -622,7 +622,7 @@ void TestToolCallsAreStructured() {
   Expect(backend.last_request.tools.size() == 1,
          "Tool schema reaches the model backend");
   Expect(backend.last_request.tool_choice ==
-             gufo::server::ChatRequest::ToolChoice::kRequired,
+             superroc::server::ChatRequest::ToolChoice::kRequired,
          "Required tool choice reaches the model backend");
 }
 
@@ -649,7 +649,7 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
       "<arg_key>max_results</arg_key>\n<arg_value>3</arg_value>\n",
       "</" + zw + "tool_call>"};
   const auto body = [](const char* choice, bool stream) {
-    auto request = gufo::json::parse(R"({
+    auto request = superroc::json::parse(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"Weather in Paris, and batteries?"}],
         "tools":[
@@ -669,12 +669,12 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
     request["stream"] = stream;
     return request.dump();
   };
-  const auto collect = [](const gufo::server::HttpResponse& response,
+  const auto collect = [](const superroc::server::HttpResponse& response,
                           bool stream, std::string* finish,
                           std::string* content) {
-    std::vector<gufo::json::Value> calls;
+    std::vector<superroc::json::Value> calls;
     if (!stream) {
-      const auto output = gufo::json::parse(response.body);
+      const auto output = superroc::json::parse(response.body);
       const auto& choice = output.find("choices")->items()[0];
       *finish = choice.member_str("finish_reason");
       const auto& message = *choice.find("message");
@@ -695,7 +695,7 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
       const auto payload = output.substr(begin, cursor - begin);
       if (payload == "[DONE]")
         break;
-      const auto event = gufo::json::parse(payload);
+      const auto event = superroc::json::parse(payload);
       const auto* choices = event.find("choices");
       if (!choices || choices->empty())
         continue;
@@ -716,7 +716,7 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
       FakeBackend backend;
       backend.native_tools = true;
       backend.pieces = ling_output;
-      const auto response = gufo::server::HandleOpenAiChat(
+      const auto response = superroc::server::HandleOpenAiChat(
           Request(body(choice, stream)), backend);
       Expect(response.status == 200, "Ling3 tool request is accepted");
       Expect(!backend.last_request.constrained_tools,
@@ -734,9 +734,9 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
       const auto& weather = *calls[0].find("function");
       const auto& search = *calls[1].find("function");
       const auto weather_args =
-          gufo::json::parse(weather.member_str("arguments"));
+          superroc::json::parse(weather.member_str("arguments"));
       const auto search_args =
-          gufo::json::parse(search.member_str("arguments"));
+          superroc::json::parse(search.member_str("arguments"));
       Expect(weather.member_str("name") == "get_weather" &&
                  weather_args.member_str("city") == "Paris" &&
                  weather_args.member_str("unit") == "celsius",
@@ -753,7 +753,7 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
   {
     FakeBackend backend;
     backend.pieces = ling_output;
-    (void)gufo::server::HandleOpenAiChat(Request(body("auto", false)), backend);
+    (void)superroc::server::HandleOpenAiChat(Request(body("auto", false)), backend);
     Expect(backend.last_request.constrained_tools,
            "other backends keep constrained tool requests");
   }
@@ -763,7 +763,7 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
     backend.native_tools = true;
     backend.pieces = {"Hello! How can I help you today?"};
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body(choice, false)), backend);
+        superroc::server::HandleOpenAiChat(Request(body(choice, false)), backend);
     if (std::string_view(choice) == "required") {
       Expect(response.status == 502 &&
                  response.body.find("tool_choice_unsatisfied") !=
@@ -785,7 +785,7 @@ void TestGlmCallRenamesTheOneUnknownKeyToTheMissingRequiredField() {
   // schema asks for "cmd". One unknown key + one missing required field = that
   // field; anything less certain stays as the model wrote it.
   const auto body = [](bool stream) {
-    auto request = gufo::json::parse(R"({
+    auto request = superroc::json::parse(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"Run the test."}],
         "tools":[{"type":"function","function":{"name":"shell",
@@ -798,7 +798,7 @@ void TestGlmCallRenamesTheOneUnknownKeyToTheMissingRequiredField() {
     request["stream"] = stream;
     return request.dump();
   };
-  const auto args_of = [](const gufo::server::HttpResponse& response,
+  const auto args_of = [](const superroc::server::HttpResponse& response,
                           bool stream) {
     std::string arguments;
     std::string text = response.body;
@@ -827,7 +827,7 @@ void TestGlmCallRenamesTheOneUnknownKeyToTheMissingRequiredField() {
                       "cd /work && python -c \"print(1)\"",
                       "</arg_value></tool_call>"};
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body(stream)), backend);
+        superroc::server::HandleOpenAiChat(Request(body(stream)), backend);
     const auto args = args_of(response, stream);
     Expect(response.status == 200 &&
                args.find("\\\"cmd\\\":\\\"cd /work && python -c") !=
@@ -844,7 +844,7 @@ void TestGlmCallRenamesTheOneUnknownKeyToTheMissingRequiredField() {
         "</arg_value><arg_key>dir</arg_key><arg_value>/work"
         "</arg_value></tool_call>"};
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body(false)), backend);
+        superroc::server::HandleOpenAiChat(Request(body(false)), backend);
     const auto args = args_of(response, false);
     Expect(args.find("\\\"cmd\\\"") == std::string::npos &&
                args.find("\\\"command\\\"") != std::string::npos,
@@ -859,7 +859,7 @@ void TestGlmCallRenamesTheOneUnknownKeyToTheMissingRequiredField() {
         "</arg_value><arg_key>note</arg_key><arg_value>x"
         "</arg_value></tool_call>"};
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body(false)), backend);
+        superroc::server::HandleOpenAiChat(Request(body(false)), backend);
     const auto args = args_of(response, false);
     Expect(args.find("\\\"note\\\"") != std::string::npos &&
                args.find("\\\"cmd\\\":\\\"ls") != std::string::npos,
@@ -868,7 +868,7 @@ void TestGlmCallRenamesTheOneUnknownKeyToTheMissingRequiredField() {
 }
 
 void TestToolParameterCompatibility() {
-  using gufo::json::Value;
+  using superroc::json::Value;
   const std::pair<const char*, const char*> cases[] = {
       {R"({"name":"f"})", "{}"},
       {R"({"name":"f","parameters":null})", "{}"},
@@ -887,13 +887,13 @@ void TestToolParameterCompatibility() {
         FakeBackend backend;
         backend.pieces = {
             "<tool_call>\n<function=f>\n</function>\n</tool_call>"};
-        auto body = gufo::json::parse(R"({
+        auto body = superroc::json::parse(R"({
           "model":"test-model","messages":[{"role":"user","content":"call f"}],
           "tool_choice":"required","tools":[]
         })");
         auto definition = Value::object();
         definition["type"] = "function";
-        auto function = gufo::json::parse(function_json);
+        auto function = superroc::json::parse(function_json);
         if (flat) {
           for (const auto& [key, value] : function.members())
             definition.append_member(key, value);
@@ -903,7 +903,7 @@ void TestToolParameterCompatibility() {
         body["tools"].push_back(std::move(definition));
         body["stream"] = stream;
         const auto response =
-            gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+            superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
         Expect(response.status == 200, "Compatible tool schema is accepted");
         std::string output = response.body;
         if (stream) {
@@ -926,7 +926,7 @@ void TestToolParameterCompatibility() {
         auto expected_function = Value::object();
         expected_function["name"] = "f";
         expected_function["parameters"] =
-            gufo::json::parse(expected_parameters);
+            superroc::json::parse(expected_parameters);
         auto expected_definition = Value::object();
         expected_definition["type"] = "function";
         expected_definition["function"] = expected_function;
@@ -958,17 +958,17 @@ void TestInvalidToolsFailBeforeGeneration() {
     for (bool valid_first : {false, true}) {
       for (const char* entry : invalid) {
         FakeBackend backend;
-        auto body = gufo::json::parse(R"({
+        auto body = superroc::json::parse(R"({
           "model":"test-model","messages":[{"role":"user","content":"use tools"}],
           "tools":[]
         })");
         if (valid_first)
-          body["tools"].push_back(gufo::json::parse(
+          body["tools"].push_back(superroc::json::parse(
               R"({"type":"function","function":{"name":"valid","parameters":{}}})"));
-        body["tools"].push_back(gufo::json::parse(entry));
+        body["tools"].push_back(superroc::json::parse(entry));
         body["stream"] = stream;
         const auto response =
-            gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+            superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
         Expect(response.status == 400 &&
                    response.body.find("invalid_tools") != std::string::npos &&
                    !response.streaming_body && backend.chat_calls == 0,
@@ -983,45 +983,45 @@ void TestResponsesToolStrictness() {
   // omits strict, so optional arguments must remain optional on that path too.
   for (const bool namespaced : {false, true}) {
     for (const std::string strict : {"omitted", "null", "false", "true"}) {
-      auto tool = gufo::json::parse(R"({
+      auto tool = superroc::json::parse(R"({
         "type":"function","name":"todo","parameters":{"type":"object",
           "properties":{"action":{"type":"string"},"status":{"type":"string"},
             "id":{"type":"integer"}},"required":["action"],
           "additionalProperties":false}})");
       if (strict != "omitted")
-        tool["strict"] = gufo::json::parse(strict);
+        tool["strict"] = superroc::json::parse(strict);
       if (strict == "true")
         tool["parameters"]["required"] =
-            gufo::json::parse(R"(["action","status","id"])");
-      auto body = gufo::json::parse(R"({"tools":[]})");
+            superroc::json::parse(R"(["action","status","id"])");
+      auto body = superroc::json::parse(R"({"tools":[]})");
       if (namespaced) {
-        auto group = gufo::json::parse(
+        auto group = superroc::json::parse(
             R"({"type":"namespace","name":"tasks","tools":[]})");
         group["tools"].push_back(tool);
         body["tools"].push_back(std::move(group));
       } else {
         body["tools"].push_back(tool);
       }
-      gufo::server::ChatRequest chat;
+      superroc::server::ChatRequest chat;
       Expect(
-          !gufo::server::ParseOpenAiResponseControls(body, &chat) &&
+          !superroc::server::ParseOpenAiResponseControls(body, &chat) &&
               chat.tools.size() == 1 && chat.constrained_tools,
           "Responses accepts each tool strictness without disabling grammar");
-      auto expected = gufo::json::Value::object();
+      auto expected = superroc::json::Value::object();
       for (const auto& [key, value] : tool.members())
         if (key != "type")
           expected.append_member(key, value);
       const auto definition =
-          gufo::json::parse(chat.tools.front().definition_json);
+          superroc::json::parse(chat.tools.front().definition_json);
       Expect(definition.find("function")->dump() == expected.dump() &&
                  chat.tools.front().parameters_json ==
                      expected.find("parameters")->dump(),
              "Responses preserves the supplied schema for every strictness");
     }
   }
-  gufo::server::ChatRequest invalid;
-  Expect(gufo::server::ParseOpenAiResponseControls(
-             gufo::json::parse(R"({"tools":[{"type":"function","name":"todo",
+  superroc::server::ChatRequest invalid;
+  Expect(superroc::server::ParseOpenAiResponseControls(
+             superroc::json::parse(R"({"tools":[{"type":"function","name":"todo",
                "strict":true,"parameters":{"type":"object","properties":{
                  "id":{"type":"integer"}},"required":[],
                "additionalProperties":false}}]})"),
@@ -1035,7 +1035,7 @@ void TestResponsesClientCompatTolerances() {
   // group client-executed functions and flatten to the function list, while a
   // malformed function still fails the controls.
   {
-    auto body = gufo::json::parse(R"({
+    auto body = superroc::json::parse(R"({
       "tools":[
         {"type":"function","name":"exec","parameters":{"type":"object",
           "properties":{"cmd":{"type":"string"}},"required":["cmd"]}},
@@ -1043,8 +1043,8 @@ void TestResponsesClientCompatTolerances() {
         {"type":"namespace","name":"agents","tools":[{"type":"function",
           "name":"spawn"}]},
         {"type":"code_interpreter"}]})");
-    gufo::server::ChatRequest chat;
-    Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+    superroc::server::ChatRequest chat;
+    Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
            "Responses skips hosted tool types without failing");
     Expect(chat.tools.size() == 2 && chat.tools[0].name == "exec" &&
                chat.tools[1].name == "spawn",
@@ -1053,9 +1053,9 @@ void TestResponsesClientCompatTolerances() {
   {
     // A namespace is a client-side grouping, not a hosted tool: its functions
     // must reach the model with their schema and strictness intact.
-    gufo::server::ChatRequest chat;
-    Expect(!gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"tools":[{"type":"namespace","name":"crm",
+    superroc::server::ChatRequest chat;
+    Expect(!superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"tools":[{"type":"namespace","name":"crm",
                  "description":"Local customer tools","tools":[{"type":"function",
                  "name":"lookup","parameters":{"type":"object","properties":{},
                  "required":[],"additionalProperties":false},"strict":true}]}]})"),
@@ -1066,18 +1066,18 @@ void TestResponsesClientCompatTolerances() {
            "Namespace function tools are flattened with their definitions");
     // Rejected parses leave the request untouched, so every case parses into
     // fresh state instead of inheriting tools from a previous parse.
-    gufo::server::ChatRequest ambiguous;
-    Expect(gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"tools":[
+    superroc::server::ChatRequest ambiguous;
+    Expect(superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"tools":[
                  {"type":"function","name":"lookup"},
                  {"type":"namespace","name":"crm","tools":[{"type":"function",
                   "name":"lookup"}]}]})"),
                &ambiguous)
                .has_value(),
            "Namespace routing is rejected when function names are ambiguous");
-    gufo::server::ChatRequest malformed;
-    Expect(gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"tools":[{"type":"namespace",
+    superroc::server::ChatRequest malformed;
+    Expect(superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"tools":[{"type":"namespace",
                  "name":"crm"}]})"),
                &malformed)
                .has_value(),
@@ -1094,27 +1094,27 @@ void TestResponsesClientCompatTolerances() {
     }
     nested += "]}";
     const std::string outside = R"({"type":"function","name":"outside"})";
-    gufo::server::ChatRequest accepted;
-    Expect(!gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"tools":[)" + nested + "]}"), &accepted) &&
+    superroc::server::ChatRequest accepted;
+    Expect(!superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"tools":[)" + nested + "]}"), &accepted) &&
                accepted.tools.size() == 128,
            "Exactly 128 functions flattened from a namespace are accepted");
     for (const bool outside_first : {false, true}) {
       const auto body = outside_first
                             ? R"({"tools":[)" + outside + "," + nested + "]}"
                             : R"({"tools":[)" + nested + "," + outside + "]}";
-      gufo::server::ChatRequest overflow;
-      Expect(gufo::server::ParseOpenAiResponseControls(gufo::json::parse(body),
+      superroc::server::ChatRequest overflow;
+      Expect(superroc::server::ParseOpenAiResponseControls(superroc::json::parse(body),
                                                        &overflow)
                  .has_value(),
              "Both boundary orderings reject the 129th flattened function");
     }
   }
   {
-    gufo::server::ChatRequest chat;
+    superroc::server::ChatRequest chat;
     Expect(
-        gufo::server::ParseOpenAiResponseControls(
-            gufo::json::parse(
+        superroc::server::ParseOpenAiResponseControls(
+            superroc::json::parse(
                 R"({"tools":[{"type":"function","function":null,"name":"f"}]})"),
             &chat)
             .has_value(),
@@ -1124,16 +1124,16 @@ void TestResponsesClientCompatTolerances() {
   // reasoning.summary is accepted and ignored; effort still applies; a
   // genuinely unknown reasoning member still fails.
   {
-    gufo::server::ChatRequest chat;
-    Expect(!gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(
+    superroc::server::ChatRequest chat;
+    Expect(!superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(
                    R"({"reasoning":{"effort":"low","summary":"auto"}})"),
                &chat) &&
                chat.reasoning.enabled == true &&
-               chat.reasoning.effort == gufo::ReasoningEffort::kLow,
+               chat.reasoning.effort == superroc::ReasoningEffort::kLow,
            "reasoning.summary is accepted while effort still applies");
-    Expect(gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"reasoning":{"effort":"low","bogus":1}})"),
+    Expect(superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"reasoning":{"effort":"low","bogus":1}})"),
                &chat)
                .has_value(),
            "Unknown reasoning members are still rejected");
@@ -1142,21 +1142,21 @@ void TestResponsesClientCompatTolerances() {
   // text.verbosity is accepted and leaves the response format unset;
   // text.format still applies beside it; an unknown text member still fails.
   {
-    gufo::server::ChatRequest chat;
-    Expect(!gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"text":{"verbosity":"low"}})"), &chat) &&
+    superroc::server::ChatRequest chat;
+    Expect(!superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"text":{"verbosity":"low"}})"), &chat) &&
                !chat.response_format,
            "text.verbosity is accepted without forcing a response format");
-    gufo::server::ChatRequest formatted;
-    Expect(!gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"text":{"format":{"type":"json_object"},
+    superroc::server::ChatRequest formatted;
+    Expect(!superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"text":{"format":{"type":"json_object"},
                  "verbosity":"low"}})"),
                &formatted) &&
                formatted.response_format,
            "text.format still applies alongside verbosity");
-    gufo::server::ChatRequest rejected;
-    Expect(gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"text":{"bogus":1}})"), &rejected)
+    superroc::server::ChatRequest rejected;
+    Expect(superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"text":{"bogus":1}})"), &rejected)
                .has_value(),
            "Unknown text members are still rejected");
   }
@@ -1164,37 +1164,37 @@ void TestResponsesClientCompatTolerances() {
   // Codex routes calls by namespace and name: a flattened function call must
   // carry its namespace, while a top-level function call carries none.
   for (const bool stream : {false, true}) {
-    auto body = gufo::json::parse(R"({"input":"go","tools":[
+    auto body = superroc::json::parse(R"({"input":"go","tools":[
       {"type":"function","name":"exec","strict":false,
        "parameters":{"type":"object","properties":{}}},
       {"type":"namespace","name":"multi_agent_v1","tools":[
         {"type":"function","name":"close_agent","strict":false,
          "parameters":{"type":"object","properties":{}}}]}]})");
     body["stream"] = stream;
-    gufo::server::ChatRequest chat;
-    Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+    superroc::server::ChatRequest chat;
+    Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
            "Responses accepts a namespace beside a function");
     FakeBackend backend;
     backend.pieces = {
         "<tool_call>{\"name\":\"close_agent\",\"arguments\":{}}</tool_call>"
         "<tool_call>{\"name\":\"exec\",\"arguments\":{}}</tool_call>"};
-    auto response = gufo::server::CreateOpenAiResponse(
+    auto response = superroc::server::CreateOpenAiResponse(
         Request(body.dump()), backend, chat, 256, {}, stream);
     Expect(response.status == 200, "namespaced tool request succeeds");
-    std::vector<gufo::json::Value> results;
+    std::vector<superroc::json::Value> results;
     if (stream) {
       response.streaming_body([&](std::string_view chunk) {
         auto pos = chunk.find("data: ");
         if (pos != std::string_view::npos &&
             !chunk.substr(pos + 6).starts_with("[DONE]")) {
-          auto event = gufo::json::parse(chunk.substr(pos + 6));
+          auto event = superroc::json::parse(chunk.substr(pos + 6));
           if (event.member_str("type") == "response.completed")
             results.push_back(*event.find("response"));
         }
         return true;
       });
     } else {
-      results.push_back(gufo::json::parse(response.body));
+      results.push_back(superroc::json::parse(response.body));
     }
     std::map<std::string, std::string> namespaces;
     for (const auto& result : results)
@@ -1213,19 +1213,19 @@ void TestMidConversationSystemMessagesKeepOrder() {
   // Codex sends developer messages mid-conversation. The adapter keeps them in
   // place; each model template decides how to render them.
   FakeBackend backend;
-  const auto body = gufo::json::parse(R"({
+  const auto body = superroc::json::parse(R"({
     "model":"test-model","messages":[
       {"role":"user","content":"first"},
       {"role":"assistant","content":"noted"},
       {"role":"developer","content":"compacted state"},
       {"role":"user","content":"second"}]})");
   const auto response =
-      gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+      superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
   Expect(response.status == 200 && backend.last_request.messages.size() == 4 &&
              backend.last_request.messages[0].content == "first" &&
              backend.last_request.messages[1].content == "noted" &&
              backend.last_request.messages[2].role ==
-                 gufo::tokenization::ChatRole::kDeveloper &&
+                 superroc::tokenization::ChatRole::kDeveloper &&
              backend.last_request.messages[2].content == "compacted state" &&
              backend.last_request.messages[3].content == "second",
          "Mid-conversation developer messages reach the backend in place");
@@ -1233,11 +1233,11 @@ void TestMidConversationSystemMessagesKeepOrder() {
 
 void TestToolNameCharacters() {
   const auto declare = [](const std::string& name) {
-    auto body = gufo::json::parse(R"({
+    auto body = superroc::json::parse(R"({
       "model":"test-model","messages":[{"role":"user","content":"use it"}],
       "tools":[]
     })");
-    auto tool = gufo::json::parse(
+    auto tool = superroc::json::parse(
         R"({"type":"function","function":{"name":"PLACEHOLDER",
             "parameters":{"type":"object","properties":{}}}})");
     tool["function"]["name"] = name;
@@ -1245,18 +1245,18 @@ void TestToolNameCharacters() {
     return body.dump();
   };
   const auto replay = [](const std::string& name) {
-    auto body = gufo::json::parse(R"({
+    auto body = superroc::json::parse(R"({
       "model":"test-model","messages":[{"role":"user","content":"use it"}]
     })");
     auto assistant =
-        gufo::json::parse(R"({"role":"assistant","tool_calls":[]})");
-    auto call = gufo::json::parse(
+        superroc::json::parse(R"({"role":"assistant","tool_calls":[]})");
+    auto call = superroc::json::parse(
         R"({"id":"call_1","type":"function","function":{"name":"PLACEHOLDER",
             "arguments":"{\"path\":\"a.txt\"}"}})");
     call["function"]["name"] = name;
     assistant["tool_calls"].push_back(std::move(call));
     body["messages"].push_back(std::move(assistant));
-    body["messages"].push_back(gufo::json::parse(
+    body["messages"].push_back(superroc::json::parse(
         R"({"role":"tool","tool_call_id":"call_1","content":"done"})"));
     return body.dump();
   };
@@ -1270,13 +1270,13 @@ void TestToolNameCharacters() {
   for (const std::string& name : renderable) {
     FakeBackend declared;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(declare(name)), declared);
+        superroc::server::HandleOpenAiChat(Request(declare(name)), declared);
     Expect(response.status == 200 && declared.last_request.tools.size() == 1 &&
                declared.last_request.tools.front().name == name,
            "A renderable tool name reaches the backend unchanged");
 
     FakeBackend replayed;
-    Expect(gufo::server::HandleOpenAiChat(Request(replay(name)), replayed)
+    Expect(superroc::server::HandleOpenAiChat(Request(replay(name)), replayed)
                        .status == 200 &&
                replayed.chat_calls == 1,
            "The same name is accepted when a message replays a call");
@@ -1300,7 +1300,7 @@ void TestToolNameCharacters() {
   for (const std::string& name : unrenderable) {
     FakeBackend declared;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(declare(name)), declared);
+        superroc::server::HandleOpenAiChat(Request(declare(name)), declared);
     Expect(response.status == 400 &&
                response.body.find("invalid_tools") != std::string::npos &&
                declared.chat_calls == 0,
@@ -1308,21 +1308,21 @@ void TestToolNameCharacters() {
 
     FakeBackend replayed;
     const auto replay_response =
-        gufo::server::HandleOpenAiChat(Request(replay(name)), replayed);
+        superroc::server::HandleOpenAiChat(Request(replay(name)), replayed);
     Expect(replay_response.status == 200 && replayed.chat_calls == 1 &&
                replayed.last_request.messages[1].tool_calls[0].name == name &&
                replayed.last_request.messages[1].tool_calls[0].id == "call_1" &&
                replayed.last_request.messages[2].tool_call_id == "call_1",
            "Historical names and result pairing survive unchanged");
 
-    auto item = gufo::json::parse(
+    auto item = superroc::json::parse(
         R"({"type":"function_call","call_id":"call_1","name":"placeholder",
             "arguments":"{\"path\":\"a.txt\"}"})");
     item["name"] = name;
-    gufo::tokenization::ChatMessage message;
-    gufo::core::ImageReadBudget budget;
+    superroc::tokenization::ChatMessage message;
+    superroc::core::ImageReadBudget budget;
     std::string error;
-    Expect(gufo::server::ParseOpenAiResponseMessage(item, &message, budget,
+    Expect(superroc::server::ParseOpenAiResponseMessage(item, &message, budget,
                                                     &error) &&
                message.tool_calls.size() == 1 &&
                message.tool_calls[0].name == name &&
@@ -1336,13 +1336,13 @@ void TestToolNameCharacters() {
 // generates that spelling. Replayed history must render it the same way, or
 // the next turn re-prefills the call it generated.
 void TestHistoricalTypedArgumentsUseTojson() {
-  const auto item = gufo::json::parse(
+  const auto item = superroc::json::parse(
       R"({"type":"function_call","call_id":"call_1","name":"edit",
           "arguments":"{\"path\":\"a.txt\",\"edits\":[{\"oldText\":\"a\",\"newText\":\"b\"}],\"n\":2}"})");
-  gufo::tokenization::ChatMessage message;
-  gufo::core::ImageReadBudget budget;
+  superroc::tokenization::ChatMessage message;
+  superroc::core::ImageReadBudget budget;
   std::string error;
-  Expect(gufo::server::ParseOpenAiResponseMessage(item, &message, budget,
+  Expect(superroc::server::ParseOpenAiResponseMessage(item, &message, budget,
                                                   &error) &&
              message.tool_calls.size() == 1 &&
              message.tool_calls[0].arguments.size() == 3 &&
@@ -1354,11 +1354,11 @@ void TestHistoricalTypedArgumentsUseTojson() {
              message.tool_calls[0].arguments[2].value == "2",
          "Typed historical arguments render as the template's tojson");
   // tojson writes integers in decimal, as the model generated them.
-  const auto large = gufo::json::parse(
+  const auto large = superroc::json::parse(
       R"({"type":"function_call","call_id":"call_1","name":"read",
           "arguments":"{\"limit\":100000,\"offsets\":[1000000]}"})");
-  gufo::tokenization::ChatMessage replayed;
-  Expect(gufo::server::ParseOpenAiResponseMessage(large, &replayed, budget,
+  superroc::tokenization::ChatMessage replayed;
+  Expect(superroc::server::ParseOpenAiResponseMessage(large, &replayed, budget,
                                                   &error) &&
              replayed.tool_calls.size() == 1 &&
              replayed.tool_calls[0].arguments.size() == 2 &&
@@ -1377,29 +1377,29 @@ void TestMalformedHistoricalFunctions() {
         R"({"name":"read","arguments":"["})",
         R"({"name":"read","arguments":"{\"x\":\"raw\nnewline\"}"})",
         R"({"name":"read\u0000file","arguments":"{}"})"}) {
-    const auto function = gufo::json::parse(source);
-    auto body = gufo::json::parse(R"({
+    const auto function = superroc::json::parse(source);
+    auto body = superroc::json::parse(R"({
       "model":"test-model","messages":[{"role":"user","content":"continue"}]
     })");
     auto assistant =
-        gufo::json::parse(R"({"role":"assistant","tool_calls":[]})");
-    auto call = gufo::json::parse(R"({"id":"call_1","type":"function"})");
+        superroc::json::parse(R"({"role":"assistant","tool_calls":[]})");
+    auto call = superroc::json::parse(R"({"id":"call_1","type":"function"})");
     call["function"] = function;
     assistant["tool_calls"].push_back(std::move(call));
     body["messages"].push_back(std::move(assistant));
     FakeBackend backend;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(response.status == 400 && backend.chat_calls == 0 &&
                response.body.find("invalid_messages") != std::string::npos,
            "Malformed history is rejected before model work");
     auto item = function;
     item["type"] = "function_call";
     item["call_id"] = "call_1";
-    gufo::tokenization::ChatMessage message;
-    gufo::core::ImageReadBudget budget;
+    superroc::tokenization::ChatMessage message;
+    superroc::core::ImageReadBudget budget;
     std::string error;
-    Expect(!gufo::server::ParseOpenAiResponseMessage(item, &message, budget,
+    Expect(!superroc::server::ParseOpenAiResponseMessage(item, &message, budget,
                                                      &error) &&
                !error.empty(),
            "Responses rejects malformed history with an explanation");
@@ -1407,8 +1407,8 @@ void TestMalformedHistoricalFunctions() {
 }
 
 void TestQwenToolBoundariesAndSchema() {
-  using gufo::json::Value;
-  const auto schema = gufo::json::parse(R"({
+  using superroc::json::Value;
+  const auto schema = superroc::json::parse(R"({
     "model":"test-model", "messages":[{"role":"user","content":"use f"}],
     "tools":[{"type":"function","function":{"name":"f","parameters":{
       "type":"object","properties":{"text":{"type":"string"},
@@ -1520,11 +1520,11 @@ void TestQwenToolBoundariesAndSchema() {
         for (char c : text)
           backend.pieces.emplace_back(1, c);
         const auto response =
-            gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+            superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
         Expect(response.status == 200, "tool boundary request succeeds");
         std::vector<Value> calls;
         if (!stream) {
-          const auto output = gufo::json::parse(response.body);
+          const auto output = superroc::json::parse(response.body);
           const auto& message =
               *output.find("choices")->items()[0].find("message");
           if (const auto* found = message.find("tool_calls"))
@@ -1543,7 +1543,7 @@ void TestQwenToolBoundariesAndSchema() {
             const auto payload = output.substr(begin, cursor - begin);
             if (payload == "[DONE]")
               break;
-            const auto event = gufo::json::parse(payload);
+            const auto event = superroc::json::parse(payload);
             const auto* choices = event.find("choices");
             if (!choices || choices->empty())
               continue;
@@ -1585,21 +1585,21 @@ void TestToolChoiceEnforcement() {
           "name=\"f\"></｜DSML｜invoke></｜DSML｜tool_calls｜>"}) {
       for (const auto* choice : {"auto", "none", "required"}) {
         for (const auto* declared : {"", "f", "other"}) {
-          auto body = gufo::json::parse(
+          auto body = superroc::json::parse(
               R"({"model":"test-model","messages":[{"role":"user","content":"use a tool"}]})");
           body["stream"] = stream;
           body["tool_choice"] = choice;
           if (*declared) {
-            auto tool = gufo::json::parse(
+            auto tool = superroc::json::parse(
                 R"({"type":"function","function":{"name":"f","parameters":{"type":"object"}}})");
             tool["function"]["name"] = declared;
-            body["tools"] = gufo::json::Value::array();
+            body["tools"] = superroc::json::Value::array();
             body["tools"].push_back(std::move(tool));
           }
           FakeBackend backend;
           backend.pieces = {text};
           const auto response =
-              gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+              superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
           const bool required = std::string_view(choice) == "required";
           if (required && !*declared) {
             Expect(response.status == 400, "required needs declared tools");
@@ -1627,9 +1627,9 @@ void TestToolChoiceEnforcement() {
   }
   FakeBackend backend;
   backend.pieces = {"ordinary text"};
-  auto body = gufo::json::parse(
+  auto body = superroc::json::parse(
       R"({"model":"test-model","messages":[{"role":"user","content":"call f"}],"tool_choice":"required","tools":[{"type":"function","function":{"name":"f","parameters":{}}}]})");
-  Expect(gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
              502,
          "ordinary text cannot fulfill required tool choice");
 }
@@ -1645,7 +1645,7 @@ void TestDeepSeekToolCallsAreStructured() {
       "</｜DSML｜tool_calls｜>",
   };
 
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"read the hostname"}],
         "tools":[{
@@ -1689,7 +1689,7 @@ void TestDeepSeekRepeatedToolParameters() {
         std::pair{"/b", false}}) {
     FakeBackend backend;
     backend.pieces = {call(repeat)};
-    const auto response = gufo::server::HandleOpenAiChat(
+    const auto response = superroc::server::HandleOpenAiChat(
         Request(
             R"({"model":"test-model","messages":[{"role":"user","content":"read"}],)"
             R"("tools":[{"type":"function","function":{"name":"read",)"
@@ -1738,14 +1738,14 @@ void TestDeepSeekSchemaCheckedArguments() {
         Case{call("unknown", "true", "oops"), true, R"({"unknown":"oops"})"}}) {
     FakeBackend backend;
     backend.pieces = {item.text};
-    const auto response = gufo::server::HandleOpenAiChat(
+    const auto response = superroc::server::HandleOpenAiChat(
         Request(
             R"({"model":"test-model","messages":[{"role":"user","content":"run"}],)"
             R"("tools":[{"type":"function","function":{"name":"run",)"
             R"("parameters":{"type":"object","properties":{"tags":{"type":"array"}}}}}]})"),
         backend);
     Expect(response.status == 200, "DeepSeek schema request is accepted");
-    const auto output = gufo::json::parse(response.body);
+    const auto output = superroc::json::parse(response.body);
     const auto* choices = output.find("choices");
     const auto* message = choices != nullptr && !choices->items().empty()
                               ? choices->items()[0].find("message")
@@ -1756,7 +1756,7 @@ void TestDeepSeekSchemaCheckedArguments() {
     Expect(accepted == item.accepted,
            "declared DSML parameter types are enforced: " + item.text);
     if (accepted) {
-      const auto arguments = gufo::json::parse(
+      const auto arguments = superroc::json::parse(
           calls->items()[0].find("function")->member_str("arguments"));
       Expect(arguments.dump() == item.arguments,
              "declared DSML arguments keep their JSON form: " + item.text);
@@ -1785,20 +1785,20 @@ void TestFlintStructuredToolCalls() {
     })";
   for (const bool stream : {false, true}) {
     FakeBackend backend;
-    backend.tool_format = gufo::sampling::JsonConstraint::ToolFormat::kFlint;
+    backend.tool_format = superroc::sampling::JsonConstraint::ToolFormat::kFlint;
     backend.native_tools = false;
     backend.initial_output_state_override =
         FakeBackend::InitialOutputState::kAuto;
     backend.pieces = pieces;
-    auto request = gufo::json::parse(body);
+    auto request = superroc::json::parse(body);
     request["stream"] = stream;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(request.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(request.dump()), backend);
     Expect(response.status == 200, "Flint tool request is accepted");
     std::string finish, content, reasoning;
-    std::vector<gufo::json::Value> calls;
+    std::vector<superroc::json::Value> calls;
     if (!stream) {
-      const auto output = gufo::json::parse(response.body);
+      const auto output = superroc::json::parse(response.body);
       const auto& choice = output.find("choices")->items()[0];
       finish = choice.member_str("finish_reason");
       const auto& message = *choice.find("message");
@@ -1819,7 +1819,7 @@ void TestFlintStructuredToolCalls() {
         const auto payload = output.substr(begin, cursor - begin);
         if (payload == "[DONE]")
           break;
-        const auto event = gufo::json::parse(payload);
+        const auto event = superroc::json::parse(payload);
         const auto* choices = event.find("choices");
         if (!choices || choices->empty())
           continue;
@@ -1845,7 +1845,7 @@ void TestFlintStructuredToolCalls() {
     if (calls.size() != 1)
       continue;
     const auto& function = *calls[0].find("function");
-    const auto arguments = gufo::json::parse(function.member_str("arguments"));
+    const auto arguments = superroc::json::parse(function.member_str("arguments"));
     Expect(function.member_str("name") == "shell",
            "the Flint tool name is preserved");
     Expect(arguments.member_str("cmd") == "echo \"hi",
@@ -1860,7 +1860,7 @@ void TestBackendSamplingDefaults() {
       .sampling = {.temperature = 0.25F},
   };
 
-  const auto default_response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto default_response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"hello"}]
       })"),
@@ -1871,7 +1871,7 @@ void TestBackendSamplingDefaults() {
   Expect(backend.last_temperature > 0.24F && backend.last_temperature < 0.26F,
          "Backend temperature default reaches generation");
 
-  const auto override_response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto override_response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"hello"}],
         "max_tokens":11,
@@ -1886,21 +1886,21 @@ void TestBackendSamplingDefaults() {
 }
 
 void TestModelSamplingDefaults() {
-  using gufo::sampling::TextModelPreset;
+  using superroc::sampling::TextModelPreset;
   FakeBackend backend;
   backend.defaults.model = TextModelPreset::kQwen38;
   backend.defaults.supplied = {};
-  auto constraint = std::make_shared<gufo::sampling::TokenConstraint>();
-  constraint->grammar = gufo::sampling::JsonConstraint::Object();
+  auto constraint = std::make_shared<superroc::sampling::TokenConstraint>();
+  constraint->grammar = superroc::sampling::JsonConstraint::Object();
   constraint->vocabulary =
-      std::make_shared<gufo::sampling::ConstraintVocabulary>(
+      std::make_shared<superroc::sampling::ConstraintVocabulary>(
           2, [](std::uint32_t id) {
-            return gufo::sampling::ConstraintVocabulary::Piece{
+            return superroc::sampling::ConstraintVocabulary::Piece{
                 .text = id == 0 ? "{}" : "", .stop = id == 1};
           });
   backend.defaults.sampling.constraint = constraint;
   auto send = [&](std::string fields) {
-    const auto response = gufo::server::HandleOpenAiChat(
+    const auto response = superroc::server::HandleOpenAiChat(
         Request("{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\","
                 "\"content\":\"hello\"}]" +
                 fields + "}"),
@@ -1950,7 +1950,7 @@ void TestModelSamplingDefaults() {
                config.repeat_penalty == 1.0F,
            "DeepSeek agentic defaults do not depend on reasoning");
   }
-  backend.defaults.supplied = gufo::sampling::SamplingOverrides::All();
+  backend.defaults.supplied = superroc::sampling::SamplingOverrides::All();
   config = send("");
   Expect(config.constraint == backend.defaults.sampling.constraint,
          "Explicit public-API configuration preserves its output constraint");
@@ -1958,7 +1958,7 @@ void TestModelSamplingDefaults() {
 
 void TestCompleteToolDefinitionsReachTemplate() {
   FakeBackend backend;
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
     "model":"test-model",
     "messages":[{"role":"user","content":"Emit a value."}],
     "tools":[{"type":"function","function":{"parameters":{
@@ -1974,9 +1974,9 @@ void TestCompleteToolDefinitionsReachTemplate() {
       tool.definition_json ==
           R"({"type":"function","function":{"parameters":{"type":"object","additionalProperties":false},"strict":true,"description":"","name":"emit"},"vendor":{"version":2}})",
       "Valid nested definitions retain every field and its original order");
-  gufo::tokenization::ChatTemplateOptions options;
+  superroc::tokenization::ChatTemplateOptions options;
   options.enable_thinking = false;
-  const auto rendered = gufo::tokenization::QwenChatTemplate::Render(
+  const auto rendered = superroc::tokenization::QwenChatTemplate::Render(
       backend.last_request.messages, backend.last_request.tools, options);
   Expect(
       rendered.has_value() &&
@@ -1989,41 +1989,41 @@ void TestCompleteToolDefinitionsReachTemplate() {
 void TestFlatToolFieldsReachTemplate() {
   for (const char* strict : {"true", "false", "null"}) {
     FakeBackend backend;
-    auto body = gufo::json::parse(R"({
+    auto body = superroc::json::parse(R"({
       "model":"test-model","messages":[{"role":"user","content":"use f"}],
       "tools":[]
     })");
-    auto function = gufo::json::parse(R"({
+    auto function = superroc::json::parse(R"({
       "name":"f","description":"","parameters":{"type":"object","additionalProperties":false},
       "strict":null,"vendor":{"version":2}
     })");
-    function["strict"] = gufo::json::parse(strict);
+    function["strict"] = superroc::json::parse(strict);
     auto flat = function;
     flat["type"] = "function";
     body["tools"].push_back(flat);
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(response.status == 200 && backend.last_request.tools.size() == 1,
            "Flat function with additional fields is accepted");
     const auto flat_tools = backend.last_request.tools;
-    const auto definition = gufo::json::parse(flat_tools[0].definition_json);
+    const auto definition = superroc::json::parse(flat_tools[0].definition_json);
     const auto* nested = definition.find("function");
     Expect(nested && nested->dump() == function.dump() &&
                !definition.contains("strict") && !definition.contains("vendor"),
            "All flat function fields survive DS4's nested function extraction");
-    gufo::tokenization::ChatTemplateOptions options;
+    superroc::tokenization::ChatTemplateOptions options;
     options.enable_thinking = false;
-    const auto flat_prompt = gufo::tokenization::QwenChatTemplate::Render(
+    const auto flat_prompt = superroc::tokenization::QwenChatTemplate::Render(
         backend.last_request.messages, flat_tools, options);
-    auto canonical = gufo::json::Value::object();
+    auto canonical = superroc::json::Value::object();
     canonical["type"] = "function";
     canonical["function"] = function;
-    body["tools"] = gufo::json::Value::array();
+    body["tools"] = superroc::json::Value::array();
     body["tools"].push_back(canonical);
     const auto nested_response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(nested_response.status == 200, "Nested equivalent is accepted");
-    const auto nested_prompt = gufo::tokenization::QwenChatTemplate::Render(
+    const auto nested_prompt = superroc::tokenization::QwenChatTemplate::Render(
         backend.last_request.messages, backend.last_request.tools, options);
     Expect(flat_prompt.has_value() && nested_prompt == flat_prompt,
            "Flat and nested tools produce identical Qwen prompts");
@@ -2050,15 +2050,15 @@ void TestToolCallRenderParseRoundTrip() {
       const auto& value = values[index];
       std::string text;
       if (deepseek) {
-        gufo::models::deepseek_v4_flash::ChatMessage call;
+        superroc::models::deepseek_v4_flash::ChatMessage call;
         call.role = "assistant";
         call.tool_calls.push_back(
             {.name = "record",
              .arguments = {{.name = "text", .value = value},
                            {.name = "other", .value = "x"}},
              .id = "call_0"});
-        const auto rendered = gufo::models::deepseek_v4_flash::RenderChat(
-            std::vector<gufo::models::deepseek_v4_flash::ChatMessage>{
+        const auto rendered = superroc::models::deepseek_v4_flash::RenderChat(
+            std::vector<superroc::models::deepseek_v4_flash::ChatMessage>{
                 {.role = "user", .content = "go"}, call});
         const auto begin = rendered.find("<｜DSML｜tool_calls>");
         const auto end_tag = std::string_view("</｜DSML｜tool_calls>");
@@ -2067,19 +2067,19 @@ void TestToolCallRenderParseRoundTrip() {
                "DeepSeek renders a historical call");
         text = rendered.substr(begin, end + end_tag.size() - begin);
       } else {
-        gufo::tokenization::ChatMessage call;
-        call.role = gufo::tokenization::ChatRole::kAssistant;
+        superroc::tokenization::ChatMessage call;
+        call.role = superroc::tokenization::ChatRole::kAssistant;
         call.tool_calls.push_back(
             {.id = "call_0",
              .name = "record",
              .arguments = {{.name = "text", .value = value},
                            {.name = "other", .value = "x"}}});
-        std::vector<gufo::tokenization::ChatMessage> history = {
-            {gufo::tokenization::ChatRole::kUser, "go"}, call};
-        gufo::tokenization::ChatTemplateOptions options;
+        std::vector<superroc::tokenization::ChatMessage> history = {
+            {superroc::tokenization::ChatRole::kUser, "go"}, call};
+        superroc::tokenization::ChatTemplateOptions options;
         options.enable_thinking = false;
         const auto rendered =
-            gufo::tokenization::QwenChatTemplate::Render(history, {}, options);
+            superroc::tokenization::QwenChatTemplate::Render(history, {}, options);
         Expect(rendered.has_value(), "Qwen renders a historical call");
         const auto begin = rendered->find("<tool_call>");
         const auto end_tag = std::string_view("</tool_call>");
@@ -2091,7 +2091,7 @@ void TestToolCallRenderParseRoundTrip() {
 
       FakeBackend backend;
       backend.pieces = {text};
-      const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+      const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"record"}],
         "tools":[{"type":"function","function":{"name":"record",
@@ -2103,7 +2103,7 @@ void TestToolCallRenderParseRoundTrip() {
       const std::string label = std::string(deepseek ? "DeepSeek" : "Qwen") +
                                 " case " + std::to_string(index);
       Expect(response.status == 200, label + ": request is accepted");
-      const auto body = gufo::json::parse(response.body);
+      const auto body = superroc::json::parse(response.body);
       const auto* choices = body.find("choices");
       const auto* message = choices != nullptr && !choices->items().empty()
                                 ? choices->items()[0].find("message")
@@ -2115,7 +2115,7 @@ void TestToolCallRenderParseRoundTrip() {
       const auto* function = calls->items()[0].find("function");
       Expect(function != nullptr, label + ": the call has a function");
       const auto arguments =
-          gufo::json::parse(function->member_str("arguments"));
+          superroc::json::parse(function->member_str("arguments"));
       const auto* text_argument = arguments.find("text");
       Expect(text_argument != nullptr && text_argument->is_string() &&
                  text_argument->get_str() == value &&
@@ -2129,7 +2129,7 @@ void TestToolCallRenderParseRoundTrip() {
 
 void TestAllSamplingControlsReachBackend() {
   FakeBackend backend;
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"hello"}],
         "temperature":0.8,
@@ -2174,11 +2174,11 @@ void TestUnsupportedSamplingControlsAreRejected() {
     for (const bool stream : {false, true}) {
       auto request = Request(
           R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})");
-      auto body = gufo::json::parse(request.body);
+      auto body = superroc::json::parse(request.body);
       body[field] = value;
       body["stream"] = stream;
       request.body = body.dump();
-      const auto response = gufo::server::HandleOpenAiChat(request, backend);
+      const auto response = superroc::server::HandleOpenAiChat(request, backend);
       Expect(response.status == 400 &&
                  response.body.find(std::string("invalid_") + field) !=
                      std::string::npos,
@@ -2188,10 +2188,10 @@ void TestUnsupportedSamplingControlsAreRejected() {
   for (const double choices : {0.0, 1.4, 2.0, 1e100}) {
     auto request = Request(
         R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})");
-    auto body = gufo::json::parse(request.body);
+    auto body = superroc::json::parse(request.body);
     body["n"] = choices;
     request.body = body.dump();
-    Expect(gufo::server::HandleOpenAiChat(request, backend).status == 400,
+    Expect(superroc::server::HandleOpenAiChat(request, backend).status == 400,
            "n must be exactly one, without truncation or overflow");
   }
   for (const auto* field : {"draft_temperature",  "temperature_draft",
@@ -2208,10 +2208,10 @@ void TestUnsupportedSamplingControlsAreRejected() {
                             "top_n_sigma",        "logit_bias"}) {
     auto request = Request(
         R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})");
-    auto body = gufo::json::parse(request.body);
+    auto body = superroc::json::parse(request.body);
     body[field] = 0.8;
     request.body = body.dump();
-    const auto response = gufo::server::HandleOpenAiChat(request, backend);
+    const auto response = superroc::server::HandleOpenAiChat(request, backend);
     Expect(response.status == 400 &&
                response.body.find("unsupported_sampling") != std::string::npos,
            "unsupported sampling must not be silently ignored");
@@ -2231,10 +2231,10 @@ void TestSamplingRanges() {
          {minimum - 1e-8, minimum, maximum, maximum + 1e-8}) {
       auto request = Request(
           R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})");
-      auto body = gufo::json::parse(request.body);
+      auto body = superroc::json::parse(request.body);
       body[field] = value;
       request.body = body.dump();
-      const auto response = gufo::server::HandleOpenAiChat(request, backend);
+      const auto response = superroc::server::HandleOpenAiChat(request, backend);
       Expect(
           response.status == (value < minimum || value > maximum ? 400 : 200),
           "sampling range is inclusive and checked before float rounding");
@@ -2245,7 +2245,7 @@ void TestSamplingRanges() {
 void TestAssistantReasoningContentReachesBackend() {
   FakeBackend backend;
   backend.pieces = {"Blue"};
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[
           {"role":"user","content":"Name one color."},
@@ -2273,7 +2273,7 @@ void TestAssistantReasoningContentReachesBackend() {
 void TestPiReasoningControlsAndOutputFraming() {
   FakeBackend backend;
   backend.pieces = {"I should verify this.", "</think>\n\n", "Forty-two."};
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"What is six times seven?"}],
         "reasoning_effort":"high",
@@ -2288,7 +2288,7 @@ void TestPiReasoningControlsAndOutputFraming() {
   Expect(response.status == 200, "Pi reasoning request is accepted");
   Expect(backend.last_request.reasoning.enabled == true,
          "Pi enable_thinking reaches the backend");
-  Expect(backend.last_request.reasoning.effort == gufo::ReasoningEffort::kHigh,
+  Expect(backend.last_request.reasoning.effort == superroc::ReasoningEffort::kHigh,
          "Pi reasoning effort reaches the backend");
   Expect(backend.last_request.reasoning.preserve_thinking == false,
          "Pi preservation control reaches the backend");
@@ -2299,7 +2299,7 @@ void TestPiReasoningControlsAndOutputFraming() {
          "Visible answer excludes reasoning");
 
   for (const auto effort : {"low", "medium", "xhigh"}) {
-    const auto native = gufo::server::HandleOpenAiChat(
+    const auto native = superroc::server::HandleOpenAiChat(
         Request("{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\","
                 "\"content\":\"hello\"}],\"chat_template_kwargs\":{"
                 "\"reasoning_effort\":\"" +
@@ -2310,7 +2310,7 @@ void TestPiReasoningControlsAndOutputFraming() {
         "Native effort alone enables thinking");
   }
   backend.pieces = {"Done."};
-  const auto disabled = gufo::server::HandleOpenAiChat(
+  const auto disabled = superroc::server::HandleOpenAiChat(
       Request(
           R"({"model":"test-model","messages":[{"role":"user","content":"hello"}],
                   "chat_template_kwargs":{"enable_thinking":false,"reasoning_effort":"low"}})"),
@@ -2320,14 +2320,14 @@ void TestPiReasoningControlsAndOutputFraming() {
       "Template enable_thinking=false suppresses the configured effort");
   Expect(disabled.body.find(R"("content":"Done.")") != std::string::npos,
          "Explicit thinking-off produces visible content");
-  const auto vision_ids = gufo::server::HandleOpenAiChat(
+  const auto vision_ids = superroc::server::HandleOpenAiChat(
       Request(
           R"({"model":"test-model","messages":[{"role":"user","content":"hello"}],
                   "chat_template_kwargs":{"add_vision_id":true}})"),
       backend);
   Expect(vision_ids.status == 200 && backend.last_request.add_vision_id,
          "Official add_vision_id option reaches the model formatter");
-  const auto invalid_ids = gufo::server::HandleOpenAiChat(
+  const auto invalid_ids = superroc::server::HandleOpenAiChat(
       Request(
           R"({"model":"test-model","messages":[{"role":"user","content":"hello"}],
                   "chat_template_kwargs":{"add_vision_id":"true"}})"),
@@ -2338,7 +2338,7 @@ void TestPiReasoningControlsAndOutputFraming() {
 void TestPiNativeDeepSeekThinkingObject() {
   FakeBackend backend;
   backend.pieces = {"Check.", "</think>", "Done."};
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"Check this."}],
         "thinking":{"type":"enabled"},
@@ -2349,10 +2349,10 @@ void TestPiNativeDeepSeekThinkingObject() {
          "Pi native DeepSeek thinking object is accepted");
   Expect(backend.last_request.reasoning.enabled == true,
          "Pi DeepSeek thinking.type enables reasoning");
-  Expect(backend.last_request.reasoning.effort == gufo::ReasoningEffort::kHigh,
+  Expect(backend.last_request.reasoning.effort == superroc::ReasoningEffort::kHigh,
          "Pi DeepSeek reasoning effort reaches the backend");
 
-  const auto disabled = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto disabled = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"Answer directly."}],
         "thinking":{"type":"disabled"}
@@ -2367,7 +2367,7 @@ void TestPiNativeDeepSeekThinkingObject() {
 void TestStreamingPromptOpenedReasoning() {
   FakeBackend backend;
   backend.pieces = {"Check", " carefully", "</thi", "nk>\n\n", "Done"};
-  auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"Check it."}],
         "reasoning_effort":"xhigh",
@@ -2389,7 +2389,7 @@ void TestStreamingPromptOpenedReasoning() {
 }
 
 void TestInitialOutputPhases() {
-  using gufo::json::Value;
+  using superroc::json::Value;
   struct Case {
     std::string text;
     bool automatic{false};
@@ -2409,7 +2409,7 @@ void TestInitialOutputPhases() {
             FakeBackend::InitialOutputState::kAuto;
       for (const char byte : item.text)
         backend.pieces.emplace_back(1, byte);
-      auto body = gufo::json::parse(R"({
+      auto body = superroc::json::parse(R"({
         "model":"test-model","messages":[]
       })");
       if (!item.automatic)
@@ -2423,7 +2423,7 @@ void TestInitialOutputPhases() {
       body["messages"].push_back(std::move(message));
       body["stream"] = stream;
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       Expect(response.status == 200, "output-phase request succeeds");
       std::string content, reasoning;
       const auto collect = [&](const Value& message) {
@@ -2434,14 +2434,14 @@ void TestInitialOutputPhases() {
         response.streaming_body([&](std::string_view chunk) {
           const auto payload = chunk.substr(chunk.find("data: ") + 6);
           if (!payload.starts_with("[DONE]")) {
-            const auto event = gufo::json::parse(payload);
+            const auto event = superroc::json::parse(payload);
             for (const auto& choice : event.find("choices")->items())
               collect(*choice.find("delta"));
           }
           return true;
         });
       } else {
-        const auto output = gufo::json::parse(response.body);
+        const auto output = superroc::json::parse(response.body);
         collect(*output.find("choices")->items()[0].find("message"));
       }
       Expect(content == (item.automatic ? "Answer." : item.text) &&
@@ -2452,7 +2452,7 @@ void TestInitialOutputPhases() {
 }
 
 void TestReasoningAnswerSeparator() {
-  using gufo::json::Value;
+  using superroc::json::Value;
   for (const bool thinking : {false, true})
     for (const bool stream : {false, true})
       for (const bool split : {false, true})
@@ -2470,33 +2470,33 @@ void TestReasoningAnswerSeparator() {
               if (truncated)
                 backend.finish_reason = FakeBackend::FinishReason::kLength;
               backend.tool_format =
-                  gufo::sampling::JsonConstraint::ToolFormat::kQwen;
+                  superroc::sampling::JsonConstraint::ToolFormat::kQwen;
               if (split) {
                 for (const char byte : raw)
                   backend.pieces.emplace_back(1, byte);
               } else {
                 backend.pieces = {raw};
               }
-              auto body = gufo::json::parse(R"({
+              auto body = superroc::json::parse(R"({
             "model":"test-model","messages":[{"role":"user","content":"4+5?"}],
             "temperature":0})");
               body["stream"] = stream;
               body["reasoning_effort"] = thinking ? "low" : "none";
               if (mode == 1) {
                 body["tools"] =
-                    gufo::json::parse(R"([{"type":"function","function":{
+                    superroc::json::parse(R"([{"type":"function","function":{
               "name":"unused","parameters":{"type":"object","properties":{},
               "additionalProperties":false}}}])");
                 body["tool_choice"] = "auto";
               } else if (mode == 2) {
-                body["response_format"] = gufo::json::parse(R"({
+                body["response_format"] = superroc::json::parse(R"({
               "type":"json_schema","json_schema":{"name":"answer","strict":true,
               "schema":{"type":"object","properties":{"answer":{"type":"integer"},
               "text":{"type":"string"}},
               "required":["answer","text"],"additionalProperties":false}}})");
               }
               const auto response =
-                  gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+                  superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
               Expect(response.status == 200,
                      "reasoning separator request succeeds");
               std::string content;
@@ -2504,7 +2504,7 @@ void TestReasoningAnswerSeparator() {
                 response.streaming_body([&](std::string_view piece) {
                   const auto payload = piece.substr(piece.find("data: ") + 6);
                   if (!payload.starts_with("[DONE]")) {
-                    const auto event = gufo::json::parse(payload);
+                    const auto event = superroc::json::parse(payload);
                     for (const auto& choice : event.find("choices")->items())
                       if (const auto* delta = choice.find("delta"))
                         content += delta->member_str("content");
@@ -2512,7 +2512,7 @@ void TestReasoningAnswerSeparator() {
                   return true;
                 });
               } else {
-                const auto parsed = gufo::json::parse(response.body);
+                const auto parsed = superroc::json::parse(response.body);
                 content = parsed.find("choices")
                               ->items()[0]
                               .find("message")
@@ -2532,7 +2532,7 @@ void TestReasoningAnswerSeparator() {
 
 void TestConflictingReasoningControlsAreRejected() {
   FakeBackend backend;
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"hello"}],
         "reasoning_effort":"high",
@@ -2548,7 +2548,7 @@ void TestConflictingReasoningControlsAreRejected() {
 
 void TestWrongModelIsRejected() {
   FakeBackend backend;
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"wrong-model",
         "messages":[{"role":"user","content":"hello"}]
       })"),
@@ -2569,7 +2569,7 @@ void TestClientIdentityReachesBackend() {
         R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})",
         {{"X-Client-ID", header}});
     request.client_id = "192.0.2.7";
-    const auto response = gufo::server::HandleOpenAiChat(request, backend);
+    const auto response = superroc::server::HandleOpenAiChat(request, backend);
     Expect(response.status == 200 &&
                backend.last_request.client_id == request.client_id,
            "untrusted headers cannot change the transport identity");
@@ -2578,8 +2578,8 @@ void TestClientIdentityReachesBackend() {
 
 void TestStreamingOverloadIsRejectedBeforeHeaders() {
   FakeBackend backend;
-  backend.reject_on_start = gufo::server::TextGenerationErrorCode::kQueueFull;
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  backend.reject_on_start = superroc::server::TextGenerationErrorCode::kQueueFull;
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"hello"}],
         "stream":true
@@ -2602,7 +2602,7 @@ void TestStreamingOverloadIsRejectedBeforeHeaders() {
 void TestImagePartsRetainOrderAndIdentity() {
   FakeBackend backend;
   backend.pieces = {"ok"};
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
     "model":"test-model",
     "stop":["END"],
     "messages":[{"role":"user","content":[
@@ -2629,7 +2629,7 @@ void TestImagePartsRetainOrderAndIdentity() {
       {R"({"messages":[{"role":"assistant","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}}]}]})",
        R"({"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AQID","detail":"low"}}]}]})",
        R"({"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"file:///tmp/image.png"}}]}]})"}) {
-    Expect(gufo::server::HandleOpenAiChat(Request(body), backend).status == 400,
+    Expect(superroc::server::HandleOpenAiChat(Request(body), backend).status == 400,
            "unsupported image role, policy and URL are rejected");
   }
 }
@@ -2646,7 +2646,7 @@ void TestTextOnlyBackendRefusesImagesBeforeReading() {
                     R"("content":[{"type":"image_url","image_url":{"url":")") +
         url + R"("}}]}]})";
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body), backend);
+        superroc::server::HandleOpenAiChat(Request(body), backend);
     Expect(response.status == 400 &&
                response.body.find("does not support image input") !=
                    std::string::npos,
@@ -2655,14 +2655,14 @@ void TestTextOnlyBackendRefusesImagesBeforeReading() {
 }
 
 void TestImageCountAndByteBudget() {
-  const auto message = gufo::json::parse(R"({"role":"user","content":[
+  const auto message = superroc::json::parse(R"({"role":"user","content":[
     {"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}}]})");
   for (const unsigned count : {17u, 257u}) {
     for (const bool split : {false, true}) {
       FakeBackend backend;
-      auto body = gufo::json::Value::object();
+      auto body = superroc::json::Value::object();
       body["model"] = "test-model";
-      body["messages"] = gufo::json::Value::array();
+      body["messages"] = superroc::json::Value::array();
       if (split) {
         for (unsigned i = 0; i < count; ++i)
           body["messages"].push_back(message);
@@ -2673,7 +2673,7 @@ void TestImageCountAndByteBudget() {
         body["messages"].push_back(std::move(combined));
       }
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       std::size_t observed = 0;
       for (const auto& parsed : backend.last_request.messages)
         observed += parsed.images.size();
@@ -2681,32 +2681,32 @@ void TestImageCountAndByteBudget() {
              "all image parts reach the model within the byte budget");
     }
   }
-  const auto response_message = gufo::json::parse(R"({
+  const auto response_message = superroc::json::parse(R"({
     "role":"user","content":[{"type":"input_image",
     "image_url":"data:image/png;base64,AQID"}]})");
-  gufo::core::ImageReadBudget budget;
+  superroc::core::ImageReadBudget budget;
   budget.remaining_bytes = 17 * 3;
   std::string error;
   for (unsigned i = 0; i < 17; ++i) {
-    gufo::tokenization::ChatMessage parsed;
-    Expect(gufo::server::ParseOpenAiResponseMessage(response_message, &parsed,
+    superroc::tokenization::ChatMessage parsed;
+    Expect(superroc::server::ParseOpenAiResponseMessage(response_message, &parsed,
                                                     budget, &error) &&
                parsed.images.size() == 1,
            "Responses accepts more than sixteen images across messages");
   }
-  gufo::tokenization::ChatMessage parsed;
-  Expect(!gufo::server::ParseOpenAiResponseMessage(response_message, &parsed,
+  superroc::tokenization::ChatMessage parsed;
+  Expect(!superroc::server::ParseOpenAiResponseMessage(response_message, &parsed,
                                                    budget, &error) &&
              error.find("byte") != std::string::npos,
          "aggregate byte protection still covers every message");
 }
 
 void TestToolImagesRetainOrderAndIdentity() {
-  using gufo::json::parse;
-  using gufo::tokenization::ChatRole;
+  using superroc::json::parse;
+  using superroc::tokenization::ChatRole;
   FakeBackend backend;
   backend.pieces = {"ok"};
-  const auto response = gufo::server::HandleOpenAiChat(Request(R"({
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
     "model":"test-model",
     "messages":[{"role":"tool","tool_call_id":"call_picture","content":[
       {"type":"text","text":"left "},
@@ -2735,11 +2735,11 @@ void TestToolImagesRetainOrderAndIdentity() {
           {"type":"input_image","image_url":"data:image/png;base64,AQID"},
           {"type":"input_text","text":" right"}
         ])");
-      gufo::core::ImageReadBudget budget;
+      superroc::core::ImageReadBudget budget;
       budget.remaining_bytes = 3;
-      gufo::tokenization::ChatMessage message;
+      superroc::tokenization::ChatMessage message;
       std::string error;
-      Expect(gufo::server::ParseOpenAiResponseMessage(item, &message, budget,
+      Expect(superroc::server::ParseOpenAiResponseMessage(item, &message, budget,
                                                       &error),
              "Responses accepts image-bearing tool outputs: " + error);
       Expect(
@@ -2750,19 +2750,19 @@ void TestToolImagesRetainOrderAndIdentity() {
               message.images[0].offset == (text ? 5 : 0) &&
               *message.images[0].bytes == std::vector<std::uint8_t>({1, 2, 3}),
           "Responses retains call association, image bytes and order");
-      gufo::tokenization::ChatMessage overflow;
-      Expect(!gufo::server::ParseOpenAiResponseMessage(item, &overflow, budget,
+      superroc::tokenization::ChatMessage overflow;
+      Expect(!superroc::server::ParseOpenAiResponseMessage(item, &overflow, budget,
                                                        &error),
              "tool output images consume the shared request byte budget");
     }
     auto literal = parse(R"({"call_id":"literal",
       "output":"data:image/png;base64,AQID"})");
     literal["type"] = kind;
-    gufo::core::ImageReadBudget budget;
+    superroc::core::ImageReadBudget budget;
     budget.remaining_bytes = 0;
-    gufo::tokenization::ChatMessage message;
+    superroc::tokenization::ChatMessage message;
     std::string error;
-    Expect(gufo::server::ParseOpenAiResponseMessage(literal, &message, budget,
+    Expect(superroc::server::ParseOpenAiResponseMessage(literal, &message, budget,
                                                     &error) &&
                message.images.empty() &&
                message.content == "data:image/png;base64,AQID",
@@ -2774,12 +2774,12 @@ void TestToolImagesRetainOrderAndIdentity() {
       {"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}}
     ]})");
     message["role"] = role;
-    auto body = gufo::json::Value::object();
+    auto body = superroc::json::Value::object();
     body["model"] = "test-model";
-    body["messages"] = gufo::json::Value::array();
+    body["messages"] = superroc::json::Value::array();
     body["messages"].push_back(std::move(message));
     Expect(
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
             400,
         "images remain rejected on non-observation roles");
   }
@@ -2796,36 +2796,36 @@ void TestToolImagesRetainOrderAndIdentity() {
     body["model"] = "test-model";
     body["messages"].push_back(std::move(message));
     Expect(
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
             400,
         "tool images preserve URL, encoding and resolution validation");
   }
 }
 
 void TestStopSequencesAndDefaultFields() {
-  using gufo::json::Value;
-  const auto base = gufo::json::parse(
+  using superroc::json::Value;
+  const auto base = superroc::json::parse(
       R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})");
   for (const auto& [field, value, message] :
        {std::tuple{"model", "5", "'model' must be a string"},
         std::tuple{"reasoning_effort", "\"bogus\"",
                    "reasoning_effort must be none, minimal"}}) {
     auto invalid = base;
-    invalid[field] = gufo::json::parse(value);
+    invalid[field] = superroc::json::parse(value);
     FakeBackend backend;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(invalid.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(invalid.dump()), backend);
     Expect(response.status == 400 &&
                response.body.find(message) != std::string::npos,
            "validation errors describe the accepted values");
   }
   for (const auto* stop : {"null", "[]", "\"END\"", "[\"END\",\"終\"]"}) {
     auto body = base;
-    body["stop"] = gufo::json::parse(stop);
+    body["stop"] = superroc::json::parse(stop);
     FakeBackend backend;
     backend.pieces = {"hello"};
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(response.status == 200, "supported stop forms are accepted");
     const auto& expected = body["stop"];
     const std::size_t count = expected.is_null()     ? 0
@@ -2843,10 +2843,10 @@ void TestStopSequencesAndDefaultFields() {
           "[\"1\",\"2\",\"3\",\"4\",\"5\"]"}) {
       auto body = base;
       body["stream"] = stream;
-      body["stop"] = gufo::json::parse(stop);
+      body["stop"] = superroc::json::parse(stop);
       FakeBackend backend;
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       Expect(response.status == 400 && backend.chat_calls == 0 &&
                  !response.streaming_body,
              "invalid stops fail before generation or streaming headers");
@@ -2855,7 +2855,7 @@ void TestStopSequencesAndDefaultFields() {
   auto body = base;
   body["stop"] = std::string(4097, 's');
   FakeBackend backend;
-  Expect(gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
              400,
          "oversized stop sequences are bounded");
   backend.defaults.max_tokens = 37;
@@ -2871,7 +2871,7 @@ void TestStopSequencesAndDefaultFields() {
         "modalities", "audio", "temperature", "top_p", "seed", "logit_bias",
         "frequency_penalty", "presence_penalty", "reasoning_effort"})
     body[field] = Value();
-  Expect(gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
              200,
          "nullable API defaults do not enable unsupported features");
   Expect(backend.last_max_tokens == backend.defaults.max_tokens,
@@ -2889,7 +2889,7 @@ void TestStopSequencesAndDefaultFields() {
     auto invalid = base;
     invalid[field] = 0;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(invalid.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(invalid.dump()), backend);
     Expect(
         response.status == 400 &&
             response.body.find("'" + field + "' must be a positive integer") !=
@@ -2898,9 +2898,9 @@ void TestStopSequencesAndDefaultFields() {
   }
   body["logprobs"] = false;
   body["logit_bias"] = Value::object();
-  body["response_format"] = gufo::json::parse(R"({"type":"text"})");
-  body["modalities"] = gufo::json::parse(R"(["text"])");
-  Expect(gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+  body["response_format"] = superroc::json::parse(R"({"type":"text"})");
+  body["modalities"] = superroc::json::parse(R"(["text"])");
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
              200,
          "explicit text-only and disabled logprobs defaults work");
   for (const auto* request :
@@ -2908,11 +2908,11 @@ void TestStopSequencesAndDefaultFields() {
         R"({"modalities":["text","audio"]})", R"({"audio":{}})",
         R"({"response_format":{"type":"text","unexpected":true}})"}) {
     auto invalid = base;
-    const auto fields = gufo::json::parse(request);
+    const auto fields = superroc::json::parse(request);
     for (const auto& [key, value] : fields.members())
       invalid[key] = value;
     const auto before = backend.chat_calls.load();
-    Expect(gufo::server::HandleOpenAiChat(Request(invalid.dump()), backend)
+    Expect(superroc::server::HandleOpenAiChat(Request(invalid.dump()), backend)
                        .status == 400 &&
                backend.chat_calls == before,
            "actual unsupported feature requests remain explicit errors");
@@ -2922,15 +2922,15 @@ void TestStopSequencesAndDefaultFields() {
 void TestStructuredResponseFormat() {
   FakeBackend backend;
   backend.reasoning_defaults_value.enabled = true;
-  auto body = gufo::json::parse(
+  auto body = superroc::json::parse(
       R"({"model":"test-model", "messages":[{"role":"user","content":"Return a value"}]})");
   for (
       const char* format :
       {R"({"type":"json_object"})",
        R"({"type":"json_schema","json_schema":{"name":"Reply","strict":true,"schema":{"type":"object","properties":{"ok":{"type":"boolean"}},"required":["ok"],"additionalProperties":false}}})"}) {
-    body["response_format"] = gufo::json::parse(format);
+    body["response_format"] = superroc::json::parse(format);
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(response.status == 200 && backend.last_request.response_format,
            "compiled format reaches backend");
     Expect(backend.last_request.reasoning.enabled == true,
@@ -2939,18 +2939,18 @@ void TestStructuredResponseFormat() {
         const char* incompatible :
         {R"({"tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}]})"}) {
       auto request = body;
-      const auto fields = gufo::json::parse(incompatible);
+      const auto fields = superroc::json::parse(incompatible);
       for (const auto& [key, value] : fields.members())
         request[key] = value;
       const auto accepted =
-          gufo::server::HandleOpenAiChat(Request(request.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(request.dump()), backend);
       Expect(accepted.status == 200 && backend.last_request.tools.size() == 1,
              "structured requests keep their active tools");
     }
   }
   body["response_format"]["json_schema"]["description"] =
       "Use the requested labels.";
-  Expect(gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
                  200 &&
              backend.last_request.response_format_description ==
                  "Use the requested labels.",
@@ -2960,11 +2960,11 @@ void TestStructuredResponseFormat() {
   backend.pieces = {literal.substr(0, literal.size() - 4),
                     literal.substr(literal.size() - 4, 1),
                     literal.substr(literal.size() - 3)};
-  body["response_format"] = gufo::json::parse(R"({"type":"json_object"})");
+  body["response_format"] = superroc::json::parse(R"({"type":"json_object"})");
   body["reasoning_effort"] = "none";
   const auto buffered =
-      gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
-  Expect(gufo::json::parse(buffered.body)
+      superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+  Expect(superroc::json::parse(buffered.body)
                  .find("choices")
                  ->items()[0]
                  .find("message")
@@ -2972,12 +2972,12 @@ void TestStructuredResponseFormat() {
          "JSON strings do not activate output protocol markers");
   body["stream"] = true;
   const auto streamed =
-      gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+      superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
   std::string content;
   streamed.streaming_body([&](std::string_view chunk) {
     if (chunk == "data: [DONE]\n\n")
       return true;
-    const auto event = gufo::json::parse(chunk.substr(6));
+    const auto event = superroc::json::parse(chunk.substr(6));
     for (const auto& choice : event.find("choices")->items()) {
       const auto* delta = choice.find("delta");
       if (delta) {
@@ -2996,14 +2996,14 @@ void TestStructuredResponseFormat() {
     body["reasoning_effort"] = "high";
     backend.pieces = {"Consider <tool_call> as text.", "</thi", "nk>", literal};
     const auto reply =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(reply.status == 200, "thinking and structured output coexist");
     std::string answer, reasoning;
     if (stream) {
       reply.streaming_body([&](std::string_view chunk) {
         if (chunk == "data: [DONE]\n\n")
           return true;
-        const auto event = gufo::json::parse(chunk.substr(6));
+        const auto event = superroc::json::parse(chunk.substr(6));
         for (const auto& choice : event.find("choices")->items()) {
           if (const auto* delta = choice.find("delta")) {
             answer += delta->member_str("content");
@@ -3013,7 +3013,7 @@ void TestStructuredResponseFormat() {
         return true;
       });
     } else {
-      const auto response = gufo::json::parse(reply.body);
+      const auto response = superroc::json::parse(reply.body);
       const auto* message =
           response.find("choices")->items()[0].find("message");
       answer = message->member_str("content");
@@ -3027,7 +3027,7 @@ void TestStructuredResponseFormat() {
   // or a schema admits extra keys. Strict tool parameters keep requiring
   // explicitly closed objects.
   {
-    auto open = gufo::json::parse(
+    auto open = superroc::json::parse(
         R"({"model":"test-model","messages":[{"role":"user","content":"Who?"}],
             "response_format":{"type":"json_schema","json_schema":{
               "name":"person","strict":true,"schema":{"type":"object",
@@ -3037,7 +3037,7 @@ void TestStructuredResponseFormat() {
     for (const bool stream : {false, true}) {
       open["stream"] = stream;
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(open.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(open.dump()), backend);
       Expect(response.status == 200 && backend.last_request.response_format,
              "response schemas without additionalProperties are admitted");
       Expect(
@@ -3050,19 +3050,19 @@ void TestStructuredResponseFormat() {
           "omitted additionalProperties keeps declared objects closed");
     }
     open["stream"] = false;
-    open["tools"] = gufo::json::parse(
+    open["tools"] = superroc::json::parse(
         R"([{"type":"function","function":{"name":"f","strict":true,
             "parameters":{"type":"object","properties":{"x":{"type":"string"}},
             "required":["x"]}}}])");
     const auto calls = backend.chat_calls.load();
     const auto rejected =
-        gufo::server::HandleOpenAiChat(Request(open.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(open.dump()), backend);
     Expect(rejected.status == 400 && backend.chat_calls == calls &&
                rejected.body.find("invalid_tools") != std::string::npos,
            "strict tools still require closed parameter objects");
-    gufo::server::ChatRequest responses;
-    Expect(!gufo::server::ParseOpenAiResponseControls(
-               gufo::json::parse(R"({"text":{"format":{"type":"json_schema",
+    superroc::server::ChatRequest responses;
+    Expect(!superroc::server::ParseOpenAiResponseControls(
+               superroc::json::parse(R"({"text":{"format":{"type":"json_schema",
                  "name":"person","strict":true,"schema":{"type":"object",
                  "properties":{"name":{"type":"string"}},"required":["name"],
                  "additionalProperties":{"type":"integer"}}}}})"),
@@ -3073,10 +3073,10 @@ void TestStructuredResponseFormat() {
            "Responses text.format admits typed additional properties");
   }
   body["stop"] = "END";
-  Expect(gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
              200,
          "structured requests accept explicit stops");
-  body = gufo::json::parse(
+  body = superroc::json::parse(
       R"({"model":"test-model","messages":[{"role":"user","content":"value"}]})");
   for (
       const char* invalid :
@@ -3084,11 +3084,11 @@ void TestStructuredResponseFormat() {
        R"({"type":"json_schema","json_schema":{"name":"bad name","schema":{}}})",
        R"({"type":"json_schema","json_schema":{"name":"Reply","strict":1,"schema":{}}})",
        R"({"type":"json_schema","json_schema":{"name":"Reply","schema":{"type":"object","properties":{},"additionalProperties":false,"not":{}}}})"}) {
-    body["response_format"] = gufo::json::parse(invalid);
+    body["response_format"] = superroc::json::parse(invalid);
     body["stream"] = true;
     const auto calls = backend.chat_calls.load();
     const auto rejected =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(
         rejected.status == 400 && !rejected.streaming_body &&
             backend.chat_calls == calls &&
@@ -3098,7 +3098,7 @@ void TestStructuredResponseFormat() {
 }
 
 void TestExplicitStopOutputFraming() {
-  using Finish = gufo::server::TextGenerationBackend::FinishReason;
+  using Finish = superroc::server::TextGenerationBackend::FinishReason;
   for (const bool stream : {false, true}) {
     for (const bool thinking : {false, true}) {
       FakeBackend backend;
@@ -3107,15 +3107,15 @@ void TestExplicitStopOutputFraming() {
       backend.pieces = {"safe"};
       backend.finish_reason = Finish::kStopSequence;
       backend.stop_sequence = "END";
-      auto body = gufo::json::parse(
+      auto body = superroc::json::parse(
           R"({"model":"test-model","messages":[{"role":"user","content":"hello"}],
               "tools":[{"type":"function","function":{"name":"f","parameters":{}}}],
               "tool_choice":"required","stop":"END"})");
       body["stream"] = stream;
-      body["chat_template_kwargs"] = gufo::json::Value::object();
+      body["chat_template_kwargs"] = superroc::json::Value::object();
       body["chat_template_kwargs"]["enable_thinking"] = thinking;
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       Expect(response.status == 200, "explicit stop completes successfully");
       std::string output = response.body;
       if (response.streaming_body)
@@ -3143,8 +3143,8 @@ void TestStructuredToolTruncation() {
       FakeBackend backend;
       backend.pieces = {call.substr(0, length)};
       backend.finish_reason =
-          gufo::server::TextGenerationBackend::FinishReason::kLength;
-      auto body = gufo::json::parse(R"({
+          superroc::server::TextGenerationBackend::FinishReason::kLength;
+      auto body = superroc::json::parse(R"({
         "model":"test-model","messages":[{"role":"user","content":"call f"}],
         "response_format":{"type":"json_object"},"reasoning_effort":"none",
         "tool_choice":"required",
@@ -3152,7 +3152,7 @@ void TestStructuredToolTruncation() {
       })");
       body["stream"] = stream;
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       Expect(response.status == 200,
              "truncated constrained tool is a length result");
       if (stream) {
@@ -3167,7 +3167,7 @@ void TestStructuredToolTruncation() {
                 output.find("<tool") == std::string::npos,
             "partial tool delimiters are not exposed as structured content");
       } else {
-        const auto output = gufo::json::parse(response.body);
+        const auto output = superroc::json::parse(response.body);
         const auto& choice = output.find("choices")->items()[0];
         Expect(choice.member_str("finish_reason") == "length" &&
                    choice.find("message")->member_str("content").empty() &&
@@ -3180,7 +3180,7 @@ void TestStructuredToolTruncation() {
 }
 
 void TestStrictToolSchema() {
-  auto body = gufo::json::parse(R"({
+  auto body = superroc::json::parse(R"({
     "model":"test-model","messages":[{"role":"user","content":"call f"}],
     "reasoning_effort":"none","parallel_tool_calls":false,
     "tools":[{"type":"function","function":{"name":"f","strict":true,
@@ -3197,12 +3197,12 @@ void TestStrictToolSchema() {
     backend.pieces.emplace_back(" After f.");
     body["stream"] = stream;
     body["tool_choice"] =
-        gufo::json::parse(R"({"type":"function","function":{"name":"f"}})");
+        superroc::json::parse(R"({"type":"function","function":{"name":"f"}})");
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     std::string output = response.body;
     std::string content;
-    const auto collect = [&](const gufo::json::Value& event) {
+    const auto collect = [&](const superroc::json::Value& event) {
       for (const auto& choice : event.find("choices")->items()) {
         const auto* message = choice.find(stream ? "delta" : "message");
         if (message)
@@ -3213,16 +3213,16 @@ void TestStrictToolSchema() {
       response.streaming_body([&](std::string_view chunk) {
         output += chunk;
         if (chunk != "data: [DONE]\n\n")
-          collect(gufo::json::parse(chunk.substr(6)));
+          collect(superroc::json::parse(chunk.substr(6)));
         return true;
       });
     else
-      collect(gufo::json::parse(response.body));
+      collect(superroc::json::parse(response.body));
     Expect(response.status == 200 && backend.last_request.constrained_tools &&
                !backend.last_request.response_format &&
                !backend.last_request.parallel_tool_calls &&
                backend.last_request.tool_choice ==
-                   gufo::server::ChatRequest::ToolChoice::kRequired,
+                   superroc::server::ChatRequest::ToolChoice::kRequired,
            "strict tool schemas and forced choice reach the runner "
            "independently of response_format");
     Expect(
@@ -3242,20 +3242,20 @@ void TestStrictToolSchema() {
       backend.pieces.emplace_back(1, byte);
     body["stream"] = stream;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     std::string content;
     if (stream) {
       response.streaming_body([&](std::string_view chunk) {
         if (chunk == "data: [DONE]\n\n")
           return true;
-        const auto event = gufo::json::parse(chunk.substr(6));
+        const auto event = superroc::json::parse(chunk.substr(6));
         for (const auto& choice : event.find("choices")->items())
           if (const auto* delta = choice.find("delta"))
             content += delta->member_str("content");
         return true;
       });
     } else {
-      content = gufo::json::parse(response.body)
+      content = superroc::json::parse(response.body)
                     .find("choices")
                     ->items()[0]
                     .find("message")
@@ -3274,10 +3274,10 @@ void TestStrictToolSchema() {
        R"({"tools":[{"type":"function","function":{"name":"bad","strict":true,"parameters":{"type":"object"}}}]})"}) {
     FakeBackend backend;
     auto request = body;
-    const auto fields = gufo::json::parse(invalid);
+    const auto fields = superroc::json::parse(invalid);
     for (const auto& [key, value] : fields.members())
       request[key] = value;
-    Expect(gufo::server::HandleOpenAiChat(Request(request.dump()), backend)
+    Expect(superroc::server::HandleOpenAiChat(Request(request.dump()), backend)
                        .status == 400 &&
                backend.chat_calls == 0,
            "invalid tool constraints fail before generation");
@@ -3288,20 +3288,20 @@ void TestStrictToolSchema() {
     prose.pieces = {"A literal ", "<"};
     body["stream"] = stream;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), prose);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), prose);
     std::string content;
     if (response.streaming_body)
       response.streaming_body([&](std::string_view chunk) {
         if (chunk == "data: [DONE]\n\n")
           return true;
-        const auto event = gufo::json::parse(chunk.substr(6));
+        const auto event = superroc::json::parse(chunk.substr(6));
         for (const auto& choice : event.find("choices")->items())
           if (const auto* delta = choice.find("delta"))
             content += delta->member_str("content");
         return true;
       });
     else
-      content = gufo::json::parse(response.body)
+      content = superroc::json::parse(response.body)
                     .find("choices")
                     ->items()[0]
                     .find("message")
@@ -3315,10 +3315,10 @@ void TestStrictToolSchema() {
     FakeBackend backend;
     backend.pieces = {"Calling f. ", call.substr(0, length)};
     backend.finish_reason =
-        gufo::server::TextGenerationBackend::FinishReason::kLength;
+        superroc::server::TextGenerationBackend::FinishReason::kLength;
     body["stream"] = false;
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(response.status == 200 &&
                response.body.find("\"finish_reason\":\"length\"") !=
                    std::string::npos &&
@@ -3328,26 +3328,26 @@ void TestStrictToolSchema() {
   FakeBackend no_arguments;
   no_arguments.pieces = {
       R"(<tool_call>{"name":"f","arguments":{}}</tool_call>)"};
-  body["tools"] = gufo::json::parse(
+  body["tools"] = superroc::json::parse(
       R"([{"type":"function","function":{"name":"f","strict":true}}])");
   const auto response =
-      gufo::server::HandleOpenAiChat(Request(body.dump()), no_arguments);
+      superroc::server::HandleOpenAiChat(Request(body.dump()), no_arguments);
   Expect(response.status == 200 && no_arguments.last_request.constrained_tools,
          "omitted parameters define a strict function without arguments");
-  body["tools"] = gufo::json::parse(
+  body["tools"] = superroc::json::parse(
       R"([{"type":"function","function":{"name":"f","parameters":{"type":"object"},"strict":false}}])");
   body["parallel_tool_calls"] = false;
   FakeBackend non_strict;
   non_strict.pieces = no_arguments.pieces;
   Expect(
-      gufo::server::HandleOpenAiChat(Request(body.dump()), non_strict).status ==
+      superroc::server::HandleOpenAiChat(Request(body.dump()), non_strict).status ==
               200 &&
           non_strict.last_request.constrained_tools,
       "parallel_tool_calls false also constrains non-strict tools");
 }
 
 void TestStopInsideToolArguments() {
-  using Finish = gufo::server::TextGenerationBackend::FinishReason;
+  using Finish = superroc::server::TextGenerationBackend::FinishReason;
   for (const bool stream : {false, true}) {
     for (const bool thinking : {false, true}) {
       for (const auto* partial :
@@ -3370,15 +3370,15 @@ void TestStopInsideToolArguments() {
           // Exercise splits inside XML delimiters and multibyte DSML tags.
           for (const char byte : raw)
             backend.pieces.emplace_back(1, byte);
-          auto body = gufo::json::parse(
+          auto body = superroc::json::parse(
               R"({"model":"test-model","messages":[{"role":"user","content":"call f"}],
                   "tools":[{"type":"function","function":{"name":"f","parameters":{}}}],
                   "tool_choice":"required","stop":"STOP"})");
           body["stream"] = stream;
-          body["chat_template_kwargs"] = gufo::json::Value::object();
+          body["chat_template_kwargs"] = superroc::json::Value::object();
           body["chat_template_kwargs"]["enable_thinking"] = thinking;
           const auto response =
-              gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+              superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
           Expect(response.status == 200,
                  "a stop inside a tool argument succeeds");
           std::string output = response.body;
@@ -3407,8 +3407,8 @@ void TestStopInsideToolArguments() {
 }
 
 void TestNativeToolImplicitReasoningEnd() {
-  using Format = gufo::sampling::JsonConstraint::ToolFormat;
-  using Finish = gufo::server::TextGenerationBackend::FinishReason;
+  using Format = superroc::sampling::JsonConstraint::ToolFormat;
+  using Finish = superroc::server::TextGenerationBackend::FinishReason;
   for (const auto format : {Format::kQwen, Format::kDeepSeek}) {
     const bool qwen = format == Format::kQwen;
     const std::string call =
@@ -3433,7 +3433,7 @@ void TestNativeToolImplicitReasoningEnd() {
             const std::string expected_thought =
                 qwen || quoted ? thought
                                : thought.substr(0, thought.size() - 2);
-            auto body = gufo::json::parse(R"({
+            auto body = superroc::json::parse(R"({
               "model":"test-model","messages":[{"role":"user","content":"read the file"}],
               "reasoning_effort":"low","tool_choice":"required","parallel_tool_calls":false,
               "tools":[{"type":"function","function":{"name":"read","parameters":{
@@ -3446,35 +3446,35 @@ void TestNativeToolImplicitReasoningEnd() {
                 interrupted ? Finish::kLength : Finish::kStop;
             for (const char byte : text)
               backend.pieces.emplace_back(1, byte);
-            gufo::server::HttpResponse response;
+            superroc::server::HttpResponse response;
             if (responses) {
               auto flat = *body["tools"].items()[0].find("function");
               flat["type"] = "function";
-              body["tools"] = gufo::json::Value::array();
+              body["tools"] = superroc::json::Value::array();
               body["tools"].push_back(std::move(flat));
-              gufo::server::ChatRequest chat;
+              superroc::server::ChatRequest chat;
               chat.reasoning.enabled = true;
-              Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+              Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                      "implicit tool fixture has valid Responses controls");
-              response = gufo::server::CreateOpenAiResponse(
+              response = superroc::server::CreateOpenAiResponse(
                   Request(body.dump()), backend, chat, 512, {}, stream);
             } else {
               response =
-                  gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+                  superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
             }
             Expect(response.status == 200,
                    "implicit native tool request succeeds");
-            gufo::json::Value result;
+            superroc::json::Value result;
             std::string streamed_reasoning, streamed_content;
             std::string streamed_arguments, finish;
             if (!stream)
-              result = gufo::json::parse(response.body);
+              result = superroc::json::parse(response.body);
             else
               response.streaming_body([&](std::string_view piece) {
                 if (piece == "data: [DONE]\n\n")
                   return true;
                 const auto event =
-                    gufo::json::parse(piece.substr(piece.find("data: ") + 6));
+                    superroc::json::parse(piece.substr(piece.find("data: ") + 6));
                 if (responses) {
                   if (event.member_str("type") ==
                       "response.reasoning_summary_text.delta")
@@ -3545,8 +3545,8 @@ void TestNativeToolImplicitReasoningEnd() {
 }
 
 void TestToolMarkersInsideConstrainedReasoning() {
-  using gufo::json::Value;
-  using Finish = gufo::server::TextGenerationBackend::FinishReason;
+  using superroc::json::Value;
+  using Finish = superroc::server::TextGenerationBackend::FinishReason;
   const std::string reasoning =
       "Confirmed garbage on the docstring line. The broken line is:\n"
       "`    \"\"\"The one BPA resource; find_resources maps logical id to a "
@@ -3582,7 +3582,7 @@ void TestToolMarkersInsideConstrainedReasoning() {
             const std::string expected_reasoning =
                 reasoning + (truncated ? tail : "");
             const std::string expected_content = truncated ? "" : prose;
-            auto body = gufo::json::parse(R"({
+            auto body = superroc::json::parse(R"({
             "model":"test-model","messages":[{"role":"user","content":"fix the docstring"}],
             "chat_template_kwargs":{"enable_thinking":true},
             "parallel_tool_calls":false,"tool_choice":"auto",
@@ -3606,21 +3606,21 @@ void TestToolMarkersInsideConstrainedReasoning() {
                 backend.pieces.emplace_back(1, byte);
             else
               backend.pieces = {raw};
-            gufo::server::HttpResponse response;
+            superroc::server::HttpResponse response;
             if (responses) {
               auto flat = *body["tools"].items()[0].find("function");
               flat["type"] = "function";
               body["tools"] = Value::array();
               body["tools"].push_back(std::move(flat));
-              gufo::server::ChatRequest chat;
+              superroc::server::ChatRequest chat;
               chat.reasoning.enabled = true;
-              Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+              Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                      "reasoning marker fixture has valid Responses controls");
-              response = gufo::server::CreateOpenAiResponse(
+              response = superroc::server::CreateOpenAiResponse(
                   Request(body.dump()), backend, chat, 4096, {}, stream);
             } else {
               response =
-                  gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+                  superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
             }
             Expect(response.status == 200, "reasoning marker fixture succeeds");
             std::vector<Value> events;
@@ -3629,11 +3629,11 @@ void TestToolMarkersInsideConstrainedReasoning() {
                 const auto pos = chunk.find("data: ");
                 if (pos != std::string_view::npos &&
                     !chunk.substr(pos + 6).starts_with("[DONE]"))
-                  events.push_back(gufo::json::parse(chunk.substr(pos + 6)));
+                  events.push_back(superroc::json::parse(chunk.substr(pos + 6)));
                 return true;
               });
             else
-              events.push_back(gufo::json::parse(response.body));
+              events.push_back(superroc::json::parse(response.body));
             std::string content, thought, emitted_arguments;
             std::string streamed_content, streamed_thought;
             std::size_t calls = 0;
@@ -3707,7 +3707,7 @@ void TestToolMarkersInsideConstrainedReasoning() {
 }
 
 void TestToolMarkersWhenToolsDisabled() {
-  using gufo::json::Value;
+  using superroc::json::Value;
   const std::string thought =
       "Quoted <tool_call> and <｜DSML｜tool_calls> are reasoning data.";
   const std::string answer =
@@ -3716,14 +3716,14 @@ void TestToolMarkersWhenToolsDisabled() {
     for (const bool stream : {false, true})
       for (const bool declared : {false, true})
         for (const int phase : {0, 1, 2}) {
-          auto body = gufo::json::parse(R"({
+          auto body = superroc::json::parse(R"({
             "model":"test-model","messages":[{"role":"user","content":"Explain syntax"}],
             "tool_choice":"none"})");
           body["stream"] = stream;
           body["chat_template_kwargs"]["enable_thinking"] = phase != 0;
           if (declared)
             body["tools"] =
-                gufo::json::parse(R"([{"type":"function","function":{
+                superroc::json::parse(R"([{"type":"function","function":{
               "name":"f","parameters":{"type":"object","properties":{},"additionalProperties":false}}}])");
           const bool incomplete = phase == 2;
           const auto expected_thought = phase ? thought : std::string{};
@@ -3733,11 +3733,11 @@ void TestToolMarkersWhenToolsDisabled() {
           FakeBackend backend;
           backend.finish_reason =
               incomplete
-                  ? gufo::server::TextGenerationBackend::FinishReason::kLength
-                  : gufo::server::TextGenerationBackend::FinishReason::kStop;
+                  ? superroc::server::TextGenerationBackend::FinishReason::kLength
+                  : superroc::server::TextGenerationBackend::FinishReason::kStop;
           for (char byte : raw)
             backend.pieces.emplace_back(1, byte);
-          gufo::server::HttpResponse response;
+          superroc::server::HttpResponse response;
           if (responses) {
             if (declared) {
               auto tool = *body["tools"].items()[0].find("function");
@@ -3745,15 +3745,15 @@ void TestToolMarkersWhenToolsDisabled() {
               body["tools"] = Value::array();
               body["tools"].push_back(std::move(tool));
             }
-            gufo::server::ChatRequest chat;
+            superroc::server::ChatRequest chat;
             chat.reasoning.enabled = phase != 0;
-            Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+            Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                    "disabled tools have valid Responses controls");
-            response = gufo::server::CreateOpenAiResponse(
+            response = superroc::server::CreateOpenAiResponse(
                 Request(body.dump()), backend, chat, 4096, {}, stream);
           } else
             response =
-                gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+                superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
           std::string text, reasoning;
           const auto inspect = [&](const Value& event) {
             if (responses) {
@@ -3792,19 +3792,19 @@ void TestToolMarkersWhenToolsDisabled() {
               const auto pos = chunk.find("data: ");
               if (pos != std::string_view::npos &&
                   !chunk.substr(pos + 6).starts_with("[DONE]"))
-                inspect(gufo::json::parse(chunk.substr(pos + 6)));
+                inspect(superroc::json::parse(chunk.substr(pos + 6)));
               return true;
             });
           else
-            inspect(gufo::json::parse(response.body));
+            inspect(superroc::json::parse(response.body));
           Expect(text == expected_answer && reasoning == expected_thought,
                  "disabled tool markers preserve content and reasoning phases");
         }
 }
 
 void TestNativeToolTransports() {
-  using gufo::json::Value;
-  using Finish = gufo::server::TextGenerationBackend::FinishReason;
+  using superroc::json::Value;
+  using Finish = superroc::server::TextGenerationBackend::FinishReason;
   const std::string literal =
       " <think>literal</think><tool_call></tool_call>"
       "<tool_call>{\"name\":\"f\",\"arguments\":{\"text\":\"nested\"}}</"
@@ -3830,7 +3830,7 @@ void TestNativeToolTransports() {
         for (bool parallel : {false, true})
           for (bool responses : {false, true})
             for (bool constrained : {false, true}) {
-              auto body = gufo::json::parse(R"({
+              auto body = superroc::json::parse(R"({
               "model":"test-model","messages":[{"role":"user","content":"call f"}],
               "tools":[{"type":"function","function":{"name":"f","strict":false,
                 "parameters":{"type":"object","properties":{"text":{"type":"string"}},
@@ -3844,27 +3844,27 @@ void TestNativeToolTransports() {
               if (constrained)
                 backend.tool_format =
                     call.starts_with("<｜DSML｜tool_calls>")
-                        ? gufo::sampling::JsonConstraint::ToolFormat::kDeepSeek
-                        : gufo::sampling::JsonConstraint::ToolFormat::kQwen;
+                        ? superroc::sampling::JsonConstraint::ToolFormat::kDeepSeek
+                        : superroc::sampling::JsonConstraint::ToolFormat::kQwen;
               const auto raw =
                   (thinking ? "Reasoning.</think>" : "") + call + " \n";
               for (char byte : raw)
                 backend.pieces.emplace_back(1, byte);
-              gufo::server::HttpResponse response;
+              superroc::server::HttpResponse response;
               if (responses) {
                 // Exercise the actual flat Responses function shape.
                 auto flat = *body["tools"].items()[0].find("function");
                 flat["type"] = "function";
                 body["tools"] = Value::array();
                 body["tools"].push_back(std::move(flat));
-                gufo::server::ChatRequest chat;
+                superroc::server::ChatRequest chat;
                 chat.reasoning.enabled = thinking;
-                Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+                Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                        "Responses shares tool controls");
-                response = gufo::server::CreateOpenAiResponse(
+                response = superroc::server::CreateOpenAiResponse(
                     Request(body.dump()), backend, chat, 256, {}, stream);
               } else {
-                response = gufo::server::HandleOpenAiChat(Request(body.dump()),
+                response = superroc::server::HandleOpenAiChat(Request(body.dump()),
                                                           backend);
               }
               Expect(response.status == 200, "native tool request succeeds");
@@ -3874,11 +3874,11 @@ void TestNativeToolTransports() {
                   auto pos = chunk.find("data: ");
                   if (pos != std::string_view::npos &&
                       !chunk.substr(pos + 6).starts_with("[DONE]"))
-                    output.push_back(gufo::json::parse(chunk.substr(pos + 6)));
+                    output.push_back(superroc::json::parse(chunk.substr(pos + 6)));
                   return true;
                 });
               } else {
-                output.push_back(gufo::json::parse(response.body));
+                output.push_back(superroc::json::parse(response.body));
               }
               std::string arguments, reasoning;
               std::size_t call_count = 0;
@@ -3927,14 +3927,14 @@ void TestNativeToolTransports() {
         FakeBackend backend;
         backend.pieces = {call.substr(0, length)};
         backend.finish_reason = finish;
-        auto body = gufo::json::parse(R"({
+        auto body = superroc::json::parse(R"({
         "model":"test-model","messages":[{"role":"user","content":"call f"}],
         "tool_choice":"required","tools":[{"type":"function","function":{
           "name":"f","parameters":{}}}]})");
         const auto result =
-            gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+            superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
         Expect(result.status == 200, "tool truncation terminates successfully");
-        const auto output = gufo::json::parse(result.body);
+        const auto output = superroc::json::parse(result.body);
         const auto* emitted =
             output.find("choices")->items()[0].find("message")->find(
                 "tool_calls");
@@ -3950,10 +3950,10 @@ void TestNativeToolTransports() {
 }
 
 void TestJsonToolStringOwnership() {
-  using gufo::json::Value;
-  using Constraint = gufo::sampling::JsonConstraint;
-  using Finish = gufo::server::TextGenerationBackend::FinishReason;
-  const auto schema = gufo::json::parse(R"({
+  using superroc::json::Value;
+  using Constraint = superroc::sampling::JsonConstraint;
+  using Finish = superroc::server::TextGenerationBackend::FinishReason;
+  const auto schema = superroc::json::parse(R"({
     "type":"object","properties":{"content":{"type":"string","pattern":".*"}},
     "required":["content"],"additionalProperties":false
   })");
@@ -3964,7 +3964,7 @@ void TestJsonToolStringOwnership() {
          "string patterns keep native tool framing");
   const auto grammar = Constraint::WithTools(
       nullptr, {{"write", Constraint::Compile(schema, false)}}, false, true);
-  auto request = gufo::json::parse(R"({
+  auto request = superroc::json::parse(R"({
     "model":"test-model","messages":[{"role":"user","content":"write"}],
     "tools":[]
   })");
@@ -4004,7 +4004,7 @@ void TestJsonToolStringOwnership() {
           for (const char byte : raw)
             backend.pieces.emplace_back(1, byte);
           const auto response =
-              gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+              superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
           Expect(response.status == 200,
                  "JSON tool ownership request succeeds");
           std::vector<Value> calls;
@@ -4025,11 +4025,11 @@ void TestJsonToolStringOwnership() {
               const auto pos = chunk.find("data: ");
               if (pos != std::string_view::npos &&
                   !chunk.substr(pos + 6).starts_with("[DONE]"))
-                inspect(gufo::json::parse(chunk.substr(pos + 6)));
+                inspect(superroc::json::parse(chunk.substr(pos + 6)));
               return true;
             });
           } else {
-            inspect(gufo::json::parse(response.body));
+            inspect(superroc::json::parse(response.body));
           }
           if (partial && !calls.empty())
             std::cerr << "Truncated JSON produced: " << calls.front().dump()
@@ -4058,10 +4058,10 @@ void TestJsonToolStringOwnership() {
       backend.pieces = {"<tool_call>" + rejected.dump() + "</tool_call>" +
                         complete};
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(request.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(request.dump()), backend);
       Expect(response.status == 200,
              "rejected JSON calls permit later recovery");
-      const auto output = gufo::json::parse(response.body);
+      const auto output = superroc::json::parse(response.body);
       const auto* calls =
           output.find("choices")->items()[0].find("message")->find(
               "tool_calls");
@@ -4075,8 +4075,8 @@ void TestJsonToolStringOwnership() {
 }
 
 void TestNativeToolDialectSelection() {
-  using gufo::json::Value;
-  using gufo::sampling::JsonConstraint;
+  using superroc::json::Value;
+  using superroc::sampling::JsonConstraint;
   using Format = JsonConstraint::ToolFormat;
   const auto native_call = [](Format format, std::string_view path) {
     if (format == Format::kDeepSeek)
@@ -4091,7 +4091,7 @@ void TestNativeToolDialectSelection() {
   // The JSON fallback leaves text before <tool_call> unconstrained. A native
   // DeepSeek call written there remains a call, as before this change.
   {
-    auto schema = gufo::json::parse(R"({"type":"object",
+    auto schema = superroc::json::parse(R"({"type":"object",
     "properties":{"path":{"type":"string","pattern":"^[a-z.]+$"}},
     "required":["path"],"additionalProperties":false})");
     // A native runner keeps DSML for this schema; the JSON-envelope runner
@@ -4099,7 +4099,7 @@ void TestNativeToolDialectSelection() {
     Expect(JsonConstraint::ToolParameters(schema, false, Format::kDeepSeek) !=
                nullptr,
            "patterned string keeps native tool framing");
-    auto body = gufo::json::parse(R"({
+    auto body = superroc::json::parse(R"({
     "model":"test-model","reasoning_effort":"none",
     "messages":[{"role":"user","content":"Read fixture.xml."}],
     "tool_choice":"auto","tools":[{"type":"function","function":{
@@ -4114,7 +4114,7 @@ void TestNativeToolDialectSelection() {
       backend.tool_format = Format::kJson;
       backend.pieces = {native_call(Format::kDeepSeek, "fixture.xml")};
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       Expect(response.status == 200, "JSON fallback request succeeds");
       std::string content;
       std::vector<std::string> arguments;
@@ -4132,11 +4132,11 @@ void TestNativeToolDialectSelection() {
         response.streaming_body([&](std::string_view chunk) {
           const auto payload = chunk.substr(chunk.find("data: ") + 6);
           if (!payload.starts_with("[DONE]"))
-            collect(gufo::json::parse(payload));
+            collect(superroc::json::parse(payload));
           return true;
         });
       } else {
-        collect(gufo::json::parse(response.body));
+        collect(superroc::json::parse(response.body));
       }
       Expect(arguments == std::vector<std::string>{R"({"path":"fixture.xml"})"},
              "a native call written under the JSON fallback is returned");
@@ -4145,7 +4145,7 @@ void TestNativeToolDialectSelection() {
     }
   }
   for (const auto format : {Format::kQwen, Format::kDeepSeek}) {
-    const auto schema = gufo::json::parse(R"({"type":"object",
+    const auto schema = superroc::json::parse(R"({"type":"object",
     "properties":{"path":{"type":"string"}},
     "required":["path"],"additionalProperties":false})");
     const auto parameters =
@@ -4175,7 +4175,7 @@ void TestNativeToolDialectSelection() {
              "production tool grammar");
       for (const bool responses : {false, true}) {
         for (const bool stream : {false, true}) {
-          auto body = gufo::json::parse(R"({
+          auto body = superroc::json::parse(R"({
           "model":"test-model","reasoning_effort":"none",
           "messages":[{"role":"user","content":"Inspect fixture.xml and its tool_calls root element."}],
           "tool_choice":"auto","tools":[{"type":"function","function":{
@@ -4189,17 +4189,17 @@ void TestNativeToolDialectSelection() {
           backend.tool_format = format;
           for (const char byte : raw)
             backend.pieces.emplace_back(1, byte);
-          gufo::server::HttpResponse response;
+          superroc::server::HttpResponse response;
           if (responses) {
-            gufo::server::ChatRequest chat;
+            superroc::server::ChatRequest chat;
             chat.reasoning.enabled = false;
-            Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+            Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                    "Responses accepts the file tool");
-            response = gufo::server::CreateOpenAiResponse(
+            response = superroc::server::CreateOpenAiResponse(
                 Request(body.dump()), backend, chat, 256, {}, stream);
           } else {
             response =
-                gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+                superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
           }
           Expect(response.status == 200, "native file tool request succeeds");
           // A later backend configuration must not change an admitted stream's
@@ -4240,11 +4240,11 @@ void TestNativeToolDialectSelection() {
             response.streaming_body([&](std::string_view chunk) {
               const auto payload = chunk.substr(chunk.find("data: ") + 6);
               if (!payload.starts_with("[DONE]"))
-                collect(gufo::json::parse(payload));
+                collect(superroc::json::parse(payload));
               return true;
             });
           } else {
-            collect(gufo::json::parse(response.body));
+            collect(superroc::json::parse(response.body));
           }
           Expect(arguments ==
                      std::vector<std::string>{R"({"path":"fixture.xml"})"},
@@ -4260,7 +4260,7 @@ void TestNativeToolDialectSelection() {
   // history would carry it twice and miss the generated continuation.
   for (const std::string prose : {"", "Reading the fixture."}) {
     for (const bool stream : {false, true}) {
-      auto body = gufo::json::parse(R"({
+      auto body = superroc::json::parse(R"({
       "model":"test-model","reasoning_effort":"none",
       "messages":[{"role":"user","content":"Read fixture.xml."}],
       "tool_choice":"auto","tools":[{"type":"function","function":{
@@ -4273,7 +4273,7 @@ void TestNativeToolDialectSelection() {
            prose + "\n\n" + native_call(Format::kDeepSeek, "fixture.xml"))
         backend.pieces.emplace_back(1, byte);
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       std::string content;
       std::size_t calls = 0;
       const auto collect = [&](const Value& event) {
@@ -4289,11 +4289,11 @@ void TestNativeToolDialectSelection() {
         response.streaming_body([&](std::string_view chunk) {
           const auto payload = chunk.substr(chunk.find("data: ") + 6);
           if (!payload.starts_with("[DONE]"))
-            collect(gufo::json::parse(payload));
+            collect(superroc::json::parse(payload));
           return true;
         });
       } else {
-        collect(gufo::json::parse(response.body));
+        collect(superroc::json::parse(response.body));
       }
       Expect(response.status == 200 && calls == 1 && content == prose,
              "the separator before a DeepSeek call block is not content");
@@ -4302,11 +4302,11 @@ void TestNativeToolDialectSelection() {
 }
 
 void TestNativeToolTextOutsideEnvelopes() {
-  using gufo::json::Value;
-  using gufo::sampling::JsonConstraint;
+  using superroc::json::Value;
+  using superroc::sampling::JsonConstraint;
   using Format = JsonConstraint::ToolFormat;
-  using Finish = gufo::server::TextGenerationBackend::FinishReason;
-  const auto schema = gufo::json::parse(R"({"type":"object",
+  using Finish = superroc::server::TextGenerationBackend::FinishReason;
+  const auto schema = superroc::json::parse(R"({"type":"object",
     "properties":{"path":{"type":"string"}},
     "required":["path"],"additionalProperties":false})");
   const auto invoke = [](std::string_view path) {
@@ -4449,7 +4449,7 @@ void TestNativeToolTextOutsideEnvelopes() {
   for (const auto& fixture : fixtures) {
     auto parameters_schema = schema;
     if (fixture.format == Format::kJson) {
-      parameters_schema["enum"] = gufo::json::parse(
+      parameters_schema["enum"] = superroc::json::parse(
           R"([{"path":"fixture.txt"},{"path":"example.txt"}])");
       // A native runner keeps DSML for finite objects too; this fixture
       // covers runners whose only call syntax is the JSON envelope.
@@ -4496,7 +4496,7 @@ void TestNativeToolTextOutsideEnvelopes() {
     for (const bool responses : {false, true})
       for (const bool stream : {false, true})
         for (const bool fragmented : {false, true}) {
-          auto body = gufo::json::parse(R"({"model":"test-model",
+          auto body = superroc::json::parse(R"({"model":"test-model",
             "reasoning_effort":"none","tool_choice":"auto",
             "messages":[{"role":"user","content":"Read the fixtures."}],
             "tools":[{"type":"function","function":{"name":"read",
@@ -4522,17 +4522,17 @@ void TestNativeToolTextOutsideEnvelopes() {
               backend.pieces.emplace_back(1, byte);
           else
             backend.pieces = {fixture.raw};
-          gufo::server::HttpResponse response;
+          superroc::server::HttpResponse response;
           if (responses) {
-            gufo::server::ChatRequest chat;
+            superroc::server::ChatRequest chat;
             chat.reasoning.enabled = false;
-            Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+            Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                    "Responses accepts tool controls");
-            response = gufo::server::CreateOpenAiResponse(
+            response = superroc::server::CreateOpenAiResponse(
                 Request(body.dump()), backend, chat, 512, {}, stream);
           } else {
             response =
-                gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+                superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
           }
           Expect(response.status == 200, "native tool request succeeds");
           backend.tool_format.reset();
@@ -4543,7 +4543,7 @@ void TestNativeToolTextOutsideEnvelopes() {
             Expect(function.member_str("name") == "read",
                    "only the declared intended call is returned");
             const auto arguments =
-                gufo::json::parse(function.member_str("arguments"));
+                superroc::json::parse(function.member_str("arguments"));
             Expect(arguments.size() == 1, "call has exactly its path argument");
             paths.push_back(arguments.member_str("path"));
           };
@@ -4577,11 +4577,11 @@ void TestNativeToolTextOutsideEnvelopes() {
               Expect(data != std::string_view::npos, "stream uses SSE framing");
               const auto payload = chunk.substr(data + 6);
               if (!payload.starts_with("[DONE]"))
-                collect(gufo::json::parse(payload));
+                collect(superroc::json::parse(payload));
               return true;
             });
           else
-            collect(gufo::json::parse(response.body));
+            collect(superroc::json::parse(response.body));
           for (const auto& tool : chat_calls)
             call(*tool.find("function"));
           Expect(backend.last_request.constrained_tools && backend.completed,
@@ -4598,10 +4598,10 @@ void TestNativeToolTextOutsideEnvelopes() {
 }
 
 void TestNativeReferencedArgumentTypes() {
-  using gufo::json::Value;
-  const auto arguments = gufo::json::parse(
+  using superroc::json::Value;
+  const auto arguments = superroc::json::parse(
       R"({"n":42,"b":true,"a":[1],"o":{"x":2},"s":"42","z":null})");
-  const auto schema = gufo::json::parse(R"({
+  const auto schema = superroc::json::parse(R"({
     "type":"object","properties":{
       "n":{"$ref":"#/$defs/number~1type~0"},
       "b":{"$ref":"#/$defs/boolean"},"a":{"$ref":"#/$defs/array"},
@@ -4626,7 +4626,7 @@ void TestNativeReferencedArgumentTypes() {
             object[key] = value;
         parameters["$defs"]["Arguments"] = std::move(object);
       }
-      auto body = gufo::json::parse(R"({
+      auto body = superroc::json::parse(R"({
         "model":"test-model","messages":[{"role":"user","content":"call f"}],
         "tools":[{"type":"function","function":{"name":"f","strict":true}}],
         "tool_choice":"required"})");
@@ -4641,19 +4641,19 @@ void TestNativeReferencedArgumentTypes() {
                 (value.is_string() ? value.str() : value.dump()) +
                 "\n</parameter>\n";
       backend.pieces = {call + "</function>\n</tool_call>"};
-      gufo::server::HttpResponse response;
+      superroc::server::HttpResponse response;
       if (responses) {
-        gufo::server::ChatRequest chat;
-        Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+        superroc::server::ChatRequest chat;
+        Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                "referenced Responses tool schema is accepted");
-        response = gufo::server::CreateOpenAiResponse(
+        response = superroc::server::CreateOpenAiResponse(
             Request(body.dump()), backend, chat, 256, {}, false);
       } else {
         response =
-            gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+            superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       }
       Expect(response.status == 200, "referenced native tool succeeds");
-      const auto output = gufo::json::parse(response.body);
+      const auto output = superroc::json::parse(response.body);
       const auto encoded =
           responses
               ? output.find("output")->items().back().member_str("arguments")
@@ -4724,20 +4724,20 @@ void TestNativeArgumentTypingMatrix() {
         {R"({"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"})",
          R"({"type":"object","additionalProperties":true})"}) {
       for (const bool stream : {false, true}) {
-        auto parameters = gufo::json::parse(root);
-        parameters["properties"]["v"] = gufo::json::parse(item.schema);
-        parameters["required"] = gufo::json::parse(R"(["v"])");
-        auto body = gufo::json::parse(R"({"model":"test-model",
+        auto parameters = superroc::json::parse(root);
+        parameters["properties"]["v"] = superroc::json::parse(item.schema);
+        parameters["required"] = superroc::json::parse(R"(["v"])");
+        auto body = superroc::json::parse(R"({"model":"test-model",
           "messages":[{"role":"user","content":"call record"}],
           "tools":[],"tool_choice":"required"})");
-        auto tool = gufo::json::Value::object();
+        auto tool = superroc::json::Value::object();
         tool["type"] = "function";
         tool["function"]["name"] = "record";
         tool["function"]["parameters"] = parameters;
         body["tools"].push_back(std::move(tool));
         body["stream"] = stream;
         FakeBackend backend;
-        backend.tool_format = gufo::sampling::JsonConstraint::ToolFormat::kQwen;
+        backend.tool_format = superroc::sampling::JsonConstraint::ToolFormat::kQwen;
         const auto raw = std::string(
                              "<tool_call>\n<function=record>\n"
                              "<parameter=v>\n") +
@@ -4748,7 +4748,7 @@ void TestNativeArgumentTypingMatrix() {
         else
           backend.pieces = {raw};
         const auto response =
-            gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+            superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
         if (response.status != 200)
           std::cerr << "native schema=" << item.schema << " raw=" << item.raw
                     << " status=" << response.status
@@ -4760,7 +4760,7 @@ void TestNativeArgumentTypingMatrix() {
           response.streaming_body([&](std::string_view part) {
             if (part == "data: [DONE]\n\n")
               return true;
-            const auto event = gufo::json::parse(part.substr(6));
+            const auto event = superroc::json::parse(part.substr(6));
             for (const auto& choice : event.find("choices")->items())
               if (const auto* delta = choice.find("delta")) {
                 content += delta->member_str("content");
@@ -4771,7 +4771,7 @@ void TestNativeArgumentTypingMatrix() {
             return true;
           });
         } else {
-          const auto output = gufo::json::parse(response.body);
+          const auto output = superroc::json::parse(response.body);
           const auto& message =
               *output.find("choices")->items()[0].find("message");
           content = message.member_str("content");
@@ -4780,12 +4780,12 @@ void TestNativeArgumentTypingMatrix() {
                 calls->items()[0].find("function")->member_str("arguments");
         }
         const auto expected = std::string(R"({"v":)") + item.expected + "}";
-        if (arguments.empty() || gufo::json::parse(arguments).dump() !=
-                                     gufo::json::parse(expected).dump())
+        if (arguments.empty() || superroc::json::parse(arguments).dump() !=
+                                     superroc::json::parse(expected).dump())
           std::cerr << "typing schema=" << item.schema << " raw=" << item.raw
                     << " stream=" << stream << " got=" << arguments << '\n';
-        Expect(!arguments.empty() && gufo::json::parse(arguments).dump() ==
-                                         gufo::json::parse(expected).dump(),
+        Expect(!arguments.empty() && superroc::json::parse(arguments).dump() ==
+                                         superroc::json::parse(expected).dump(),
                "native arguments are typed as llama.cpp types them");
         Expect(content.empty(), "a native call leaves no visible framing");
       }
@@ -4799,23 +4799,23 @@ void TestNativeArgumentTypingMatrix() {
                                                         {"boolean", "1"},
                                                         {"array", "{}"},
                                                         {"object", "null"}}) {
-    auto body = gufo::json::parse(R"({"model":"test-model",
+    auto body = superroc::json::parse(R"({"model":"test-model",
       "messages":[{"role":"user","content":"call record"}],
       "tools":[{"type":"function","function":{"name":"record",
         "parameters":{"type":"object","properties":{"v":{"type":"integer"}},
         "required":["v"],"additionalProperties":false}}}]})");
     auto tool = body["tools"].items()[0];
     tool["function"]["parameters"]["properties"]["v"]["type"] = type;
-    body["tools"] = gufo::json::Value::array();
+    body["tools"] = superroc::json::Value::array();
     body["tools"].push_back(std::move(tool));
     FakeBackend backend;
-    backend.tool_format = gufo::sampling::JsonConstraint::ToolFormat::kQwen;
+    backend.tool_format = superroc::sampling::JsonConstraint::ToolFormat::kQwen;
     backend.pieces = {"<tool_call>\n<function=record>\n<parameter=v>\n" + raw +
                       "\n</parameter>\n</function>\n</tool_call>"};
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(response.status == 200, "invalid native output is handled safely");
-    const auto output = gufo::json::parse(response.body);
+    const auto output = superroc::json::parse(response.body);
     const auto& message = *output.find("choices")->items()[0].find("message");
     Expect(!message.find("tool_calls"),
            "a value with the wrong declared type is not invoked");
@@ -4823,7 +4823,7 @@ void TestNativeArgumentTypingMatrix() {
   // A declared name with surrounding spaces remains exact. llama.cpp's
   // JSON mapper trims it despite matching the exact key in its PEG grammar.
   for (const bool stream : {false, true}) {
-    auto body = gufo::json::parse(R"({"model":"test-model",
+    auto body = superroc::json::parse(R"({"model":"test-model",
       "messages":[{"role":"user","content":"call record"}],
       "tools":[{"type":"function","function":{"name":"record","strict":true,
         "parameters":{"type":"object","properties":{" value ":{"type":"string"}},
@@ -4831,19 +4831,19 @@ void TestNativeArgumentTypingMatrix() {
       "tool_choice":"required"})");
     body["stream"] = stream;
     FakeBackend backend;
-    backend.tool_format = gufo::sampling::JsonConstraint::ToolFormat::kQwen;
+    backend.tool_format = superroc::sampling::JsonConstraint::ToolFormat::kQwen;
     backend.pieces = {
         "<tool_call>\n<function=record>\n<parameter= value >\nx\n</parameter>\n"
         "</function>\n</tool_call>"};
     const auto response =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     Expect(response.status == 200, "spaced parameter call succeeds");
     std::string arguments;
     if (stream) {
       response.streaming_body([&](std::string_view part) {
         if (part == "data: [DONE]\n\n")
           return true;
-        const auto event = gufo::json::parse(part.substr(6));
+        const auto event = superroc::json::parse(part.substr(6));
         for (const auto& choice : event.find("choices")->items())
           if (const auto* delta = choice.find("delta"))
             if (const auto* calls = delta->find("tool_calls"))
@@ -4852,7 +4852,7 @@ void TestNativeArgumentTypingMatrix() {
         return true;
       });
     } else {
-      const auto output = gufo::json::parse(response.body);
+      const auto output = superroc::json::parse(response.body);
       arguments = output.find("choices")
                       ->items()[0]
                       .find("message")
@@ -4870,7 +4870,7 @@ void TestNativeUnionToolTypes() {
   // Non-strict unions stay in Qwen's native syntax (#383). The parser tries
   // their typed alternatives first, as llama.cpp's qwen3-coder parser does,
   // while plain strings keep quotes and literal JSON text.
-  auto body = gufo::json::parse(R"({"model":"test-model",
+  auto body = superroc::json::parse(R"({"model":"test-model",
     "messages":[{"role":"user","content":"call record"}],
     "tools":[{"type":"function","function":{"name":"record","parameters":{
       "type":"object","properties":{
@@ -4895,10 +4895,10 @@ void TestNativeUnionToolTypes() {
       "<parameter=limit>\n3\n</parameter>\n"
       "</function>\n</tool_call>"};
   const auto response =
-      gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+      superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
   Expect(response.status == 200, "native union call succeeds");
-  const auto output = gufo::json::parse(response.body);
-  const auto arguments = gufo::json::parse(output.find("choices")
+  const auto output = superroc::json::parse(response.body);
+  const auto arguments = superroc::json::parse(output.find("choices")
                                                ->items()[0]
                                                .find("message")
                                                ->find("tool_calls")
@@ -4906,7 +4906,7 @@ void TestNativeUnionToolTypes() {
                                                .find("function")
                                                ->member_str("arguments"));
   Expect(arguments.dump() ==
-             gufo::json::parse(R"({"content":"#include \"a.h\"\n42",
+             superroc::json::parse(R"({"content":"#include \"a.h\"\n42",
                "provider":"exa","args":{"key":1},"label":null,
                "note":"plain text","limit":3})")
                  .dump(),
@@ -4914,13 +4914,13 @@ void TestNativeUnionToolTypes() {
 }
 
 void TestWildcardToolTypes() {
-  using gufo::json::Value;
-  using Constraint = gufo::sampling::JsonConstraint;
+  using superroc::json::Value;
+  using Constraint = superroc::sampling::JsonConstraint;
   using Format = Constraint::ToolFormat;
-  const auto schema = gufo::json::parse(R"({"type":"object",
+  const auto schema = superroc::json::parse(R"({"type":"object",
     "properties":{"value":{"type":"string"}},"required":["value"],
     "patternProperties":{"^x_":{"type":"integer"}}})");
-  const auto arguments = gufo::json::parse(
+  const auto arguments = superroc::json::parse(
       R"({"value":"alpha","x_n":1,"x_b":true,"x_z":null,"x_a":[1],"x_o":{"n":1},"x_s":"1"})");
   for (const auto format : {Format::kQwen, Format::kDeepSeek}) {
     const auto parameters = Constraint::ToolParameters(schema, false, format);
@@ -4930,7 +4930,7 @@ void TestWildcardToolTypes() {
     // Qwen tags carry no type flag, so as in llama.cpp only declared
     // parameters are generated; DeepSeek's flag keeps typed wildcards.
     const auto expected = format == Format::kQwen
-                              ? gufo::json::parse(R"({"value":"alpha"})")
+                              ? superroc::json::parse(R"({"value":"alpha"})")
                               : arguments;
     std::string call;
     if (format == Format::kQwen) {
@@ -4964,7 +4964,7 @@ void TestWildcardToolTypes() {
       state = grammar->Advance(state, byte);
     Expect(grammar->Complete(state), "round-trip call is grammar-admissible");
     for (bool responses : {false, true}) {
-      auto body = gufo::json::parse(R"({"model":"test-model",
+      auto body = superroc::json::parse(R"({"model":"test-model",
         "messages":[{"role":"user","content":"call record"}],
         "tools":[{"type":"function","function":{"name":"record","strict":false}}],
         "tool_choice":"auto"})");
@@ -4974,19 +4974,19 @@ void TestWildcardToolTypes() {
       body["tools"].push_back(std::move(tool));
       FakeBackend backend;
       backend.pieces = {call};
-      gufo::server::HttpResponse response;
+      superroc::server::HttpResponse response;
       if (responses) {
-        gufo::server::ChatRequest chat;
-        Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+        superroc::server::ChatRequest chat;
+        Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                "wildcard Responses controls are accepted");
-        response = gufo::server::CreateOpenAiResponse(
+        response = superroc::server::CreateOpenAiResponse(
             Request(body.dump()), backend, chat, 256, {}, false);
       } else {
         response =
-            gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+            superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       }
       Expect(response.status == 200, "wildcard call succeeds");
-      const auto output = gufo::json::parse(response.body);
+      const auto output = superroc::json::parse(response.body);
       const auto encoded =
           responses
               ? output.find("output")->items().back().member_str("arguments")
@@ -5004,8 +5004,8 @@ void TestWildcardToolTypes() {
 }
 
 void TestToolMetadataAndFraming() {
-  using gufo::json::Value;
-  auto body = gufo::json::parse(R"({
+  using superroc::json::Value;
+  auto body = superroc::json::parse(R"({
     "model":"test-model","messages":[{"role":"user","content":"call f"}],
     "tools":[{"type":"function","function":{"name":"f","strict":true,
       "parameters":{"type":"object","properties":{"text":{"type":"string"}},
@@ -5013,8 +5013,8 @@ void TestToolMetadataAndFraming() {
     "tool_choice":{"type":"function","name":"f"},
     "parallel_tool_calls":null})");
   for (const bool stream : {false, true}) {
-    gufo::server::ChatRequest chat;
-    Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+    superroc::server::ChatRequest chat;
+    Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
            "Responses accepts nullable parallel_tool_calls");
     Expect(chat.forced_tool_name == "f" && !chat.parallel_tool_calls,
            "named tools retain their identity and single-call semantics");
@@ -5022,7 +5022,7 @@ void TestToolMetadataAndFraming() {
     backend.pieces = {
         "<tool_call>\n<function=f>\n<parameter=text>\r\nliteral\r\r\n"
         "</parameter>\n</function>\n</tool_call>"};
-    const auto response = gufo::server::CreateOpenAiResponse(
+    const auto response = superroc::server::CreateOpenAiResponse(
         Request(body.dump()), backend, chat, 256, {}, stream);
     const auto inspect = [&](const Value& result) {
       const auto* choice = result.find("tool_choice");
@@ -5031,7 +5031,7 @@ void TestToolMetadataAndFraming() {
              "Responses echoes named function choices, including lifecycle "
              "events");
       if (result.member_str("status") == "completed") {
-        const auto arguments = gufo::json::parse(
+        const auto arguments = superroc::json::parse(
             result.find("output")->items().back().member_str("arguments"));
         Expect(arguments.member_str("text") == "literal\r",
                "CRLF framing retains a literal trailing carriage return");
@@ -5040,33 +5040,33 @@ void TestToolMetadataAndFraming() {
     if (stream)
       response.streaming_body([&](std::string_view chunk) {
         const auto event =
-            gufo::json::parse(chunk.substr(chunk.find("data: ") + 6));
+            superroc::json::parse(chunk.substr(chunk.find("data: ") + 6));
         if (const auto* result = event.find("response"))
           inspect(*result);
         return true;
       });
     else
-      inspect(gufo::json::parse(response.body));
+      inspect(superroc::json::parse(response.body));
   }
   body["tool_choice"] = "auto";
-  gufo::server::ChatRequest chat;
-  Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat) &&
+  superroc::server::ChatRequest chat;
+  Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat) &&
              chat.parallel_tool_calls && chat.forced_tool_name.empty(),
          "null Responses parallel control retains default");
   chat.forced_tool_name = "f";
-  Expect(!gufo::server::ParseOpenAiResponseControls(
-             gufo::json::parse(R"({"tool_choice":"none"})"), &chat) &&
+  Expect(!superroc::server::ParseOpenAiResponseControls(
+             superroc::json::parse(R"({"tool_choice":"none"})"), &chat) &&
              chat.forced_tool_name.empty() &&
-             chat.tool_choice == gufo::server::ChatRequest::ToolChoice::kNone,
+             chat.tool_choice == superroc::server::ChatRequest::ToolChoice::kNone,
          "an explicit choice clears inherited named-tool metadata");
   FakeBackend backend;
-  Expect(gufo::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
              400,
          "Chat Completions parallel control still requires a boolean");
 }
 
 void TestResponsesOutput() {
-  using Backend = gufo::server::TextGenerationBackend;
+  using Backend = superroc::server::TextGenerationBackend;
   for (const bool reasoning : {false, true}) {
     for (const bool limited : {false, true}) {
       FakeBackend backend;
@@ -5077,19 +5077,19 @@ void TestResponsesOutput() {
       backend.finish_reason = limited ? Backend::FinishReason::kLength
                                       : Backend::FinishReason::kStop;
       backend.reasoning_tokens = reasoning ? 3 : 0;
-      gufo::server::ChatRequest chat;
+      superroc::server::ChatRequest chat;
       chat.reasoning.enabled = reasoning;
-      const auto buffered = gufo::server::CreateOpenAiResponse(
+      const auto buffered = superroc::server::CreateOpenAiResponse(
           Request("{}"), backend, chat, 0, {}, false);
-      const auto body = gufo::json::parse(buffered.body);
-      const auto stream = gufo::server::CreateOpenAiResponse(
+      const auto body = superroc::json::parse(buffered.body);
+      const auto stream = superroc::server::CreateOpenAiResponse(
           Request("{}"), backend, chat, 0, {}, true);
-      std::vector<gufo::json::Value> events;
+      std::vector<superroc::json::Value> events;
       std::string text, thought;
       stream.streaming_body([&](std::string_view chunk) {
         const auto begin = chunk.find("\ndata: ");
         Expect(begin != std::string::npos, "Responses SSE has event and data");
-        auto event = gufo::json::parse(chunk.substr(begin + 7));
+        auto event = superroc::json::parse(chunk.substr(begin + 7));
         const auto type = event.member_str("type");
         Expect(chunk.starts_with("event: " + type + "\n"),
                "SSE name matches the semantic event type");
@@ -5157,7 +5157,7 @@ void TestResponsesLiveAndCancellation() {
   FakeBackend backend;
   backend.pieces = {"<tool_call>first", "second"};
   backend.block_after_first_piece = true;
-  auto response = gufo::server::CreateOpenAiResponse(Request("{}"), backend, {},
+  auto response = superroc::server::CreateOpenAiResponse(Request("{}"), backend, {},
                                                      0, {}, true);
   std::atomic<bool> first{false};
   std::jthread writer([&] {
@@ -5174,7 +5174,7 @@ void TestResponsesLiveAndCancellation() {
 
   backend.block_after_first_piece = false;
   backend.completed = false;
-  auto cancelled = gufo::server::CreateOpenAiResponse(Request("{}"), backend,
+  auto cancelled = superroc::server::CreateOpenAiResponse(Request("{}"), backend,
                                                       {}, 0, {}, true);
   bool terminal = false;
   cancelled.streaming_body([&](std::string_view chunk) {
@@ -5193,7 +5193,7 @@ void TestStreamingPromptProgress() {
   backend.progress = {{.total = 7, .cache = 5, .processed = 5, .time_ms = 0},
                       {.total = 7, .cache = 5, .processed = 7, .time_ms = 3}};
   const auto stream = [&](std::string_view options) {
-    auto response = gufo::server::HandleOpenAiChat(
+    auto response = superroc::server::HandleOpenAiChat(
         Request(
             R"({"model":"test-model","messages":[{"role":"user","content":"hello"}],)"
             R"("stream":true)" +
@@ -5227,7 +5227,7 @@ void TestStreamingPromptProgress() {
            "prompt progress is opt-in");
   }
 
-  const auto invalid = gufo::server::HandleOpenAiChat(
+  const auto invalid = superroc::server::HandleOpenAiChat(
       Request(
           R"({"model":"test-model","messages":[{"role":"user","content":"hello"}],)"
           R"("stream":true,"return_progress":"yes"})"),
@@ -5243,19 +5243,19 @@ void TestResponsesPromptProgress() {
   backend.progress = {{.total = 7, .cache = 5, .processed = 5, .time_ms = 0},
                       {.total = 7, .cache = 5, .processed = 7, .time_ms = 3}};
   for (const auto* setting : {"true", "false", "null"}) {
-    gufo::server::ChatRequest chat;
-    const auto body = gufo::json::parse(std::string(R"({"return_progress":)") +
+    superroc::server::ChatRequest chat;
+    const auto body = superroc::json::parse(std::string(R"({"return_progress":)") +
                                         setting + "}");
-    Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+    Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
            "Responses accepts boolean and null progress settings");
-    const auto response = gufo::server::CreateOpenAiResponse(
+    const auto response = superroc::server::CreateOpenAiResponse(
         Request(body.dump()), backend, chat, 8, {}, true);
     std::size_t sequence = 0, progress_count = 0;
     bool content_seen = false;
     response.streaming_body([&](std::string_view chunk) {
       const auto offset = chunk.find("data: ");
       Expect(offset != std::string_view::npos, "Responses SSE contains data");
-      const auto event = gufo::json::parse(chunk.substr(offset + 6));
+      const auto event = superroc::json::parse(chunk.substr(offset + 6));
       Expect(event.member_size("sequence_number") == sequence++,
              "progress preserves contiguous Responses sequence numbers");
       if (const auto* progress = event.find("prompt_progress")) {
@@ -5275,9 +5275,9 @@ void TestResponsesPromptProgress() {
     Expect(content_seen && progress_count == (chat.return_progress ? 2 : 0),
            "Responses progress is opt-in and preserves content");
   }
-  gufo::server::ChatRequest chat;
-  Expect(gufo::server::ParseOpenAiResponseControls(
-             gufo::json::parse(R"({"return_progress":1})"), &chat)
+  superroc::server::ChatRequest chat;
+  Expect(superroc::server::ParseOpenAiResponseControls(
+             superroc::json::parse(R"({"return_progress":1})"), &chat)
              .has_value(),
          "Responses rejects non-boolean progress settings");
 }
@@ -5288,8 +5288,8 @@ void TestResponsesPromptProgress() {
 // or an unfinished call silently dropped. Both are parse-path defects, so they
 // are covered here for buffered and streamed transports.
 void TestToolClosingFraming() {
-  using gufo::json::Value;
-  const auto schema = gufo::json::parse(R"({
+  using superroc::json::Value;
+  const auto schema = superroc::json::parse(R"({
     "model":"test-model", "messages":[{"role":"user","content":"use f"}],
     "tools":[{"type":"function","function":{"name":"f","parameters":{
       "type":"object","properties":{"text":{"type":"string"}},
@@ -5393,7 +5393,7 @@ void TestToolClosingFraming() {
       {"Planning.\n" + envelope + dsml, 1, R"({"text":"42"})",
        "Planning.\n" + envelope},
   };
-  using Format = gufo::sampling::JsonConstraint::ToolFormat;
+  using Format = superroc::sampling::JsonConstraint::ToolFormat;
   for (const auto& [format, cases] :
        {std::pair{Format::kQwen, &qwen_cases},
         std::pair{Format::kDeepSeek, &deepseek_cases}})
@@ -5411,13 +5411,13 @@ void TestToolClosingFraming() {
           else
             backend.pieces.push_back(item.text);
           const auto response =
-              gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+              superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
           Expect(response.status == 200, "framing request succeeds");
           std::vector<Value> calls;
           std::string content;
           std::string finish;
           if (!stream) {
-            const auto output = gufo::json::parse(response.body);
+            const auto output = superroc::json::parse(response.body);
             const auto& choice = output.find("choices")->items()[0];
             const auto& message = *choice.find("message");
             content = message.member_str("content");
@@ -5428,7 +5428,7 @@ void TestToolClosingFraming() {
             response.streaming_body([&](std::string_view part) {
               if (part == "data: [DONE]\n\n")
                 return true;
-              const auto event = gufo::json::parse(part.substr(6));
+              const auto event = superroc::json::parse(part.substr(6));
               if (event.contains("error"))
                 std::cerr << "Framing input: " << item.text
                           << "\nStream error: " << event.dump() << '\n';
@@ -5503,33 +5503,33 @@ void TestUnconstrainedQuoteFallbackChecksSchema() {
     for (const bool constrained : {false, true}) {
       for (const bool stream : {false, true}) {
         for (const bool bytewise : {false, true}) {
-          gufo::server::ChatRequest chat;
+          superroc::server::ChatRequest chat;
           chat.reasoning.enabled = false;
           Expect(
-              !gufo::server::ParseOpenAiResponseControls(
-                  gufo::json::parse(
+              !superroc::server::ParseOpenAiResponseControls(
+                  superroc::json::parse(
                       R"({"tools":[{"type":"function","name":"f","parameters":{"type":"object","properties":{"text":{"type":"string","const":"42"}},"required":["text"],"additionalProperties":false}}]})"),
                   &chat),
               "fallback fixture has valid tool controls");
           chat.constrained_tools = constrained;
           FakeBackend backend;
           backend.tool_format =
-              gufo::sampling::JsonConstraint::ToolFormat::kQwen;
+              superroc::sampling::JsonConstraint::ToolFormat::kQwen;
           if (bytewise)
             for (const char byte : item.text)
               backend.pieces.emplace_back(1, byte);
           else
             backend.pieces.push_back(item.text);
-          const auto response = gufo::server::CreateOpenAiResponse(
+          const auto response = superroc::server::CreateOpenAiResponse(
               Request("{}"), backend, chat, 512, {}, stream);
-          gufo::json::Value output;
+          superroc::json::Value output;
           std::string streamed;
           if (!stream)
-            output = gufo::json::parse(response.body);
+            output = superroc::json::parse(response.body);
           else
             response.streaming_body([&](std::string_view chunk) {
               const auto offset = chunk.find("data: ");
-              const auto event = gufo::json::parse(chunk.substr(offset + 6));
+              const auto event = superroc::json::parse(chunk.substr(offset + 6));
               if (event.member_str("type") == "response.output_text.delta")
                 streamed += event.member_str("delta");
               if (event.member_str("type") == "response.completed")
@@ -5594,11 +5594,11 @@ void TestUnfinishedInlineReasoningFallback() {
        }) {
     for (const bool stream : {false, true})
       for (const bool bytewise : {false, true}) {
-        gufo::server::ChatRequest chat;
+        superroc::server::ChatRequest chat;
         chat.reasoning.enabled = true;
         Expect(
-            !gufo::server::ParseOpenAiResponseControls(
-                gufo::json::parse(
+            !superroc::server::ParseOpenAiResponseControls(
+                superroc::json::parse(
                     R"({"tools":[{"type":"function","name":"f","parameters":{"type":"object","properties":{"text":{"type":"string","const":"42"}},"required":["text"],"additionalProperties":false}}]})"),
                 &chat),
             "reasoning fallback fixture has valid controls");
@@ -5606,23 +5606,23 @@ void TestUnfinishedInlineReasoningFallback() {
         // reasoning deliberately requires the explicit phase delimiter.
         chat.constrained_tools = false;
         FakeBackend backend;
-        backend.tool_format = gufo::sampling::JsonConstraint::ToolFormat::kQwen;
+        backend.tool_format = superroc::sampling::JsonConstraint::ToolFormat::kQwen;
         const auto& raw = item.text;
         if (bytewise)
           for (const char byte : raw)
             backend.pieces.emplace_back(1, byte);
         else
           backend.pieces = {raw};
-        const auto response = gufo::server::CreateOpenAiResponse(
+        const auto response = superroc::server::CreateOpenAiResponse(
             Request("{}"), backend, chat, 512, {}, stream);
-        gufo::json::Value output;
+        superroc::json::Value output;
         std::string streamed_content, streamed_reasoning;
         if (!stream)
-          output = gufo::json::parse(response.body);
+          output = superroc::json::parse(response.body);
         else
           response.streaming_body([&](std::string_view chunk) {
             const auto event =
-                gufo::json::parse(chunk.substr(chunk.find("data: ") + 6));
+                superroc::json::parse(chunk.substr(chunk.find("data: ") + 6));
             if (event.member_str("type") == "response.output_text.delta")
               streamed_content += event.member_str("delta");
             if (event.member_str("type") ==
@@ -5674,8 +5674,8 @@ void TestUnfinishedInlineReasoningFallback() {
 // reply was truncated at the first inline mention (assistant row 103597) while
 // a phantom `terminal` call carrying "..." reached the client and ran.
 void TestProseAboutTheDialectIsNotACall() {
-  using gufo::json::Value;
-  const auto schema = gufo::json::parse(R"({
+  using superroc::json::Value;
+  const auto schema = superroc::json::parse(R"({
     "model":"test-model",
     "messages":[{"role":"user","content":"why was it a bug"}],
     "tools":[{"type":"function","function":{"name":"f","parameters":{
@@ -5693,7 +5693,7 @@ void TestProseAboutTheDialectIsNotACall() {
       "into the structured tool_calls field of the OpenAI API, and makes sure "
       "the *rest* of the markup never appears as text.\n"
       "\n"
-      "1. **Closing tags escaped into content.** When the call parsed, gufo "
+      "1. **Closing tags escaped into content.** When the call parsed, superroc "
       "removed the opening envelope but let the tail — `</parameter>`, "
       "`</invoke>`, `</function>` — escape into content.\n"
       "\n"
@@ -5721,12 +5721,12 @@ void TestProseAboutTheDialectIsNotACall() {
         backend.pieces.push_back(message);
       }
       const auto response =
-          gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+          superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
       Expect(response.status == 200, "an answer about the dialect is served");
       std::vector<Value> calls;
       std::string content;
       if (!stream) {
-        const auto output = gufo::json::parse(response.body);
+        const auto output = superroc::json::parse(response.body);
         const auto& choice =
             *output.find("choices")->items()[0].find("message");
         if (const auto* text = choice.find("content");
@@ -5747,7 +5747,7 @@ void TestProseAboutTheDialectIsNotACall() {
           const auto payload = output.substr(begin, cursor - begin);
           if (payload == "[DONE]")
             break;
-          const auto event = gufo::json::parse(payload);
+          const auto event = superroc::json::parse(payload);
           const auto* choices = event.find("choices");
           if (!choices || choices->empty())
             continue;
@@ -5802,24 +5802,24 @@ void TestBracketDenseContent() {
     if (!tail.empty())
       backend.pieces.push_back(tail);
 
-    auto body = gufo::json::parse(
+    auto body = superroc::json::parse(
         R"({"model":"test-model","messages":[{"role":"user","content":"echo it"}],)"
         R"("reasoning_effort":"none"})");
     const auto buffered =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
-    const auto parsed = gufo::json::parse(buffered.body);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+    const auto parsed = superroc::json::parse(buffered.body);
     const auto* message = parsed.find("choices")->items()[0].find("message");
     Expect(message->member_str("content") == dense + tail,
            "bracket-dense prose and its tail survive verbatim");
 
     body["stream"] = true;
     const auto streamed =
-        gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
     std::string content;
     streamed.streaming_body([&](std::string_view chunk) {
       if (chunk == "data: [DONE]\n\n")
         return true;
-      const auto event = gufo::json::parse(chunk.substr(6));
+      const auto event = superroc::json::parse(chunk.substr(6));
       for (const auto& choice : event.find("choices")->items()) {
         const auto* delta = choice.find("delta");
         if (delta)
@@ -5842,18 +5842,18 @@ struct ToolBoundaryOutput {
 // ownership too: a delta cannot precede its header or follow its block's close.
 ToolBoundaryOutput ToolBoundaryRequest(
     const std::vector<std::string>& pieces,
-    gufo::sampling::JsonConstraint::ToolFormat format, int api, bool stream,
+    superroc::sampling::JsonConstraint::ToolFormat format, int api, bool stream,
     FakeBackend::InitialOutputState initial =
         FakeBackend::InitialOutputState::kContent,
     FakeBackend::FinishReason finish = FakeBackend::FinishReason::kStop) {
-  using gufo::json::Value;
+  using superroc::json::Value;
   FakeBackend backend;
   backend.pieces = pieces;
   backend.tool_format = format;
   backend.initial_output_state_override = initial;
   backend.finish_reason = finish;
   backend.stop_sequence = "HALT";
-  auto body = gufo::json::parse(R"({
+  auto body = superroc::json::parse(R"({
     "model":"test-model","messages":[{"role":"user","content":"test framing"}],
     "tool_choice":"auto","tools":[
       {"type":"function","function":{"name":"record","parameters":{
@@ -5865,16 +5865,16 @@ ToolBoundaryOutput ToolBoundaryRequest(
   body["stream"] = stream;
   body["reasoning_effort"] =
       initial == FakeBackend::InitialOutputState::kContent ? "none" : "low";
-  gufo::server::HttpResponse response;
+  superroc::server::HttpResponse response;
   if (api == 0)
-    response = gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+    response = superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
   else {
-    gufo::server::ChatRequest chat;
-    Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+    superroc::server::ChatRequest chat;
+    Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
            "tag boundary controls parse");
-    response = api == 1 ? gufo::server::CreateOpenAiResponse(
+    response = api == 1 ? superroc::server::CreateOpenAiResponse(
                               Request("{}"), backend, chat, 4096, {}, stream)
-                        : gufo::server::CreateAnthropicMessage(
+                        : superroc::server::CreateAnthropicMessage(
                               Request("{}"), backend, chat, 4096, {}, stream);
   }
   Expect(response.status == 200, "tag boundary request is accepted");
@@ -6002,11 +6002,11 @@ ToolBoundaryOutput ToolBoundaryRequest(
   if (stream)
     response.streaming_body([&](std::string_view chunk) {
       if (chunk != "data: [DONE]\n\n")
-        collect(gufo::json::parse(chunk.substr(chunk.find("data: ") + 6)));
+        collect(superroc::json::parse(chunk.substr(chunk.find("data: ") + 6)));
       return true;
     });
   else
-    collect(gufo::json::parse(response.body));
+    collect(superroc::json::parse(response.body));
   for (const auto& call : chat_calls) {
     Expect(!call.member_str("id").empty(), "Chat tools have stable identities");
     out.names.push_back(call.find("function")->member_str("name"));
@@ -6017,7 +6017,7 @@ ToolBoundaryOutput ToolBoundaryRequest(
 }
 
 void TestToolTagBoundaries() {
-  using Format = gufo::sampling::JsonConstraint::ToolFormat;
+  using Format = superroc::sampling::JsonConstraint::ToolFormat;
   using Initial = FakeBackend::InitialOutputState;
   using Finish = FakeBackend::FinishReason;
   const auto bytewise = [](const std::string& raw) {
@@ -6065,7 +6065,7 @@ void TestToolTagBoundaries() {
             "literal <think></think> <tool_call></tool_call> <|im_end|>",
             "line\n</parameter> is data\n</parameter>\rX\nlast"}) {
         const auto raw = opening + value + closing;
-        auto expected = gufo::json::Value::object();
+        auto expected = superroc::json::Value::object();
         expected["text"] = value;
         for (const int api : {0, 1, 2}) {
           const auto buffered = ToolBoundaryRequest({raw}, format, api, false);
@@ -6190,7 +6190,7 @@ void TestToolTagBoundaries() {
             if (streamed.arguments.size() > buffered.arguments.size()) {
               bool invalid = false;
               try {
-                (void)gufo::json::parse(streamed.arguments.back());
+                (void)superroc::json::parse(streamed.arguments.back());
               } catch (const std::exception&) {
                 invalid = true;
               }
@@ -6202,7 +6202,7 @@ void TestToolTagBoundaries() {
 }
 
 void TestStreamingQuotedAndMalformedTools() {
-  using Format = gufo::sampling::JsonConstraint::ToolFormat;
+  using Format = superroc::sampling::JsonConstraint::ToolFormat;
   for (const auto format : {Format::kQwen, Format::kDeepSeek}) {
     const bool qwen = format == Format::kQwen;
     const std::string opening =
@@ -6231,8 +6231,8 @@ void TestStreamingQuotedAndMalformedTools() {
         for (const char byte : raw)
           pieces.emplace_back(1, byte);
         const auto output = ToolBoundaryRequest(pieces, format, api, true);
-        auto expected = gufo::json::Value::object();
-        expected["data"] = gufo::json::parse(data);
+        auto expected = superroc::json::Value::object();
+        expected["data"] = superroc::json::parse(data);
         Expect(
             !output.failed &&
                 output.arguments == std::vector<std::string>{expected.dump()} &&
@@ -6306,7 +6306,7 @@ void TestStreamingQuotedAndMalformedTools() {
                  "event");
           bool invalid = false;
           try {
-            (void)gufo::json::parse(streamed.arguments.back());
+            (void)superroc::json::parse(streamed.arguments.back());
           } catch (const std::exception&) {
             invalid = true;
           }
@@ -6322,7 +6322,7 @@ void TestStreamingQuotedAndMalformedTools() {
 // A parameter the schema rejects ends a streamed call's arguments; neither the
 // rejected parameter nor a later unfinished value is published.
 void TestStreamingStopsAtRejectedParameter() {
-  using Format = gufo::sampling::JsonConstraint::ToolFormat;
+  using Format = superroc::sampling::JsonConstraint::ToolFormat;
   for (const auto format : {Format::kQwen, Format::kDeepSeek}) {
     const std::string raw =
         format == Format::kQwen
@@ -6354,8 +6354,8 @@ void TestStreamingStopsAtRejectedParameter() {
 }
 
 void TestIncrementalToolArguments() {
-  using gufo::json::Value;
-  using Format = gufo::sampling::JsonConstraint::ToolFormat;
+  using superroc::json::Value;
+  using Format = superroc::sampling::JsonConstraint::ToolFormat;
   const std::string value =
       "first line\nliteral </parameter> is data\n"
       "<tool_call> and <|im_end|> stay literal; \"quoted\" \\ café";
@@ -6379,7 +6379,7 @@ void TestIncrementalToolArguments() {
         // Exercise every byte boundary, including UTF-8 and escaped JSON.
         for (const char byte : value.substr(10) + closing)
           backend.pieces.emplace_back(1, byte);
-        auto body = gufo::json::parse(R"({
+        auto body = superroc::json::parse(R"({
           "model":"test-model","stream":true,
           "messages":[{"role":"user","content":"record the literal text"}],
           "tools":[{"type":"function","function":{"name":"record",
@@ -6388,19 +6388,19 @@ void TestIncrementalToolArguments() {
           "tool_choice":"required"})");
         if (reasoning)
           body["reasoning_effort"] = "low";
-        gufo::server::HttpResponse response;
+        superroc::server::HttpResponse response;
         if (api == 0) {
           response =
-              gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+              superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
         } else {
-          gufo::server::ChatRequest chat;
-          Expect(!gufo::server::ParseOpenAiResponseControls(body, &chat),
+          superroc::server::ChatRequest chat;
+          Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
                  "stream fixture controls parse");
           chat.reasoning.enabled = reasoning;
           response = api == 1
-                         ? gufo::server::CreateOpenAiResponse(
+                         ? superroc::server::CreateOpenAiResponse(
                                Request("{}"), backend, chat, 512, {}, true)
-                         : gufo::server::CreateAnthropicMessage(
+                         : superroc::server::CreateAnthropicMessage(
                                Request("{}"), backend, chat, 512, {}, true);
         }
         std::mutex mutex;
@@ -6413,7 +6413,7 @@ void TestIncrementalToolArguments() {
             if (chunk == "data: [DONE]\n\n")
               return true;
             const auto event =
-                gufo::json::parse(chunk.substr(chunk.find("data: ") + 6));
+                superroc::json::parse(chunk.substr(chunk.find("data: ") + 6));
             const std::lock_guard lock(mutex);
             failed |= event.contains("error") ||
                       event.member_str("type") == "response.failed";
@@ -6485,32 +6485,32 @@ void TestIncrementalToolArguments() {
         Expect(headers == 1 && !id.empty() && name == "record",
                "one stable tool header is emitted");
         Expect(fragments > 2, "arguments arrive incrementally");
-        Expect(gufo::json::parse(arguments).member_str("text") == value,
+        Expect(superroc::json::parse(arguments).member_str("text") == value,
                "fragment assembly preserves literal argument bytes");
         Expect(content.empty(), "tool markup does not leak into content");
         // Disconnect while the same backend is still producing arguments.
         // The compatibility serializers must propagate a failed writer too.
         backend.completed = false;
         backend.block_after_first_piece = false;
-        gufo::server::ChatRequest cancelled_chat;
+        superroc::server::ChatRequest cancelled_chat;
         Expect(
-            !gufo::server::ParseOpenAiResponseControls(body, &cancelled_chat),
+            !superroc::server::ParseOpenAiResponseControls(body, &cancelled_chat),
             "cancelled tool controls parse");
         cancelled_chat.reasoning.enabled = reasoning;
         auto cancelled_response =
             api == 0
-                ? gufo::server::HandleOpenAiChat(Request(body.dump()), backend)
+                ? superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
             : api == 1
-                ? gufo::server::CreateOpenAiResponse(
+                ? superroc::server::CreateOpenAiResponse(
                       Request("{}"), backend, cancelled_chat, 512, {}, true)
-                : gufo::server::CreateAnthropicMessage(
+                : superroc::server::CreateAnthropicMessage(
                       Request("{}"), backend, cancelled_chat, 512, {}, true);
         bool disconnected = false;
         cancelled_response.streaming_body([&](std::string_view chunk) {
           if (chunk == "data: [DONE]\n\n")
             return true;
           const auto event =
-              gufo::json::parse(chunk.substr(chunk.find("data: ") + 6));
+              superroc::json::parse(chunk.substr(chunk.find("data: ") + 6));
           if (const auto* choices = event.find("choices"))
             for (const auto& choice : choices->items())
               disconnected |= choice.find("delta")->contains("tool_calls");
@@ -6537,7 +6537,7 @@ void TestParallelCallSeparatorIsNotContent() {
     for (const bool stream : {false, true})
       for (const bool constrained : {false, true})
         for (const std::string separator : {"\n", "\n\n", " \n"}) {
-          auto body = gufo::json::parse(R"({
+          auto body = superroc::json::parse(R"({
             "model":"test-model","messages":[{"role":"user","content":"both"}],
             "parallel_tool_calls":true,"tool_choice":"auto",
             "tools":[{"type":"function","function":{"name":"get_alpha",
@@ -6549,13 +6549,13 @@ void TestParallelCallSeparatorIsNotContent() {
           FakeBackend backend;
           if (constrained)
             backend.tool_format =
-                gufo::sampling::JsonConstraint::ToolFormat::kQwen;
+                superroc::sampling::JsonConstraint::ToolFormat::kQwen;
           const std::string raw = (thinking ? "Plan.</think>\n\n" : "") +
                                   alpha + separator + beta + "\n";
           for (char byte : raw)
             backend.pieces.emplace_back(1, byte);
           const auto response =
-              gufo::server::HandleOpenAiChat(Request(body.dump()), backend);
+              superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
           std::string content;
           std::set<std::string> names;
           bool null_content = false;
@@ -6563,7 +6563,7 @@ void TestParallelCallSeparatorIsNotContent() {
             response.streaming_body([&](std::string_view chunk) {
               if (chunk == "data: [DONE]\n\n")
                 return true;
-              const auto event = gufo::json::parse(chunk.substr(6));
+              const auto event = superroc::json::parse(chunk.substr(6));
               for (const auto& choice : event.find("choices")->items())
                 if (const auto* delta = choice.find("delta")) {
                   content += delta->member_str("content");
@@ -6576,7 +6576,7 @@ void TestParallelCallSeparatorIsNotContent() {
               return true;
             });
           } else {
-            const auto parsed = gufo::json::parse(response.body);
+            const auto parsed = superroc::json::parse(response.body);
             const auto& message =
                 *parsed.find("choices")->items()[0].find("message");
             null_content = message.find("content")->is_null();
@@ -6597,7 +6597,7 @@ void TestParallelCallSeparatorIsNotContent() {
   for (const int api : {1, 2})
     for (const bool stream : {false, true}) {
       const auto out = ToolBoundaryRequest(
-          pieces, gufo::sampling::JsonConstraint::ToolFormat::kQwen, api,
+          pieces, superroc::sampling::JsonConstraint::ToolFormat::kQwen, api,
           stream);
       Expect(!out.failed && out.names.size() == 2 && out.content.empty(),
              "Responses and Messages omit whitespace between parallel calls");

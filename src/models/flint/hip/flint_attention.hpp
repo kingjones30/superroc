@@ -1,13 +1,13 @@
 // Flint split-K decode attention (fp32 head-major, head_dim 128, sinks).
-#ifndef GUFO_MODELS_FLINT_HIP_FLINT_ATTENTION_HPP_
-#define GUFO_MODELS_FLINT_HIP_FLINT_ATTENTION_HPP_
+#ifndef SUPERROC_MODELS_FLINT_HIP_FLINT_ATTENTION_HPP_
+#define SUPERROC_MODELS_FLINT_HIP_FLINT_ATTENTION_HPP_
 
 #include <cstdint>
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 struct FlintLaunchStatus {
   bool ok{false};
@@ -23,8 +23,8 @@ struct FlintLaunchStatus {
     std::uint32_t num_kv_heads, std::uint32_t head_dim, std::uint32_t n_splits,
     float* partial, const float* sinks, hipStream_t stream);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_FLINT_HIP_FLINT_ATTENTION_HPP_
+#endif  // SUPERROC_MODELS_FLINT_HIP_FLINT_ATTENTION_HPP_

@@ -1,5 +1,5 @@
 // ling3_mla_prefill_test.cpp — LF1 SPEC3 unit gate for the PORT of the fork's
-// tile flash-attention kernel (kernels/ling3_mla_tile.hip) to gufo's absorbed-
+// tile flash-attention kernel (kernels/ling3_mla_tile.hip) to superroc's absorbed-
 // MLA prefill. Same harness role as the wave-1/2 one, tile-only this time:
 //
 //   1. synthetic tensors at the real shapes: T = 1, 2, 5, 63, 64, 65, 130, 512,

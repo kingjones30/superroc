@@ -96,14 +96,14 @@ class FunctionalRunnerTest(unittest.TestCase):
         self.assertLessEqual({f"tests/functional/{name}" for name in functional.HARNESS_ROOTS},
                              hashed)
         self.assertLessEqual({"tests/functional/messages_tools.py",
-                              "tools/gufo/control_tokens.py"}, hashed)
+                              "tools/superroc/control_tokens.py"}, hashed)
 
     def test_continuation_restore_reports_observed_equality(self):
         import continuation
 
         def result(text, prefill=37, cached=672, disk=True):
             return {"choices": [{"message": {"role": "assistant", "content": text}}],
-                    "usage": {"cached_tokens": cached, "gufo": {
+                    "usage": {"cached_tokens": cached, "superroc": {
                         "prefill_tokens": prefill, "ttft_ms": 1, "cache_disk_hit": disk}}}
 
         cases = [
@@ -267,7 +267,7 @@ class FunctionalRunnerTest(unittest.TestCase):
     def test_image_inputs_require_a_projector_before_starting_a_server(self):
         for suite in ("image-inputs", "image-count", "tool-images"):
             argv = ["run.py", "--output", "/unused", "--sampling-preset", "qwen38",
-                    "--suite", suite, "--record-baseline", "--", "gufo", "serve", "llm"]
+                    "--suite", suite, "--record-baseline", "--", "superroc", "serve", "llm"]
             with patch.object(sys, "argv", argv), patch.object(functional, "server") as start, \
                     contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
                 functional.main()
@@ -290,7 +290,7 @@ class FunctionalRunnerTest(unittest.TestCase):
         self.assertEqual(len(invalid_image_cases(image)), 5)
         result = {"text": "red", "reasoning": "", "finish": "stop", "usage": {
             "prompt_tokens": 100, "prompt_tokens_details": {"cached_tokens": 0},
-            "gufo": {"prefill_tokens": 100}}}
+            "superroc": {"prefill_tokens": 100}}}
         assert_color(result, "red")
         for change in ({"text": "blue"}, {"text": "not red"}, {"reasoning": "leaked"},
                        {"finish": "length"}, {"usage": {**result["usage"],
@@ -327,7 +327,7 @@ class FunctionalRunnerTest(unittest.TestCase):
     def test_discovery_requires_an_explicit_expectation_before_starting_a_server(self):
         for suite in ("discovery", "messages-image-counts", "all"):
             argv = ["run.py", "--output", "/unused", "--sampling-preset", "qwen38",
-                    "--suite", suite, "--record-baseline", "--", "gufo", "serve", "llm"]
+                    "--suite", suite, "--record-baseline", "--", "superroc", "serve", "llm"]
             with self.subTest(suite=suite), patch.object(sys, "argv", argv), \
                     patch.object(functional, "server") as start, \
                     contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:
@@ -543,7 +543,7 @@ class FunctionalRunnerTest(unittest.TestCase):
             return {"text": code, "reasoning": "", "tools": [], "finish": "stop",
                     "usage": {"prompt_tokens": total, "cached_tokens": cached,
                               "completion_tokens": 2,
-                              "gufo": {"prefill_tokens": total - cached}}}
+                              "superroc": {"prefill_tokens": total - cached}}}
 
         with contextlib.redirect_stderr(io.StringIO()):
             check_cache_depth(None, "fixture", checks, chat_result, concurrency)
@@ -603,7 +603,7 @@ class FunctionalRunnerTest(unittest.TestCase):
             return {"text": code, "reasoning": "", "tools": [], "finish": "stop",
                     "usage": {"prompt_tokens": total, "cached_tokens": cached,
                               "completion_tokens": 2,
-                              "gufo": {"prefill_tokens": total - cached}}}
+                              "superroc": {"prefill_tokens": total - cached}}}
 
         with contextlib.redirect_stderr(io.StringIO()):
             check_cache_rotation(None, "fixture", checks, chat_result)
@@ -656,7 +656,7 @@ class FunctionalRunnerTest(unittest.TestCase):
                     "tools": [], "finish": "stop", "usage": {
                         "prompt_tokens": total, "cached_tokens": cached,
                         "completion_tokens": 8,
-                        "gufo": {"prefill_tokens": total - cached}}}
+                        "superroc": {"prefill_tokens": total - cached}}}
 
         class MessagesClient:
             """Messages replay reproduces the previous turn, completion included."""
@@ -752,7 +752,7 @@ class FunctionalRunnerTest(unittest.TestCase):
             return {"text": code[1] if code else "Z", "reasoning": "", "tools": [], "finish": "stop",
                     "usage": {"prompt_tokens": total, "cached_tokens": cached,
                               "completion_tokens": 2,
-                              "gufo": {"prefill_tokens": total - cached,
+                              "superroc": {"prefill_tokens": total - cached,
                                        "shared_prefix_wait_ms": wait}}}
 
         owner = threading.get_ident()
@@ -822,7 +822,7 @@ class FunctionalRunnerTest(unittest.TestCase):
                     "finish": "stop",
                     "usage": {"prompt_tokens": total, "cached_tokens": cached,
                               "completion_tokens": 2,
-                              "gufo": {"prefill_tokens": total - cached}}}
+                              "superroc": {"prefill_tokens": total - cached}}}
 
         checks = {}
         with contextlib.redirect_stderr(io.StringIO()):
@@ -880,7 +880,7 @@ class FunctionalRunnerTest(unittest.TestCase):
             return {"text": code, "reasoning": "", "tools": [], "finish": "stop",
                     "usage": {"prompt_tokens": total, "cached_tokens": cached,
                               "completion_tokens": 2,
-                              "gufo": {"prefill_tokens": total - cached}}}
+                              "superroc": {"prefill_tokens": total - cached}}}
 
         try:
             with contextlib.redirect_stderr(io.StringIO()):
@@ -936,7 +936,7 @@ class FunctionalRunnerTest(unittest.TestCase):
                 return {"text": "OK", "reasoning": "", "tools": [], "finish": "stop",
                         "usage": {"prompt_tokens": 200, "cached_tokens": 0,
                                   "completion_tokens": 1,
-                                  "gufo": {"prefill_tokens": 200,
+                                  "superroc": {"prefill_tokens": 200,
                                            "cache_snapshot_bytes": 300,
                                            "cache_restore_bytes": 0}}}
             if messages[-1]["content"] == "Z":
@@ -948,7 +948,7 @@ class FunctionalRunnerTest(unittest.TestCase):
             return {"text": code, "reasoning": "", "tools": [], "finish": "stop",
                     "usage": {"prompt_tokens": total, "cached_tokens": cached,
                               "completion_tokens": 2,
-                              "gufo": {"prefill_tokens": total - cached,
+                              "superroc": {"prefill_tokens": total - cached,
                                        "cache_snapshot_bytes": 200,
                                        "cache_restore_bytes": restore_bytes if cached else 0}}}
 
@@ -1413,7 +1413,7 @@ class FunctionalRunnerTest(unittest.TestCase):
 
     def test_fragmented_stream_metrics_and_output_identity(self):
         usage = {"prompt_tokens": 10, "completion_tokens": 2,
-                 "gufo": {"prefill_tokens": 10, "prefill_ms": 20, "decode_ms": 8}}
+                 "superroc": {"prefill_tokens": 10, "prefill_ms": 20, "decode_ms": 8}}
         payloads = [
             {"choices": [{"index": 0, "delta": {"content": "é"}}]},
             {"choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]},
@@ -1451,7 +1451,7 @@ class FunctionalRunnerTest(unittest.TestCase):
                                                 "finish_reason": "stop"}],
                                   "usage": {"prompt_tokens": 1, "completion_tokens": 1,
                                             "total_tokens": 2, "cached_tokens": 0,
-                                            "gufo": {"prefill_tokens": 1, "prefill_ms": 1,
+                                            "superroc": {"prefill_tokens": 1, "prefill_ms": 1,
                                                      "decode_ms": 100, "queue_ms": 0,
                                                      "ttft_ms": 2, "cache_restore_ms": 0,
                                                      "cache_snapshot_ms": 0,
@@ -1654,7 +1654,7 @@ class FunctionalRunnerTest(unittest.TestCase):
 
     def test_runner_requires_explicit_suites_before_starting_server(self):
         args = ["run.py", "--record-baseline", "--output", "/unused",
-                "--sampling-preset", "qwen38", "--", "gufo", "serve", "llm",
+                "--sampling-preset", "qwen38", "--", "superroc", "serve", "llm",
                 "--model", "fixture.gguf"]
         with patch.object(sys, "argv", args), patch.object(functional, "server") as start, \
              contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as error:

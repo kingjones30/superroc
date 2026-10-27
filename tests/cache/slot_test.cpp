@@ -17,8 +17,8 @@
 #include "src/cache/prefix_index.hpp"
 #include "tests/cache/fake_adapter.hpp"
 
-using namespace gufo::cache;
-using namespace gufo::cache::testing;
+using namespace superroc::cache;
+using namespace superroc::cache::testing;
 using namespace std::chrono_literals;
 namespace {
 constexpr ResourceLimits kLimits{1 << 20, 1 << 20, 1 << 20, 1 << 20};

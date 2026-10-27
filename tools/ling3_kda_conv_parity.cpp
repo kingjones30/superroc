@@ -27,7 +27,7 @@
 // GPU at 15:28Z) — and the same index audit the launchers run is repeated on the host
 // before each launch and printed.
 //
-// Build: target gufo_ling3_kda_conv_parity (src/models/ling3/CMakeLists.txt). gpu-run only.
+// Build: target superroc_ling3_kda_conv_parity (src/models/ling3/CMakeLists.txt). gpu-run only.
 
 #include <hip/hip_runtime.h>
 

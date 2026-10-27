@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -21,11 +21,11 @@
 #include "src/models/qwen38_flash_next/ngram.hpp"
 #include "src/models/qwen38_flash_next/prompt_lookup.hpp"
 
-namespace gufo::core {
+namespace superroc::core {
 class GgufReader;
 }
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 
 struct ModelWeights;
 struct MtpWeights;
@@ -56,7 +56,7 @@ struct ModelOptions {
 class Session;
 class SessionSnapshot;
 
-/// Gufo-owned API over the ROCm runtime: one resident model, any number of
+/// SuperROC-owned API over the ROCm runtime: one resident model, any number of
 /// sessions with shared projection batches and independent context state.
 class Model final : public std::enable_shared_from_this<Model> {
 public:
@@ -368,6 +368,6 @@ private:
   friend class Session;
 };
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next
 
-#endif  // GUFO_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_
+#endif  // SUPERROC_MODELS_QWEN38_FLASH_NEXT_ENGINE_HPP_

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_DFLASH_POLICY_HPP_
-#define GUFO_MODELS_QWEN_DFLASH_POLICY_HPP_
+#ifndef SUPERROC_MODELS_QWEN_DFLASH_POLICY_HPP_
+#define SUPERROC_MODELS_QWEN_DFLASH_POLICY_HPP_
 
 #include <algorithm>
 #include <array>
@@ -11,7 +11,7 @@
 #include <stdexcept>
 #include <string_view>
 
-namespace gufo::speculative {
+namespace superroc::speculative {
 
 enum class DFlashDraftPolicy : std::uint32_t { kFixed, kAdaptive };
 
@@ -311,6 +311,6 @@ private:
   std::uint32_t last_full_width_{0};
 };
 
-}  // namespace gufo::speculative
+}  // namespace superroc::speculative
 
-#endif  // GUFO_MODELS_QWEN_DFLASH_POLICY_HPP_
+#endif  // SUPERROC_MODELS_QWEN_DFLASH_POLICY_HPP_

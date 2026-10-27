@@ -12,11 +12,11 @@
 
 namespace {
 
-namespace json = gufo::json;
-using gufo::tokenization::ChatMessage;
-using gufo::tokenization::ChatRole;
-using gufo::tokenization::ChatTemplateOptions;
-using gufo::tokenization::ChatTool;
+namespace json = superroc::json;
+using superroc::tokenization::ChatMessage;
+using superroc::tokenization::ChatRole;
+using superroc::tokenization::ChatTemplateOptions;
+using superroc::tokenization::ChatTool;
 
 std::string ReadFile(const std::string& path) {
   std::ifstream input(path, std::ios::binary);
@@ -165,7 +165,7 @@ int main() {
     }
     ChatTemplateOptions options;
     options.add_generation_prompt = true;
-    const auto rendered = gufo::tokenization::FlintRender(
+    const auto rendered = superroc::tokenization::FlintRender(
         std::span<const ChatMessage>(messages.data(), messages.size()),
         std::span<const ChatTool>(tools.data(), tools.size()), options, &error);
     if (!rendered.has_value()) {

@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_TRACE_HPP_
-#define GUFO_SERVER_TRACE_HPP_
+#ifndef SUPERROC_SERVER_TRACE_HPP_
+#define SUPERROC_SERVER_TRACE_HPP_
 
 #include <optional>
 #include <string>
@@ -7,9 +7,9 @@
 
 #include "src/core/json.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
-/// Opt-in client-content trace written by `gufo serve llm --trace PATH`.
+/// Opt-in client-content trace written by `superroc serve llm --trace PATH`.
 ///
 /// Logs never carry prompt text, message bodies or generated text. This sink
 /// does, so a client-visible failure (a leaked tool-call closer, a history the
@@ -68,6 +68,6 @@ public:
   [[nodiscard]] static std::string CurrentRequest();
 };
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_TRACE_HPP_
+#endif  // SUPERROC_SERVER_TRACE_HPP_

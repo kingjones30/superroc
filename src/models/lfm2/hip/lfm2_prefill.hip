@@ -19,7 +19,7 @@
 #include "src/models/qwen/hip/ops/token.hpp"  // LFM2
 #include "src/models/qwen/moe/qwen_moe_prefill.hpp"  // LFM2 (grouped experts)
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 // LFM2: Glimmer's CheckGpu renamed. // LFM2
@@ -384,7 +384,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardLfm2PromptBatch(  // LFM2
                       kv_heads, arena_.stream)  // LFM2
                 : Lfm2LaunchStatus{  // LFM2
                       false,  // LFM2
-                      "lfm2 fp16 KV needs head_dim 64 (GUFO_LFM2_KV=fp32)"});  // LFM2
+                      "lfm2 fp16 KV needs head_dim 64 (SUPERROC_LFM2_KV=fp32)"});  // LFM2
       } else {  // LFM2 (fp32 reference cache)
       Lfm2Require(LaunchGlimmerBatchedWriteKv(  // LFM2
           arena_.d_k, arena_.d_v, arena_.d_kv_cache, v_cache,  // LFM2
@@ -565,5 +565,5 @@ void QwenGpuExecutor::MaterializeLfm2RowLogits(std::size_t row) {  // LFM2
   }  // LFM2
 }  // LFM2
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

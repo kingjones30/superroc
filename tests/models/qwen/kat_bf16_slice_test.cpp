@@ -210,11 +210,11 @@ std::string BindFile(const std::vector<std::uint8_t>& bytes, const char* path) {
   }
   close(fd);
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   if (reader == nullptr) {
     return "open: " + error;
   }
-  auto weights = gufo::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+  auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   if (!weights.has_value()) {
     return error;
   }
@@ -277,9 +277,9 @@ void AddTrunk(std::vector<Tensor>& ts, bool swap_gate_dims) {
 }  // namespace
 
 int main() {
-  using gufo::core::GgmlType;
-  using gufo::models::KatExpertRowBytes;
-  using gufo::models::KatExpertSlice;
+  using superroc::core::GgmlType;
+  using superroc::models::KatExpertRowBytes;
+  using superroc::models::KatExpertSlice;
 
   Expect(KatExpertRowBytes(GgmlType::kF32, 32) == 128, "F32 stride k*4");
   Expect(KatExpertRowBytes(GgmlType::kF16, 32) == 64, "F16 stride k*2");
@@ -299,7 +299,7 @@ int main() {
     if (sink >= 0) {
       dup2(sink, 2);
     }
-    gufo::models::QwenTensorRef empty;
+    superroc::models::QwenTensorRef empty;
     empty.type = GgmlType::kBF16;
     empty.num_elements = 64;
     empty.data = nullptr;
@@ -357,13 +357,13 @@ int main() {
       off += static_cast<std::size_t>(n);
     }
     close(fd);
-    auto reader = gufo::core::GgufReader::OpenFile(ok_path, &ok_error);
+    auto reader = superroc::core::GgufReader::OpenFile(ok_path, &ok_error);
     Expect(reader != nullptr, "open ok gguf: " + ok_error);
     // Audit J7 (2026-10-14): a qwen35moe trunk whose experts are not ROCmFP4
     // is refused at bind (the GPU expert path reads ROCmFP4 only), so the BF16
     // slice stride is checked on a hand-made ref instead of a bound layer.
     auto weights =
-        gufo::models::QwenModelWeights::LoadFromGguf(*reader, &ok_error);
+        superroc::models::QwenModelWeights::LoadFromGguf(*reader, &ok_error);
     Expect(
         !weights.has_value() &&
             ok_error.find("trunk experts must be ROCmFP4") != std::string::npos,
@@ -374,7 +374,7 @@ int main() {
                gate->dimensions[2] == 2,
            "synthetic gate dims");
     std::vector<std::uint16_t> slab(2 * 8 * 32, 0x3f80);  // two BF16 experts
-    gufo::models::QwenTensorRef ref;
+    superroc::models::QwenTensorRef ref;
     ref.type = GgmlType::kBF16;
     ref.data = slab.data();
     ref.num_elements = slab.size();

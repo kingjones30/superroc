@@ -9,7 +9,7 @@
 // fork's MMVQ arithmetic instead -- the ACTIVATION is quantised to Q8_1 (int8 +
 // one scale per 32 values), and the row dot is an integer dot of the int8-
 // expanded FP4 codes against it, with one scale multiply per 32 weights. That
-// is what ggml's rocmfp4_vec_dot_q4_0_q8_1 does, so this also moves gufo's
+// is what ggml's rocmfp4_vec_dot_q4_0_q8_1 does, so this also moves superroc's
 // numerics toward the reference: llama.cpp quantises the activation for these
 // tensors too.
 //

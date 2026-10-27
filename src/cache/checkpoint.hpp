@@ -1,5 +1,5 @@
-#ifndef GUFO_CACHE_CHECKPOINT_HPP_
-#define GUFO_CACHE_CHECKPOINT_HPP_
+#ifndef SUPERROC_CACHE_CHECKPOINT_HPP_
+#define SUPERROC_CACHE_CHECKPOINT_HPP_
 
 #include <array>
 #include <cstddef>
@@ -15,7 +15,7 @@
 #include "src/cache/ledger.hpp"
 #include "src/cache/slot.hpp"
 
-namespace gufo::cache {
+namespace superroc::cache {
 struct LineageId {
   std::uint64_t value{};
   bool operator==(const LineageId&) const = default;
@@ -305,5 +305,5 @@ private:
   // are sorted before publication; pruning preserves the order.
   std::vector<Entry> entries_;
 };
-}  // namespace gufo::cache
+}  // namespace superroc::cache
 #endif

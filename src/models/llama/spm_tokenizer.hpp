@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LLAMA_SPM_TOKENIZER_HPP_
-#define GUFO_MODELS_LLAMA_SPM_TOKENIZER_HPP_
+#ifndef SUPERROC_MODELS_LLAMA_SPM_TOKENIZER_HPP_
+#define SUPERROC_MODELS_LLAMA_SPM_TOKENIZER_HPP_
 
 #include <array>
 #include <cstdint>
@@ -12,7 +12,7 @@
 
 #include "src/core/gguf_reader.hpp"
 
-namespace gufo::models::llama {
+namespace superroc::models::llama {
 
 /// SentencePiece tokenizer matching llama.cpp's LLAMA_VOCAB_TYPE_SPM path
 /// (`tokenizer.ggml.model = llama`, `tokenizer.ggml.pre = default`).
@@ -110,6 +110,6 @@ private:
   bool add_eos_{false};
 };
 
-}  // namespace gufo::models::llama
+}  // namespace superroc::models::llama
 
-#endif  // GUFO_MODELS_LLAMA_SPM_TOKENIZER_HPP_
+#endif  // SUPERROC_MODELS_LLAMA_SPM_TOKENIZER_HPP_

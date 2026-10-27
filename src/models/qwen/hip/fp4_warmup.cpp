@@ -1,4 +1,4 @@
-// lqw:fp4-warmup. The copied Ling FP4 GEMV slots (gufo_fp4_quant_q8) grow
+// lqw:fp4-warmup. The copied Ling FP4 GEMV slots (superroc_fp4_quant_q8) grow
 // lazily via hipFree/hipMalloc on first use per width, and the fused-SwiGLU
 // scratch in fp4_launch.hpp does the same. The first FP4 decode step runs
 // inside a captured hipGraph, where an allocation poisons the capture (fault
@@ -12,7 +12,7 @@
 
 #include "src/models/qwen/hip/fp4_launch.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 struct WarmMark {
   std::size_t k = 0;
@@ -33,18 +33,18 @@ bool WarmupRocmFp4Slots(std::size_t k, hipStream_t stream) {
   // set. A grown table (another executor attached, or configure() pre-sized)
   // re-warms so the new sets' slots exist before any captured step; without
   // this the first captured decode on a new set hipMallocs mid-capture.
-  if (g_warm.k >= k && g_warm.sets >= gufo_fp4_slot_sets_count()) {
+  if (g_warm.k >= k && g_warm.sets >= superroc_fp4_slot_sets_count()) {
     return true;
   }
   // SQ10: pre-grow every set's five Q8 slots (the verify pair rides inside,
   // as before). The MoE scratch rides in model_loader beside this call.
   const bool ok =
-      gufo_fp4_slots_warm_q8(static_cast<int>(k), stream) == GUFO_FP4_OK;
+      superroc_fp4_slots_warm_q8(static_cast<int>(k), stream) == SUPERROC_FP4_OK;
   if (ok) {
     if (k > g_warm.k) {
       g_warm.k = k;
     }
-    g_warm.sets = gufo_fp4_slot_sets_count();
+    g_warm.sets = superroc_fp4_slot_sets_count();
   }
   return ok;
 }
@@ -57,4 +57,4 @@ void DiscardRocmFp4Warmup() noexcept {
   g_warm.k = 0;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip

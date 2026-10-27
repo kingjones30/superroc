@@ -1,6 +1,6 @@
 # MiniCPM-V-4.7-35B-A3B, ROCmFP4 LEAN with Q6_K trunk
 
-MiniCPM-V-4.7-35B-A3B is a 35B mixture-of-experts model. These files are ROCmFP4 LEAN quantizations for Strix Halo built with gufo-quant, with the trunk attention and recurrent matrices at Q6_K in the served Q6K-trunk build. This setup serves text only without a drafter.
+MiniCPM-V-4.7-35B-A3B is a 35B mixture-of-experts model. These files are ROCmFP4 LEAN quantizations for Strix Halo built with superroc-quant, with the trunk attention and recurrent matrices at Q6_K in the served Q6K-trunk build. This setup serves text only without a drafter.
 
 | | |
 |---|---|

@@ -15,7 +15,7 @@
 
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 
-namespace q = gufo::models::qwen38_flash_next::rocm;
+namespace q = superroc::models::qwen38_flash_next::rocm;
 namespace {
 
 // The model's indexer: 4 heads of 128, 4-token blocks, a 2048-token budget.

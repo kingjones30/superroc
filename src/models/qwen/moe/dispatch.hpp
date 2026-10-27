@@ -1,11 +1,11 @@
-#ifndef GUFO_MODELS_QWEN_MOE_DISPATCH_HPP_
-#define GUFO_MODELS_QWEN_MOE_DISPATCH_HPP_
+#ifndef SUPERROC_MODELS_QWEN_MOE_DISPATCH_HPP_
+#define SUPERROC_MODELS_QWEN_MOE_DISPATCH_HPP_
 
 #include <string_view>
 
 #include "src/core/model_family.hpp"
 
-namespace gufo::models::qwen {
+namespace superroc::models::qwen {
 
 // KAT: serve maps TextSpeculativeBackend by enumerator name
 // (kDisabled, kDFlash, kDSpark, kMtp), not by casting the integer.
@@ -39,7 +39,7 @@ inline bool DflashSidecarIsMarkovKind(bool has_markov_w1,
 inline KatDispatch ClassifyKatDispatch(
     std::string_view arch, KatSpecKind spec, bool draft_path_empty,
     bool has_vision, bool dflash_markov_sidecar = false) noexcept {
-  if (!gufo::core::IsModelFamily(arch, gufo::core::ModelFamilyId::kQwen35Moe)) {
+  if (!superroc::core::IsModelFamily(arch, superroc::core::ModelFamilyId::kQwen35Moe)) {
     return KatDispatch::kNotKat;
   }
   if (has_vision) {
@@ -63,6 +63,6 @@ inline KatDispatch ClassifyKatDispatch(
   return KatDispatch::kAccept;
 }
 
-}  // namespace gufo::models::qwen
+}  // namespace superroc::models::qwen
 
-#endif  // GUFO_MODELS_QWEN_MOE_DISPATCH_HPP_
+#endif  // SUPERROC_MODELS_QWEN_MOE_DISPATCH_HPP_

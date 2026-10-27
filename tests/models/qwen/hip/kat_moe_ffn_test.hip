@@ -1,5 +1,5 @@
 // KAT S3/S4 G1: the GPU MoE FFN against the CPU oracle on the real KAT GGUF.
-//   A: routed expert slices e in {0, 8, 255} through gufo_fp4_expert_ffn_dev
+//   A: routed expert slices e in {0, 8, 255} through superroc_fp4_expert_ffn_dev
 //   B: the sigmoid-gated shared expert (QwenMoeShexpSigmoid + expert_ffn_dev)
 //   C: the full single-token decode MoE (fast route + experts + shexp +
 //      combine) vs ForwardMoe, incl. the router id set
@@ -9,8 +9,8 @@
 // in float, so the gate is RV24's Q8-activation leg: cosine >= 0.9999.
 #include "src/core/gguf_reader.hpp"
 #include "src/core/quant/ggml_dequant.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 #include "src/models/qwen/forward.hpp"
 #include "src/models/qwen/moe/forward_moe.hpp"
 #include "src/models/qwen/moe/qwen_moe_ffn.hpp"
@@ -125,9 +125,9 @@ int main() {
     return 77;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open: " + error);
-  auto weights = gufo::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+  auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "bind: " + error);
   const auto& cfg = weights->config;
   const auto& layer0 = weights->layers[0];
@@ -142,15 +142,15 @@ int main() {
   Expect(layer0.is_moe, "layer0 is moe");
 
   const int qtype = static_cast<int>(layer0.ffn_gate_exps.type);
-  Expect(qtype == GUFO_FP4_Q4_0_ROCMFP4_FAST ||
-             qtype == GUFO_FP4_Q4_0_ROCMFP4,
+  Expect(qtype == SUPERROC_FP4_Q4_0_ROCMFP4_FAST ||
+             qtype == SUPERROC_FP4_Q4_0_ROCMFP4,
          "expert type fp4");
   Expect(layer0.ffn_up_exps.type == layer0.ffn_gate_exps.type &&
              layer0.ffn_down_exps.type == layer0.ffn_gate_exps.type,
          "expert types agree");
   const int qtype_sh = static_cast<int>(layer0.ffn_gate_shexp.type);
-  Expect(layer0.ffn_gate_inp.type == gufo::core::GgmlType::kF32 &&
-             layer0.ffn_gate_inp_shexp.type == gufo::core::GgmlType::kF32,
+  Expect(layer0.ffn_gate_inp.type == superroc::core::GgmlType::kF32 &&
+             layer0.ffn_gate_inp_shexp.type == superroc::core::GgmlType::kF32,
          "router + shexp gate f32");
 
   std::vector<float> x(static_cast<std::size_t>(hidden));
@@ -161,16 +161,16 @@ int main() {
   // Byte counts follow the binder's convention (forward_moe.cpp ExpertSlice):
   // expert stride = n_rows * QuantizedRowBytes(type, k).
   const std::size_t rb_k =
-      gufo::quant::QuantizedRowBytes(layer0.ffn_gate_exps.type,
+      superroc::quant::QuantizedRowBytes(layer0.ffn_gate_exps.type,
                                      static_cast<std::size_t>(hidden));
   const std::size_t rb_ff =
-      gufo::quant::QuantizedRowBytes(layer0.ffn_down_exps.type,
+      superroc::quant::QuantizedRowBytes(layer0.ffn_down_exps.type,
                                      static_cast<std::size_t>(ff));
   const std::size_t sh_rb_k =
-      gufo::quant::QuantizedRowBytes(layer0.ffn_gate_shexp.type,
+      superroc::quant::QuantizedRowBytes(layer0.ffn_gate_shexp.type,
                                      static_cast<std::size_t>(hidden));
   const std::size_t sh_rb_ff =
-      gufo::quant::QuantizedRowBytes(layer0.ffn_down_shexp.type,
+      superroc::quant::QuantizedRowBytes(layer0.ffn_down_shexp.type,
                                      static_cast<std::size_t>(ff_s));
   Expect(rb_k > 0 && rb_ff > 0 && sh_rb_k > 0 && sh_rb_ff > 0, "row bytes");
   const std::size_t gate_bytes =
@@ -219,35 +219,35 @@ int main() {
     HIP_REQUIRE(hipMemcpy(d_ids.p, &e, sizeof(int), hipMemcpyHostToDevice));
     const float one = 1.0F;
     HIP_REQUIRE(hipMemcpy(d_w.p, &one, sizeof(float), hipMemcpyHostToDevice));
-    Expect(gufo_fp4_expert_ffn_dev(qtype, d_gate.p, d_up.p, d_down.p, d_x.f32(),
+    Expect(superroc_fp4_expert_ffn_dev(qtype, d_gate.p, d_up.p, d_down.p, d_x.f32(),
                                    d_ids.i32(), d_w.f32(), 1, n_expert, hidden,
-                                   ff, 0.0F, d_y.f32(), nullptr) == GUFO_FP4_OK,
+                                   ff, 0.0F, d_y.f32(), nullptr) == SUPERROC_FP4_OK,
            "slice launch");
     HIP_REQUIRE(hipDeviceSynchronize());
     Fetch(got, d_y);
-    gufo::models::KatExpertSwiglu(layer0.ffn_gate_exps, layer0.ffn_up_exps,
+    superroc::models::KatExpertSwiglu(layer0.ffn_gate_exps, layer0.ffn_up_exps,
                                   layer0.ffn_down_exps, e, x, hidden, ff,
                                   gscratch, uscratch, ascratch, cpu);
     const double cosine = Cosine(got, cpu);
     std::cout << "KAT_FFN slice e=" << e << " cosine=" << cosine << "\n";
     Expect(cosine >= 0.9999, "slice cosine");
   }
-  Expect(gufo_fp4_moe_dev_check() == GUFO_FP4_OK, "slice status");
+  Expect(superroc_fp4_moe_dev_check() == SUPERROC_FP4_OK, "slice status");
 
   // --- B: shared expert + sigmoid gate --------------------------------------
   Expect(LaunchQwenMoeShexpSigmoid(d_x.f32(), d_gatevec.f32(), hidden, 1,
                                    d_sig.f32(), nullptr) == 0,
          "sigmoid launch");
-  Expect(gufo_fp4_expert_ffn_dev(qtype_sh, d_shgate.p, d_shup.p, d_shdown.p,
+  Expect(superroc_fp4_expert_ffn_dev(qtype_sh, d_shgate.p, d_shup.p, d_shdown.p,
                                  d_x.f32(), d_zero.i32(), d_sig.f32(), 1, 1,
                                  hidden, ff_s, 0.0F, d_y.f32(),
-                                 nullptr) == GUFO_FP4_OK,
+                                 nullptr) == SUPERROC_FP4_OK,
          "shexp launch");
   HIP_REQUIRE(hipDeviceSynchronize());
   Fetch(got, d_y);
   std::vector<float> sig_host(1);
   Fetch(sig_host, d_sig);
-  gufo::models::KatExpertSwiglu(layer0.ffn_gate_shexp, layer0.ffn_up_shexp,
+  superroc::models::KatExpertSwiglu(layer0.ffn_gate_shexp, layer0.ffn_up_shexp,
                                 layer0.ffn_down_shexp, -1, x, hidden, ff_s,
                                 gscratch, uscratch, ascratch, cpu);
   float dot = 0.0F;
@@ -266,26 +266,26 @@ int main() {
             << " sig_abs=" << std::fabs(sig_host[0] - sig_ref) << "\n";
   Expect(shexp_cos >= 0.9999, "shexp cosine");
   Expect(std::fabs(sig_host[0] - sig_ref) < 1.0e-4F, "sigmoid delta");
-  Expect(gufo_fp4_moe_dev_check() == GUFO_FP4_OK, "shexp status");
+  Expect(superroc_fp4_moe_dev_check() == SUPERROC_FP4_OK, "shexp status");
 
   // --- C: full single-token decode MoE --------------------------------------
   Expect(LaunchQwenMoeRoute(d_x.f32(), d_router.f32(), hidden, n_expert,
                             n_used, d_logits.f32(), d_ids.i32(), d_w.f32(),
                             nullptr) == 0,
          "route launch");
-  Expect(gufo_fp4_expert_ffn_dev(qtype, d_gate.p, d_up.p, d_down.p, d_x.f32(),
+  Expect(superroc_fp4_expert_ffn_dev(qtype, d_gate.p, d_up.p, d_down.p, d_x.f32(),
                                  d_ids.i32(), d_w.f32(), n_used, n_expert,
                                  hidden, ff, 0.0F, d_y.f32(),
-                                 nullptr) == GUFO_FP4_OK,
+                                 nullptr) == SUPERROC_FP4_OK,
          "experts launch");
   DeviceBuf d_sy(static_cast<std::size_t>(hidden) * sizeof(float));
   Expect(LaunchQwenMoeShexpSigmoid(d_x.f32(), d_gatevec.f32(), hidden, 1,
                                    d_sig.f32(), nullptr) == 0,
          "sigmoid relaunch");
-  Expect(gufo_fp4_expert_ffn_dev(qtype_sh, d_shgate.p, d_shup.p, d_shdown.p,
+  Expect(superroc_fp4_expert_ffn_dev(qtype_sh, d_shgate.p, d_shup.p, d_shdown.p,
                                  d_x.f32(), d_zero.i32(), d_sig.f32(), 1, 1,
                                  hidden, ff_s, 0.0F, d_sy.f32(),
-                                 nullptr) == GUFO_FP4_OK,
+                                 nullptr) == SUPERROC_FP4_OK,
          "shexp relaunch");
   DeviceBuf d_out(static_cast<std::size_t>(hidden) * sizeof(float));
   Expect(LaunchQwenMoeCombine(d_y.f32(), d_sy.f32(), hidden, 1, d_out.f32(),
@@ -297,12 +297,12 @@ int main() {
   std::vector<float> moe_logits(static_cast<std::size_t>(n_expert));
   std::vector<float> moe_probs(static_cast<std::size_t>(n_expert));
   std::vector<float> eh(static_cast<std::size_t>(hidden));
-  gufo::models::ForwardMoe(x, layer0, cfg, moe_logits, moe_probs, gscratch,
+  superroc::models::ForwardMoe(x, layer0, cfg, moe_logits, moe_probs, gscratch,
                            uscratch, ascratch, eh, cpu);
   const double moe_cos = Cosine(got, cpu);
   std::vector<int> cpu_ids(n_used);
   std::vector<float> cpu_w(n_used);
-  Expect(gufo::models::KatRouteSoftmaxTopK(moe_logits, n_used, cpu_ids, cpu_w),
+  Expect(superroc::models::KatRouteSoftmaxTopK(moe_logits, n_used, cpu_ids, cpu_w),
          "cpu route");
   std::vector<int> gpu_ids(static_cast<std::size_t>(n_used));
   FetchIds(gpu_ids, d_ids);
@@ -311,7 +311,7 @@ int main() {
   Expect(cpu_ids == gpu_ids, "decode id set");
   std::cout << "KAT_FFN decode_moe cosine=" << moe_cos << " ids_match=1\n";
   Expect(moe_cos >= 0.9999, "decode moe cosine");
-  Expect(gufo_fp4_moe_dev_check() == GUFO_FP4_OK, "decode status");
+  Expect(superroc_fp4_moe_dev_check() == SUPERROC_FP4_OK, "decode status");
 
   // --- D: batched route head -------------------------------------------------
   constexpr int kTB = 17;
@@ -341,11 +341,11 @@ int main() {
     std::vector<float> xt(xb.begin() + static_cast<std::size_t>(t) * hidden,
                           xb.begin() + static_cast<std::size_t>(t + 1) * hidden);
     std::vector<float> lg(static_cast<std::size_t>(n_expert));
-    gufo::models::TensorGEMV(layer0.ffn_gate_inp, xt,
+    superroc::models::TensorGEMV(layer0.ffn_gate_inp, xt,
                              static_cast<std::size_t>(n_expert), hidden, lg);
     std::vector<int> ci(n_used);
     std::vector<float> cw(n_used);
-    Expect(gufo::models::KatRouteSoftmaxTopK(lg, n_used, ci, cw), "cpu route t");
+    Expect(superroc::models::KatRouteSoftmaxTopK(lg, n_used, ci, cw), "cpu route t");
     std::vector<int> gi(ids_b.begin() + static_cast<std::size_t>(t) * n_used,
                         ids_b.begin() +
                             static_cast<std::size_t>(t + 1) * n_used);
@@ -377,24 +377,24 @@ int main() {
          "prefill sigmoid");
   for (int t0 = 0; t0 < kTP; t0 += 4) {
     const int m = std::min(4, kTP - t0);
-    Expect(gufo_fp4_expert_ffn_m(
+    Expect(superroc_fp4_expert_ffn_m(
                qtype, d_gate.p, d_up.p, d_down.p,
                d_xb.f32() + static_cast<std::size_t>(t0) * hidden,
                d_idsb.i32() + static_cast<std::size_t>(t0) * n_used,
                d_wb.f32() + static_cast<std::size_t>(t0) * n_used, m, n_used,
                n_expert, hidden, ff, 0.0F,
                d_moey.f32() + static_cast<std::size_t>(t0) * hidden,
-               nullptr) == GUFO_FP4_OK,
+               nullptr) == SUPERROC_FP4_OK,
            "prefill experts");
-    Expect(gufo_fp4_expert_ffn_shared_m(
+    Expect(superroc_fp4_expert_ffn_shared_m(
                qtype_sh, d_shgate.p, d_shup.p, d_shdown.p,
                d_xb.f32() + static_cast<std::size_t>(t0) * hidden,
                d_zerob.i32() + t0, d_sigb.f32() + t0, m, 1, 1, hidden, ff_s,
                0.0F, d_shey.f32() + static_cast<std::size_t>(t0) * hidden,
-               nullptr) == GUFO_FP4_OK,
+               nullptr) == SUPERROC_FP4_OK,
            "prefill shexp");
   }
-  Expect(gufo_fp4_expert_ffn_m_check() == GUFO_FP4_OK, "prefill status");
+  Expect(superroc_fp4_expert_ffn_m_check() == SUPERROC_FP4_OK, "prefill status");
   Expect(LaunchQwenMoeCombine(d_moey.f32(), d_shey.f32(), hidden, kTP,
                               d_outb.f32(), nullptr) == 0,
          "prefill combine");
@@ -405,7 +405,7 @@ int main() {
   for (int t = 0; t < kTP; ++t) {
     std::vector<float> xt(xb.begin() + static_cast<std::size_t>(t) * hidden,
                           xb.begin() + static_cast<std::size_t>(t + 1) * hidden);
-    gufo::models::ForwardMoe(xt, layer0, cfg, moe_logits, moe_probs, gscratch,
+    superroc::models::ForwardMoe(xt, layer0, cfg, moe_logits, moe_probs, gscratch,
                              uscratch, ascratch, eh, cpu);
     std::vector<float> gt(out_b.begin() + static_cast<std::size_t>(t) * hidden,
                           out_b.begin() +
@@ -454,20 +454,20 @@ int main() {
   for (int t0 = 0; t0 < kTG; t0 += 4) {
     const int m = std::min(4, kTG - t0);
     const std::size_t off = static_cast<std::size_t>(t0) * hidden;
-    Expect(gufo_fp4_expert_ffn_m(
+    Expect(superroc_fp4_expert_ffn_m(
                qtype, d_gate.p, d_up.p, d_down.p, d_xg.f32() + off,
                d_idg.i32() + static_cast<std::size_t>(t0) * n_used,
                d_wg.f32() + static_cast<std::size_t>(t0) * n_used, m, n_used,
                n_expert, hidden, ff, 0.0F, d_ref_y.f32() + off,
-               nullptr) == GUFO_FP4_OK,
+               nullptr) == SUPERROC_FP4_OK,
            "m4 experts");
-    Expect(gufo_fp4_expert_ffn_shared_m(
+    Expect(superroc_fp4_expert_ffn_shared_m(
                qtype_sh, d_shgate.p, d_shup.p, d_shdown.p, d_xg.f32() + off,
                d_zerg.i32() + t0, d_sigg.f32() + t0, m, 1, 1, hidden, ff_s, 0.0F,
-               d_ref_s.f32() + off, nullptr) == GUFO_FP4_OK,
+               d_ref_s.f32() + off, nullptr) == SUPERROC_FP4_OK,
            "m4 shared");
   }
-  Expect(gufo_fp4_expert_ffn_m_check() == GUFO_FP4_OK, "m4 status");
+  Expect(superroc_fp4_expert_ffn_m_check() == SUPERROC_FP4_OK, "m4 status");
   Expect(LaunchKatMoeRoutedGrouped(qtype, d_gate.p, d_up.p, d_down.p, d_xg.f32(),
                                    d_idg.i32(), d_wg.f32(), kTG, n_used,
                                    n_expert, hidden, ff, d_grp_y.f32(),

@@ -12,7 +12,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void BatchedResidualAddKernel(const float* __restrict__ a,
                                          const float* __restrict__ b,
@@ -32,8 +32,8 @@ void LaunchBatchedResidualAdd(const float* a, const float* b, float* out,
   const std::size_t grid_size = (total + block_size - 1) / block_size;
   BatchedResidualAddKernel<<<grid_size, block_size, 0, stream>>>(a, b, out,
                                                                  total);
-  GUFO_CHECK_LAUNCH("BatchedResidualAddKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedResidualAddKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

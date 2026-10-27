@@ -13,7 +13,7 @@
 #include "src/models/qwen/hip/kernels/q4_0_gemv.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // Quant block layouts (Q8_0 / Q5_K / Q6_K / Q8_K) and the quant helpers are
 // shared via src/models/qwen/hip/quant_ops.hpp.
@@ -68,7 +68,7 @@ void LaunchBatchedEmbeddingLookup(const void* table, core::GgmlType type,
   BatchedEmbeddingLookupKernel<<<grid, static_cast<unsigned int>(block_size), 0,
                                  stream>>>(table, type, token_ids, out_hidden,
                                            batch_size, hidden_size);
-  GUFO_CHECK_LAUNCH("BatchedEmbeddingLookupKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedEmbeddingLookupKernel");
 }
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_GLIMMER_GLIMMER_CHAT_HPP_
-#define GUFO_MODELS_GLIMMER_GLIMMER_CHAT_HPP_
+#ifndef SUPERROC_MODELS_GLIMMER_GLIMMER_CHAT_HPP_
+#define SUPERROC_MODELS_GLIMMER_GLIMMER_CHAT_HPP_
 
 #include <optional>
 #include <span>
@@ -8,7 +8,7 @@
 
 #include "src/models/qwen/chat_template.hpp"
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 
 /// Pinned sha256 of tokenizer.chat_template in both Muse Glimmer GGUFs.
 inline constexpr std::string_view kGlimmerChatTemplateSha256 =
@@ -29,6 +29,6 @@ inline constexpr std::string_view kGlimmerChatTemplateSha256 =
     std::span<const ChatTool> tools, const ChatTemplateOptions& options = {},
     std::string* error_msg = nullptr);
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization
 
-#endif  // GUFO_MODELS_GLIMMER_GLIMMER_CHAT_HPP_
+#endif  // SUPERROC_MODELS_GLIMMER_GLIMMER_CHAT_HPP_

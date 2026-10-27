@@ -14,8 +14,8 @@
 #include <stdexcept>
 
 #include "src/core/hip/hip_utils.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 #include "src/models/flint/hip/flint_attention.hpp"
 #include "src/models/glimmer/hip/glimmer_decode.hpp"
 #include "src/models/lfm2/hip/lfm2_kernels.hpp"
@@ -27,7 +27,7 @@
 #include "src/models/qwen/hip/ops/token.hpp"
 #include "src/models/qwen/vision/device_input.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 void Require(const Lfm2LaunchStatus& status) {
@@ -135,10 +135,10 @@ void ExecuteFlintDecodeStep(QwenGpuArena& arena,
         IsRocmFp4(layer.attn_v.type) && RocmFp4ShapeOk(attn, hidden) &&
         RocmFp4ShapeOk(kv, hidden) &&
         PrepareRocmFp4Act(scratch.decode.normed.data(), hidden,
-                          GUFO_FP4_Q8_SLOT_ATTN_NORM, arena.stream);
+                          SUPERROC_FP4_Q8_SLOT_ATTN_NORM, arena.stream);
     if (!shared_qkv ||
         !TryLaunchRocmFp4GemvSlot(layer.attn_q.type, layer.attn_q.data,
-                                  GUFO_FP4_Q8_SLOT_ATTN_NORM,
+                                  SUPERROC_FP4_Q8_SLOT_ATTN_NORM,
                                   scratch.attention.q.data(), attn, hidden,
                                   arena.stream)) {
       LaunchGEMV(layer.attn_q.data, layer.attn_q.type,
@@ -147,7 +147,7 @@ void ExecuteFlintDecodeStep(QwenGpuArena& arena,
     }
     if (!shared_qkv ||
         !TryLaunchRocmFp4GemvSlot(layer.attn_k.type, layer.attn_k.data,
-                                  GUFO_FP4_Q8_SLOT_ATTN_NORM,
+                                  SUPERROC_FP4_Q8_SLOT_ATTN_NORM,
                                   scratch.attention.k.data(), kv, hidden,
                                   arena.stream)) {
       LaunchGEMV(layer.attn_k.data, layer.attn_k.type,
@@ -156,7 +156,7 @@ void ExecuteFlintDecodeStep(QwenGpuArena& arena,
     }
     if (!shared_qkv ||
         !TryLaunchRocmFp4GemvSlot(layer.attn_v.type, layer.attn_v.data,
-                                  GUFO_FP4_Q8_SLOT_ATTN_NORM,
+                                  SUPERROC_FP4_Q8_SLOT_ATTN_NORM,
                                   scratch.attention.v.data(), kv, hidden,
                                   arena.stream)) {
       LaunchGEMV(layer.attn_v.data, layer.attn_v.type,
@@ -229,14 +229,14 @@ void ExecuteFlintDecodeStep(QwenGpuArena& arena,
           static_cast<std::uint32_t>(hidden), n_expert, n_used,
           arena.d_moe_logits, arena.d_moe_ids, arena.d_moe_weights,
           arena.stream));
-      if (gufo_fp4_expert_ffn_dev(
+      if (superroc_fp4_expert_ffn_dev(
               static_cast<int>(layer.ffn_gate_exps.type),
               layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
               layer.ffn_down_exps.data, scratch.decode.normed.data(),
               arena.d_moe_ids, arena.d_moe_weights, static_cast<int>(n_used),
               static_cast<int>(n_expert), static_cast<int>(hidden),
               static_cast<int>(expert_ff), 0.0F, scratch.ffn.out.data(),
-              arena.stream) != GUFO_FP4_OK) {
+              arena.stream) != SUPERROC_FP4_OK) {
         throw std::runtime_error("flint decode experts failed");
       }
       LaunchResidualAdd(scratch.ffn.out.data(), scratch.attention.output.data(),
@@ -325,5 +325,5 @@ tokenization::TokenId QwenGpuExecutor::ForwardFlintPromptChunk(
   return CheckedSampleToken(next_token_id, config.vocab_size);
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

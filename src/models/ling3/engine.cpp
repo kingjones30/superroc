@@ -14,7 +14,7 @@
 #include "src/models/ling3/rocm_backend.hpp"
 #endif
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 namespace {
 
 /// LS4 phase 3: how many prompt positions to prime the MTP head over.
@@ -831,4 +831,4 @@ bool Session::PrefillVision(const vision::PreparedPrompt& prepared,
   return ok;
 }
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3

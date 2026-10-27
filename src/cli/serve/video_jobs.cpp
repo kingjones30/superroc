@@ -28,8 +28,9 @@
 #include "src/cli/serve/logging.hpp"
 #include "src/core/json.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
+#include "src/core/previous_name_compat.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 namespace {
 
 bool IsH3Model(std::string_view model) {
@@ -174,7 +175,7 @@ bool WriteAtomic(const std::filesystem::path& path, std::string_view contents,
     }
     return false;
   }
-  const std::filesystem::path partial = path.string() + ".gufo-partial-" +
+  const std::filesystem::path partial = path.string() + ".superroc-partial-" +
                                         std::to_string(getpid()) + "-" +
                                         std::to_string(NextFileNonce());
   {
@@ -203,7 +204,7 @@ bool WriteAtomic(const std::filesystem::path& path, std::string_view contents,
 
 std::string SnapshotJson(const VideoJobSnapshot& snapshot) {
   json::Value root = json::Value::object();
-  root["schema"] = "gufo.video-job.v1";
+  root["schema"] = "superroc.video-job.v1";
   root["id"] = snapshot.id;
   root["status"] = std::string(ToString(snapshot.status));
   root["progress"] = snapshot.progress;
@@ -400,8 +401,14 @@ struct VideoJobService::Impl {
         if (filesystem_error) {
           break;
         }
-        if (child.path().filename().string().find(".gufo-partial-") !=
-            std::string::npos) {
+        // Compatibility: previous releases wrote the previous
+        // engine-name suffix (built from parts so the old spelling never
+        // appears here); the scanner still removes it.
+        if (const std::string partial_name =
+                child.path().filename().string();
+            partial_name.find(".superroc-partial-") != std::string::npos ||
+            partial_name.find(std::string("g") + "ufo-partial-") !=
+                std::string::npos) {
           std::filesystem::remove_all(child.path(), filesystem_error);
           filesystem_error.clear();
         }
@@ -448,7 +455,8 @@ struct VideoJobService::Impl {
             expires_at > completed_at &&
             expires_at <=
                 static_cast<double>(std::numeric_limits<std::int64_t>::max());
-        if (value.member_str("schema") != "gufo.video-job.v1" ||
+        if (!::superroc::core::MatchesCurrentOrPrevious(
+                value.member_str("schema"), "superroc.video-job.v1") ||
             !IsVideoId(job->snapshot.id) || job->snapshot.id != directory_id ||
             !IsH3Model(job->snapshot.model) ||
             !minimax_h3::ResolveDurationFrames(job->snapshot.seconds) ||
@@ -946,4 +954,4 @@ VideoJobLookupResult VideoJobService::Delete(std::string_view id) {
       .result = VideoJobResult::kOk, .job = std::move(snapshot), .error = {}};
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

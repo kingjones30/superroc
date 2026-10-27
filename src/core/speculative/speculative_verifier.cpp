@@ -18,12 +18,13 @@
 
 #include "src/core/sampling.hpp"
 #include "src/models/llama/spm_tokenizer.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::speculative {
+namespace superroc::speculative {
 namespace {
 
 // lqw:mtp-cost (SPEC3 item 1). Optional per-step wall-clock accounting for
-// the speculative loop, behind GUFO_SPEC_STEP_COST=1: milliseconds spent in
+// the speculative loop, behind SUPERROC_SPEC_STEP_COST=1: milliseconds spent in
 // the draft (Propose), the target verification forward, the rollback /
 // re-feed bookkeeping (SaveState/RestoreState + CommitVerificationChunk +
 // replay + AcceptFeedback), and plain autoregressive steps. Host-side read
@@ -42,7 +43,7 @@ struct SpecStepCost {
   double ar_ms = 0.0;
   double prime_ms = 0.0;
 };
-SpecStepCost g_cost{.on = std::getenv("GUFO_SPEC_STEP_COST") != nullptr};
+SpecStepCost g_cost{.on = ::superroc::core::GetEnvCompat("SUPERROC_SPEC_STEP_COST") != nullptr};
 
 class CostTimer {
 public:
@@ -721,7 +722,7 @@ SpeculativeVerifier::PreparedStep SpeculativeVerifier::PrepareStep(
           : 0;
   // KAT-MTP: a draft backend with no lossless sampled proposals (the MTP
   // head) is dropped for every sampled, penalized or constrained request --
-  // drafting is greedy-only, and GUFO_MTP_PMIN is never consulted on those
+  // drafting is greedy-only, and SUPERROC_MTP_PMIN is never consulted on those
   // requests. Say so once instead of silently losing the speedup; /health
   // carries the same fact for a running server.
   if (prepared.sampled && prepared.max_draft_tokens == 0 &&
@@ -1891,5 +1892,5 @@ tokenization::TokenId SpeculativeVerifier::Prime(
   return first_token;
 }
 
-}  // namespace gufo::speculative
+}  // namespace superroc::speculative
 #endif  // defined(ENGINE_ENABLE_HIP)

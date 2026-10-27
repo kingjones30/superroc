@@ -7,11 +7,11 @@
 
 #include "src/core/model_family.hpp"
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 namespace {
 
 constexpr std::string_view kArchitecture =
-    gufo::core::ModelFamilyArch(gufo::core::ModelFamilyId::kBailingMoe3);
+    superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kBailingMoe3);
 
 /// GGML_ROPE_TYPE_NORM: pairs of CONSECUTIVE head values (2i, 2i+1) -- see
 /// llama_model_rope_type, which puts BAILINGMOE3 under "a normal RoPE,
@@ -21,7 +21,7 @@ constexpr std::uint32_t kRopeModeNorm = 0;
 /// LLAMA_EXPERT_GATING_FUNC_TYPE_SIGMOID.
 constexpr std::uint32_t kGatingSigmoid = 2;
 
-/// gufo's GgufReader does not prepend the architecture prefix, so every
+/// superroc's GgufReader does not prepend the architecture prefix, so every
 /// bailingmoe3.* key is spelled out here once.
 constexpr std::string_view kPrefix = "bailingmoe3.";
 
@@ -322,4 +322,4 @@ std::optional<Config> Config::FromGguf(const core::GgufReader& gguf,
   return c;
 }
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3

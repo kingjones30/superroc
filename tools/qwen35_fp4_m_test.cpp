@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "src/core/gguf_reader.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
 
 namespace {
 
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
                : "/path/to/models/qwen38-27b-bench/"
                  "Qwen3.8-27B-Q4_0_ROCMFP4_STRIX.gguf";
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   if (reader == nullptr) {
     Die(error.c_str());
   }
@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
 
     const int max_m = 8;
     const int total = max_m * k;
-    if (gufo_fp4_verify_m_reserve(total) != 0) {
+    if (superroc_fp4_verify_m_reserve(total) != 0) {
       Die("reserve");
     }
 
@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
       Hip(hipEventCreate(&ev1), "event");
       Hip(hipEventRecord(ev0, nullptr), "record");
       for (int t = 0; t < m; ++t) {
-        if (gufo_fp4_gemv_fp4(qtype, weights, x + static_cast<std::size_t>(t) * k,
+        if (superroc_fp4_gemv_fp4(qtype, weights, x + static_cast<std::size_t>(t) * k,
                               y + static_cast<std::size_t>(t) * n, k, n,
                               nullptr) != 0) {
           Die("m=1 gemv");
@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
           "copy ref");
 
       Hip(hipEventRecord(ev0, nullptr), "record");
-      if (gufo_fp4_gemv_verify_m(qtype, weights, x, y, k, n, m, nullptr) != 0) {
+      if (superroc_fp4_gemv_verify_m(qtype, weights, x, y, k, n, m, nullptr) != 0) {
         Die("verify gemv");
       }
       Hip(hipEventRecord(ev1, nullptr), "record");

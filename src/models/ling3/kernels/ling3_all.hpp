@@ -10,8 +10,8 @@
 // build brief. They are LK's (KDA, MLA, ops, GEMV) and LX's (quant, router,
 // expert FFN); both are referenced in the README.
 
-#ifndef GUFO_LING3_ALL_HPP
-#define GUFO_LING3_ALL_HPP
+#ifndef SUPERROC_LING3_ALL_HPP
+#define SUPERROC_LING3_ALL_HPP
 
 // The order matters: ling3_mla.hpp uses View and ViewC without declaring
 // them, and they come from ling3_kda.hpp. Verified on the Mac with LK's
@@ -28,4 +28,4 @@
 #include "ling3_mla.hpp"
 #include "ling3_ops.hpp"
 
-#endif  // GUFO_LING3_ALL_HPP
+#endif  // SUPERROC_LING3_ALL_HPP

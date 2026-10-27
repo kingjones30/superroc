@@ -11,7 +11,7 @@
 #include "src/models/qwen/hip/ops/ssm.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void CaptureBatchedSsmReplayKernel(
     const float* __restrict__ qkv, const float* __restrict__ alpha,
@@ -71,7 +71,7 @@ void LaunchCaptureBatchedSsmReplay(
   CaptureBatchedSsmReplayKernel<<<grid_size, kBlockSize, 0, stream>>>(
       qkv, alpha, beta, replay_capture, layer_idx, start_pos, batch_size,
       qkv_size, time_step_rank);
-  GUFO_CHECK_LAUNCH("CaptureBatchedSsmReplayKernel");
+  SUPERROC_CHECK_LAUNCH("CaptureBatchedSsmReplayKernel");
 }
 
 // opt-c191-ssm-rows: one launch walks `rows` consecutive verification rows
@@ -189,7 +189,7 @@ void LaunchSSMConvRecurrenceRows(
     SSMConvKernel<Diverge><<<grid_size, block_size, 0, stream>>>(
         qkv_in, conv_weights, conv_layer_state, conv_out, qkv_size, layer_idx,
         replay_capture, rows, qkv_size, conv_layer_in);
-    GUFO_CHECK_LAUNCH("SSMConvKernel<Diverge>");
+    SUPERROC_CHECK_LAUNCH("SSMConvKernel<Diverge>");
   };
   const auto launch =
       [&]<typename StateT, bool Resident, bool WriteOutput, bool Diverge>() {
@@ -208,7 +208,7 @@ void LaunchSSMConvRecurrenceRows(
                 num_key_heads, num_heads, key_dim, val_dim, replay_capture,
                 rows, qkv_size, projection_row_stride, inner_row_stride,
                 static_cast<const StateT*>(state.recurrent_in));
-      GUFO_CHECK_LAUNCH("DeltaNetRecurrenceKernel<StateT, Resident, WriteOutput, Diverge>");
+      SUPERROC_CHECK_LAUNCH("DeltaNetRecurrenceKernel<StateT, Resident, WriteOutput, Diverge>");
       };
   const auto launch_diverge =
       [&]<typename StateT, bool Resident, bool WriteOutput>() {
@@ -286,7 +286,7 @@ void LaunchSSMConvRecurrenceBatch(
       <<<dim3((qkv_size + 255) / 256, count), 256, 0, stream>>>(
           qkv_in, conv_weights, nullptr, conv_out, qkv_size, layer_idx, {}, 0,
           qkv_size, nullptr, batch);
-  GUFO_CHECK_LAUNCH("SSMConvKernel<true, SsmSequenceBatch>");
+  SUPERROC_CHECK_LAUNCH("SSMConvKernel<true, SsmSequenceBatch>");
   const auto launch = [&]<typename StateT, bool Resident, bool WriteOutput>() {
     DeltaNetRecurrenceKernel<StateT, Resident, WriteOutput, true,
                              SsmSequenceBatch>
@@ -295,7 +295,7 @@ void LaunchSSMConvRecurrenceBatch(
             gate, out_buf, layer_idx, num_key_heads, num_heads, key_dim,
             val_dim, {}, 0, qkv_size, projection_row_stride, inner_row_stride,
             nullptr, batch);
-    GUFO_CHECK_LAUNCH("DeltaNetRecurrenceKernel<StateT, Resident, WriteOutput, true, SsmSequenceBatch>");
+    SUPERROC_CHECK_LAUNCH("DeltaNetRecurrenceKernel<StateT, Resident, WriteOutput, true, SsmSequenceBatch>");
   };
   const auto launch_output = [&]<typename StateT, bool Resident>() {
     if (out_buf)
@@ -311,5 +311,5 @@ void LaunchSSMConvRecurrenceBatch(
     launch_output.template operator()<float, false>();
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

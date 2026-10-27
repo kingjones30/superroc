@@ -23,7 +23,7 @@ bool Near(float got, float want, float tol) {
 }  // namespace
 
 int main() {
-  using gufo::hip::KatMtpTop1Probability;
+  using superroc::hip::KatMtpTop1Probability;
   Expect(KatMtpTop1Probability({}) == 0.0F, "empty");
   Expect(Near(KatMtpTop1Probability(std::vector<float>{3.0F}), 1.0F, 1e-6F),
          "one logit");
@@ -50,21 +50,21 @@ int main() {
               1e-6F),
          "11th logit below top-10 does not move the max");
 
-  // RV44: an unparsable GUFO_MTP_PMIN must not silently disable the gate.
-  unsetenv("GUFO_MTP_PMIN");
-  Expect(Near(gufo::hip::MtpPMinFromEnv(), 0.0F, 0.0F), "unset p-min is 0");
-  setenv("GUFO_MTP_PMIN", "abc", 1);
-  Expect(Near(gufo::hip::MtpPMinFromEnv(), 0.0F, 0.0F),
+  // RV44: an unparsable SUPERROC_MTP_PMIN must not silently disable the gate.
+  unsetenv("SUPERROC_MTP_PMIN");
+  Expect(Near(superroc::hip::MtpPMinFromEnv(), 0.0F, 0.0F), "unset p-min is 0");
+  setenv("SUPERROC_MTP_PMIN", "abc", 1);
+  Expect(Near(superroc::hip::MtpPMinFromEnv(), 0.0F, 0.0F),
          "unparsable p-min falls back to 0");
-  setenv("GUFO_MTP_PMIN", "0.5", 1);
-  Expect(Near(gufo::hip::MtpPMinFromEnv(), 0.5F, 1e-6F), "0.5 parses");
-  setenv("GUFO_MTP_PMIN", "5", 1);
-  Expect(Near(gufo::hip::MtpPMinFromEnv(), 1.0F, 1e-6F), "5 clamps to 1");
-  setenv("GUFO_MTP_PMIN", "-2", 1);
-  Expect(Near(gufo::hip::MtpPMinFromEnv(), 0.0F, 1e-6F), "-2 clamps to 0");
-  setenv("GUFO_MTP_PMIN", "nan", 1);
-  Expect(Near(gufo::hip::MtpPMinFromEnv(), 0.0F, 0.0F), "nan falls back to 0");
-  unsetenv("GUFO_MTP_PMIN");
+  setenv("SUPERROC_MTP_PMIN", "0.5", 1);
+  Expect(Near(superroc::hip::MtpPMinFromEnv(), 0.5F, 1e-6F), "0.5 parses");
+  setenv("SUPERROC_MTP_PMIN", "5", 1);
+  Expect(Near(superroc::hip::MtpPMinFromEnv(), 1.0F, 1e-6F), "5 clamps to 1");
+  setenv("SUPERROC_MTP_PMIN", "-2", 1);
+  Expect(Near(superroc::hip::MtpPMinFromEnv(), 0.0F, 1e-6F), "-2 clamps to 0");
+  setenv("SUPERROC_MTP_PMIN", "nan", 1);
+  Expect(Near(superroc::hip::MtpPMinFromEnv(), 0.0F, 0.0F), "nan falls back to 0");
+  unsetenv("SUPERROC_MTP_PMIN");
 
   if (fails != 0) {
     std::cerr << "KAT_MTP_PMIN FAIL " << fails << "\n";

@@ -141,7 +141,7 @@ both conversations still restore (removing the wait for reclamation fails
 allocates no slot. The `disk_over_budget` warning has no test: once
 reclamation finishes, startup can always retire unpinned entries.
 
-Production-build smoke runs (release `gufo serve llm`, one session, context
+Production-build smoke runs (release `superroc serve llm`, one session, context
 16384) check the startup paths on gfx1151. In AR, the first server published
 two unrelated 4,741-token prompts as 251,663,008-byte checkpoints (503,415,538
 managed bytes) and reported `capacity_bytes` and `automatic_bytes`

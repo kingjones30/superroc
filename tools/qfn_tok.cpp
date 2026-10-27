@@ -1,4 +1,4 @@
-// FLASHNEXT: print gufo token ids for character cuts. Tokenizer only;
+// FLASHNEXT: print superroc token ids for character cuts. Tokenizer only;
 // does not upload weights. Usage: qfn_tok <gguf> <text> <cut>...
 #include <fstream>
 #include <iostream>
@@ -14,12 +14,12 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(argv[1], &error);
+  auto reader = superroc::core::GgufReader::OpenFile(argv[1], &error);
   if (!reader) {
     std::cerr << "gguf: " << error << "\n";
     return 1;
   }
-  auto tok = gufo::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
+  auto tok = superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
   if (!tok) {
     std::cerr << "tokenizer: " << error << "\n";
     return 1;

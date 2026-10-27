@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_AUDIO_STREAM_HPP_
-#define GUFO_SERVER_AUDIO_STREAM_HPP_
+#ifndef SUPERROC_SERVER_AUDIO_STREAM_HPP_
+#define SUPERROC_SERVER_AUDIO_STREAM_HPP_
 
 #include <algorithm>
 #include <cmath>
@@ -8,7 +8,7 @@
 #include <string>
 #include <string_view>
 
-namespace gufo::server {
+namespace superroc::server {
 
 // An empty result for nonempty input reports an invalid waveform.
 inline std::string EncodePcm16(std::span<const float> samples) {
@@ -82,6 +82,6 @@ inline bool DecodeAudioBase64(std::string_view text, std::size_t limit,
   return true;
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_AUDIO_STREAM_HPP_
+#endif  // SUPERROC_SERVER_AUDIO_STREAM_HPP_

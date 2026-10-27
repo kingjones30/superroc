@@ -18,7 +18,7 @@
 #include "src/models/qwen/moe/qwen_moe_route.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 void CheckLaunch(int rc, const char* what) {
@@ -63,7 +63,7 @@ void LaunchSwiglu(const float* gate, const float* up, float* act, int n,
   const int threads = 256;
   const int blocks = (n + threads - 1) / threads;
   KatMtpSwigluKernel<<<blocks, threads, 0, stream>>>(gate, up, act, n);
-  GUFO_CHECK_LAUNCH("KatMtpSwigluKernel");
+  SUPERROC_CHECK_LAUNCH("KatMtpSwigluKernel");
 }
 
 void LaunchAxpy(const float* x, float scale, float* out, int n,
@@ -71,7 +71,7 @@ void LaunchAxpy(const float* x, float scale, float* out, int n,
   const int threads = 256;
   const int blocks = (n + threads - 1) / threads;
   KatMtpAxpyKernel<<<blocks, threads, 0, stream>>>(x, scale, out, n);
-  GUFO_CHECK_LAUNCH("KatMtpAxpyKernel");
+  SUPERROC_CHECK_LAUNCH("KatMtpAxpyKernel");
 }
 
 // KDG (SPEC1 step 2): per-slot axpy reading the weight on device.
@@ -92,7 +92,7 @@ void LaunchAxpySlot(const float* x, const float* d_weights, int slot,
   const int blocks = (n + threads - 1) / threads;
   KatMtpAxpySlotKernel<<<blocks, threads, 0, stream>>>(x, d_weights, slot, out,
                                                        n);
-  GUFO_CHECK_LAUNCH("KatMtpAxpySlotKernel");
+  SUPERROC_CHECK_LAUNCH("KatMtpAxpySlotKernel");
 }
 
 // KDG (SPEC1 step 2): device-routed Q8_0 GEMV. Bit-identical to
@@ -284,7 +284,7 @@ void GemvQ8Device(core::GgmlType type, const void* base, const int* d_ids,
         static_cast<std::uint32_t>(expert_bytes / sizeof(Q8_0Block)),
         static_cast<std::uint32_t>(n_expert), x, y,
         static_cast<std::uint32_t>(rows), static_cast<std::uint32_t>(cols));
-    GUFO_CHECK_LAUNCH("KatMtpIndirectQ8GemmKernel");
+    SUPERROC_CHECK_LAUNCH("KatMtpIndirectQ8GemmKernel");
     return;
   }
   if (type == core::GgmlType::kQ8_K) {
@@ -296,7 +296,7 @@ void GemvQ8Device(core::GgmlType type, const void* base, const int* d_ids,
         static_cast<const Q8KBlock*>(base), d_ids, slot,
         expert_bytes / sizeof(Q8KBlock), n_expert, x, y,
         static_cast<std::size_t>(rows), static_cast<std::size_t>(cols));
-    GUFO_CHECK_LAUNCH("KatMtpIndirectQ8KGemmKernel");
+    SUPERROC_CHECK_LAUNCH("KatMtpIndirectQ8KGemmKernel");
     return;
   }
   throw std::runtime_error("KAT-MTP: expert matrix must be Q8_0 or Q8_K");
@@ -346,7 +346,7 @@ void LaunchScaleAdd(const float* x, const float* scale, float* out, int n,
   const int threads = 256;
   const int blocks = (n + threads - 1) / threads;
   KatMtpScaleAddKernel<<<blocks, threads, 0, stream>>>(x, scale, out, n);
-  GUFO_CHECK_LAUNCH("KatMtpScaleAddKernel");
+  SUPERROC_CHECK_LAUNCH("KatMtpScaleAddKernel");
 }
 
 void GemvQ8(const models::QwenTensorRef& weight, const float* x, float* y,
@@ -436,7 +436,7 @@ void LaunchKatMtpWriteKv(const float* k, const float* v, float* k_cache,
       k, v, k_cache, v_cache, static_cast<__half*>(k_cache_f16),
       static_cast<__half*>(v_cache_f16), start_pos, max_context, num_kv_heads,
       head_dim);
-  GUFO_CHECK_LAUNCH("KatMtpWriteKvKernel");
+  SUPERROC_CHECK_LAUNCH("KatMtpWriteKvKernel");
 }
 
 void LaunchKatMtpMoeFfn(const models::QwenLayerWeights& layer,
@@ -491,5 +491,5 @@ void LaunchKatMtpMoeFfn(const models::QwenLayerWeights& layer,
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

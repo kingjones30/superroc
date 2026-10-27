@@ -1,9 +1,9 @@
-#ifndef GUFO_MODELS_QWEN_HIP_DETAIL_KV_F16_STORE_HPP_
-#define GUFO_MODELS_QWEN_HIP_DETAIL_KV_F16_STORE_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_DETAIL_KV_F16_STORE_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_DETAIL_KV_F16_STORE_HPP_
 
 #include <hip/hip_fp16.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // Super ROC QKS (Muse Wonder W7-A #1): the fp16 KV store saturates at +-65504
 // instead of overflowing to +-inf. An inf key turns every later attention
@@ -17,6 +17,6 @@ __device__ __forceinline__ __half QwenKvF16(float x) {
   return __float2half_rn(c);
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
-#endif  // GUFO_MODELS_QWEN_HIP_DETAIL_KV_F16_STORE_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_DETAIL_KV_F16_STORE_HPP_

@@ -1,10 +1,10 @@
 // ling3_wmma.hip — LS3 phase 3: W8A8 int8-WMMA GEMM for the ROCmFP4 prefill.
 // See ling3_wmma.hpp for the design and the contracts.
 //
-// Structure follows gufo's WKQuantA8BlockedWmmaGEMMKernel
-// (src/models/qwen/hip/kernels/prefill_quant_gemm.hpp) — the kernel gufo's
+// Structure follows superroc's WKQuantA8BlockedWmmaGEMMKernel
+// (src/models/qwen/hip/kernels/prefill_quant_gemm.hpp) — the kernel superroc's
 // Qwen prefill runs on this exact GPU — reduced to what Ling needs:
-//   * WaveSize 64 (the w64 builtin gufo's TryLaunchQuantPrefillWave64 uses),
+//   * WaveSize 64 (the w64 builtin superroc's TryLaunchQuantPrefillWave64 uses),
 //     raw __builtin_amdgcn_wmma_i32_16x16x16_iu8_w64 — NOT rocWMMA/CK, which
 //     silently no-op WMMA on gfx1151 under ROCm 7.2 (CK #3724).
 //   * PerHalfScale = true, HasOffset = false: ROCmFP4's dual e[0]/e[1]
@@ -15,15 +15,15 @@
 //     verified the perm's selector order exhaustively on this box); nothing
 //     is repacked at load — the GGUF stays packed for the decode path.
 //   * activations pre-quantised to the 576-byte tiled Q8_1 layout by
-//     ling3_wmma_quant (gufo's QuantizeActivationToQ8_1Kernel, no sidecar:
+//     ling3_wmma_quant (superroc's QuantizeActivationToQ8_1Kernel, no sidecar:
 //     ROCmFP4 has no offset term).
 //   * out-of-range rows / k-blocks are clamped and their scale zeroed by a
-//     multiply (gufo opt-c179): bit-identical to zero-filling the operands,
+//     multiply (superroc opt-c179): bit-identical to zero-filling the operands,
 //     and every load stays inside a real block of a real row.
 //   * the epilogue writes straight from the WMMA accumulator registers:
 //     with our y layout (slot/token-major, y[j*n + r]) lane (sub_lane,
 //     half_id) of element l owns C(row = (WS/16)*l + half_id, tok =
-//     sub_lane) — the same ownership gufo's scratch dance implements — so
+//     sub_lane) — the same ownership superroc's scratch dance implements — so
 //     no LDS round trip and no wave barrier are needed.
 //
 // Instantiations:
@@ -101,7 +101,7 @@ __device__ __forceinline__ int32x4_t wmma_w64(int32x4_t a, int32x4_t b, int32x4_
 }
 
 // ---------------------------------------------------------------------------
-// activation quantiser: one warp per (row, 32-block), gufo's
+// activation quantiser: one warp per (row, 32-block), superroc's
 // QuantizeActivationToQ8_1Kernel (max-abs/127, roundf) into the 576-byte
 // tile layout, at the (possibly group-remapped) destination tile.
 // ---------------------------------------------------------------------------
@@ -134,7 +134,7 @@ __global__ __launch_bounds__(256) void k_q8_quant(
     const int8_t q = (int8_t) roundf(val * id);
 
     // tile[(k-half * 256) + (token * 16) + element-within-16], scale at
-    // tile+512 + token*4 — gufo's StoreQ8ActLane without the sum sidecar.
+    // tile+512 + token*4 — superroc's StoreQ8ActLane without the sum sidecar.
     int8_t * tile =
         q8 + ((size_t) ((dp >> 4) * num_blocks + blk) * (size_t) kActTileBytes);
     tile[((lane >> 4) * 256) + ((dp & 15) * 16) + (lane & 15)] = q;
@@ -144,7 +144,7 @@ __global__ __launch_bounds__(256) void k_q8_quant(
 }
 // NOTE (measured, see the unit gate): this file compiles with -ffast-math,
 // and on gfx11 that lowers `max_abs / 127.0f` to a reciprocal multiply --
-// the same compiled form as gufo's own QuantizeActivationToQ8_1Kernel and
+// the same compiled form as superroc's own QuantizeActivationToQ8_1Kernel and
 // LS1's shipped ling3_gemv_q8 quantizer (same flags), 1 ulp from the exact
 // division. The quantise arithmetic is otherwise LS1's recipe verbatim
 // (max|x| per 32, d = max/127, q = roundf(x/d)). Deterministic: same binary,
@@ -327,7 +327,7 @@ __global__ __launch_bounds__(WM * WN * WaveSize, 1) void k_wmma_grp(
             const int kk = idx % BK;
             const int rs = rr / 16;
             const int rl = rr % 16;
-            // w64 D-fragment lane ownership (gufo, verbatim)
+            // w64 D-fragment lane ownership (superroc, verbatim)
             const int slot = (rl % 4) * 4 + rl / 4;
             s_a[kk][rs][rl] = r_q0[p];
             s_a[kk][rs][16 + rl] = r_q1[p];
@@ -402,7 +402,7 @@ __global__ __launch_bounds__(WM * WN * WaveSize, 1) void k_wmma_grp(
     // ---- epilogue: straight from the accumulator registers ----
     // Lane (sub_lane, half_id) of accumulator element l owns
     // C(row = (WaveSize/16)*l + half_id, tok = sub_lane) of its wave's
-    // 16x16 tile — the ownership gufo's scratch dance implements, written
+    // 16x16 tile — the ownership superroc's scratch dance implements, written
     // here directly because y is slot/token-major already.
 #pragma unroll
     for (int i = 0; i < kWaveRowTiles; ++i) {
@@ -513,7 +513,7 @@ extern "C" int ling3_wmma_quant(const float * x, const int * x_rows, const int *
     }
     ls3w::k_q8_quant<<<(unsigned) grid, 256>>>(x, x_rows, dest,
                                                (int8_t *) q8, n_rows, num_blocks);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls3w_chk("quant");
 }
 
@@ -570,19 +570,19 @@ extern "C" int ling3_wmma_gemm_grp(int qtype, const void * W, size_t expert_stri
             qtype == LING3_Q4_0_ROCMFP4_FAST ? 1 : 0, (const uint8_t *) W, rb,
             expert_stride, grp_expert, grp_off, grp_cnt, grp_zp, n_groups,
             /*m=*/0, (const int8_t *) q8_x, y, y_scale, k, n);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     } else if (MoeV2() == 1) {
         ls3w::k_wmma_grp<64, 16, 8, 4, 1, 64><<<grid, 256>>>(
             qtype == LING3_Q4_0_ROCMFP4_FAST ? 1 : 0, (const uint8_t *) W, rb,
             expert_stride, grp_expert, grp_off, grp_cnt, grp_zp, n_groups,
             /*m=*/0, (const int8_t *) q8_x, y, y_scale, k, n);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     } else {
         ls3w::k_wmma_grp<64, 16, 2, 4, 1, 64><<<grid, 256>>>(
             qtype == LING3_Q4_0_ROCMFP4_FAST ? 1 : 0, (const uint8_t *) W, rb,
             expert_stride, grp_expert, grp_off, grp_cnt, grp_zp, n_groups,
             /*m=*/0, (const int8_t *) q8_x, y, y_scale, k, n);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     }
     return ls3w_chk("gemm_grp");
 }
@@ -609,7 +609,7 @@ extern "C" int ling3_wmma_gemm_dense(int qtype, const void * W, const void * q8_
         /*expert_stride=*/0, /*grp_expert=*/nullptr, /*grp_off=*/nullptr,
         /*grp_cnt=*/nullptr, /*grp_zp=*/nullptr, /*n_groups=*/0, m,
         (const int8_t *) q8_x, y, /*y_scale=*/nullptr, k, n);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls3w_chk("gemm_dense");
 }
 
@@ -625,7 +625,7 @@ extern "C" int ling3_wmma_codebook_check(void) {
         return LING3_ERR_HIP;
     }
     ls3w::k_codebook_check<<<64, 256>>>(d_bad);
-    if (::gufo::hip_check::LaunchFailed()) return -1;
+    if (::superroc::hip_check::LaunchFailed()) return -1;
     int bad = -1;
     const hipError_t e =
         hipMemcpy(&bad, d_bad, sizeof(int), hipMemcpyDeviceToHost);

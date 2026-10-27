@@ -1,6 +1,6 @@
 // LFM2 split-K "flash-decoding" attention (decode) + device-side KV write.
-#ifndef GUFO_MODELS_LFM2_HIP_LFM2_ATTENTION_HPP_
-#define GUFO_MODELS_LFM2_HIP_LFM2_ATTENTION_HPP_
+#ifndef SUPERROC_MODELS_LFM2_HIP_LFM2_ATTENTION_HPP_
+#define SUPERROC_MODELS_LFM2_HIP_LFM2_ATTENTION_HPP_
 
 #include <cstdint>
 
@@ -9,7 +9,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // LFM2: fp32 KV write reading the position from device memory. Same math as
 // GlimmerWriteKvKernel, but pos = *d_pos (d_pos points at the pos word of the
@@ -52,8 +52,8 @@ Lfm2LaunchStatus LaunchLfm2DecodeAttentionF16(
     std::uint32_t num_kv_heads, std::uint32_t head_dim, std::uint32_t n_splits,
     float* partial, hipStream_t stream);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_LFM2_HIP_LFM2_ATTENTION_HPP_
+#endif  // SUPERROC_MODELS_LFM2_HIP_LFM2_ATTENTION_HPP_

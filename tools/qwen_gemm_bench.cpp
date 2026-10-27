@@ -47,8 +47,8 @@
 #include "src/models/qwen/hip/ops/gemm.hpp"
 #include "src/models/qwen/hip/ops/prefill_fp16.hpp"
 
-namespace hipq = gufo::hip;
-namespace f16 = gufo::models::qwen38_flash_next::rocm;
+namespace hipq = superroc::hip;
+namespace f16 = superroc::models::qwen38_flash_next::rocm;
 
 #define HIP_OK(call)                                                          \
   do {                                                                        \
@@ -127,7 +127,7 @@ static void FillQ4K(std::vector<std::uint8_t>& buf, std::size_t rows,
   std::uniform_int_distribution<int> s(0, 4);
   for (std::size_t r = 0; r < rows; ++r)
     for (std::size_t n = 0; n < nb; ++n) {
-      auto* blk = reinterpret_cast<gufo::quant::block_q4_K*>(
+      auto* blk = reinterpret_cast<superroc::quant::block_q4_K*>(
           &buf[(r * nb + n) * 144]);
       blk->d = 0x3400;  // ~0.002 in F16 bits (timing only)
       blk->dmin = 0x0000;
@@ -158,7 +158,7 @@ static void FillFP4(std::vector<std::uint8_t>& buf, std::size_t rows,
 // sizes via sizeof (never hardcoded).
 static void FillQ5K(std::vector<std::uint8_t>& buf, std::size_t rows,
                     std::size_t k, std::mt19937& rng) {
-  using gufo::quant::block_q5_K;
+  using superroc::quant::block_q5_K;
   const std::size_t nb = k / 256;
   buf.resize(rows * nb * sizeof(block_q5_K));
   std::uniform_int_distribution<int> b(0, 255);
@@ -177,7 +177,7 @@ static void FillQ5K(std::vector<std::uint8_t>& buf, std::size_t rows,
 
 static void FillQ6K(std::vector<std::uint8_t>& buf, std::size_t rows,
                     std::size_t k, std::mt19937& rng) {
-  using gufo::quant::block_q6_K;
+  using superroc::quant::block_q6_K;
   const std::size_t nb = k / 256;
   buf.resize(rows * nb * sizeof(block_q6_K));
   std::uniform_int_distribution<int> b(0, 255);
@@ -196,7 +196,7 @@ static void FillQ6K(std::vector<std::uint8_t>& buf, std::size_t rows,
 
 static void FillIQ4XS(std::vector<std::uint8_t>& buf, std::size_t rows,
                       std::size_t k, std::mt19937& rng) {
-  using gufo::quant::block_iq4_xs;
+  using superroc::quant::block_iq4_xs;
   const std::size_t nb = k / 256;
   buf.resize(rows * nb * sizeof(block_iq4_xs));
   std::uniform_int_distribution<int> b(0, 255);
@@ -213,7 +213,7 @@ static void FillIQ4XS(std::vector<std::uint8_t>& buf, std::size_t rows,
 
 static void FillQ80(std::vector<std::uint8_t>& buf, std::size_t rows,
                     std::size_t k, std::mt19937& rng) {
-  using gufo::quant::block_q8_0;
+  using superroc::quant::block_q8_0;
   const std::size_t nb = k / 32;
   buf.resize(rows * nb * sizeof(block_q8_0));
   std::uniform_int_distribution<int> b(-128, 127);
@@ -340,7 +340,7 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
     hipq::LaunchFloatToFp16(dx, dxh, T * s.k, stream);
     HIP_OK(hipDeviceSynchronize());
     float stock_ms = TimeIt(stream, [&] {
-      hipq::LaunchBatchedQuantGEMMFp16(gufo::core::GgmlType::kQ4_K, dwq4, dxh,
+      hipq::LaunchBatchedQuantGEMMFp16(superroc::core::GgmlType::kQ4_K, dwq4, dxh,
                                       out, T, s.m, s.k, stream);
     }, reps);
     Row(cell, "stock-Q4K", "gemm", stock_ms, flops / stock_ms / 1e9,
@@ -358,7 +358,7 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
     HIP_OK(hipDeviceSynchronize());
     float today_ms = TimeIt(stream, [&] {
       hipq::LaunchBatchedQuantGEMMPreQuantized(
-          gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST, dwf4fast, dq8, out, T, s.m,
+          superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST, dwf4fast, dq8, out, T, s.m,
           s.k, stream);
     }, reps);
     Row(cell, "today-FP4", "gemm", today_ms, flops / today_ms / 1e9,
@@ -372,17 +372,17 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
     // FP4-vs-Q4_K inside one int8 kernel and (b) F16-vs-int8 for stock types.
     struct RealType {
       const char* route;
-      gufo::core::GgmlType type;
+      superroc::core::GgmlType type;
       const void* w;
       double wbytes;
     };
     const RealType kReal[] = {
-        {"real-Q4K", gufo::core::GgmlType::kQ4_K, dwq4, wbytes_q4},
-        {"real-Q5K", gufo::core::GgmlType::kQ5_K, dwq5, double(wq5.size())},
-        {"real-Q6K", gufo::core::GgmlType::kQ6_K, dwq6, double(wq6.size())},
-        {"real-IQ4XS", gufo::core::GgmlType::kIQ4_XS, dwiq4xs,
+        {"real-Q4K", superroc::core::GgmlType::kQ4_K, dwq4, wbytes_q4},
+        {"real-Q5K", superroc::core::GgmlType::kQ5_K, dwq5, double(wq5.size())},
+        {"real-Q6K", superroc::core::GgmlType::kQ6_K, dwq6, double(wq6.size())},
+        {"real-IQ4XS", superroc::core::GgmlType::kIQ4_XS, dwiq4xs,
          double(wiq4xs.size())},
-        {"real-Q80", gufo::core::GgmlType::kQ8_0, dwq8, double(wq8.size())},
+        {"real-Q80", superroc::core::GgmlType::kQ8_0, dwq8, double(wq8.size())},
     };
     for (const RealType& rt : kReal) {
       float r_ms = TimeIt(stream, [&] {
@@ -400,11 +400,11 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
     // Every type here is in DirectGemm's switch (prefill_fp16.hip) and takes
     // this route in production on stock files.
     const RealType kF16Real[] = {
-        {"f16-Q5K", gufo::core::GgmlType::kQ5_K, dwq5, double(wq5.size())},
-        {"f16-Q6K", gufo::core::GgmlType::kQ6_K, dwq6, double(wq6.size())},
-        {"f16-IQ4XS", gufo::core::GgmlType::kIQ4_XS, dwiq4xs,
+        {"f16-Q5K", superroc::core::GgmlType::kQ5_K, dwq5, double(wq5.size())},
+        {"f16-Q6K", superroc::core::GgmlType::kQ6_K, dwq6, double(wq6.size())},
+        {"f16-IQ4XS", superroc::core::GgmlType::kIQ4_XS, dwiq4xs,
          double(wiq4xs.size())},
-        {"f16-Q80", gufo::core::GgmlType::kQ8_0, dwq8, double(wq8.size())},
+        {"f16-Q80", superroc::core::GgmlType::kQ8_0, dwq8, double(wq8.size())},
     };
     for (const RealType& rt : kF16Real) {
       float f_ms = TimeIt(stream, [&] {
@@ -422,14 +422,14 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
     // test: DirectGemm FP4 cases in prefill_fp16.hip). Shared F16 narrow.
     struct Fp4Row {
       const char* route;
-      gufo::core::GgmlType type;
+      superroc::core::GgmlType type;
       const void* w;
       double wbytes;
     };
     const Fp4Row kF16Fp4[] = {
-        {"f16-101", gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST, dwf4fast,
+        {"f16-101", superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST, dwf4fast,
          wbytes_f4},
-        {"f16-100", gufo::core::GgmlType::kQ4_0_ROCMFP4, dwf4,
+        {"f16-100", superroc::core::GgmlType::kQ4_0_ROCMFP4, dwf4,
          double(wf4.size())},
     };
     for (const Fp4Row& fr : kF16Fp4) {
@@ -481,7 +481,7 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
       __half* out16 = (__half*)DevAlloc(Tp * s.m * 2);
       float d_ms = TimeIt(stream, [&] {
         if (!hipq::TryLaunchBatchedDualQuantGEMMSwiGLUFp16(
-                gufo::core::GgmlType::kQ4_K, gufo::core::GgmlType::kQ4_K, dwq4,
+                superroc::core::GgmlType::kQ4_K, superroc::core::GgmlType::kQ4_K, dwq4,
                 dwq4, dxh, out16, T, s.m, s.k, stream)) {
           printf("FAIL %s dual-Q4K declined\n", cell);
           ++g_fail;

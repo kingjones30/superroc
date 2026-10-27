@@ -7,7 +7,7 @@
 #include "src/models/qwen/hip/ops/token.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void UnpackQGKernel(const float* __restrict__ qg_interleaved,
                                float* __restrict__ q_out,
@@ -35,8 +35,8 @@ void LaunchUnpackQG(const float* qg_interleaved, float* q_out, float* gate_out,
   const std::size_t grid_size = (total + block_size - 1) / block_size;
   UnpackQGKernel<<<grid_size, block_size, 0, stream>>>(
       qg_interleaved, q_out, gate_out, num_heads, head_dim);
-  GUFO_CHECK_LAUNCH("UnpackQGKernel");
+  SUPERROC_CHECK_LAUNCH("UnpackQGKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

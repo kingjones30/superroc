@@ -18,18 +18,18 @@ namespace {
 int RunOne(const char* path, std::uint32_t context) {
   try {
     std::string err;
-    auto opened = gufo::core::GgufReader::OpenFile(path, &err);
+    auto opened = superroc::core::GgufReader::OpenFile(path, &err);
     if (opened == nullptr) {
       std::cerr << "SKIP glimmer_s1_token: " << path << " unreadable: " << err
                 << '\n';
       return 77;
     }
-    std::shared_ptr<const gufo::core::GgufReader> reader(std::move(opened));
+    std::shared_ptr<const superroc::core::GgufReader> reader(std::move(opened));
 
-    gufo::hip::QwenExecutionPolicy policy;
-    policy.kv_cache_storage = gufo::hip::QwenKvCacheStorage::kFp32;
+    superroc::hip::QwenExecutionPolicy policy;
+    policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
-    auto executor = gufo::hip::QwenGpuExecutor::CreateFromGguf(reader, &err,
+    auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(reader, &err,
                                                                context, policy);
     if (executor == nullptr) {
       std::cerr << "FAIL load context=" << context << " " << err << '\n';

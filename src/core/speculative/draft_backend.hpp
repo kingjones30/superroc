@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_SPECULATIVE_DRAFT_BACKEND_HPP_
-#define GUFO_CORE_SPECULATIVE_DRAFT_BACKEND_HPP_
+#ifndef SUPERROC_CORE_SPECULATIVE_DRAFT_BACKEND_HPP_
+#define SUPERROC_CORE_SPECULATIVE_DRAFT_BACKEND_HPP_
 
 #include <algorithm>
 #include <cstddef>
@@ -13,7 +13,7 @@
 
 #include "src/models/qwen/tokenizer.hpp"
 
-namespace gufo::speculative {
+namespace superroc::speculative {
 
 /// Represents a speculative draft proposal block
 struct DraftProposal {
@@ -264,6 +264,6 @@ private:
   std::vector<tokenization::TokenId> candidate_pool_;
 };
 
-}  // namespace gufo::speculative
+}  // namespace superroc::speculative
 
-#endif  // GUFO_CORE_SPECULATIVE_DRAFT_BACKEND_HPP_
+#endif  // SUPERROC_CORE_SPECULATIVE_DRAFT_BACKEND_HPP_

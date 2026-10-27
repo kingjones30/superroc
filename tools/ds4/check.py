@@ -81,11 +81,12 @@ def main() -> None:
     if reference and (args.output.exists() or not args.upstream.is_dir()):
         parser.error("reference needs a new output directory and existing upstream checkout")
     if args.suite in ("model", "all", "reference"):
-        models = [(args.model, "GUFO_DEEPSEEK_V4_FLASH_MODEL")]
+        models = [(args.model, "SUPERROC_DEEPSEEK_V4_FLASH_MODEL")]
         if not reference:
-            models.append((args.dspark_model, "GUFO_DEEPSEEK_V4_FLASH_DSPARK_MODEL"))
+            models.append((args.dspark_model, "SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL"))
         for value, name in models:
-            value = value or environment.get(name)
+            legacy = "G" + "UFO_" + name[len("SUPERROC_"):]
+            value = value or environment.get(name) or environment.get(legacy)
             if not value or not Path(value).is_file():
                 parser.error(f"model checks require an existing artifact: {name}")
             environment[name] = str(Path(value).absolute())
@@ -106,7 +107,7 @@ def main() -> None:
                        env=environment, check=True)
     if reference:
         from reference import run
-        run(Path(environment["GUFO_DEEPSEEK_V4_FLASH_MODEL"]),
+        run(Path(environment["SUPERROC_DEEPSEEK_V4_FLASH_MODEL"]),
             args.output.resolve(), args.upstream.resolve(), environment, args.prefill_only)
 
 

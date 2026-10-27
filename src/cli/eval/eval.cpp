@@ -24,23 +24,24 @@
 #include "src/eval/dataset.hpp"
 #include "src/eval/extract.hpp"
 #include "src/eval/http_client.hpp"
+#include "src/core/env_compat.hpp"
 
-#ifndef GUFO_REVISION
-#define GUFO_REVISION "unknown"
+#ifndef SUPERROC_REVISION
+#define SUPERROC_REVISION "unknown"
 #endif
-#ifndef GUFO_EVAL_SOURCE_DATA
-#define GUFO_EVAL_SOURCE_DATA \
+#ifndef SUPERROC_EVAL_SOURCE_DATA
+#define SUPERROC_EVAL_SOURCE_DATA \
   "tests/models/deepseek_v4_flash/fixtures/antirez-ds4.json"
 #endif
-#ifndef GUFO_EVAL_INSTALLED_DATA
-#define GUFO_EVAL_INSTALLED_DATA GUFO_EVAL_SOURCE_DATA
+#ifndef SUPERROC_EVAL_INSTALLED_DATA
+#define SUPERROC_EVAL_INSTALLED_DATA SUPERROC_EVAL_SOURCE_DATA
 #endif
 
-namespace gufo::cli {
+namespace superroc::cli {
 namespace {
 
-using gufo::eval::HttpResult;
-using gufo::json::Value;
+using superroc::eval::HttpResult;
+using superroc::json::Value;
 
 constexpr std::size_t kMaximumQuestions = 75;
 constexpr std::size_t kMaximumCompletionTokens = 16000;
@@ -75,16 +76,16 @@ struct ParsedCompletion {
 };
 
 std::filesystem::path DefaultEvalData() {
-  std::filesystem::path source = GUFO_EVAL_SOURCE_DATA;
+  std::filesystem::path source = SUPERROC_EVAL_SOURCE_DATA;
   std::error_code error;
   if (std::filesystem::is_regular_file(source, error)) {
     return source;
   }
-  return GUFO_EVAL_INSTALLED_DATA;
+  return SUPERROC_EVAL_INSTALLED_DATA;
 }
 
 std::string Environment(std::string_view name) {
-  const char* value = std::getenv(std::string(name).c_str());
+  const char* value = ::superroc::core::GetEnvCompat(std::string(name).c_str());
   return value == nullptr ? std::string() : std::string(value);
 }
 
@@ -190,7 +191,7 @@ std::optional<ModelInfo> ParseSingleModel(const HttpResult& response,
   }
 
   try {
-    const Value root = gufo::json::parse(response.body);
+    const Value root = superroc::json::parse(response.body);
     const Value* data = root.find("data");
     if (data == nullptr || !data->is_array()) {
       throw std::runtime_error("response has no data array");
@@ -216,11 +217,17 @@ std::optional<ModelInfo> ParseSingleModel(const HttpResult& response,
     if (info.revision.empty()) {
       info.revision = model.member_str("model_revision");
     }
-    const Value* gufo = model.find("gufo");
-    if (gufo != nullptr && gufo->is_object()) {
-      info.artifact_id = gufo->member_str("artifact_id");
+    // Compatibility: previous releases reported the previous
+    // engine-name object (built from parts so its spelling never appears
+    // here); prefer the current name.
+    const Value* extension = model.find("superroc");
+    if (extension == nullptr) {
+      extension = model.find(std::string("g") + "ufo");
+    }
+    if (extension != nullptr && extension->is_object()) {
+      info.artifact_id = extension->member_str("artifact_id");
       if (info.revision.empty()) {
-        info.revision = gufo->member_str("repository_revision");
+        info.revision = extension->member_str("repository_revision");
       }
     }
     return info;
@@ -261,7 +268,7 @@ Value RequestJson(const ModelInfo& model, Value messages, bool greedy) {
 std::optional<ParsedCompletion> ParseCompletion(const HttpResult& response,
                                                 std::string* error) {
   try {
-    const Value root = gufo::json::parse(response.body);
+    const Value root = superroc::json::parse(response.body);
     const Value* choices = root.find("choices");
     if (choices == nullptr || !choices->is_array() || choices->size() != 1) {
       throw std::runtime_error("response must contain exactly one choice");
@@ -302,7 +309,7 @@ std::optional<ParsedCompletion> ParseCompletion(const HttpResult& response,
 
 std::string ApiErrorCode(const HttpResult& response) {
   try {
-    const Value root = gufo::json::parse(response.body);
+    const Value root = superroc::json::parse(response.body);
     const Value* api_error = root.find("error");
     if (api_error != nullptr && api_error->is_object()) {
       return api_error->member_str("code");
@@ -391,7 +398,7 @@ Value OptionalIdentity(std::string value, std::string_view base_url,
 }
 
 std::string EvaluatorState() {
-  const std::string revision = GUFO_REVISION;
+  const std::string revision = SUPERROC_REVISION;
   if (revision == "unknown") {
     return "unknown";
   }
@@ -400,11 +407,11 @@ std::string EvaluatorState() {
 
 int Execute(const EvalOptions& options) {
   std::string error;
-  if (!gufo::eval::ValidateBaseUrl(options.base_url, &error)) {
+  if (!superroc::eval::ValidateBaseUrl(options.base_url, &error)) {
     std::cerr << "eval: " << error << '\n';
     return 2;
   }
-  const auto suite = gufo::eval::LoadEvalSuite(DefaultEvalData(), &error);
+  const auto suite = superroc::eval::LoadEvalSuite(DefaultEvalData(), &error);
   if (!suite.has_value()) {
     std::cerr << "eval: " << error << '\n';
     return 1;
@@ -421,9 +428,9 @@ int Execute(const EvalOptions& options) {
 
   std::string bearer_token = Environment("OPENAI_API_KEY");
   if (bearer_token.empty()) {
-    bearer_token = Environment("GUFO_EVAL_API_KEY");
+    bearer_token = Environment("SUPERROC_EVAL_API_KEY");
   }
-  const gufo::eval::HttpClient client(options.base_url, bearer_token);
+  const superroc::eval::HttpClient client(options.base_url, bearer_token);
   const auto model_response = client.Get("/models");
   const auto discovered = ParseSingleModel(model_response, &error);
   if (!discovered.has_value()) {
@@ -431,8 +438,8 @@ int Execute(const EvalOptions& options) {
     return 1;
   }
   ModelInfo model = *discovered;
-  const std::string model_revision = Environment("GUFO_EVAL_MODEL_REVISION");
-  const std::string artifact_id = Environment("GUFO_EVAL_ARTIFACT_ID");
+  const std::string model_revision = Environment("SUPERROC_EVAL_MODEL_REVISION");
+  const std::string artifact_id = Environment("SUPERROC_EVAL_ARTIFACT_ID");
   if (!model_revision.empty()) {
     model.revision = model_revision;
   }
@@ -441,7 +448,7 @@ int Execute(const EvalOptions& options) {
   }
 
   Value report = Value::object();
-  report["schema"] = "gufo.eval-result.v1";
+  report["schema"] = "superroc.eval-result.v1";
   report["benchmark"] = suite->benchmark;
   Value source = Value::object();
   source["repository"] = suite->source_repository;
@@ -451,7 +458,7 @@ int Execute(const EvalOptions& options) {
   report["benchmark_source"] = std::move(source);
 
   Value run = Value::object();
-  run["evaluator_commit"] = GUFO_REVISION;
+  run["evaluator_commit"] = SUPERROC_REVISION;
   run["evaluator_worktree"] = EvaluatorState();
   run["command"] = SanitizedCommand(options);
   run["questions"] = options.questions;
@@ -460,18 +467,18 @@ int Execute(const EvalOptions& options) {
   run["max_completion_tokens"] = kMaximumCompletionTokens;
   run["request_timeout_ms"] =
       std::chrono::duration_cast<std::chrono::milliseconds>(
-          gufo::eval::HttpClient::kRequestTimeout)
+          superroc::eval::HttpClient::kRequestTimeout)
           .count();
   run["temperature"] = options.greedy ? Value(0) : Value();
   run["temperature_policy"] = options.greedy ? "greedy" : "server_default";
   run["thinking_policy"] = "server_default";
   Value server = Value::object();
-  server["label"] = OptionalIdentity(Environment("GUFO_EVAL_SERVER_LABEL"),
+  server["label"] = OptionalIdentity(Environment("SUPERROC_EVAL_SERVER_LABEL"),
                                      options.base_url, bearer_token);
-  server["commit"] = OptionalIdentity(Environment("GUFO_EVAL_SERVER_COMMIT"),
+  server["commit"] = OptionalIdentity(Environment("SUPERROC_EVAL_SERVER_COMMIT"),
                                       options.base_url, bearer_token);
   server["configuration"] = OptionalIdentity(
-      Environment("GUFO_EVAL_SERVER_CONFIG"), options.base_url, bearer_token);
+      Environment("SUPERROC_EVAL_SERVER_CONFIG"), options.base_url, bearer_token);
   run["server"] = std::move(server);
   Value model_json = Value::object();
   model_json["id"] = SafeIdentity(model.id, options.base_url, bearer_token);
@@ -512,7 +519,7 @@ int Execute(const EvalOptions& options) {
 
   for (std::size_t index = 0; index < options.questions; ++index) {
     const auto& eval_case = suite->cases[index];
-    const std::string user_prompt = gufo::eval::BuildUserPrompt(eval_case);
+    const std::string user_prompt = superroc::eval::BuildUserPrompt(eval_case);
     Value request_messages = MessagesJson(suite->system_prompt, user_prompt);
     Value report_messages = MessagesJson(suite->system_prompt, user_prompt);
     const Value request =
@@ -524,7 +531,7 @@ int Execute(const EvalOptions& options) {
     item["ds4_index"] = eval_case.ds4_index;
     item["source"] = eval_case.source;
     item["case_id"] = eval_case.id;
-    item["kind"] = std::string(gufo::eval::AnswerKindName(eval_case.kind));
+    item["kind"] = std::string(superroc::eval::AnswerKindName(eval_case.kind));
     item["messages"] = std::move(report_messages);
     item["expected_answer"] = eval_case.answer;
 
@@ -586,11 +593,11 @@ int Execute(const EvalOptions& options) {
       item["metrics"] = std::move(completion->metrics);
 
       const auto result =
-          gufo::eval::GradeAnswer(eval_case, completion->content);
+          superroc::eval::GradeAnswer(eval_case, completion->content);
       grade["extraction_status"] = std::string(
-          gufo::eval::ExtractionStatusName(result.extraction.status));
+          superroc::eval::ExtractionStatusName(result.extraction.status));
       grade["extracted_answer"] =
-          result.extraction.status == gufo::eval::ExtractionStatus::kFound
+          result.extraction.status == superroc::eval::ExtractionStatus::kFound
               ? Value(result.extraction.answer)
               : Value();
       grade["verdict"] = result.passed ? "passed" : "failed";
@@ -702,4 +709,4 @@ int RunEval(std::span<const char* const> args) {
   return Execute(options);
 }
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli

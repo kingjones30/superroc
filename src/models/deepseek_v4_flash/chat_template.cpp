@@ -14,7 +14,7 @@
 #include "src/core/model_family.hpp"
 #include "src/models/deepseek_v4_flash/tool_calls.hpp"
 
-namespace gufo::models::deepseek_v4_flash {
+namespace superroc::models::deepseek_v4_flash {
 namespace {
 
 constexpr std::string_view kBos = "<｜begin▁of▁sentence｜>";
@@ -434,9 +434,9 @@ std::string_view GenerationPrompt(bool enable_thinking) {
 
 bool ValidateGgufTemplate(const core::GgufReader& reader,
                           std::string* error_msg) {
-  if (!gufo::core::IsModelFamily(
+  if (!superroc::core::IsModelFamily(
           reader.GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kDeepSeek4)) {
+          superroc::core::ModelFamilyId::kDeepSeek4)) {
     AssignError(error_msg,
                 "DeepSeek V4 Flash artifact has unexpected architecture");
     return false;
@@ -465,4 +465,4 @@ bool ValidateGgufTemplate(const core::GgufReader& reader,
   return true;
 }
 
-}  // namespace gufo::models::deepseek_v4_flash
+}  // namespace superroc::models::deepseek_v4_flash

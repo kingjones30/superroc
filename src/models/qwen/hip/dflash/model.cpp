@@ -16,7 +16,7 @@
 #include "src/models/qwen/hip/kernels/dflash_kernels.hpp"
 #include "src/models/qwen/hip/mtp/detail/allocation.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::size_t kPackChunkBytes = 8ULL << 20;
@@ -414,5 +414,5 @@ std::shared_ptr<const QwenDFlashGpuModel> QwenDFlashGpuModel::Create(
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

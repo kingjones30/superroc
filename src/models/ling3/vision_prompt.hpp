@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_VISION_PROMPT_HPP_
-#define GUFO_MODELS_LING3_VISION_PROMPT_HPP_
+#ifndef SUPERROC_MODELS_LING3_VISION_PROMPT_HPP_
+#define SUPERROC_MODELS_LING3_VISION_PROMPT_HPP_
 
 #include <cstdint>
 #include <span>
@@ -10,7 +10,7 @@
 
 #include "src/models/ling3/tokenizer.hpp"
 
-namespace gufo::models::ling3::vision {
+namespace superroc::models::ling3::vision {
 
 /// One prompt after the Bailing V3 image placeholder has been expanded.
 ///
@@ -67,6 +67,6 @@ void Clear();
 /// the M-RoPE table the MLA rope kernels read.
 void OnHidden(float* hidden, int pos0, int n, int width, void* stream);
 
-}  // namespace gufo::models::ling3::vision
+}  // namespace superroc::models::ling3::vision
 
 #endif

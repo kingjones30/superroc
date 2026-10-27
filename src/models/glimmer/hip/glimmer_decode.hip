@@ -15,7 +15,7 @@
 #include "src/models/qwen/hip/ops/token.hpp"
 #include "src/models/qwen/vision/device_input.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::size_t kScoreBytesLimit = 48U * 1024U;
@@ -717,5 +717,5 @@ void ExecuteGlimmerDecodeStep(QwenGpuArena& arena,
                          config.vocab_size, scratch.ffn.out, arena.stream);
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

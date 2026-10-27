@@ -25,11 +25,11 @@
 #undef hipLaunchKernelGGL
 #define hipLaunchKernelGGL(kernelName, numBlocks, numThreads, memPerBlock, streamId, ...) \
   do {                                                                                    \
-    ::gufo::models::qwen38_flash_next::rocm::LfnNoteLaunch();                             \
+    ::superroc::models::qwen38_flash_next::rocm::LfnNoteLaunch();                             \
     kernelName<<<(numBlocks), (numThreads), (memPerBlock), (streamId)>>>(__VA_ARGS__);   \
   } while (0)
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 namespace {
 
 // ---- copied deps (SQ1): these stay in kernels.hip.cpp too. They are
@@ -1454,4 +1454,4 @@ int Fp4F16PrefillMinWavesPerSimd(char* report, std::size_t report_bytes) {
   return min_waves;
 }
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm

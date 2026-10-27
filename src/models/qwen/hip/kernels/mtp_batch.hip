@@ -7,7 +7,7 @@
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // One block per row. Thread t owns columns t, t+blockDim, ... of the hidden
 // width for both halves, loads each element exactly once into registers,
@@ -82,8 +82,8 @@ void LaunchMtpFusionNorms(const float* embed_rows, const float* h_rows,
   MtpFusionNormsKernel<<<static_cast<std::uint32_t>(batch_size), threads, 0,
                          stream>>>(embed_rows, h_rows, enorm, hnorm, fusion,
                                    hidden, eps);
-  GUFO_CHECK_LAUNCH("MtpFusionNormsKernel");
+  SUPERROC_CHECK_LAUNCH("MtpFusionNormsKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

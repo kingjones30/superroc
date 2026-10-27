@@ -9,8 +9,8 @@
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/rocm_fp4/fp4_f16_prefill.hpp"   // SQ1: ported FP4->F16 GEMMs
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"  // KAT:
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"    // KAT:
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // KAT:
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"    // KAT:
 #include "src/models/qwen/gemm_route.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/executor.hpp"
@@ -20,11 +20,12 @@
 #include "src/models/qwen/moe/qwen_moe_prefill.hpp"  // KAT:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"    // KAT:
 #include "src/models/qwen/qwen_fp4_f16_gate.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 // SQ1: the promoted FP4->F16 prefill launchers (Flash-Next namespace kept
 // for kernel symbol stability; see fp4_f16_prefill.hpp).
-namespace fp4w = ::gufo::models::qwen38_flash_next::rocm;
+namespace fp4w = ::superroc::models::qwen38_flash_next::rocm;
 namespace {
 
 // KAT: default ON only when the grouped path can run the shape
@@ -106,11 +107,11 @@ struct KatPrefillProf {
       const int used = static_cast<int>(cfg.expert_used_count);
       const int nexp = static_cast<int>(cfg.expert_count);
       const double expert =
-          2.0 * ff * static_cast<double>(gufo_fp4_row_bytes(qt, hidden)) +
-          static_cast<double>(hidden) * gufo_fp4_row_bytes(qt, ff);
+          2.0 * ff * static_cast<double>(superroc_fp4_row_bytes(qt, hidden)) +
+          static_cast<double>(hidden) * superroc_fp4_row_bytes(qt, ff);
       const double shared_w =
-          2.0 * ffs * static_cast<double>(gufo_fp4_row_bytes(qts, hidden)) +
-          static_cast<double>(hidden) * gufo_fp4_row_bytes(qts, ffs);
+          2.0 * ffs * static_cast<double>(superroc_fp4_row_bytes(qts, hidden)) +
+          static_cast<double>(hidden) * superroc_fp4_row_bytes(qts, ffs);
       if (!grouped) {
         routed_b = static_cast<double>(tokens) * used * expert;
         shared_b = static_cast<double>((tokens + 3) / 4) * shared_w;
@@ -182,21 +183,21 @@ bool IsQwenFp4(core::GgmlType type) {
          type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
 }
 
-// FRZA SPEC2: GUFO_QWEN_FP4_F16_PREFILL is tri-state now. Unset/1 = the
+// FRZA SPEC2: SUPERROC_QWEN_FP4_F16_PREFILL is tri-state now. Unset/1 = the
 // fail-closed gate, 0 = today's kill switch (unchanged), 2 = force the tag
 // engine's F16 route for every FP4 file (one controlled experiment later).
 int QwenFp4F16PrefillMode() {
   static const int mode = models::qwen::ParseQwenFp4F16PrefillMode(
-      std::getenv("GUFO_QWEN_FP4_F16_PREFILL"));
+      ::superroc::core::GetEnvCompat("SUPERROC_QWEN_FP4_F16_PREFILL"));
   return mode;
 }
 
-// SQ1: GUFO_QWEN_FP4_PORTED (default off) routes FP4 tensors through the
+// SQ1: SUPERROC_QWEN_FP4_PORTED (default off) routes FP4 tensors through the
 // SPEC1 ported kernels instead of the stock F16 kernel. The ported path is
 // kept for A/B only; the shippable FP4 route is the F16 kernel (SPEC2 §2).
 bool QwenFp4PortedOn() {
   static const bool on = [] {
-    const char* e = std::getenv("GUFO_QWEN_FP4_PORTED");
+    const char* e = ::superroc::core::GetEnvCompat("SUPERROC_QWEN_FP4_PORTED");
     return e != nullptr && e[0] != '0';
   }();
   return on;
@@ -279,7 +280,7 @@ bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
     static std::atomic<bool> frza_refusal_logged{false};
     if (!frza_refusal_logged.exchange(true)) {
       std::fprintf(stderr,
-                   "frza: GUFO_QWEN_FP4_F16_PREFILL=1 refuses the F16 prefill "
+                   "frza: SUPERROC_QWEN_FP4_F16_PREFILL=1 refuses the F16 prefill "
                    "route: type-100 on %s at layer %d; using the pre-f85008b "
                    "dispatch\n",
                    fp4_gate.family, fp4_gate.layer);
@@ -288,7 +289,7 @@ bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
   }
   // SQ1 capability for files with FP4 tensors: every checked tensor keeps a
   // supported route (FP4 -> the F16 launchers, or the ported kernels when
-  // GUFO_QWEN_FP4_PORTED=1; the rest -> the F16 launchers), every K is
+  // SUPERROC_QWEN_FP4_PORTED=1; the rest -> the F16 launchers), every K is
   // non-zero and a multiple of 32 (the ported kernels' contract; any batch
   // and m), and K % 256 == 0 holds wherever a tensor needs DirectGemm's
   // contract (SQ1: all 27B/MiMo K dims qualify, so FP4 always takes F16).
@@ -410,7 +411,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
       if (IsQwenFp4(w.type) && QwenFp4PortedOn()) {
         // SQ1: ROC FP4 prefill on the promoted F16 WMMA kernels. bf16_input
         // holds F16 here (LaunchBatchedRMSNormFp16 / the F16 mixer outputs).
-        // SQ1: ported only when GUFO_QWEN_FP4_PORTED=1; otherwise FP4 falls
+        // SQ1: ported only when SUPERROC_QWEN_FP4_PORTED=1; otherwise FP4 falls
         // into the stock F16 launcher below (DirectGemm FP4 cases).
         const bool fast = w.type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
         if (!fp4w::Fp4DenseF16Gemm(
@@ -900,7 +901,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
           const int m = std::min(4, moe_tokens - t0);
           const std::size_t off = static_cast<std::size_t>(t0) * hidden_size;
           kat_prof.Arm();
-          if (gufo_fp4_expert_ffn_m(
+          if (superroc_fp4_expert_ffn_m(
                   static_cast<int>(layer.ffn_gate_exps.type),
                   layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
                   layer.ffn_down_exps.data, arena_.d_normed + off,
@@ -908,18 +909,18 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                   arena_.d_moe_weights +
                       static_cast<std::size_t>(t0) * moe_used,
                   m, moe_used, moe_expert, moe_hidden, moe_ff, 0.0F,
-                  arena_.d_moe_y + off, arena_.stream) != GUFO_FP4_OK) {
+                  arena_.d_moe_y + off, arena_.stream) != SUPERROC_FP4_OK) {
             throw std::runtime_error("qwen35moe prefill experts failed");
           }
           kat_prof.routed_ms += kat_prof.Take();
           kat_prof.Arm();
-          if (gufo_fp4_expert_ffn_shared_m(
+          if (superroc_fp4_expert_ffn_shared_m(
                   static_cast<int>(layer.ffn_gate_shexp.type),
                   layer.ffn_gate_shexp.data, layer.ffn_up_shexp.data,
                   layer.ffn_down_shexp.data, arena_.d_normed + off,
                   arena_.d_moe_zero_ids + t0, arena_.d_moe_sig + t0, m, 1, 1,
                   moe_hidden, moe_ffs, 0.0F, arena_.d_moe_shexp_y + off,
-                  arena_.stream) != GUFO_FP4_OK) {
+                  arena_.stream) != SUPERROC_FP4_OK) {
             throw std::runtime_error("qwen35moe prefill shared expert failed");
           }
           kat_prof.shared_ms += kat_prof.Take();
@@ -928,13 +929,13 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
         // read could precede these kernels and miss a bad-router-id error
         // (the R6 stale class); it also cleared every other session's word.
         // A refusal fails loudly, as on the decode sites.
-        const int slot_set = gufo_fp4_slot_stream_attach_at(
+        const int slot_set = superroc_fp4_slot_stream_attach_at(
             arena_.stream, __func__, static_cast<long>(moe_hidden));
         if (slot_set < 0) {
           throw std::runtime_error("qwen35moe prefill slot set refused");
         }
-        if (gufo_fp4_expert_ffn_m_check_set_on_stream(
-                slot_set, arena_.stream) != GUFO_FP4_OK) {
+        if (superroc_fp4_expert_ffn_m_check_set_on_stream(
+                slot_set, arena_.stream) != SUPERROC_FP4_OK) {
           throw std::runtime_error("qwen35moe prefill expert device status");
         }
       }
@@ -1013,7 +1014,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
             // d_ffn_up's F32 content is dead past SwiGLU, so the F16 result
             // lands where the paired path puts it. (A fused SwiGLU-to-F16
             // would save the F32 round trip; follow-up, not this lane.)
-            // SQ1: ported only when GUFO_QWEN_FP4_PORTED=1; otherwise the
+            // SQ1: ported only when SUPERROC_QWEN_FP4_PORTED=1; otherwise the
             // else arm runs (dual declines FP4, singles + SwiGLU epilogue).
             gemm_weight(layer.ffn_gate, arena_.d_scratch_bf16, nullptr,
                         arena_.d_ffn_gate, intermediate_size, hidden_size);
@@ -1287,5 +1288,5 @@ void QwenGpuExecutor::CommitVerificationChunk(
   capture_prompt_hidden_ = capture_hidden;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

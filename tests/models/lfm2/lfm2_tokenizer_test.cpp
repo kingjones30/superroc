@@ -93,14 +93,14 @@ int main() {
   }
 
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(fs::path(gguf), &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(fs::path(gguf), &error);
   if (reader == nullptr) {
     std::cout << "FAIL lfm2_tokenizer_test: cannot open GGUF: " << error
               << "\n";
     return 1;
   }
   auto tokenizer =
-      gufo::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
+      superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
   if (tokenizer == nullptr) {
     std::cout << "FAIL lfm2_tokenizer_test: cannot load tokenizer: " << error
               << "\n";
@@ -119,7 +119,7 @@ int main() {
     return 1;
   }
 
-  gufo::tokenization::TokenizerOptions options;
+  superroc::tokenization::TokenizerOptions options;
   options.add_bos = true;
   options.add_eos = false;
   options.parse_special_tokens = false;

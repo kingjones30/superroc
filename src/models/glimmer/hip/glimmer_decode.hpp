@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_GLIMMER_HIP_GLIMMER_DECODE_HPP_
-#define GUFO_MODELS_GLIMMER_HIP_GLIMMER_DECODE_HPP_
+#ifndef SUPERROC_MODELS_GLIMMER_HIP_GLIMMER_DECODE_HPP_
+#define SUPERROC_MODELS_GLIMMER_HIP_GLIMMER_DECODE_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -9,14 +9,14 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::models {
+namespace superroc::models {
 struct QwenModelWeights;
 namespace qwen::vision {
 class DeviceInput;
 }
-}  // namespace gufo::models
+}  // namespace superroc::models
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 class QwenGpuArena;
 
@@ -92,8 +92,8 @@ void ExecuteGlimmerDecodeStep(QwenGpuArena& arena,
                               bool compute_logits,
                               models::qwen::vision::DeviceInput* image_input);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_GLIMMER_HIP_GLIMMER_DECODE_HPP_
+#endif  // SUPERROC_MODELS_GLIMMER_HIP_GLIMMER_DECODE_HPP_

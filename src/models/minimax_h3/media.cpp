@@ -22,13 +22,14 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include "src/core/env_compat.hpp"
 
-#ifndef GUFO_FFMPEG_EXECUTABLE
-#define GUFO_FFMPEG_EXECUTABLE "ffmpeg"
+#ifndef SUPERROC_FFMPEG_EXECUTABLE
+#define SUPERROC_FFMPEG_EXECUTABLE "ffmpeg"
 #endif
 
-#ifndef GUFO_FFPROBE_EXECUTABLE
-#define GUFO_FFPROBE_EXECUTABLE "ffprobe"
+#ifndef SUPERROC_FFPROBE_EXECUTABLE
+#define SUPERROC_FFPROBE_EXECUTABLE "ffprobe"
 #endif
 
 // POSIX requires the process environment through a mutable-pointer ABI even
@@ -36,7 +37,7 @@
 extern char**
     environ;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-namespace gufo::minimax_h3 {
+namespace superroc::minimax_h3 {
 namespace {
 
 constexpr std::size_t kIoChunkBytes = 4U << 20U;
@@ -70,22 +71,22 @@ void SetError(std::string* error, std::string message) {
 }
 
 const char* FfmpegProgram() {
-  const char* override = std::getenv("GUFO_FFMPEG");
+  const char* override = ::superroc::core::GetEnvCompat("SUPERROC_FFMPEG");
   return override != nullptr && *override != '\0' ? override
-                                                  : GUFO_FFMPEG_EXECUTABLE;
+                                                  : SUPERROC_FFMPEG_EXECUTABLE;
 }
 
 const char* FfprobeProgram() {
-  const char* override = std::getenv("GUFO_FFPROBE");
+  const char* override = ::superroc::core::GetEnvCompat("SUPERROC_FFPROBE");
   return override != nullptr && *override != '\0' ? override
-                                                  : GUFO_FFPROBE_EXECUTABLE;
+                                                  : SUPERROC_FFPROBE_EXECUTABLE;
 }
 
 std::filesystem::path PartialMediaPath(
     const std::filesystem::path& destination) {
   static std::atomic<std::uint64_t> sequence{0};
   const std::string name =
-      destination.filename().string() + ".gufo-partial-" +
+      destination.filename().string() + ".superroc-partial-" +
       std::to_string(static_cast<std::uint64_t>(getpid())) + "-" +
       std::to_string(sequence.fetch_add(1, std::memory_order_relaxed)) + ".mp4";
   return destination.parent_path() / name;
@@ -750,4 +751,4 @@ bool ProbeMediaFile(const std::filesystem::path& path, MediaProbe* probe,
   return true;
 }
 
-}  // namespace gufo::minimax_h3
+}  // namespace superroc::minimax_h3

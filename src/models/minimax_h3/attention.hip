@@ -6,7 +6,7 @@
 #include "src/models/minimax_h3/attention.hip.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::minimax_h3::dit_ops {
+namespace superroc::minimax_h3::dit_ops {
 using BufferResource = __attribute__((ext_vector_type(4))) unsigned;
 __device__ BufferResource
 LoadBuffer(BufferResource, unsigned, unsigned,
@@ -354,15 +354,15 @@ void LaunchWmmaAttention(const std::uint16_t* query, const std::uint16_t* key,
   if (rows <= 4096) {
     ShortAttention<<<dim3((rows + 63) / 64, heads), 128, 0, stream>>>(
         query, key, value, output, rows, heads);
-    GUFO_CHECK_LAUNCH("ShortAttention");
+    SUPERROC_CHECK_LAUNCH("ShortAttention");
     return;
   }
   PackValues<<<dim3((rows + 31) / 32, heads), 256, 0, stream>>>(
       value, packed_values, rows);
-  GUFO_CHECK_LAUNCH("PackValues");
+  SUPERROC_CHECK_LAUNCH("PackValues");
   WmmaAttention<false><<<dim3((rows + 127) / 128, heads), 256, 0, stream>>>(
       query, key, packed_values, output, rows, heads);
-  GUFO_CHECK_LAUNCH("WmmaAttention<false>");
+  SUPERROC_CHECK_LAUNCH("WmmaAttention<false>");
 }
 
 void LaunchProjectionAttention(const std::uint16_t* query,
@@ -372,7 +372,7 @@ void LaunchProjectionAttention(const std::uint16_t* query,
                                std::uint32_t heads, hipStream_t stream) {
   WmmaAttention<true><<<dim3((rows + 127) / 128, heads), 256, 0, stream>>>(
       query, key, packed_values, output, rows, heads);
-  GUFO_CHECK_LAUNCH("WmmaAttention<true>");
+  SUPERROC_CHECK_LAUNCH("WmmaAttention<true>");
 }
 
-}  // namespace gufo::minimax_h3::dit_ops
+}  // namespace superroc::minimax_h3::dit_ops

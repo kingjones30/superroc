@@ -2,7 +2,7 @@
 # SQ16 SPEC2 (S2-4): drafting must not change any client's answer when four
 # sessions share a verify batch (KAT+MTP, three fresh servers).
 #
-# Serves the KAT+MTP model named by GUFO_SQ16_KAT_MODEL: first one -j 1
+# Serves the KAT+MTP model named by SUPERROC_SQ16_KAT_MODEL: first one -j 1
 # server answers the four client prompts sequentially (each client's
 # one-session text), then three fresh -j 4 servers answer the same four
 # prompts concurrently. PASS iff every concurrent text equals its
@@ -10,37 +10,37 @@
 # side FAILs). Without a model file it SKIPs (exit 77) for ctest
 # SKIP_RETURN_CODE.
 #
-# Usage: sq16_four_session.sh <gufo-binary>
-# Env: GUFO_SQ16_KAT_MODEL (required), GUFO_SQ16_PORT (default 18237),
-#      GUFO_SQ16_OUT (log dir, default: current directory),
-#      GUFO_SQ16_ROUNDS (default 3), GUFO_SQ16_TOKENS (default 96).
+# Usage: sq16_four_session.sh <superroc-binary>
+# Env: SUPERROC_SQ16_KAT_MODEL (required), SUPERROC_SQ16_PORT (default 18237),
+#      SUPERROC_SQ16_OUT (log dir, default: current directory),
+#      SUPERROC_SQ16_ROUNDS (default 3), SUPERROC_SQ16_TOKENS (default 96).
 set -uo pipefail
-BIN=${1:?usage: sq16_four_session.sh <gufo-binary>}
-if [ -z "${GUFO_SQ16_KAT_MODEL:-}" ]; then
-  echo "SKIP sq16_four_session: GUFO_SQ16_KAT_MODEL is not set"
+BIN=${1:?usage: sq16_four_session.sh <superroc-binary>}
+if [ -z "${SUPERROC_SQ16_KAT_MODEL:-}" ]; then
+  echo "SKIP sq16_four_session: SUPERROC_SQ16_KAT_MODEL is not set"
   exit 77
 fi
-if [ ! -f "$GUFO_SQ16_KAT_MODEL" ]; then
-  echo "SKIP sq16_four_session: model file missing: $GUFO_SQ16_KAT_MODEL"
+if [ ! -f "$SUPERROC_SQ16_KAT_MODEL" ]; then
+  echo "SKIP sq16_four_session: model file missing: $SUPERROC_SQ16_KAT_MODEL"
   exit 77
 fi
 if [ ! -x "$BIN" ]; then
-  echo "FAIL sq16_four_session: gufo binary not executable: $BIN"
+  echo "FAIL sq16_four_session: superroc binary not executable: $BIN"
   exit 1
 fi
-PORT=${GUFO_SQ16_PORT:-18237}
-OUT=${GUFO_SQ16_OUT:-$(pwd)}
-ROUNDS=${GUFO_SQ16_ROUNDS:-3}
-TOKENS=${GUFO_SQ16_TOKENS:-96}
+PORT=${SUPERROC_SQ16_PORT:-18237}
+OUT=${SUPERROC_SQ16_OUT:-$(pwd)}
+ROUNDS=${SUPERROC_SQ16_ROUNDS:-3}
+TOKENS=${SUPERROC_SQ16_TOKENS:-96}
 # SPEC3 (1b): ROUNDS must be an integer >= 1; anything else FAILs before any
 # server starts (ROUNDS=0 used to print PASS with zero rounds).
 case $ROUNDS in
   ''|*[!0-9]*)
-    echo "FAIL sq16_four_session: GUFO_SQ16_ROUNDS must be an integer >= 1: ${GUFO_SQ16_ROUNDS:-}"
+    echo "FAIL sq16_four_session: SUPERROC_SQ16_ROUNDS must be an integer >= 1: ${SUPERROC_SQ16_ROUNDS:-}"
     exit 1;;
 esac
 if [ "$ROUNDS" -lt 1 ]; then
-  echo "FAIL sq16_four_session: GUFO_SQ16_ROUNDS must be an integer >= 1: $ROUNDS"
+  echo "FAIL sq16_four_session: SUPERROC_SQ16_ROUNDS must be an integer >= 1: $ROUNDS"
   exit 1
 fi
 LOG=$OUT/sq16_four_session.log
@@ -78,7 +78,7 @@ serve() { # $1 jobs $2 tag
     return 1
   fi
   ("$BIN" serve -i 127.0.0.1 -p "$PORT" -j "$1" llm \
-    -m "$GUFO_SQ16_KAT_MODEL" --served-model-name m --context 32768 \
+    -m "$SUPERROC_SQ16_KAT_MODEL" --served-model-name m --context 32768 \
     --think off -t 0 --presence-penalty 0 \
     --speculative mtp -d 3 --min-draft-tokens 1) >>"$LOG" 2>&1 < /dev/null &
   P=$!

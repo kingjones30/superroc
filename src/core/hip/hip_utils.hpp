@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_HIP_HIP_UTILS_HPP_
-#define GUFO_CORE_HIP_HIP_UTILS_HPP_
+#ifndef SUPERROC_CORE_HIP_HIP_UTILS_HPP_
+#define SUPERROC_CORE_HIP_HIP_UTILS_HPP_
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace gufo::hip {
+namespace superroc::hip {
 // Cleanup must not throw while another GPU failure is unwinding the request.
 inline void LogCleanupError(hipError_t error) noexcept {
   if (error != hipSuccess)
@@ -20,7 +20,7 @@ inline void LogCleanupError(hipblasStatus_t error) noexcept {
     std::fprintf(stderr, "hipBLAS cleanup failed: %d\n",
                  static_cast<int>(error));
 }
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 #define HIP_CHECK(call)                                                 \
   do {                                                                  \
@@ -46,4 +46,4 @@ inline void LogCleanupError(hipblasStatus_t error) noexcept {
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_CORE_HIP_HIP_UTILS_HPP_
+#endif  // SUPERROC_CORE_HIP_HIP_UTILS_HPP_

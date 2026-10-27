@@ -1,12 +1,12 @@
-#ifndef GUFO_MODELS_QWEN3_TTS_PROMPT_HPP_
-#define GUFO_MODELS_QWEN3_TTS_PROMPT_HPP_
+#ifndef SUPERROC_MODELS_QWEN3_TTS_PROMPT_HPP_
+#define SUPERROC_MODELS_QWEN3_TTS_PROMPT_HPP_
 
 #include <cstddef>
 #include <span>
 #include <string>
 #include <vector>
 
-namespace gufo::models::qwen3_tts {
+namespace superroc::models::qwen3_tts {
 
 struct PromptOutput {
   std::vector<float> embeddings;
@@ -53,6 +53,6 @@ struct IclPromptInput {
                                   PromptOutput* output,
                                   std::string* error = nullptr);
 
-}  // namespace gufo::models::qwen3_tts
+}  // namespace superroc::models::qwen3_tts
 
-#endif  // GUFO_MODELS_QWEN3_TTS_PROMPT_HPP_
+#endif  // SUPERROC_MODELS_QWEN3_TTS_PROMPT_HPP_

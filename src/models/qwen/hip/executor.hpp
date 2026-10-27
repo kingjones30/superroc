@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_EXECUTOR_HPP_
-#define GUFO_MODELS_QWEN_HIP_EXECUTOR_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_EXECUTOR_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_EXECUTOR_HPP_
 
 #include <array>
 #include <cstddef>
@@ -33,11 +33,11 @@
 #include "src/models/qwen/hip/ops/token.hpp"
 #include "src/models/qwen/vision/device_input.hpp"
 
-namespace gufo::models::llama {
+namespace superroc::models::llama {
 class SpmTokenizer;
 }
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 class HipblasLtGemm;
 class QwenGpuExecutor;
@@ -409,7 +409,7 @@ public:
   [[nodiscard]] std::optional<std::size_t> GetTargetLayerCaptureIndex(
       std::uint32_t layer) const noexcept;
 
-  // sq16: env-gated (GUFO_VERIFY_DEBUG=1) per-stage snapshots for
+  // sq16: env-gated (SUPERROC_VERIFY_DEBUG=1) per-stage snapshots for
   // decode-vs-verify diagnosis. No-op when disabled.
   void SnapVerifyStage(const char* tag, std::uint32_t layer,
                        const float* device, std::size_t floats_per_row,
@@ -615,7 +615,7 @@ public:
   /// Copies the final-layer hidden state from the most recent forward pass.
   [[nodiscard]] std::span<const float> CopyLastHidden();
 
-  // sq16: env-gated (GUFO_VERIFY_DEBUG=1) per-stage snapshots from the most
+  // sq16: env-gated (SUPERROC_VERIFY_DEBUG=1) per-stage snapshots from the most
   // recent decode or verification forward on this session's arena.
   void ClearVerifyDebug();
   [[nodiscard]] const std::vector<detail::VerifyDebugStage>& GetVerifyDebug()
@@ -743,8 +743,8 @@ private:
   bool replaying_ssm_state_{false};
 };
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_QWEN_HIP_EXECUTOR_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_EXECUTOR_HPP_

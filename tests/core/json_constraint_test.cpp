@@ -17,8 +17,8 @@
 
 #include "src/core/sampling.hpp"
 
-using gufo::json::parse;
-using namespace gufo::sampling;
+using superroc::json::parse;
+using namespace superroc::sampling;
 
 bool Accepts(const JsonConstraint& grammar, std::string_view text) {
   auto state = grammar.Start();
@@ -63,7 +63,7 @@ void TestWideNativeArgumentOrder() {
         assert(!Accepts(*grammar, parameter(0) + parameter(4, "\"1\"")));
       }
       auto optional_schema = schema;
-      optional_schema["required"] = gufo::json::Value::array();
+      optional_schema["required"] = superroc::json::Value::array();
       const auto optional =
           JsonConstraint::ToolParameters(optional_schema, false, format);
       assert(Accepts(*optional, ""));
@@ -71,7 +71,7 @@ void TestWideNativeArgumentOrder() {
       assert(!Accepts(*optional, parameter(4) + parameter(4)));
       // Many required fields also remain unordered, without enumerating 2^N
       // grammar rules. Reject a call missing even the final required member.
-      schema["required"] = gufo::json::Value::array();
+      schema["required"] = superroc::json::Value::array();
       std::string reverse;
       for (unsigned i = count; i-- > 0;) {
         schema["required"].push_back("p" + std::to_string(i));
@@ -518,7 +518,7 @@ void TestPrimitiveConstraints() {
   }
 }
 
-bool Rejects(const gufo::json::Value& schema, bool strict,
+bool Rejects(const superroc::json::Value& schema, bool strict,
              bool open_objects = false) {
   try {
     (void)JsonConstraint::Compile(schema, strict, open_objects);
@@ -1138,7 +1138,7 @@ void TestAutomaticTools() {
                 i == 256};
           });
       for (const float temperature : {0.0F, 0.7F, 1.4F}) {
-        gufo::sampling::SamplingConfig config{.temperature = temperature,
+        superroc::sampling::SamplingConfig config{.temperature = temperature,
                                               .top_k = 20,
                                               .top_p = .8F,
                                               .min_p = .05F,
@@ -1291,14 +1291,14 @@ void TestNativeTools() {
     for (unsigned byte = 0; byte < 256; ++byte)
       pieces.push_back("shared-prefix" +
                        std::string(1, static_cast<char>(byte)));
-    const gufo::sampling::ConstraintVocabulary vocabulary(
+    const superroc::sampling::ConstraintVocabulary vocabulary(
         pieces.size(), [&](std::uint32_t i) {
-          return gufo::sampling::ConstraintVocabulary::Piece{pieces[i], i == 6};
+          return superroc::sampling::ConstraintVocabulary::Piece{pieces[i], i == 6};
         });
-    auto binding = std::make_shared<gufo::sampling::TokenConstraint>();
+    auto binding = std::make_shared<superroc::sampling::TokenConstraint>();
     binding->grammar = grammar;
     binding->vocabulary =
-        std::make_shared<gufo::sampling::ConstraintVocabulary>(vocabulary);
+        std::make_shared<superroc::sampling::ConstraintVocabulary>(vocabulary);
     auto state = grammar->Start();
     for (const unsigned char byte : call) {
       const auto mask = vocabulary.Allowed(*grammar, state);
@@ -1350,13 +1350,13 @@ void TestNativeTools() {
                  "<tool_call>\n<function=f>\n<parameter=text>\nanything\n"
                  "</parameter>\n</function>\n</tool_call>"));
   for (const std::string name : {" text", "text ", "\ttext", "text\f"}) {
-    auto unusual = gufo::json::Value::object();
+    auto unusual = superroc::json::Value::object();
     unusual["type"] = "object";
     unusual["properties"][name]["type"] = "string";
-    unusual["required"] = gufo::json::Value::array();
+    unusual["required"] = superroc::json::Value::array();
     unusual["required"].push_back(name);
     unusual["additionalProperties"] = false;
-    auto value = gufo::json::Value::object();
+    auto value = superroc::json::Value::object();
     value[name] = "literal";
     assert(Accepts(*JsonConstraint::Compile(unusual, true), value.dump()));
     // As llama.cpp, the name is written literally in native syntax (the
@@ -1454,9 +1454,9 @@ void TestFlintTools() {
   assert(!Accepts(*thinking_required, "Done."));
   // (d) Grammar speed (T4): the (c) grammar with a 259-piece vocabulary,
   // walking the (a) shell call byte by byte.
-  const gufo::sampling::ConstraintVocabulary vocabulary(
+  const superroc::sampling::ConstraintVocabulary vocabulary(
       259, [&](std::uint32_t i) {
-        return gufo::sampling::ConstraintVocabulary::Piece{
+        return superroc::sampling::ConstraintVocabulary::Piece{
             i < 256    ? std::string(1, static_cast<char>(i))
             : i == 258 ? std::string("<tool_call>")
                        : std::string(),
@@ -2231,7 +2231,7 @@ void TestNativeToolSchemaMatrix() {
   for (const auto& [root_text, open] : roots) {
     for (const auto& property : properties) {
       auto schema = parse(root_text);
-      schema["properties"] = gufo::json::Value::object();
+      schema["properties"] = superroc::json::Value::object();
       schema["properties"]["v"] = parse(property.schema);
       schema["properties"]["other"] = parse(R"({"type":"string"})");
       schema["required"] = parse(R"(["v"])");
@@ -2317,7 +2317,7 @@ void TestNativeToolSchemaMatrix() {
 // is recorded with its reason. tools/llama_parity regenerates the fixture.
 void TestLlamaCppToolGrammarGoldens() {
   using Format = JsonConstraint::ToolFormat;
-  std::ifstream in(GUFO_LLAMA_TOOL_GRAMMAR_GOLDENS);
+  std::ifstream in(SUPERROC_LLAMA_TOOL_GRAMMAR_GOLDENS);
   assert(in && "llama.cpp tool grammar goldens are present");
   const auto fixture =
       parse(std::string(std::istreambuf_iterator<char>(in), {}));
@@ -2332,16 +2332,16 @@ void TestLlamaCppToolGrammarGoldens() {
         true, false, format);
     const bool accepted = Accepts(*grammar, row.member_str("output"));
     const bool llama = row.find("llama_cpp")->as_bool();
-    const bool expected = row.find("gufo")->as_bool();
+    const bool expected = row.find("superroc")->as_bool();
     if (accepted != expected)
       std::cerr << "llama.cpp golden mismatch: " << row.member_str("format")
                 << " " << row.member_str("case") << " "
-                << row.member_str("class") << " gufo=" << accepted
+                << row.member_str("class") << " superroc=" << accepted
                 << " recorded=" << expected << "\n";
     assert(accepted == expected);
     const bool explained = row.contains("difference");
     assert(explained == (accepted != llama));
-    // gufo is never stricter on a valid output, except a const it enforces.
+    // superroc is never stricter on a valid output, except a const it enforces.
     if (llama && row.member_str("class") == "valid" && !accepted)
       assert(row.member_str("difference").find("const") != std::string::npos);
     ++rows;
@@ -2356,7 +2356,7 @@ int main(int argc, char** argv) {
   if (argc == 2 && std::string_view(argv[1]) == "--probe") {
     std::string line;
     while (std::getline(std::cin, line)) {
-      auto output = gufo::json::Value::object();
+      auto output = superroc::json::Value::object();
       try {
         const auto input = parse(line);
         const auto* strict = input.find("strict");
@@ -2364,11 +2364,11 @@ int main(int argc, char** argv) {
         const auto grammar = JsonConstraint::Compile(
             *input.find("schema"), !strict || strict->as_bool(),
             open && open->as_bool());
-        output["accepted"] = gufo::json::Value::array();
+        output["accepted"] = superroc::json::Value::array();
         for (const auto& text : input.find("texts")->items())
           output["accepted"].push_back(Accepts(*grammar, text.str()));
         if (const auto* prefixes = input.find("prefixes")) {
-          output["viable"] = gufo::json::Value::array();
+          output["viable"] = superroc::json::Value::array();
           for (const auto& text : prefixes->items()) {
             auto state = grammar->Start();
             for (unsigned char byte : text.str())

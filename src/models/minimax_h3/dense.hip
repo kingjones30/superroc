@@ -7,7 +7,7 @@
 #include "src/models/minimax_h3/dit.hpp"
 #include "src/models/minimax_h3/dit_ops.hip.hpp"
 #include "src/core/hip_launch_check.hpp"
-namespace gufo::minimax_h3::dit_ops {
+namespace superroc::minimax_h3::dit_ops {
 namespace {
 __device__ hip_bfloat16 Bf16(float x) {
   return hip_bfloat16(x);
@@ -102,7 +102,7 @@ __global__ void PackedAdaLn(const std::uint16_t* input,
   }
 }
 
-// Adapted from Gufo's Qwen-Image kernel. Packed BF16 operands feed WMMA
+// Adapted from SuperROC's Qwen-Image kernel. Packed BF16 operands feed WMMA
 // directly, with the pinned projection's increasing-K FP32 accumulation.
 // Packing replaces the original weight buffer rather than retaining a copy.
 template<bool Tail>
@@ -391,13 +391,13 @@ void LaunchHiddenProjection(const std::uint16_t* packed_weight,
             packed_weight, packed_input,
             reinterpret_cast<hip_bfloat16*>(output), rows, kDitHiddenSize,
             width, 0);
-    GUFO_CHECK_LAUNCH("HiddenProjection<false>");
+    SUPERROC_CHECK_LAUNCH("HiddenProjection<false>");
   }
   if (rows % 128 != 0) {
     HiddenProjection<true><<<dim3(1, kDitHiddenSize / 256), 256, 0, stream>>>(
         packed_weight, packed_input, reinterpret_cast<hip_bfloat16*>(output),
         rows, kDitHiddenSize, width, rows / 128);
-    GUFO_CHECK_LAUNCH("HiddenProjection<true>");
+    SUPERROC_CHECK_LAUNCH("HiddenProjection<true>");
   }
 }
 
@@ -409,7 +409,7 @@ void LaunchPackDense(const std::uint16_t* input, std::uint16_t* output,
   PackDense<true>
       <<<dim3((columns + 63) / 64, (rows + 63) / 64), 256, 0, stream>>>(
           input, output, rows, columns);
-  GUFO_CHECK_LAUNCH("PackDense<true>");
+  SUPERROC_CHECK_LAUNCH("PackDense<true>");
 }
 
 void LaunchUnpackDense(const std::uint16_t* input, std::uint16_t* output,
@@ -418,7 +418,7 @@ void LaunchUnpackDense(const std::uint16_t* input, std::uint16_t* output,
   PackDense<false>
       <<<dim3((columns + 63) / 64, (rows + 63) / 64), 256, 0, stream>>>(
           input, output, rows, columns);
-  GUFO_CHECK_LAUNCH("PackDense<false>");
+  SUPERROC_CHECK_LAUNCH("PackDense<false>");
 }
 
 void LaunchPackFfnUpWeights(const std::uint16_t* input, std::uint16_t* output,
@@ -439,7 +439,7 @@ void LaunchPackedMlpAdaLn(const std::uint16_t* input,
   PackedAdaLn<3, 4>
       <<<dim3(kDitHiddenSize / 64, (rows + 63) / 64), 256, 0, stream>>>(
           input, weight, modulation, row_map, inverse, output, rows);
-  GUFO_CHECK_LAUNCH("PackedAdaLn<3, 4>");
+  SUPERROC_CHECK_LAUNCH("PackedAdaLn<3, 4>");
 }
 
 void LaunchPackedAttentionAdaLn(const std::uint16_t* input,
@@ -451,7 +451,7 @@ void LaunchPackedAttentionAdaLn(const std::uint16_t* input,
   PackedAdaLn<0, 1>
       <<<dim3(kDitHiddenSize / 64, (rows + 63) / 64), 256, 0, stream>>>(
           input, weight, modulation, row_map, inverse, output, rows);
-  GUFO_CHECK_LAUNCH("PackedAdaLn<0, 1>");
+  SUPERROC_CHECK_LAUNCH("PackedAdaLn<0, 1>");
 }
 
 void LaunchQkv(const std::uint16_t* packed_weight,
@@ -466,7 +466,7 @@ void LaunchQkv(const std::uint16_t* packed_weight,
                                packed_value, query_weight, key_weight, rope_cos,
                                rope_sin, rows, kDitAttentionWidth * 3,
                                kDitHiddenSize);
-  GUFO_CHECK_LAUNCH("QkvProjection");
+  SUPERROC_CHECK_LAUNCH("QkvProjection");
 }
 
 void LaunchFfnUp(const std::uint16_t* packed_weight,
@@ -482,14 +482,14 @@ void LaunchFfnUp(const std::uint16_t* packed_weight,
         <<<dim3(rows / 128, kDitFeedForwardSize / 128), 256, 0, stream>>>(
             packed_weight, packed_weight + half, packed_input, output, rows,
             kDitFeedForwardSize, kDitHiddenSize, silu_lookup, 0);
-    GUFO_CHECK_LAUNCH("FfnUpProjection<false>");
+    SUPERROC_CHECK_LAUNCH("FfnUpProjection<false>");
   }
   if (rows % 128 != 0) {
     FfnUpProjection<true>
         <<<dim3(1, kDitFeedForwardSize / 128), 256, 0, stream>>>(
             packed_weight, packed_weight + half, packed_input, output, rows,
             kDitFeedForwardSize, kDitHiddenSize, silu_lookup, rows / 128);
-    GUFO_CHECK_LAUNCH("FfnUpProjection<true>");
+    SUPERROC_CHECK_LAUNCH("FfnUpProjection<true>");
   }
 }
 
@@ -507,4 +507,4 @@ void LaunchAttentionOutput(const std::uint16_t* packed_weight,
   LaunchHiddenProjection(packed_weight, packed_input, output, rows,
                          kDitAttentionWidth, stream);
 }
-}  // namespace gufo::minimax_h3::dit_ops
+}  // namespace superroc::minimax_h3::dit_ops

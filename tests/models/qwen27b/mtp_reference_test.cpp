@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "src/core/gguf_reader.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -60,23 +61,23 @@ std::vector<float> MakeTargetHidden(std::size_t size) {
 }  // namespace
 
 int main() {
-  const char* model_path = std::getenv("GUFO_QWEN27B_MTP_MODEL");
+  const char* model_path = ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MTP_MODEL");
   if (model_path == nullptr || std::string_view(model_path).empty()) {
     std::cout << "qwen_mtp_reference_test: skipped "
-                 "(GUFO_QWEN27B_MTP_MODEL not set)\n";
+                 "(SUPERROC_QWEN27B_MTP_MODEL not set)\n";
     return kSkipped;
   }
 
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(model_path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(model_path, &error);
   if (reader == nullptr) {
     std::cerr << "Failed to open MTP model: " << error << '\n';
     return 1;
   }
-  std::shared_ptr<const gufo::core::GgufReader> shared_reader{
+  std::shared_ptr<const superroc::core::GgufReader> shared_reader{
       std::move(reader)};
   auto reference =
-      gufo::speculative::QwenMtpReference::Create(shared_reader, 16, &error);
+      superroc::speculative::QwenMtpReference::Create(shared_reader, 16, &error);
   if (reference == nullptr) {
     std::cerr << "Failed to create MTP reference: " << error << '\n';
     return 1;

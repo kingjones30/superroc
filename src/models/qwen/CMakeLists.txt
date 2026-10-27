@@ -1,4 +1,4 @@
-target_sources(gufo_core PRIVATE
+target_sources(superroc_core PRIVATE
   ${PROJECT_SOURCE_DIR}/src/models/qwen/vision/image_cache.cpp
   ${PROJECT_SOURCE_DIR}/src/models/qwen/vision/prompt.cpp
   ${PROJECT_SOURCE_DIR}/src/models/qwen/tokenizer.cpp
@@ -31,8 +31,8 @@ target_sources(gufo_core PRIVATE
 
 if (ENGINE_ENABLE_HIP)
   find_package(OpenSSL REQUIRED COMPONENTS Crypto)
-  target_link_libraries(gufo_core PRIVATE OpenSSL::Crypto)
-  target_sources(gufo_core PRIVATE
+  target_link_libraries(superroc_core PRIVATE OpenSSL::Crypto)
+  target_sources(superroc_core PRIVATE
     ${PROJECT_SOURCE_DIR}/src/models/qwen/vision/encoder.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/vision/device_input.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/attention.hip
@@ -111,7 +111,7 @@ if (ENGINE_ENABLE_HIP)
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/dflash/dspark_sampling.hip)
   set_source_files_properties(
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/dflash/dspark_sampling.hip
-    TARGET_DIRECTORY gufo_core
+    TARGET_DIRECTORY superroc_core
     PROPERTIES LANGUAGE HIP)
 
   # HIP helpers must share the kernel's wave size, so compile this unit
@@ -120,74 +120,74 @@ if (ENGINE_ENABLE_HIP)
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/small_batch_wave64.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_quant_wave64.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/attention_decode_verify_wave64.hip
-    TARGET_DIRECTORY gufo_core
+    TARGET_DIRECTORY superroc_core
     PROPERTIES COMPILE_OPTIONS -mwavefrontsize64)
   # Iterative ILP improves Q4/Q5 groups of sixteen without changing arithmetic.
   # Keep it isolated: other widths regress. Line tables retain source profiling
   # while avoiding an LLVM register-pressure crash with full debug information.
   set_source_files_properties(
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/small_batch_quant16_wave64.hip
-    TARGET_DIRECTORY gufo_core
+    TARGET_DIRECTORY superroc_core
     PROPERTIES COMPILE_OPTIONS
     "-mwavefrontsize64;-gline-tables-only;-Xarch_device;-mllvm=-amdgpu-sched-strategy=iterative-ilp")
   # lqw:cmake-hip. Renamed Ling FP4 kernels. wmma stays wave64; the others stay wave32.
-  target_sources(gufo_core PRIVATE
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/gufo_fp4_gemv_q8.hip
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/gufo_fp4_gemm.hip
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/gufo_fp4_wmma.hip
+  target_sources(superroc_core PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_gemv_q8.hip
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_gemm.hip
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_wmma.hip
     ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/fp4_f16_prefill.hip  # SQ1:
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/gufo_fp4_moe_group.hip
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_moe_group.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/moe/qwen_moe_route.hip  # KAT:
     ${PROJECT_SOURCE_DIR}/src/models/qwen/moe/qwen_moe_ffn.hip  # KAT:
     ${PROJECT_SOURCE_DIR}/src/models/qwen/moe/qwen_moe_prefill.hip)  # KAT:
   set_source_files_properties(
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/gufo_fp4_gemv_q8.hip
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/gufo_fp4_gemm.hip
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/gufo_fp4_moe_group.hip
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_gemv_q8.hip
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_gemm.hip
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_moe_group.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/moe/qwen_moe_route.hip  # KAT:
     ${PROJECT_SOURCE_DIR}/src/models/qwen/moe/qwen_moe_ffn.hip  # KAT:
     ${PROJECT_SOURCE_DIR}/src/models/qwen/moe/qwen_moe_prefill.hip  # KAT:
-    TARGET_DIRECTORY gufo_core
+    TARGET_DIRECTORY superroc_core
     PROPERTIES LANGUAGE HIP)
   set_source_files_properties(
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/gufo_fp4_wmma.hip
-    TARGET_DIRECTORY gufo_core
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_wmma.hip
+    TARGET_DIRECTORY superroc_core
     PROPERTIES LANGUAGE HIP COMPILE_OPTIONS -mwavefrontsize64)
   # SQ1: the promoted FP4->F16 prefill kernels. Wave32 like kernels.hip.cpp;
   # -ffast-math -fno-finite-math-only match that TU's codegen exactly, so the
   # moved kernels are bit-identical to the Flash-Next build. The two -Wno-
-  # flags match its warning behaviour too: gufo_core builds with -Wall -Wextra
+  # flags match its warning behaviour too: superroc_core builds with -Wall -Wextra
   # but the Flash-Next TU has neither, so without them the byte-exact moved
   # code warns (-Wsign-compare in the SSM epilogue, -Wunneeded-internal for the
   # HcScaledSilu dep whose only uses here are dead template branches).
   set_source_files_properties(
     ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/fp4_f16_prefill.hip
-    TARGET_DIRECTORY gufo_core
+    TARGET_DIRECTORY superroc_core
     PROPERTIES LANGUAGE HIP COMPILE_OPTIONS
     "-ffast-math;-fno-finite-math-only;-Wno-sign-compare;-Wno-unneeded-internal-declaration")
   # Teacher-forced perplexity for G3. Not part of the default test build.
   add_executable(glimmer_ppl EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/glimmer_ppl.cpp)
-  target_link_libraries(glimmer_ppl PRIVATE gufo_core)
+  target_link_libraries(glimmer_ppl PRIVATE superroc_core)
   # LFM2: teacher-forced perplexity on the LFM2 token-loop decode path.
   add_executable(lfm2_ppl EXCLUDE_FROM_ALL  # LFM2
     ${PROJECT_SOURCE_DIR}/tools/lfm2_ppl.cpp)
-  target_link_libraries(lfm2_ppl PRIVATE gufo_core)
+  target_link_libraries(lfm2_ppl PRIVATE superroc_core)
   add_executable(flint_ppl EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/flint_ppl.cpp)
-  target_link_libraries(flint_ppl PRIVATE gufo_core)
+  target_link_libraries(flint_ppl PRIVATE superroc_core)
   add_executable(flint_parity EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/flint_parity.cpp)
-  target_link_libraries(flint_parity PRIVATE gufo_core)
+  target_link_libraries(flint_parity PRIVATE superroc_core)
 
   # SQ1: ported-kernel unit test + 27B-shape microbench. GPU-only tools,
   # EXCLUDE_FROM_ALL like the other qualification tools; run via gpu-run.
   add_executable(qwen_fp4_f16_prefill_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tests/models/qwen/hip/fp4_f16_prefill_test.cpp)
   # The tiled-Q8 producer and the Q8_0 cross-check kernel stay Flash-Next
-  # resident; the ported launchers come from gufo_core.
-  target_link_libraries(qwen_fp4_f16_prefill_test PRIVATE gufo_core
-    gufo_qwen38_flash_next)
+  # resident; the ported launchers come from superroc_core.
+  target_link_libraries(qwen_fp4_f16_prefill_test PRIVATE superroc_core
+    superroc_qwen38_flash_next)
   # LANGUAGE HIP: the int8 cell calls fp4_f16::Fp4ScaleByteToFloat, which
   # lives in the header's device section (same precedent as fp4_f16_test).
   set_source_files_properties(
@@ -196,7 +196,7 @@ if (ENGINE_ENABLE_HIP)
     PROPERTIES LANGUAGE HIP)
   add_executable(qwen_gemm_bench EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/qwen_gemm_bench.cpp)
-  target_link_libraries(qwen_gemm_bench PRIVATE gufo_core)
+  target_link_libraries(qwen_gemm_bench PRIVATE superroc_core)
   # SLP vectorization puts the K-quant scales and offsets of the blocked
   # prefill GEMMs into wide register tuples. With clang 23, the Q3_K and Q6_K
   # 128x128 tiles then spill. Disable SLP for the two units on all compilers.
@@ -204,17 +204,17 @@ if (ENGINE_ENABLE_HIP)
     SOURCE
       ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_quant_gemm.hip
       ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_quant_wave64.hip
-    TARGET_DIRECTORY gufo_core
+    TARGET_DIRECTORY superroc_core
     APPEND PROPERTY COMPILE_OPTIONS -fno-slp-vectorize)
 endif()
 
 # lqw:qwen35_ppl. Teacher-forced perplexity on the GPU executor over a prompt
-# file (the gufo-side leg of the fork llama-perplexity comparison).
+# file (the superroc-side leg of the fork llama-perplexity comparison).
 add_executable(qwen35_ppl EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/qwen35_ppl.cpp)
-target_link_libraries(qwen35_ppl PRIVATE gufo_core)
+target_link_libraries(qwen35_ppl PRIVATE superroc_core)
 
 # lqw:spec6. Bitwise small-m FP4 GEMV against real 27B layers.
 add_executable(qwen35_fp4_m_test EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/qwen35_fp4_m_test.cpp)
-target_link_libraries(qwen35_fp4_m_test PRIVATE gufo_core)
+target_link_libraries(qwen35_fp4_m_test PRIVATE superroc_core)

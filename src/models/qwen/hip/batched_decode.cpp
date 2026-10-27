@@ -18,8 +18,9 @@
 #include "src/models/qwen/hip/ops.hpp"
 #include "src/models/qwen/moe/qwen_moe_ffn.hpp"    // KAT-MTP:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"  // KAT-MTP:
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::size_t kMaxDecodeBatch = 8;
@@ -112,14 +113,14 @@ struct VerifyProf {
 // stderr line per process the first time it is seen on (the read stays per
 // call; only the announcement is once).
 [[nodiscard]] bool VerifyNoChunk() {
-  const char* env = std::getenv("GUFO_VERIFY_NO_CHUNK");
+  const char* env = ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_NO_CHUNK");
   const bool on = env != nullptr && env[0] == '1';
   if (on) {
     static bool warned = false;
     if (!warned) {
       warned = true;
       std::fprintf(stderr,
-                   "GUFO_VERIFY_NO_CHUNK=1: test hook, >8-row verify runs "
+                   "SUPERROC_VERIFY_NO_CHUNK=1: test hook, >8-row verify runs "
                    "per-row integer GEMV (slower)\n");
     }
   }
@@ -143,10 +144,10 @@ bool TryLaunchChunkedVerifyM(core::GgmlType type, const void* weights,
                                   input_size, stream);
     }
     const auto m = static_cast<int>(std::min<std::size_t>(8, left));
-    if (gufo_fp4_gemv_verify_m(
+    if (superroc_fp4_gemv_verify_m(
             RocmFp4Qtype(type), weights, input + row * input_size,
             output + row * output_size, static_cast<int>(input_size),
-            static_cast<int>(output_size), m, stream) != GUFO_FP4_OK) {
+            static_cast<int>(output_size), m, stream) != SUPERROC_FP4_OK) {
       return false;
     }
     row += static_cast<std::size_t>(m);
@@ -166,11 +167,11 @@ bool TryLaunchVerifyInteger(const models::QwenTensorRef& weight,
   // lqw:spec6. Intercept m = 2..8 first, including the LM head (n > 8192
   // takes the 2048-wide grid stride).
   if (batch_size >= 2 && batch_size <= 8) {
-    const int rc = gufo_fp4_gemv_verify_m(
+    const int rc = superroc_fp4_gemv_verify_m(
         RocmFp4Qtype(weight.type), weight.data, input, output,
         static_cast<int>(input_size), static_cast<int>(output_size),
         static_cast<int>(batch_size), stream);
-    if (rc == GUFO_FP4_OK) {
+    if (rc == SUPERROC_FP4_OK) {
       return true;
     }
     static int nwarn = 0;
@@ -204,12 +205,12 @@ bool TryLaunchVerifyInteger(const models::QwenTensorRef& weight,
 }
 
 // Super ROC QVO (Muse Wonder W7-B R1): the members of a verify projection
-// group read one input, but each gufo_fp4_gemv_verify_m call quantised it
+// group read one input, but each superroc_fp4_gemv_verify_m call quantised it
 // again (SSM group 4x, QKV 3x, dense FFN gate/up 2x per layer). The first
 // member quantises; the rest reuse that Q8 copy (_xq), which is bit-identical.
 // On any refusal the members rerun through TryLaunchVerifyInteger exactly as
 // before (same short-circuit), so the outputs can only be today's.
-// GUFO_VERIFY_Q8_REUSE=0 turns the reuse off for A/B runs.
+// SUPERROC_VERIFY_Q8_REUSE=0 turns the reuse off for A/B runs.
 struct VerifyGroupMember {
   const models::QwenTensorRef* weight;
   float* output;
@@ -218,7 +219,7 @@ struct VerifyGroupMember {
 
 bool VerifyQ8ReuseOn() {
   static const bool on = [] {
-    const char* e = std::getenv("GUFO_VERIFY_Q8_REUSE");
+    const char* e = ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_Q8_REUSE");
     return !(e != nullptr && e[0] == '0');
   }();
   return on;
@@ -232,11 +233,11 @@ bool TryLaunchVerifyIntegerGroup(
     bool ok = true;
     for (const auto& member : members) {
       const auto launch =
-          first ? gufo_fp4_gemv_verify_m : gufo_fp4_gemv_verify_m_xq;
+          first ? superroc_fp4_gemv_verify_m : superroc_fp4_gemv_verify_m_xq;
       ok = launch(RocmFp4Qtype(member.weight->type), member.weight->data, input,
                   member.output, static_cast<int>(input_size),
                   static_cast<int>(member.output_size),
-                  static_cast<int>(batch_size), stream) == GUFO_FP4_OK;
+                  static_cast<int>(batch_size), stream) == SUPERROC_FP4_OK;
       first = false;
       if (!ok)
         break;
@@ -452,17 +453,17 @@ void LaunchVerifyFfn(const models::QwenLayerWeights& layer,
     int* const zero = moe_zero_ids + row;
     float* const y = moe_y + row * hidden_size;
     float* const sy = moe_shexp_y + row * hidden_size;
-    if (gufo_fp4_expert_ffn_dev(
+    if (superroc_fp4_expert_ffn_dev(
             gate_type, layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
             layer.ffn_down_exps.data, x, ids, wts, moe_used, moe_expert,
-            moe_hidden, moe_ff, 0.0F, y, stream) != GUFO_FP4_OK) {
+            moe_hidden, moe_ff, 0.0F, y, stream) != SUPERROC_FP4_OK) {
       throw std::runtime_error("qwen35moe verify experts failed");
     }
     // QSM: reuses the routed call's Q8 copy of this row's x (same stream).
-    if (gufo_fp4_expert_ffn_dev_xq(
+    if (superroc_fp4_expert_ffn_dev_xq(
             shexp_type, layer.ffn_gate_shexp.data, layer.ffn_up_shexp.data,
             layer.ffn_down_shexp.data, x, zero, sig, 1, 1, moe_hidden, moe_ffs,
-            0.0F, sy, stream) != GUFO_FP4_OK) {
+            0.0F, sy, stream) != SUPERROC_FP4_OK) {
       throw std::runtime_error("qwen35moe verify shared expert failed");
     }
   }
@@ -879,15 +880,15 @@ std::vector<tokenization::TokenId> QwenGpuExecutor::ForwardTokenBatch(
   // SQ10: name the coordinator stream's set, so concurrent sessions check
   // theirs. SPEC2 (R2): a refusal fails the step loudly (unreachable in serve).
   if (config.is_moe) {
-    const int slot_set = gufo_fp4_slot_stream_attach_at(
+    const int slot_set = superroc_fp4_slot_stream_attach_at(
         arena.stream, __func__, static_cast<long>(hidden_size));
     if (slot_set < 0) {
       throw std::runtime_error("qwen35moe verify slot set refused");
     }
     // SPEC2 (R6): stream-ordered check (the bare read proved stale on the
     // box: STALE_STATUS missed 1/200).
-    if (gufo_fp4_moe_dev_check_set_on_stream(slot_set, arena.stream) !=
-        GUFO_FP4_OK) {
+    if (superroc_fp4_moe_dev_check_set_on_stream(slot_set, arena.stream) !=
+        SUPERROC_FP4_OK) {
       throw std::runtime_error("qwen35moe verify expert device status");
     }
   }
@@ -1081,7 +1082,7 @@ QwenGpuExecutor::ForwardVerificationBatch(
   static hipEvent_t prof_a = nullptr;
   static hipEvent_t prof_b = nullptr;
   static const bool prof_on = [] {
-    const char* env = std::getenv("GUFO_MTP_PROFILE");
+    const char* env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PROFILE");
     return env != nullptr && env[0] != '\0' && env[0] != '0';
   }();
   if (prof_on && prof_a == nullptr) {
@@ -1439,15 +1440,15 @@ QwenGpuExecutor::ForwardVerificationBatch(
   // SQ10: name the coordinator stream's set, so concurrent sessions check
   // theirs. SPEC2 (R2): a refusal fails the step loudly (unreachable in serve).
   if (config.is_moe) {
-    const int slot_set = gufo_fp4_slot_stream_attach_at(
+    const int slot_set = superroc_fp4_slot_stream_attach_at(
         arena_.stream, __func__, static_cast<long>(hidden_size));
     if (slot_set < 0) {
       throw std::runtime_error("qwen35moe verify slot set refused");
     }
     // SPEC2 (R6): stream-ordered check (the bare read proved stale on the
     // box: STALE_STATUS missed 1/200).
-    if (gufo_fp4_moe_dev_check_set_on_stream(slot_set, arena_.stream) !=
-        GUFO_FP4_OK) {
+    if (superroc_fp4_moe_dev_check_set_on_stream(slot_set, arena_.stream) !=
+        SUPERROC_FP4_OK) {
       throw std::runtime_error("qwen35moe verify expert device status");
     }
   }
@@ -1525,5 +1526,5 @@ QwenGpuExecutor::ForwardVerificationBatch(
   return predictions;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

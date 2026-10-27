@@ -53,7 +53,7 @@ let
   };
 in
 stdenv.mkDerivation {
-  pname = "gufo";
+  pname = "superroc";
   version = packageVersion;
   src = productionSource;
 
@@ -85,10 +85,10 @@ stdenv.mkDerivation {
   cmakeFlags = [
     "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
     "-DBUILD_TESTING=OFF"
-    "-DGUFO_RELEASE_VERSION=${versionLabel}"
-    "-DGUFO_REVISION=${revision}"
-    "-DGUFO_FFMPEG_EXECUTABLE=${ffmpeg-headless}/bin/ffmpeg"
-    "-DGUFO_FFPROBE_EXECUTABLE=${ffmpeg-headless}/bin/ffprobe"
+    "-DSUPERROC_RELEASE_VERSION=${versionLabel}"
+    "-DSUPERROC_REVISION=${revision}"
+    "-DSUPERROC_FFMPEG_EXECUTABLE=${ffmpeg-headless}/bin/ffmpeg"
+    "-DSUPERROC_FFPROBE_EXECUTABLE=${ffmpeg-headless}/bin/ffprobe"
     "-DCMAKE_HIP_COMPILER=${rocmPackages.llvm.clang}/bin/clang"
   ];
 
@@ -96,19 +96,19 @@ stdenv.mkDerivation {
   postFixup = ''
     # HIP loads ROCr transitively. Select the patched ABI-compatible runtime
     # without rebuilding the unchanged HIP/BLAS compiler and kernel libraries.
-    wrapProgram "$out/bin/gufo" \
+    wrapProgram "$out/bin/superroc" \
       --prefix LD_LIBRARY_PATH : "${rocmRuntime}/lib"
   '';
   installCheckPhase = ''
     runHook preInstallCheck
 
-    test "$($out/bin/gufo --version)" = "gufo version ${versionLabel} (${revision})"
-    $out/bin/gufo --help >/dev/null
-    test "$($out/bin/gufo-server --version)" = "gufo version ${versionLabel} (${revision})"
-    $out/bin/gufo-server --help >/dev/null
-    test ! -e $out/bin/gufo-kernel-bench
-    test -f $out/share/licenses/gufo/LICENSE
-    test -f $out/share/licenses/gufo/third-party/LICENSE.ds4
+    test "$($out/bin/superroc --version)" = "Super ROC ${versionLabel} (${revision}) - engine lineage: upstream v0.19.0 (MIT)"
+    $out/bin/superroc --help >/dev/null
+    test "$($out/bin/superroc-server --version)" = "Super ROC ${versionLabel} (${revision}) - engine lineage: upstream v0.19.0 (MIT)"
+    $out/bin/superroc-server --help >/dev/null
+    test ! -e $out/bin/superroc-kernel-bench
+    test -f $out/share/licenses/superroc/LICENSE
+    test -f $out/share/licenses/superroc/third-party/LICENSE.ds4
 
     runHook postInstallCheck
   '';
@@ -125,10 +125,10 @@ stdenv.mkDerivation {
   };
 
   meta = with lib; {
-    description = "Gufo Engine — local inference runtime for AMD Strix Halo (gfx1151 GPU)";
+    description = "SuperROC Engine — local inference runtime for AMD Strix Halo (gfx1151 GPU)";
     homepage = "https://github.com/gufo-org/gufo";
     license = licenses.mit;
     platforms = [ "x86_64-linux" ];
-    mainProgram = "gufo";
+    mainProgram = "superroc";
   };
 }

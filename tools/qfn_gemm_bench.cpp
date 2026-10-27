@@ -4,12 +4,12 @@
 // Times, per dense (m, k) of the Flash-Next shapes in lft/DECISIONS.md:
 //   * DenseF16Gemm over Q8_0 weights (F16 WMMA, pre-narrowed activations),
 //   * the stock int8 W8A8Gemm over Q8_0 (QuantizeQ8Tiled + GEMM),
-//   * today's ROC route over type-101 weights (gufo_fp4_wmma_quant + GEMM),
+//   * today's ROC route over type-101 weights (superroc_fp4_wmma_quant + GEMM),
 //   * --with-lfp: LFP's Fp4DenseF16Gemm over type-101 weights (v1.4+),
 // and per routed geometry (512 experts, 10 used):
 //   * stock RoutedCompact + Narrow + gate/up (gated when the executor uses
 //     it) + down + MoeEpilogueVec4F16,
-//   * ROC gufo_fp4_moe_group_batch + quant + 3x gemm_grp + Swiglu + gather,
+//   * ROC superroc_fp4_moe_group_batch + quant + 3x gemm_grp + Swiglu + gather,
 //   * --with-lfq: LFQ's RoutedCompact + Narrow + gated/down over type-101
 //     weights (needs the LFQ stack tree; on v1.4 the launcher declines and
 //     the cells report failed-or-no-LFQ).
@@ -37,13 +37,13 @@
 #include <vector>
 
 #include "src/core/quant/ggml_dequant.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemm.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_moe_group.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_wmma.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemm.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_moe_group.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_wmma.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 
-namespace qfn = gufo::models::qwen38_flash_next::rocm;
+namespace qfn = superroc::models::qwen38_flash_next::rocm;
 
 #define HIP_OK(call)                                                          \
   do {                                                                        \
@@ -130,7 +130,7 @@ static void FillQ80(std::vector<std::uint8_t>& buf, std::size_t rows,
   std::uniform_int_distribution<int> q(-16, 16);
   for (std::size_t r = 0; r < rows; ++r)
     for (std::size_t b = 0; b < nb; ++b) {
-      auto* blk = reinterpret_cast<gufo::quant::block_q8_0*>(
+      auto* blk = reinterpret_cast<superroc::quant::block_q8_0*>(
           &buf[(r * nb + b) * 34]);
       blk->d = F32ToF16(0.02f);
       for (int j = 0; j < 32; ++j) blk->qs[j] = std::int8_t(q(rng));
@@ -145,7 +145,7 @@ static void FillQ4K(std::vector<std::uint8_t>& buf, std::size_t rows,
   std::uniform_int_distribution<int> s(0, 4);
   for (std::size_t r = 0; r < rows; ++r)
     for (std::size_t n = 0; n < nb; ++n) {
-      auto* blk = reinterpret_cast<gufo::quant::block_q4_K*>(
+      auto* blk = reinterpret_cast<superroc::quant::block_q4_K*>(
           &buf[(r * nb + n) * 144]);
       blk->d = F32ToF16(0.002f);
       blk->dmin = F32ToF16(0.0f);
@@ -305,21 +305,21 @@ static void BenchDense(std::size_t T, int reps, hipStream_t stream,
           "quant+gemm");
     }
 
-    // FP4 route (gufo_fp4 calls run on the NULL stream).
+    // FP4 route (superroc_fp4 calls run on the NULL stream).
     int qrc = 0;
     float f4q_ms = TimeIt(nullptr, [&] {
-      qrc = gufo_fp4_wmma_quant(dx, nullptr, nullptr, f4q8, int(T), int(s.k));
+      qrc = superroc_fp4_wmma_quant(dx, nullptr, nullptr, f4q8, int(T), int(s.k));
     }, reps);
-    if (qrc != GUFO_FP4_OK) {
+    if (qrc != SUPERROC_FP4_OK) {
       Row(s.cell, "FP4-101", "quant", 0, -1, -1, 0, "quant-failed");
     } else {
       Row(s.cell, "FP4-101", "quant", f4q_ms, -1, act_bytes / f4q_ms / 1e6, 1);
       int grc = 0;
       float f4g_ms = TimeIt(nullptr, [&] {
-        grc = gufo_fp4_wmma_gemm_dense(GUFO_FP4_Q4_0_ROCMFP4_FAST, dwf4, f4q8,
+        grc = superroc_fp4_wmma_gemm_dense(SUPERROC_FP4_Q4_0_ROCMFP4_FAST, dwf4, f4q8,
                                       out, int(s.k), int(s.m), int(T));
       }, reps);
-      if (grc != GUFO_FP4_OK) {
+      if (grc != SUPERROC_FP4_OK) {
         Row(s.cell, "FP4-101", "gemm", 0, -1, -1, 0, "gemm-failed");
       } else {
         Row(s.cell, "FP4-101", "gemm", f4g_ms, flops / f4g_ms / 1e9,
@@ -631,9 +631,9 @@ static void BenchRouted(std::size_t T, int reps, hipStream_t stream,
 
   // ---- ROC: group + quant + gate/up + swiglu + quant + down + gather ----
   {
-    const int Q = GUFO_FP4_Q4_0_ROCMFP4_FAST;
-    const std::size_t rb_k = gufo_fp4_row_bytes(Q, H);
-    const std::size_t rb_f = gufo_fp4_row_bytes(Q, F);
+    const int Q = SUPERROC_FP4_Q4_0_ROCMFP4_FAST;
+    const std::size_t rb_k = superroc_fp4_row_bytes(Q, H);
+    const std::size_t rb_f = superroc_fp4_row_bytes(Q, F);
     const std::size_t stride_k = std::size_t(F) * rb_k;
     const std::size_t stride_f = std::size_t(H) * rb_f;
     std::vector<std::uint8_t> g1, u1, d1;
@@ -686,13 +686,13 @@ static void BenchRouted(std::size_t T, int reps, hipStream_t stream,
     int hdr[4] = {0, 0, 0, 0};
     int grc = 0;
     float grp_ms = TimeIt(nullptr, [&] {
-      grc = gufo_fp4_moe_group_batch(dids, dwts, nullptr, n, used, used, nex,
+      grc = superroc_fp4_moe_group_batch(dids, dwts, nullptr, n, used, used, nex,
                                      gcap, slot_tok, slot_w, token_slots,
                                      grp_e, grp_off, grp_cnt, grp_zp,
                                      slot_dest, garr, nslots, hdr);
     }, reps);
     const int ngroups = hdr[0], total_tiles = hdr[2], status = hdr[3];
-    const bool gok = grc == GUFO_FP4_OK && status == GUFO_FP4_OK &&
+    const bool gok = grc == SUPERROC_FP4_OK && status == SUPERROC_FP4_OK &&
                      ngroups > 0 && total_tiles > 0 &&
                      std::uint32_t(total_tiles) <= tiles_cap;
     char gnote[96];
@@ -705,48 +705,48 @@ static void BenchRouted(std::size_t T, int reps, hipStream_t stream,
     Row(cell, "FP4-101", "group", grp_ms, -1, -1, gok ? 1 : 0, gnote);
     if (gok) {
       // Re-group once outside the timer so the timed GEMMs see valid maps.
-      gufo_fp4_moe_group_batch(dids, dwts, nullptr, n, used, used, nex, gcap,
+      superroc_fp4_moe_group_batch(dids, dwts, nullptr, n, used, used, nex, gcap,
                                slot_tok, slot_w, token_slots, grp_e, grp_off,
                                grp_cnt, grp_zp, slot_dest, garr, nslots, hdr);
       int rc = 0;
       float q1 = TimeIt(nullptr, [&] {
-        rc = gufo_fp4_wmma_quant(dx, slot_tok, slot_dest, q8_e, nslots, hid);
+        rc = superroc_fp4_wmma_quant(dx, slot_tok, slot_dest, q8_e, nslots, hid);
       }, reps);
       Row(cell, "FP4-101", "quant1", q1, -1,
-          double(slots) * double(H) * 4.0 / q1 / 1e6, rc == GUFO_FP4_OK);
+          double(slots) * double(H) * 4.0 / q1 / 1e6, rc == SUPERROC_FP4_OK);
       float g_ms = TimeIt(nullptr, [&] {
-        rc = gufo_fp4_wmma_gemm_grp(Q, dgate, stride_k, grp_e, grp_off,
+        rc = superroc_fp4_wmma_gemm_grp(Q, dgate, stride_k, grp_e, grp_off,
                                     grp_cnt, grp_zp, ngroups, total_tiles,
                                     q8_e, gate_e, nullptr, hid, nff);
       }, reps);
-      Row(cell, "FP4-101", "gate", g_ms, -1, -1, rc == GUFO_FP4_OK);
+      Row(cell, "FP4-101", "gate", g_ms, -1, -1, rc == SUPERROC_FP4_OK);
       float u_ms = TimeIt(nullptr, [&] {
-        rc = gufo_fp4_wmma_gemm_grp(Q, dup, stride_k, grp_e, grp_off, grp_cnt,
+        rc = superroc_fp4_wmma_gemm_grp(Q, dup, stride_k, grp_e, grp_off, grp_cnt,
                                     grp_zp, ngroups, total_tiles, q8_e, up_e,
                                     nullptr, hid, nff);
       }, reps);
-      Row(cell, "FP4-101", "up", u_ms, -1, -1, rc == GUFO_FP4_OK);
+      Row(cell, "FP4-101", "up", u_ms, -1, -1, rc == SUPERROC_FP4_OK);
       float sw_ms = TimeIt(stream, [&] {
         qfn::Swiglu(gate_e, up_e, slots * F, stream);
       }, reps);
       Row(cell, "FP4-101", "swiglu", sw_ms, -1, -1, 1);
       HIP_OK(hipDeviceSynchronize());
       float q2 = TimeIt(nullptr, [&] {
-        rc = gufo_fp4_wmma_quant(gate_e, nullptr, slot_dest, q8_h, nslots,
+        rc = superroc_fp4_wmma_quant(gate_e, nullptr, slot_dest, q8_h, nslots,
                                  nff);
       }, reps);
       Row(cell, "FP4-101", "quant2", q2, -1,
-          double(slots) * double(F) * 4.0 / q2 / 1e6, rc == GUFO_FP4_OK);
+          double(slots) * double(F) * 4.0 / q2 / 1e6, rc == SUPERROC_FP4_OK);
       float d_ms = TimeIt(nullptr, [&] {
-        rc = gufo_fp4_wmma_gemm_grp(Q, ddown, stride_f, grp_e, grp_off,
+        rc = superroc_fp4_wmma_gemm_grp(Q, ddown, stride_f, grp_e, grp_off,
                                     grp_cnt, grp_zp, ngroups, total_tiles,
                                     q8_h, down_e, slot_w, nff, hid);
       }, reps);
-      Row(cell, "FP4-101", "down", d_ms, -1, -1, rc == GUFO_FP4_OK);
+      Row(cell, "FP4-101", "down", d_ms, -1, -1, rc == SUPERROC_FP4_OK);
       float ga_ms = TimeIt(nullptr, [&] {
-        rc = gufo_fp4_slot_gather_sum(down_e, token_slots, out, used, hid, n);
+        rc = superroc_fp4_slot_gather_sum(down_e, token_slots, out, used, hid, n);
       }, reps);
-      Row(cell, "FP4-101", "gather", ga_ms, -1, -1, rc == GUFO_FP4_OK);
+      Row(cell, "FP4-101", "gather", ga_ms, -1, -1, rc == SUPERROC_FP4_OK);
       const float total = grp_ms + q1 + g_ms + u_ms + sw_ms + q2 + d_ms + ga_ms;
       // 16-token tiles: each tile re-sweeps its expert's full stack.
       const double wmoved =

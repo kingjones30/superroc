@@ -16,7 +16,7 @@ the next turn of the same conversation does not recompute the prefix it shares
 with the previous one. This is what the rest of this document is about: the
 `ContinuationCache`, and the optional on-disk tier behind `--cache-disk`.
 
-The second is where the important subtlety lives. What Gufo retains is **not**
+The second is where the important subtlety lives. What SuperROC retains is **not**
 literally K/V tensors. It is an opaque snapshot owned by the model runner. For
 Qwen3.8-27B that payload happens to be attention KV. For Qwen3.8-Flash-Next it
 also contains GDN recurrent state, the indexer, position and sampling state.
@@ -528,7 +528,7 @@ Anything that changes the token prefix. In practice:
   checkpoints after it. Appending a new one does not.
 - **Reasoning the client cannot replay** — thinking is on by default for Qwen
   and `reasoning_content` is not part of the OpenAI schema, so an ordinary
-  client omits it when sending the conversation back. Gufo retains each turn's
+  client omits it when sending the conversation back. SuperROC retains each turn's
   boundary before the assistant opening, so the next turn can reuse the prior
   history and process the rewritten assistant plus new input. That boundary
   must be saved on warm hits too; retaining only the old resume point caused
@@ -566,7 +566,7 @@ result can still populate the cache. `null` keeps the default, `true`.
 | `event=disk_cache action=skipped reason=staging_capacity` | a checkpoint exceeded `--cache-disk-staging-bytes` and was never written |
 | `event=disk_cache action=skipped reason=min_step` | a checkpoint was less than 2048 tokens past a stored prefix; RAM still retains it |
 
-Per-request outcomes appear in the completion log and in `usage.gufo`:
+Per-request outcomes appear in the completion log and in `usage.superroc`:
 `cache_hit`, `cache_miss_reason`, `cache_common_prefix_tokens`,
 `cache_checkpoint_tokens`, `cache_restore_bytes`, `cache_restore_ms`,
 `shared_prefix_wait_ms` (time spent waiting for a concurrent request, part of
@@ -579,7 +579,7 @@ when one does but no restorable boundary covers it;
 `cache_common_prefix_tokens` is then the longest agreement and
 `cache_checkpoint_tokens` the deepest compatible boundary.
 
-Flash-Next also reports `usage.gufo.component_cache.captured_checkpoint_ids`.
+Flash-Next also reports `usage.superroc.component_cache.captured_checkpoint_ids`.
 Match these request-local IDs to `checkpoint_id` in publication/refusal logs:
 an earlier request's asynchronous write may finish after the current response.
 IDs belong to one server lifetime; correlate each restart separately.

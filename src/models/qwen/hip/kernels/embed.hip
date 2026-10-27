@@ -12,7 +12,7 @@
 #include "src/models/qwen/hip/kernels/q4_0_gemv.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void EmbeddingLookupKernel(const void* __restrict__ table,
                                       core::GgmlType type,
@@ -101,7 +101,7 @@ void LaunchEmbeddingLookup(const void* table, core::GgmlType type,
   const std::size_t grid_size = (hidden_size + block_size - 1) / block_size;
   EmbeddingLookupKernel<<<grid_size, block_size, 0, stream>>>(
       table, type, token_id, out_hidden, hidden_size);
-  GUFO_CHECK_LAUNCH("EmbeddingLookupKernel");
+  SUPERROC_CHECK_LAUNCH("EmbeddingLookupKernel");
 }
 
 void LaunchEmbeddingLookup(const void* table, core::GgmlType type,
@@ -111,8 +111,8 @@ void LaunchEmbeddingLookup(const void* table, core::GgmlType type,
   const std::size_t grid_size = (hidden_size + block_size - 1) / block_size;
   EmbeddingLookupPtrKernel<<<grid_size, block_size, 0, stream>>>(
       table, type, d_token_id, out_hidden, hidden_size);
-  GUFO_CHECK_LAUNCH("EmbeddingLookupPtrKernel");
+  SUPERROC_CHECK_LAUNCH("EmbeddingLookupPtrKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

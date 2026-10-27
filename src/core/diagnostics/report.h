@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_DIAGNOSTICS_REPORT_H_
-#define GUFO_CORE_DIAGNOSTICS_REPORT_H_
+#ifndef SUPERROC_CORE_DIAGNOSTICS_REPORT_H_
+#define SUPERROC_CORE_DIAGNOSTICS_REPORT_H_
 
 #include <cstdint>
 #include <map>
@@ -12,7 +12,7 @@
 #include "src/core/diagnostics/fingerprint.h"
 #include "src/core/diagnostics/system_inventory.h"
 
-namespace gufo::diagnostics {
+namespace superroc::diagnostics {
 
 enum class DiagnosticStatus : std::uint8_t {
   kPass,
@@ -89,6 +89,6 @@ private:
   std::optional<MachineFingerprint> fingerprint_;
 };
 
-}  // namespace gufo::diagnostics
+}  // namespace superroc::diagnostics
 
-#endif  // GUFO_CORE_DIAGNOSTICS_REPORT_H_
+#endif  // SUPERROC_CORE_DIAGNOSTICS_REPORT_H_

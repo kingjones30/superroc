@@ -51,9 +51,9 @@ namespace {
 // throw std::logic_error instead of dereferencing null (previously UB).
 // Runs without NANBEIGE_GGUF.
 void TestLlamaGetTokenizerThrows() {
-  gufo::models::QwenModelWeights weights;
+  superroc::models::QwenModelWeights weights;
   weights.config.llama = true;
-  const gufo::hip::QwenGpuModel model(nullptr, std::move(weights), nullptr, {},
+  const superroc::hip::QwenGpuModel model(nullptr, std::move(weights), nullptr, {},
                                       {}, nullptr);
   bool threw = false;
   try {
@@ -70,8 +70,8 @@ void TestLlamaGetTokenizerThrows() {
 // the exact override Create applies, since building an executor needs a fully
 // loaded model.
 void TestLlamaCreateResolvesFp32KvPolicy() {
-  auto policy = gufo::hip::QwenExecutionPolicy::Production();
-  gufo::hip::ApplyLlamaExecutionPolicy(policy);
+  auto policy = superroc::hip::QwenExecutionPolicy::Production();
+  superroc::hip::ApplyLlamaExecutionPolicy(policy);
   Expect(!policy.UsesFp16AttentionKv(), "llama policy keeps fp32 KV cache");
   Expect(!policy.fuse_qk_norm_rope_kv, "llama policy unfused QK-RoPE-KV");
   Expect(policy.glimmer_fp16_kv, "llama policy glimmer fp16 KV plane");
@@ -155,10 +155,10 @@ std::vector<std::uint8_t> BuildSyntheticLlamaConfig(
   return buf;
 }
 
-std::optional<gufo::core::ModelConfig> ParseSyntheticConfig(
+std::optional<superroc::core::ModelConfig> ParseSyntheticConfig(
     const std::vector<std::uint8_t>& file, std::string& error) {
   const auto reader =
-      gufo::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
+      superroc::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
   Expect(reader != nullptr, "open synthetic llama GGUF: " + error);
   return reader->ExtractModelConfig(&error);
 }
@@ -215,7 +215,7 @@ int main() {
   }
 
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(gguf, &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(gguf, &error);
   Expect(reader != nullptr, "open GGUF: " + error);
 
   const auto cfg_opt = reader->ExtractModelConfig(&error);
@@ -247,9 +247,9 @@ int main() {
          "rope.freq_base got " + std::to_string(cfg.rope_theta));
   Expect(cfg.norm_eps_pre == 1.0e-5F,
          "layer_norm_rms_epsilon got " + std::to_string(cfg.norm_eps_pre));
-  Expect(cfg.rope_variant == gufo::core::RopeVariant::kNorm,
+  Expect(cfg.rope_variant == superroc::core::RopeVariant::kNorm,
          "adjacent-pair (NORM) RoPE");
-  Expect(cfg.attn_gate_mode == gufo::core::AttnGateMode::kFused,
+  Expect(cfg.attn_gate_mode == superroc::core::AttnGateMode::kFused,
          "fused attention gate mode");
   Expect(cfg.AttentionSize() == 56U * 128U, "attention size 7168");
   Expect(cfg.FullAttentionLayerCount() == 52U, "every layer full attention");

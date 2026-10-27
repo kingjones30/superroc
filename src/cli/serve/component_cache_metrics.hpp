@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_COMPONENT_CACHE_METRICS_HPP_
-#define GUFO_SERVER_COMPONENT_CACHE_METRICS_HPP_
+#ifndef SUPERROC_SERVER_COMPONENT_CACHE_METRICS_HPP_
+#define SUPERROC_SERVER_COMPONENT_CACHE_METRICS_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -12,7 +12,7 @@
 #include "src/cache/streaming.hpp"
 #include "src/core/json.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 struct ComponentCacheMetrics {
   std::string reuse{"none"};
   std::uint32_t selection_reason{};
@@ -101,5 +101,5 @@ inline json::Value ComponentCacheJson(const ComponentCacheMetrics& value) {
   }
   return result;
 }
-}  // namespace gufo::server
+}  // namespace superroc::server
 #endif

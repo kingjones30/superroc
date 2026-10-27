@@ -321,7 +321,7 @@ These focused observations do not replace the complete benchmark table or
 establish statistical language quality.
 
 llama.cpp `10b8b755` also verifies context proposals against the target, but its
-ngram path samples the target directly and compares the token. Gufo retains
+ngram path samples the target directly and compares the token. SuperROC retains
 point-mass rejection sampling for copies alongside its neural p/q proposals.
 Both preserve the target distribution; identical seeded streams or a speed
 advantage over llama.cpp are not claimed. Target arithmetic and weights are
@@ -396,7 +396,7 @@ its translation is correct, but its extra grammar explanation mislabels a
 declension. Changed proposals can consume RNG differently across builds.
 These numerical, replay and functional checks establish regression evidence
 against main, not upstream unquantized-model accuracy or a statistical
-language-quality result. The Gufo benchmark refresh below retains all llama.cpp
+language-quality result. The SuperROC benchmark refresh below retains all llama.cpp
 data unchanged.
 
 The cache follow-up in `fdc21849` changes storage and bookkeeping while
@@ -561,9 +561,9 @@ Older Flash-Next disk checkpoints are rejected and rebuilt once.
 
 ## Vision
 
-**One Gufo encoder comparison fails:** relative L2 **6.47%** versus official
+**One SuperROC encoder comparison fails:** relative L2 **6.47%** versus official
 Transformers BF16, above the **5%** limit, on a 1024×1024 synthetic texture.
-Both use the same converted GGUF weights. Against FP32, Gufo and Transformers
+Both use the same converted GGUF weights. Against FP32, SuperROC and Transformers
 BF16 differ by **7.83% / 8.10%**, respectively. This is numerical drift, not an
 image-answer score; **llama.cpp was not tested**. Optimizations retain native
 embedding bytes but do not resolve this gap. [Evidence](artifacts/vision-parity.json).
@@ -593,7 +593,7 @@ weights. [Vision reproduction](../qwen3.8-27b/QUALITY.md#vision).
 
 ## Benchmark method
 
-All Gufo tables were refreshed on October 18, 2026, with the clean production
+All SuperROC tables were refreshed on October 18, 2026, with the clean production
 Nix build `fec4759d` (ELF SHA-256 prefix `1d822fb97b4639c61`).
 The pinned compiler and dependencies are unchanged; the package includes the
 qualified ROCr host-memory patch. Every single-user row reproduces the
@@ -609,7 +609,7 @@ retained samples are in [artifacts](artifacts/bench.json) and
 [model identities](artifacts/model-identities.json). Full raw requests, phase
 timings, diagnostic profiles and repeated controls are retained outside Git.
 
-The driver is `tools/bench/model-bench.py run --target gufo --fresh`.
+The driver is `tools/bench/model-bench.py run --target superroc --fresh`.
 One warmed sample per point, HTTP, greedy, thinking off, penalties disabled;
 automatic cache RAM budget. Repetitive MTP through 64K also includes one
 focused repeat, preserving the ordered history and the initial sweep's realized

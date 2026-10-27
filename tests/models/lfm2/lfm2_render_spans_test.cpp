@@ -9,10 +9,10 @@
 
 namespace {
 
-using gufo::tokenization::ChatMessage;
-using gufo::tokenization::ChatRole;
-using gufo::tokenization::ChatTool;
-using gufo::tokenization::ContentSpan;
+using superroc::tokenization::ChatMessage;
+using superroc::tokenization::ChatRole;
+using superroc::tokenization::ChatTool;
+using superroc::tokenization::ContentSpan;
 
 int failures = 0;
 
@@ -62,7 +62,7 @@ int main() {
   std::vector<ContentSpan> spans;
   std::string error;
   const auto out =
-      gufo::tokenization::Lfm2Render(messages, tools, {}, &error, &spans);
+      superroc::tokenization::Lfm2Render(messages, tools, {}, &error, &spans);
   Check(out.has_value(), "render ok " + error);
   if (out.has_value()) {
     Check(InContent(*out, spans, evil), "tool description is content");

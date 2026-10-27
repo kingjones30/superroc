@@ -22,10 +22,11 @@
 #include "src/models/qwen/generator.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "tests/models/qwen27b/sampling_cases.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
-using TokenId = gufo::tokenization::TokenId;
+using TokenId = superroc::tokenization::TokenId;
 
 void Expect(bool condition, const std::string& message) {
   if (!condition) {
@@ -33,10 +34,10 @@ void Expect(bool condition, const std::string& message) {
   }
 }
 
-std::vector<TokenId> GenerateDirect(gufo::hip::QwenGpuExecutor& executor,
+std::vector<TokenId> GenerateDirect(superroc::hip::QwenGpuExecutor& executor,
                                     std::span<const TokenId> prompt_tokens,
                                     std::size_t max_tokens) {
-  gufo::models::GenerationOptions options;
+  superroc::models::GenerationOptions options;
   options.max_new_tokens = max_tokens;
   options.sampling.temperature = 0.0F;
   return executor.Generate(prompt_tokens, options);
@@ -49,17 +50,17 @@ void ExpectStableGpuMemory(std::size_t before, std::size_t after) {
 }
 
 void CheckSamplingStrategies(
-    gufo::server::InferenceBackend& backend,
-    gufo::server::InferenceBackend* speculative_backend = nullptr) {
+    superroc::server::InferenceBackend& backend,
+    superroc::server::InferenceBackend* speculative_backend = nullptr) {
   constexpr std::uint32_t token_count = 8;
   struct Reference {
     std::string prompt;
-    gufo::sampling::SamplingConfig config;
-    gufo::server::InferenceBackend::Result ar;
-    gufo::server::InferenceBackend::Result speculative;
+    superroc::sampling::SamplingConfig config;
+    superroc::server::InferenceBackend::Result ar;
+    superroc::server::InferenceBackend::Result speculative;
   };
   std::vector<Reference> references;
-  for (const auto& test : gufo::test::QwenSamplingCases()) {
+  for (const auto& test : superroc::test::QwenSamplingCases()) {
     const auto prompt = "Sampling " + std::string(test.name) +
                         ": Continue red, blue, blue, red,";
     const auto ar = backend.complete(prompt, token_count, test.config);
@@ -89,10 +90,10 @@ void CheckSamplingStrategies(
     std::cout << "Sampling replay passed: " << test.name
               << (speculative_backend ? " (AR + DFlash2)" : " (AR)") << '\n';
   }
-  const auto check_concurrent = [&](gufo::server::InferenceBackend& current,
+  const auto check_concurrent = [&](superroc::server::InferenceBackend& current,
                                     bool speculative, std::size_t width,
                                     std::size_t offset) {
-    std::vector<std::future<gufo::server::InferenceBackend::Result>> pending;
+    std::vector<std::future<superroc::server::InferenceBackend::Result>> pending;
     pending.reserve(width);
     for (std::size_t row = 0; row < width; ++row) {
       const auto* reference = &references[(offset + row) % references.size()];
@@ -140,7 +141,7 @@ class TemporaryDirectory {
 public:
   TemporaryDirectory() {
     std::string pattern =
-        (std::filesystem::temp_directory_path() / "gufo-qwen-disk-cache-XXXXXX")
+        (std::filesystem::temp_directory_path() / "superroc-qwen-disk-cache-XXXXXX")
             .string();
     const char* created = ::mkdtemp(pattern.data());
     if (created == nullptr) {
@@ -166,24 +167,24 @@ private:
 };
 
 void RunPromptReuseSmoke(
-    const std::shared_ptr<const gufo::hip::QwenGpuModel>& model,
-    gufo::server::InferenceBackend& backend) {
+    const std::shared_ptr<const superroc::hip::QwenGpuModel>& model,
+    superroc::server::InferenceBackend& backend) {
   // This fixture supplies a visible assistant answer, not a reasoning trace.
   // Match the full cache suite's template so it extends the original prefix.
-  const gufo::tokenization::ChatTemplateOptions cache_template{
+  const superroc::tokenization::ChatTemplateOptions cache_template{
       .enable_thinking = false};
   const auto cache_request = [](const auto& messages) {
-    gufo::server::ChatRequest request(messages);
+    superroc::server::ChatRequest request(messages);
     request.reasoning.enabled = false;
     return request;
   };
-  const std::vector<gufo::tokenization::ChatMessage> messages = {
-      {gufo::tokenization::ChatRole::kSystem, "Answer with one short sentence.",
+  const std::vector<superroc::tokenization::ChatMessage> messages = {
+      {superroc::tokenization::ChatRole::kSystem, "Answer with one short sentence.",
        "", ""},
-      {gufo::tokenization::ChatRole::kUser, "Name one primary color.", "", ""},
+      {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "", ""},
   };
   const auto rendered_chat =
-      gufo::tokenization::QwenChatTemplate::Render(messages, cache_template);
+      superroc::tokenization::QwenChatTemplate::Render(messages, cache_template);
   Expect(rendered_chat.has_value() && !rendered_chat->empty(),
          "prefix-reuse chat prompt rendering");
   const auto prompt = model->GetTokenizer().Encode(*rendered_chat);
@@ -203,12 +204,12 @@ void RunPromptReuseSmoke(
          "exact prompt reuse must avoid another full snapshot copy");
 
   auto continued_messages = messages;
-  continued_messages.emplace_back(gufo::tokenization::ChatRole::kAssistant,
+  continued_messages.emplace_back(superroc::tokenization::ChatRole::kAssistant,
                                   "Blue.");
-  continued_messages.emplace_back(gufo::tokenization::ChatRole::kUser,
+  continued_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                   "Name a different primary color.");
   const auto rendered_continuation =
-      gufo::tokenization::QwenChatTemplate::Render(continued_messages,
+      superroc::tokenization::QwenChatTemplate::Render(continued_messages,
                                                    cache_template);
   Expect(rendered_continuation.has_value(),
          "prefix-reuse continuation prompt rendering");
@@ -227,16 +228,16 @@ void RunPromptReuseSmoke(
 }
 
 void CheckGeneratedFrontierReuse(
-    const std::shared_ptr<const gufo::hip::QwenGpuModel>& model,
+    const std::shared_ptr<const superroc::hip::QwenGpuModel>& model,
     const char* draft_path) {
-  using Backend = gufo::server::InferenceBackend;
-  using Role = gufo::tokenization::ChatRole;
-  const gufo::server::TextSpeculativeConfig draft{
-      .backend = gufo::server::TextSpeculativeBackend::kDFlash,
+  using Backend = superroc::server::InferenceBackend;
+  using Role = superroc::tokenization::ChatRole;
+  const superroc::server::TextSpeculativeConfig draft{
+      .backend = superroc::server::TextSpeculativeBackend::kDFlash,
       .draft_model_path = draft_path,
   };
   const auto request = [](const auto& messages) {
-    gufo::server::ChatRequest result(messages);
+    superroc::server::ChatRequest result(messages);
     result.reasoning.enabled = false;
     return result;
   };
@@ -245,7 +246,7 @@ void CheckGeneratedFrontierReuse(
     Backend ar, spec;
     Expect(ar.load(model, &error, 256, 1), error);
     Expect(spec.load(model, &error, 256, 1, {}, {}, draft), error);
-    const std::vector<gufo::tokenization::ChatMessage> messages{
+    const std::vector<superroc::tokenization::ChatMessage> messages{
         {Role::kUser,
          "Explain why careful reasoning and clear examples make technical "
          "writing useful. Include several contrasting examples."}};
@@ -266,7 +267,7 @@ void CheckGeneratedFrontierReuse(
     Expect(continued_ar.tokens == continued_spec.tokens,
            "AR/DFlash2 differ after resuming their generated frontier");
 
-    const gufo::sampling::SamplingConfig sampling{
+    const superroc::sampling::SamplingConfig sampling{
         .temperature = 0.8F, .top_k = 40, .top_p = 0.9F, .seed = 47};
     const auto sampled_ar = ar.chat(request(continuation), 8, sampling);
     const auto sampled_spec = spec.chat(request(continuation), 8, sampling);
@@ -288,14 +289,14 @@ void CheckGeneratedFrontierReuse(
       // both AR and DFlash2 checkpoints, then restore into fresh sessions.
       for (const bool speculative : {false, true}) {
         TemporaryDirectory directory;
-        const gufo::server::TextDiskCacheConfig disk{
+        const superroc::server::TextDiskCacheConfig disk{
             .directory = directory.path(),
             .model_artifact_fingerprint = std::string(64, 'a'),
             .draft_model_artifact_fingerprint =
                 speculative ? std::string(64, 'b') : "",
         };
         const auto mode =
-            speculative ? draft : gufo::server::TextSpeculativeConfig{};
+            speculative ? draft : superroc::server::TextSpeculativeConfig{};
         {
           Backend writer;
           Expect(writer.load(model, &error, 256, 1, {}, {}, mode, disk), error);
@@ -318,10 +319,10 @@ void CheckGeneratedFrontierReuse(
   for (const bool speculative : {false, true}) {
     Backend oracle, forks;
     const auto mode =
-        speculative ? draft : gufo::server::TextSpeculativeConfig{};
+        speculative ? draft : superroc::server::TextSpeculativeConfig{};
     Expect(oracle.load(model, &error, 256, 1, {}, {}, mode), error);
     Expect(forks.load(model, &error, 256, 4, {}, {}, mode), error);
-    const std::vector<gufo::tokenization::ChatMessage> messages{
+    const std::vector<superroc::tokenization::ChatMessage> messages{
         {Role::kUser,
          "Explain why careful reasoning and clear examples make technical "
          "writing useful. Include several contrasting examples."}};
@@ -334,8 +335,8 @@ void CheckGeneratedFrontierReuse(
     continuation.emplace_back(
         Role::kUser, "Continue the explanation with concrete examples.");
     for (const auto& sampling :
-         {gufo::sampling::SamplingConfig{},
-          gufo::sampling::SamplingConfig{
+         {superroc::sampling::SamplingConfig{},
+          superroc::sampling::SamplingConfig{
               .temperature = 0.8F, .top_k = 40, .top_p = 0.9F, .seed = 47}}) {
       const auto expected = oracle.chat(request(continuation), 24, sampling);
       std::vector<std::shared_ptr<Backend::GenerationRequest>> pending;
@@ -365,14 +366,14 @@ void CheckGeneratedFrontierReuse(
   for (const bool speculative : {false, true}) {
     Backend interrupted, reference;
     const auto mode =
-        speculative ? draft : gufo::server::TextSpeculativeConfig{};
+        speculative ? draft : superroc::server::TextSpeculativeConfig{};
     Expect(interrupted.load(model, &error, 256, 1, {}, {}, mode), error);
     Expect(reference.load(model, &error, 256, 1), error);
-    const std::vector<gufo::tokenization::ChatMessage> messages{
+    const std::vector<superroc::tokenization::ChatMessage> messages{
         {Role::kUser, "Describe a quiet mountain village in detail."}};
     std::size_t pieces = 0;
     const auto stopped = interrupted.chat(
-        request(messages), 64, gufo::sampling::SamplingConfig{}, {},
+        request(messages), 64, superroc::sampling::SamplingConfig{}, {},
         [&pieces](std::string_view) { return ++pieces < 24; });
     Expect(stopped.finish_reason == Backend::FinishReason::kCancelled &&
                !stopped.tokens.empty(),
@@ -409,19 +410,19 @@ void CheckGeneratedFrontierReuse(
 int main(int argc, const char* const* argv) {
   try {
     const char* model_path =
-        argc > 1 ? argv[1] : std::getenv("GUFO_QWEN27B_MODEL");
+        argc > 1 ? argv[1] : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
     if (model_path == nullptr) {
       std::cout << "SKIP: pass a Qwen GGUF path for the gfx1151 server test; "
                    "append --full for the exhaustive suite\n";
       return 77;
     }
 
-    const char* draft_model_path = std::getenv("GUFO_QWEN27B_DFLASH_MODEL");
+    const char* draft_model_path = ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_DFLASH_MODEL");
     bool run_full_suite = draft_model_path != nullptr;
     bool sampling_only = false;
     bool cache_only = false;
     bool continuation_only = false;
-    auto sampling_policy = gufo::speculative::DFlashDraftPolicy::kAdaptive;
+    auto sampling_policy = superroc::speculative::DFlashDraftPolicy::kAdaptive;
     for (int index = 2; index < argc; ++index) {
       const std::string_view argument = argv[index];
       if (argument == "--full") {
@@ -433,7 +434,7 @@ int main(int argc, const char* const* argv) {
       } else if (argument == "--continuation-only") {
         continuation_only = true;
       } else if (argument == "--fixed") {
-        sampling_policy = gufo::speculative::DFlashDraftPolicy::kFixed;
+        sampling_policy = superroc::speculative::DFlashDraftPolicy::kFixed;
       } else if (argument.starts_with("--")) {
         throw std::invalid_argument("unknown Qwen GPU test option");
       } else if (draft_model_path == nullptr) {
@@ -445,11 +446,11 @@ int main(int argc, const char* const* argv) {
     }
 
     std::string error;
-    auto reader_owner = gufo::core::GgufReader::OpenFile(model_path, &error);
+    auto reader_owner = superroc::core::GgufReader::OpenFile(model_path, &error);
     Expect(reader_owner != nullptr, error);
-    const std::shared_ptr<const gufo::core::GgufReader> reader(
+    const std::shared_ptr<const superroc::core::GgufReader> reader(
         std::move(reader_owner));
-    auto model = gufo::hip::QwenGpuModel::CreateFromGguf(reader, &error);
+    auto model = superroc::hip::QwenGpuModel::CreateFromGguf(reader, &error);
     Expect(model != nullptr, error);
     Expect(model->GetWeightRegionCount() == reader->GetMappedRegions().size(),
            "every mapped GGUF shard must have one shared GPU region");
@@ -464,15 +465,15 @@ int main(int argc, const char* const* argv) {
     }
     const std::uint32_t context = run_full_suite ? 256U : 64U;
     const std::size_t state_count = run_full_suite ? 8U : 1U;
-    gufo::server::InferenceBackend backend;
+    superroc::server::InferenceBackend backend;
     Expect(!backend.load(
                model, &error, context, state_count, {}, {},
-               {.backend = gufo::server::TextSpeculativeBackend::kMtp}) &&
+               {.backend = superroc::server::TextSpeculativeBackend::kMtp}) &&
                error.find("Flash-Next") != std::string::npos,
            "Qwen27B must reject MTP instead of silently running AR");
     Expect(
         !backend.load(model, &error, context, state_count, {}, {},
-                      {.backend = gufo::server::TextSpeculativeBackend::kDFlash,
+                      {.backend = superroc::server::TextSpeculativeBackend::kDFlash,
                        .min_draft_tokens = 2}) &&
             error.find("min-draft-tokens") != std::string::npos,
         "DFlash must reject an unused adaptive draft floor");
@@ -486,12 +487,12 @@ int main(int argc, const char* const* argv) {
       if (draft_model_path == nullptr) {
         CheckSamplingStrategies(backend);
       } else {
-        gufo::server::InferenceBackend speculative_backend;
+        superroc::server::InferenceBackend speculative_backend;
         Expect(speculative_backend.load(
                    model, &error, context, state_count,
                    {.decode_active_tokens = 8},
                    {.max_pending_requests_per_client = 8},
-                   {.backend = gufo::server::TextSpeculativeBackend::kDFlash,
+                   {.backend = superroc::server::TextSpeculativeBackend::kDFlash,
                     .draft_model_path = draft_model_path,
                     .max_draft_tokens = 7,
                     .min_draft_tokens = 1,
@@ -509,7 +510,7 @@ int main(int argc, const char* const* argv) {
       return 0;
     }
 
-    auto direct = gufo::hip::QwenGpuExecutor::Create(model, &error, context);
+    auto direct = superroc::hip::QwenGpuExecutor::Create(model, &error, context);
     Expect(direct != nullptr, error);
 
     const std::string raw_prompt = "The capital of France is";
@@ -517,7 +518,7 @@ int main(int argc, const char* const* argv) {
 
     {
       auto snapshot_source =
-          gufo::hip::QwenGpuExecutor::Create(model, &error, context);
+          superroc::hip::QwenGpuExecutor::Create(model, &error, context);
       Expect(snapshot_source != nullptr, error);
       const auto frontier =
           snapshot_source->ForwardPromptBatch(raw_prompt_tokens);
@@ -529,7 +530,7 @@ int main(int argc, const char* const* argv) {
           frontier, static_cast<std::uint32_t>(raw_prompt_tokens.size()));
 
       for (int fork_index = 0; fork_index < 2; ++fork_index) {
-        auto fork = gufo::hip::QwenGpuExecutor::Create(model, &error, context);
+        auto fork = superroc::hip::QwenGpuExecutor::Create(model, &error, context);
         Expect(fork != nullptr, error);
         fork->RestoreSnapshot(*snapshot);
         const auto forked = fork->ForwardToken(
@@ -548,18 +549,18 @@ int main(int argc, const char* const* argv) {
     Expect(http_raw.ttft_ms > 0.0, "raw HTTP TTFT must be reported");
 
     if (draft_model_path != nullptr) {
-      gufo::server::InferenceBackend speculative_backend;
+      superroc::server::InferenceBackend speculative_backend;
       Expect(
           speculative_backend.load(
               model, &error, context, state_count, {.decode_active_tokens = 8},
               {.max_pending_requests_per_client = 8},
-              gufo::server::TextSpeculativeConfig{
-                  .backend = gufo::server::TextSpeculativeBackend::kDFlash,
+              superroc::server::TextSpeculativeConfig{
+                  .backend = superroc::server::TextSpeculativeBackend::kDFlash,
                   .draft_model_path = draft_model_path,
                   .max_draft_tokens = 7,
                   .min_draft_tokens = 1,
                   .dflash_policy =
-                      gufo::speculative::DFlashDraftPolicy::kAdaptive,
+                      superroc::speculative::DFlashDraftPolicy::kAdaptive,
               }),
           error);
       const auto direct_spec = GenerateDirect(*direct, raw_prompt_tokens, 8);
@@ -573,7 +574,7 @@ int main(int argc, const char* const* argv) {
       Expect(!http_spec.cache_hit,
              "first DFlash HTTP request must be a cache miss");
 
-      const gufo::sampling::SamplingConfig sampling{
+      const superroc::sampling::SamplingConfig sampling{
           .temperature = 0.8F,
           .top_k = 40,
           .top_p = 0.9F,
@@ -623,7 +624,7 @@ int main(int argc, const char* const* argv) {
         }
       }
 
-      const gufo::sampling::SamplingConfig greedy_penalties{
+      const superroc::sampling::SamplingConfig greedy_penalties{
           .temperature = 0.0F,
           .seed = 73,
           .repeat_penalty = 1.1F,
@@ -645,27 +646,27 @@ int main(int argc, const char* const* argv) {
                  penalized_replay.tokens == penalized_spec.tokens,
              "greedy penalized DFlash cached replay changed tokens");
 
-      const std::vector<gufo::tokenization::ChatMessage> spec_messages = {
-          {gufo::tokenization::ChatRole::kSystem,
+      const std::vector<superroc::tokenization::ChatMessage> spec_messages = {
+          {superroc::tokenization::ChatRole::kSystem,
            "Answer with one short sentence.", "", ""},
-          {gufo::tokenization::ChatRole::kUser, "Name one primary color.", "",
+          {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "",
            ""},
       };
       // This fixture must actually reach EOS, rather than truncate the
       // now-default thinking trace at its 32-token budget.
-      gufo::server::ChatRequest spec_request(spec_messages);
+      superroc::server::ChatRequest spec_request(spec_messages);
       spec_request.reasoning.enabled = false;
       const auto template_options =
-          gufo::tokenization::ResolveQwenChatOptions(spec_request.reasoning);
+          superroc::tokenization::ResolveQwenChatOptions(spec_request.reasoning);
       const auto first_spec_chat =
           speculative_backend.chat(spec_request, 32, {});
-      const auto stop_prompt = gufo::tokenization::QwenChatTemplate::Render(
+      const auto stop_prompt = superroc::tokenization::QwenChatTemplate::Render(
           spec_messages, template_options);
       Expect(stop_prompt.has_value(), "DFlash stop prompt rendering");
       const auto first_ar_tokens = GenerateDirect(
           *direct, model->GetTokenizer().Encode(*stop_prompt), 32);
       Expect(first_spec_chat.finish_reason ==
-                     gufo::server::TextGenerationBackend::FinishReason::kStop &&
+                     superroc::server::TextGenerationBackend::FinishReason::kStop &&
                  first_spec_chat.tokens == first_ar_tokens,
              "DFlash must reach EOS with the same published tokens as AR");
       Expect(!first_spec_chat.cache_hit,
@@ -675,21 +676,21 @@ int main(int argc, const char* const* argv) {
 
       auto continued_spec_messages = spec_messages;
       continued_spec_messages.emplace_back(
-          gufo::tokenization::ChatRole::kAssistant, first_spec_chat.text);
-      continued_spec_messages.emplace_back(gufo::tokenization::ChatRole::kUser,
+          superroc::tokenization::ChatRole::kAssistant, first_spec_chat.text);
+      continued_spec_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                            "Name a different primary color.");
       auto forked_spec_messages = spec_messages;
       forked_spec_messages.emplace_back(
-          gufo::tokenization::ChatRole::kAssistant, first_spec_chat.text);
-      forked_spec_messages.emplace_back(gufo::tokenization::ChatRole::kUser,
+          superroc::tokenization::ChatRole::kAssistant, first_spec_chat.text);
+      forked_spec_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                         "Name one warm primary color.");
       const auto rendered_spec_continuation =
-          gufo::tokenization::QwenChatTemplate::Render(continued_spec_messages,
+          superroc::tokenization::QwenChatTemplate::Render(continued_spec_messages,
                                                        template_options);
       Expect(rendered_spec_continuation.has_value(),
              "DFlash continuation prompt rendering");
       const auto rendered_spec_fork =
-          gufo::tokenization::QwenChatTemplate::Render(forked_spec_messages,
+          superroc::tokenization::QwenChatTemplate::Render(forked_spec_messages,
                                                        template_options);
       Expect(rendered_spec_fork.has_value(), "DFlash fork prompt rendering");
       const auto direct_spec_continuation = GenerateDirect(
@@ -698,10 +699,10 @@ int main(int argc, const char* const* argv) {
       const auto direct_spec_fork = GenerateDirect(
           *direct, model->GetTokenizer().Encode(*rendered_spec_fork), 2);
 
-      gufo::server::ChatRequest continued_spec_request(continued_spec_messages);
+      superroc::server::ChatRequest continued_spec_request(continued_spec_messages);
       continued_spec_request.reasoning = spec_request.reasoning;
       continued_spec_request.client_id = "dflash-snapshot-branch-a";
-      gufo::server::ChatRequest forked_spec_request(forked_spec_messages);
+      superroc::server::ChatRequest forked_spec_request(forked_spec_messages);
       forked_spec_request.reasoning = spec_request.reasoning;
       forked_spec_request.client_id = "dflash-snapshot-branch-b";
       auto pending_spec_continuation =
@@ -741,21 +742,21 @@ int main(int argc, const char* const* argv) {
     // Cache-prefix fixtures disable thinking: reinserting an unfinished
     // reasoning trace as ordinary assistant content changes the template
     // prefix rather than extending the saved prompt.
-    const gufo::tokenization::ChatTemplateOptions cache_template{
+    const superroc::tokenization::ChatTemplateOptions cache_template{
         .enable_thinking = false};
     const auto cache_request = [](const auto& messages) {
-      gufo::server::ChatRequest request(messages);
+      superroc::server::ChatRequest request(messages);
       request.reasoning.enabled = false;
       return request;
     };
-    const std::vector<gufo::tokenization::ChatMessage> messages = {
-        {gufo::tokenization::ChatRole::kSystem,
+    const std::vector<superroc::tokenization::ChatMessage> messages = {
+        {superroc::tokenization::ChatRole::kSystem,
          "Answer with one short sentence.", "", ""},
-        {gufo::tokenization::ChatRole::kUser, "Name one primary color.", "",
+        {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "",
          ""},
     };
     const auto rendered_chat =
-        gufo::tokenization::QwenChatTemplate::Render(messages, cache_template);
+        superroc::tokenization::QwenChatTemplate::Render(messages, cache_template);
     Expect(rendered_chat.has_value() && !rendered_chat->empty(),
            "CLI chat prompt rendering");
     const auto chat_prompt = model->GetTokenizer().Encode(*rendered_chat);
@@ -775,19 +776,19 @@ int main(int argc, const char* const* argv) {
            "exact Qwen reuse avoids another full snapshot copy");
 
     auto continued_messages = messages;
-    continued_messages.emplace_back(gufo::tokenization::ChatRole::kAssistant,
+    continued_messages.emplace_back(superroc::tokenization::ChatRole::kAssistant,
                                     http_chat.text);
-    continued_messages.emplace_back(gufo::tokenization::ChatRole::kUser,
+    continued_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                     "Name a different primary color.");
     auto forked_messages = messages;
-    forked_messages.emplace_back(gufo::tokenization::ChatRole::kAssistant,
+    forked_messages.emplace_back(superroc::tokenization::ChatRole::kAssistant,
                                  http_chat.text);
-    forked_messages.emplace_back(gufo::tokenization::ChatRole::kUser,
+    forked_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                  "Name one warm primary color.");
     const auto rendered_continuation =
-        gufo::tokenization::QwenChatTemplate::Render(continued_messages,
+        superroc::tokenization::QwenChatTemplate::Render(continued_messages,
                                                      cache_template);
-    const auto rendered_fork = gufo::tokenization::QwenChatTemplate::Render(
+    const auto rendered_fork = superroc::tokenization::QwenChatTemplate::Render(
         forked_messages, cache_template);
     Expect(rendered_continuation.has_value(),
            "continued chat prompt rendering");
@@ -810,7 +811,7 @@ int main(int argc, const char* const* argv) {
                   direct->GetMemoryUsage().request_state_bytes &&
               snapshot->CompactPayloadBytes() == snapshot->PayloadBytes() + 80,
           "Qwen snapshot retains only live KV and recurrent layers");
-      gufo::models::GenerationOptions options;
+      superroc::models::GenerationOptions options;
       options.max_new_tokens = 2;
       options.sampling.temperature = 0.0F;
       // Direct prefix restoration takes exact executed IDs. Server transcript
@@ -831,7 +832,7 @@ int main(int argc, const char* const* argv) {
              "prefill");
 
       auto restored =
-          gufo::hip::QwenGpuExecutor::Create(model, &error, context);
+          superroc::hip::QwenGpuExecutor::Create(model, &error, context);
       Expect(restored != nullptr, error);
       // Restore over an unrelated, longer history. Rows after the snapshot
       // frontier may remain stale, but no attention path may read them.
@@ -851,7 +852,7 @@ int main(int argc, const char* const* argv) {
 
     {
       TemporaryDirectory cache_directory;
-      const gufo::server::TextDiskCacheConfig disk_cache{
+      const superroc::server::TextDiskCacheConfig disk_cache{
           .directory = cache_directory.path(),
           .capacity_bytes = 1024ULL * 1024ULL * 1024ULL,
           .staging_capacity_bytes = 512ULL * 1024ULL * 1024ULL,
@@ -859,7 +860,7 @@ int main(int argc, const char* const* argv) {
           .draft_model_artifact_fingerprint = {},
       };
       {
-        gufo::server::InferenceBackend writer;
+        superroc::server::InferenceBackend writer;
         Expect(writer.load(model, &error, context, 1, {}, {}, {}, disk_cache),
                error);
         const auto persistent_root =
@@ -872,7 +873,7 @@ int main(int argc, const char* const* argv) {
                "Qwen disk writer did not publish a compact snapshot");
       }
 
-      gufo::server::InferenceBackend restarted;
+      superroc::server::InferenceBackend restarted;
       Expect(restarted.load(model, &error, context, 1, {}, {}, {}, disk_cache),
              error);
       const auto restored_continuation =
@@ -891,7 +892,7 @@ int main(int argc, const char* const* argv) {
 
       auto incompatible_cache = disk_cache;
       incompatible_cache.model_artifact_fingerprint = std::string(64, 'b');
-      gufo::server::InferenceBackend incompatible;
+      superroc::server::InferenceBackend incompatible;
       Expect(incompatible.load(model, &error, context, 1, {}, {}, {},
                                incompatible_cache),
              error);
@@ -904,8 +905,8 @@ int main(int argc, const char* const* argv) {
              "Qwen compatibility miss changed cold execution");
 
       if (draft_model_path != nullptr) {
-        const gufo::server::TextSpeculativeConfig dflash_config{
-            .backend = gufo::server::TextSpeculativeBackend::kDFlash,
+        const superroc::server::TextSpeculativeConfig dflash_config{
+            .backend = superroc::server::TextSpeculativeBackend::kDFlash,
             .draft_model_path = draft_model_path,
             .max_draft_tokens = 7,
             .min_draft_tokens = 1,
@@ -916,7 +917,7 @@ int main(int argc, const char* const* argv) {
         const auto direct_dflash_continuation =
             GenerateDirect(*direct, continuation_prompt, 8);
 
-        gufo::server::InferenceBackend warm_dflash;
+        superroc::server::InferenceBackend warm_dflash;
         Expect(
             warm_dflash.load(model, &error, context, 1, {}, {}, dflash_config),
             error);
@@ -933,7 +934,7 @@ int main(int argc, const char* const* argv) {
                "warm DFlash continuation did not exercise drafting");
 
         {
-          gufo::server::InferenceBackend dflash_writer;
+          superroc::server::InferenceBackend dflash_writer;
           Expect(dflash_writer.load(model, &error, context, 1, {}, {},
                                     dflash_config, dflash_disk_cache),
                  error);
@@ -945,7 +946,7 @@ int main(int argc, const char* const* argv) {
                  "DFlash disk writer did not publish a compact snapshot");
         }
 
-        gufo::server::InferenceBackend restarted_dflash;
+        superroc::server::InferenceBackend restarted_dflash;
         Expect(restarted_dflash.load(model, &error, context, 1, {}, {},
                                      dflash_config, dflash_disk_cache),
                error);
@@ -973,7 +974,7 @@ int main(int argc, const char* const* argv) {
         auto incompatible_dflash_cache = dflash_disk_cache;
         incompatible_dflash_cache.draft_model_artifact_fingerprint =
             std::string(64, 'd');
-        gufo::server::InferenceBackend incompatible_dflash;
+        superroc::server::InferenceBackend incompatible_dflash;
         Expect(
             incompatible_dflash.load(model, &error, context, 1, {}, {},
                                      dflash_config, incompatible_dflash_cache),
@@ -1035,24 +1036,24 @@ int main(int argc, const char* const* argv) {
     // Small chunks also cover bounded prefill before the concurrent decode.
     Expect(backend.load(model, &error, context, 2, {.decode_active_tokens = 8}),
            error);
-    gufo::server::ChatRequest concurrent_a({
-        {gufo::tokenization::ChatRole::kUser,
+    superroc::server::ChatRequest concurrent_a({
+        {superroc::tokenization::ChatRole::kUser,
          "The quick brown fox jumps over the lazy dog. Explain why this "
          "sentence is commonly used.",
          "", ""},
     });
     concurrent_a.client_id = "batch-a";
-    gufo::server::ChatRequest concurrent_b({
-        {gufo::tokenization::ChatRole::kUser,
+    superroc::server::ChatRequest concurrent_b({
+        {superroc::tokenization::ChatRole::kUser,
          "Write a concise C++20 implementation of a fixed-capacity ring buffer "
          "with push, pop, front, and size. Explain the invariants.",
          "", ""},
     });
     concurrent_b.client_id = "batch-b";
     const auto rendered_a =
-        gufo::tokenization::QwenChatTemplate::Render(concurrent_a.messages);
+        superroc::tokenization::QwenChatTemplate::Render(concurrent_a.messages);
     const auto rendered_b =
-        gufo::tokenization::QwenChatTemplate::Render(concurrent_b.messages);
+        superroc::tokenization::QwenChatTemplate::Render(concurrent_b.messages);
     Expect(rendered_a.has_value() && rendered_b.has_value(),
            "concurrent chat prompt rendering");
     const auto direct_a =

@@ -5,7 +5,7 @@
 #include "src/models/qwen/hip/ops/swiglu.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip::detail {
+namespace superroc::hip::detail {
 namespace {
 
 template<core::GgmlType Type>
@@ -21,7 +21,7 @@ void LaunchWideFfn(const void* w, const float* x, float* y, std::size_t batch,
                                         true, 1, 64, kLanes>
         <<<((17408 + kRowsPerBlock - 1) / kRowsPerBlock) * Groups, 256, 0,
            stream>>>(w, x, y, 17408, 5120);
-    GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<8, Batch, kRows, Type, 1, 4, Groups, true, 1, 64, kLanes>");
+    SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<8, Batch, kRows, Type, 1, 4, Groups, true, 1, 64, kLanes>");
   };
   const auto grouped = [&]<std::size_t Batch>() {
     switch (groups) {
@@ -67,7 +67,7 @@ void Launch(const void* w, const float* x, float* y, std::size_t m,
                                               MinWaves, Groups, Narrow, Step,
                                               64, LogicalLanes>
               <<<grid, Waves * 32, 0, stream>>>(w, x, y, m, k);
-          GUFO_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<Waves, Batch, Rows, Type, Tiles, MinWaves, Groups, Narrow, Step, 64, LogicalLanes>");
+          SUPERROC_CHECK_LAUNCH("SmallBatchKQuantExactFp32GEMMKernel<Waves, Batch, Rows, Type, Tiles, MinWaves, Groups, Narrow, Step, 64, LogicalLanes>");
         }
       };
   const bool down = m == 5120 && k == 17408;
@@ -301,7 +301,7 @@ bool TryLaunchQ8SmallBatchWave64(const void* w, const float* x, float* y,
                                            Groups, Step, Distributed, true>
           <<<((m + 16 * Rows - 1) / (16 * Rows)) * Groups, 512, 0, stream>>>(
               w, x, y, m, k, batch);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     };
     if (batch <= 24) {
       launch.template operator()<12, 2, 4>();
@@ -323,7 +323,7 @@ bool TryLaunchQ8SmallBatchWave64(const void* w, const float* x, float* y,
         SmallBatchQ8_0ExactFp32VecGEMMKernel<16, 16, 3, true, true, 64, Groups,
                                              Step, Distributed>
             <<<((m + 47) / 48) * Groups, 512, 0, stream>>>(w, x, y, m, k);
-        if (::gufo::hip_check::LaunchFailed()) return false;
+        if (::superroc::hip_check::LaunchFailed()) return false;
       };
       if constexpr (Groups == 1) {
         if (up || (m == 10240 && k == 5120))
@@ -360,13 +360,13 @@ bool TryLaunchQ8SmallBatchWave64(const void* w, const float* x, float* y,
   if (batch == 12 && grouped_projection) {
     SmallBatchQ8_0ExactFp32VecGEMMKernel<16, 12, 4, true, true, 64>
         <<<(m + 63) / 64, 512, 0, stream>>>(w, x, y, m, k);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
     return true;
   }
   if (batch == 6 && m == 5120 && k == 17408) {
     SmallBatchQ8_0ExactFp32VecGEMMKernel<8, 6, 4, true, false, 64>
         <<<(m + 31) / 32, 256, 0, stream>>>(w, x, y, m, k);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
     return true;
   }
   return false;
@@ -389,7 +389,7 @@ bool TryLaunchBf16SmallBatchWave64(const void* w, const float* x, float* y,
         BatchedExactBf16GEMMFp32VecKernel<16, 16, Rows, false, 64, 1, true>
             <<<dim3(groups, (m + 16 * Rows - 1) / (16 * Rows)), 512, 0,
                stream>>>(static_cast<const hip_bfloat16*>(w), x, y, m, k);
-        if (::gufo::hip_check::LaunchFailed()) return false;
+        if (::superroc::hip_check::LaunchFailed()) return false;
       };
       launch.template operator()<3>();
       return true;
@@ -399,7 +399,7 @@ bool TryLaunchBf16SmallBatchWave64(const void* w, const float* x, float* y,
       BatchedExactBf16GEMMFp32VecKernel<16, 16, Rows, false, 64, Groups>
           <<<((m + 16 * Rows - 1) / (16 * Rows)) * Groups, 512, 0, stream>>>(
               static_cast<const hip_bfloat16*>(w), x, y, m, k);
-      if (::gufo::hip_check::LaunchFailed()) return false;
+      if (::superroc::hip_check::LaunchFailed()) return false;
     };
     const auto launch_shape = [&]<std::size_t Groups>() {
       if (down)
@@ -428,7 +428,7 @@ bool TryLaunchBf16SmallBatchWave64(const void* w, const float* x, float* y,
     BatchedExactBf16GEMMFp32VecKernel<Waves, Batch, Rows, true, 64>
         <<<(m + Waves * Rows - 1) / (Waves * Rows), Waves * 32, 0, stream>>>(
             static_cast<const hip_bfloat16*>(w), x, y, m, k);
-    if (::gufo::hip_check::LaunchFailed()) return false;
+    if (::superroc::hip_check::LaunchFailed()) return false;
   };
   const auto launch_shape = [&]<std::size_t Batch>() {
     if constexpr (Batch <= 11) {
@@ -581,9 +581,9 @@ bool TryLaunchKQuantSmallBatchWave64(core::GgmlType type, const void* w,
   }
 }
 
-}  // namespace gufo::hip::detail
+}  // namespace superroc::hip::detail
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 bool TryLaunchPackedQuantSwiGLUFp32(core::GgmlType type, const void* gate_up,
                                     const float* input, float* output,
@@ -612,7 +612,7 @@ bool TryLaunchPackedQuantSwiGLUFp32(core::GgmlType type, const void* gate_up,
                                             true, 1, 64, kLanes, true, true>
             <<<((34816 + kRowsPerBlock - 1) / kRowsPerBlock) * Groups, 256, 0,
                stream>>>(gate_up, input, output, 34816, 5120);
-        if (::gufo::hip_check::LaunchFailed()) return false;
+        if (::superroc::hip_check::LaunchFailed()) return false;
       };
   if (type == core::GgmlType::kQ4_K) {
     launch.template operator()<core::GgmlType::kQ4_K, 14, 1>();
@@ -640,5 +640,5 @@ bool TryLaunchPackedQuantSwiGLUFp32(core::GgmlType type, const void* gate_up,
   return true;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

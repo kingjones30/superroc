@@ -1,6 +1,6 @@
 function(add_llama_cpu_test target source)
   add_executable(${target} ${PROJECT_SOURCE_DIR}/${source})
-  target_link_libraries(${target} PRIVATE gufo_core)
+  target_link_libraries(${target} PRIVATE superroc_core)
   add_test(NAME ${target} COMMAND ${target})
   set_tests_properties(${target} PROPERTIES LABELS "cpu;models;llama")
 endfunction()

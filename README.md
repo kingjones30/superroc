@@ -5,15 +5,15 @@ and up to 128 GB of unified memory. It serves GGUF models, including 4-bit ROCmF
 Anthropic-compatible server with MTP and DSpark drafting and a prompt cache that can resume from any earlier
 conversation state.
 
-Super ROC is a fork of [Gufo](https://github.com/gufo-org/gufo) v0.19.0. Issues, pull requests and forks are welcome.
+Super ROC is its own engine project. Issues, pull requests and forks are welcome.
 
-## What Super ROC adds to Gufo
+## What Super ROC adds
 
 - **ROCmFP4 / ROCmFPX tensor types** (GGUF types 100 and above) in the loader, the kernels and the serving path, including
   spill-free dense prefill and decode kernels for the 4-bit types.
-- **`gufo-quant`**, a standalone GGUF quantizer for the ROC recipes (STRIX, STRIX_LEAN, LEAN, COHERENT, FAST and the G4
+- **`superroc-quant`**, a standalone GGUF quantizer for the ROC recipes (STRIX, STRIX_LEAN, LEAN, COHERENT, FAST and the G4
   variants) with protect rules, a tensor census, manifests and streaming output. For the ROC recipes its output is byte
-  for byte the same as the ROCmFPX `llama-quantize`. See [docs/gufo-quant.md](docs/gufo-quant.md).
+  for byte the same as the ROCmFPX `llama-quantize`. See [docs/superroc-quant.md](docs/superroc-quant.md).
 - **More model families**: `qwen35` / `qwen35moe` ROC builds (Qwen3.8, KAT-Coder, Ornith, MiniCPM-V, OxCoder, Agnes,
   Nex, BTL-4, MiMo), `bailingmoe3` (Ling-3.0-flash and Ling-3.0-flash-VL), `lfm2` / `lfm2moe` (LFM2.5), `flint`
   (Flint 40B-A2.5B: sliding-window and position-free attention layers with attention sinks), `llama`
@@ -97,8 +97,7 @@ cmake --build --preset release --parallel 4
 ./build/release/superroc diagnose
 ```
 
-`cmake --install build/release` installs Super ROC, its runtime data and the license notices. The build also creates a
-`gufo` link to the same binary, so commands written for Gufo keep working.
+`cmake --install build/release` installs Super ROC, its runtime data and the license notices. The build also creates a compatibility link under the previous binary name, so previously written commands keep working.
 
 ## Run
 
@@ -159,11 +158,11 @@ response limit that clients can override (reasoning tokens count toward it). The
 - A Qwen3.6-35B-A3B file with its MoE experts stored as Q8_0 does not load on this build.
 - Several GPU tests and tools read a model file; they take its path from an environment variable and fail without it.
 
-## Lineage and license
+## Lineage and credits
 
 Super ROC began as a fork of Gufo v0.19.0 (https://github.com/gufo-org/gufo). The code is released under the MIT License
 in [LICENSE](LICENSE). [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) list the code that came from
-Gufo, llama.cpp / ggml and other projects, with their licenses. Gufo's original README is kept at
+Gufo, llama.cpp / ggml and other projects, with their licenses. The upstream project's original README is kept at
 [docs/lineage/GUFO-README.md](docs/lineage/GUFO-README.md). Model weights are not included; each Hugging Face card states
 the license of its weights.
 

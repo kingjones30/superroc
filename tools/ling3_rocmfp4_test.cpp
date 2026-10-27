@@ -1,4 +1,4 @@
-// ling3-rocmfp4-test — verifies gufo's ROCmFP4 decoder against the fork's.
+// ling3-rocmfp4-test — verifies superroc's ROCmFP4 decoder against the fork's.
 //
 // The fork exports rocmfp4_dequantize_row_q4_0 and _fast from libggml-base.so.
 // This test feeds both decoders the same deterministic pseudo-random blocks and
@@ -39,8 +39,8 @@ std::uint64_t Next(std::uint64_t* state) {
 }
 
 int Compare(const char* label, const void* blocks, std::size_t n_blocks,
-            void (*mine)(gufo::core::GgmlType, const void*, float*, std::size_t),
-            gufo::core::GgmlType type, void (*theirs)(const void*, float*, std::int64_t),
+            void (*mine)(superroc::core::GgmlType, const void*, float*, std::size_t),
+            superroc::core::GgmlType type, void (*theirs)(const void*, float*, std::int64_t),
             const std::uint8_t* src) {
   std::vector<float> a(n_blocks * 32, -12345.0F);
   std::vector<float> b(n_blocks * 32, 54321.0F);
@@ -115,21 +115,21 @@ int main(int argc, char** argv) {
     }
 
     failures += Compare("dual", d.data(), n_blocks,
-                        gufo::models::ling3::rocmfp4::DequantizeRow,
-                        gufo::core::GgmlType::kQ4_0_ROCMFP4,
+                        superroc::models::ling3::rocmfp4::DequantizeRow,
+                        superroc::core::GgmlType::kQ4_0_ROCMFP4,
                         reinterpret_cast<void (*)(const void*, float*, std::int64_t)>(dual),
                         reinterpret_cast<const std::uint8_t*>(d.data()));
     failures += Compare("fast", f.data(), n_blocks,
-                        gufo::models::ling3::rocmfp4::DequantizeRow,
-                        gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST,
+                        superroc::models::ling3::rocmfp4::DequantizeRow,
+                        superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST,
                         reinterpret_cast<void (*)(const void*, float*, std::int64_t)>(fast),
                         reinterpret_cast<const std::uint8_t*>(f.data()));
   }
 
   // The reserved scale byte must decode to exactly zero, not a denormal.
-  if (gufo::models::ling3::rocmfp4::ScaleFromByte(0x7f) != 0.0F) {
+  if (superroc::models::ling3::rocmfp4::ScaleFromByte(0x7f) != 0.0F) {
     std::printf("ScaleFromByte(0x7f) is %g, expected 0\n",
-                static_cast<double>(gufo::models::ling3::rocmfp4::ScaleFromByte(0x7f)));
+                static_cast<double>(superroc::models::ling3::rocmfp4::ScaleFromByte(0x7f)));
     ++failures;
   }
 

@@ -18,12 +18,13 @@
 #include "src/models/qwen/hip/kernels/dflash_kernels.hpp"
 #include "src/models/qwen/hip/mtp/detail/allocation.hpp"
 #include "src/models/qwen/hip/ops.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 [[nodiscard]] bool DsparkEnvOff(const char* name) {
-  const char* value = std::getenv(name);
+  const char* value = ::superroc::core::GetEnvCompat(name);
   return value != nullptr && value[0] == '0' && value[1] == '\0';
 }
 
@@ -291,10 +292,10 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
     }
     // 27B selector path keeps block_size-1. DSpark honouring sample_from_anchor
     // may use the full block (slot 0 is a draft) when
-    // GUFO_DSPARK_ANCHOR_LAYOUT=1.
+    // SUPERROC_DSPARK_ANCHOR_LAYOUT=1.
     const std::uint32_t draft_cap =
         !draft.has_selector && draft.sample_from_anchor &&
-                !DsparkEnvOff("GUFO_DSPARK_ANCHOR_LAYOUT")
+                !DsparkEnvOff("SUPERROC_DSPARK_ANCHOR_LAYOUT")
             ? draft.block_size
             : (draft.block_size > 0 ? draft.block_size - 1U : 0U);
     counts[index] = std::min({request.draft_count, draft_cap,
@@ -563,5 +564,5 @@ QwenDFlashGpuExecutor::ForwardBlockBatch(
   return proposals;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

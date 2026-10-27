@@ -15,13 +15,14 @@
 #include "src/models/qwen/chat_template.hpp"
 #include "src/models/qwen/tokenizer.hpp"
 #include "tests/models/chat_template_golden_helpers.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
-namespace json = gufo::json;
-namespace qwen = gufo::tokenization;
+namespace json = superroc::json;
+namespace qwen = superroc::tokenization;
 
-using namespace gufo::testing::chat_goldens;
+using namespace superroc::testing::chat_goldens;
 
 void CheckQwenCase(const json::Value& fixture, std::string_view case_name,
                    const qwen::QwenTokenizer& tokenizer,
@@ -55,7 +56,7 @@ void CheckQwenCase(const json::Value& fixture, std::string_view case_name,
 void TestQwenGoldens(const json::Value& fixture,
                      const std::string& model_path) {
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(model_path, &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(model_path, &error);
   Expect(reader != nullptr, "Qwen GGUF opens: " + error);
   Expect(reader->GetMetadataString("tokenizer.ggml.pre") ==
              std::optional<std::string_view>{"qwen35"},
@@ -130,13 +131,13 @@ void TestQwenGoldens(const json::Value& fixture,
 }  // namespace
 
 int main() {
-  const char* qwen_model = std::getenv("GUFO_QWEN_GGUF");
+  const char* qwen_model = ::superroc::core::GetEnvCompat("SUPERROC_QWEN_GGUF");
   if (qwen_model == nullptr || qwen_model[0] == '\0') {
-    std::cout << "SKIP: set GUFO_QWEN_GGUF\n";
+    std::cout << "SKIP: set SUPERROC_QWEN_GGUF\n";
     return 77;
   }
 
-  std::ifstream input(GUFO_CHAT_TEMPLATE_HF_GOLDENS, std::ios::binary);
+  std::ifstream input(SUPERROC_CHAT_TEMPLATE_HF_GOLDENS, std::ios::binary);
   Expect(input.good(), "Hugging Face golden fixture opens");
   const std::string fixture_text{std::istreambuf_iterator<char>(input),
                                  std::istreambuf_iterator<char>()};

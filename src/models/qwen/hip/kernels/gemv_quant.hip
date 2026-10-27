@@ -11,7 +11,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 template<std::uint32_t WavesPerBlock>
 __launch_bounds__(WavesPerBlock * 32, 4) __global__
@@ -172,7 +172,7 @@ void LaunchQ8KBlockGEMV(const void* A, core::GgmlType type, const float* x,
     const auto launch = [&]<core::GgmlType StaticType>() {
       Q8KBlockGEMVKernel_2Rows<kWavesPerBlock, StaticType>
           <<<grid, kBlockThreads, 0, stream>>>(A, type, x, y, M, K);
-      GUFO_CHECK_LAUNCH("Q8KBlockGEMVKernel_2Rows<kWavesPerBlock, StaticType>");
+      SUPERROC_CHECK_LAUNCH("Q8KBlockGEMVKernel_2Rows<kWavesPerBlock, StaticType>");
     };
     switch (type) {
       case core::GgmlType::kQ4_K:
@@ -194,8 +194,8 @@ void LaunchQ8KBlockGEMV(const void* A, core::GgmlType type, const float* x,
   const std::size_t grid = (M + kWavesPerBlock - 1U) / kWavesPerBlock;
   Q8KBlockGEMVKernel<kWavesPerBlock>
       <<<grid, kBlockThreads, 0, stream>>>(A, type, x, y, M, K);
-  GUFO_CHECK_LAUNCH("Q8KBlockGEMVKernel<kWavesPerBlock>");
+  SUPERROC_CHECK_LAUNCH("Q8KBlockGEMVKernel<kWavesPerBlock>");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

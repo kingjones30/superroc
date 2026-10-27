@@ -23,8 +23,8 @@
 
 namespace {
 
-namespace qwen3_tts_hip = gufo::models::qwen3_tts::hip;
-namespace qwen3_tts = gufo::models::qwen3_tts;
+namespace qwen3_tts_hip = superroc::models::qwen3_tts::hip;
+namespace qwen3_tts = superroc::models::qwen3_tts;
 
 constexpr std::string_view kText =
     "The boy who lived. Mr. and Mrs. Dursley, of number four, Privet Drive, "

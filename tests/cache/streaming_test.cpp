@@ -13,14 +13,14 @@
 
 #include "tests/cache/fake_adapter.hpp"
 
-using namespace gufo::cache;
-using namespace gufo::cache::testing;
+using namespace superroc::cache;
+using namespace superroc::cache::testing;
 namespace fs = std::filesystem;
 namespace {
 struct Directory {
   fs::path path;
   Directory() {
-    char pattern[] = "/tmp/gufo-streaming-test-XXXXXX";
+    char pattern[] = "/tmp/superroc-streaming-test-XXXXXX";
     path = mkdtemp(pattern);
   }
   ~Directory() { fs::remove_all(path); }

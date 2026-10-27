@@ -5,7 +5,7 @@
 
 #include "src/core/quant/ggml_dequant.hpp"
 
-namespace gufo::models::ling3 {
+namespace superroc::models::ling3 {
 namespace {
 
 using core::GgmlType;
@@ -251,4 +251,4 @@ std::optional<ModelWeights> ModelWeights::Bind(const core::GgufReader& gguf,
   return w;
 }
 
-}  // namespace gufo::models::ling3
+}  // namespace superroc::models::ling3

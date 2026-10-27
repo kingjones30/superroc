@@ -10,7 +10,7 @@
 
 #include "src/cache/ledger.hpp"
 
-using namespace gufo::cache;
+using namespace superroc::cache;
 namespace {
 using Clock = std::chrono::steady_clock;
 using Samples = std::array<std::vector<std::uint64_t>, 3>;

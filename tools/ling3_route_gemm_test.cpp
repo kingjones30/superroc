@@ -2,7 +2,7 @@
 // replaces, at Ling's real shape.
 //
 // PHASE9 item 1. This kernel is NOT bit-identical and is not meant to be: DECISIONS
-// 2026-10-03 00:55 permits the router's accumulation order to change, because gufo's order
+// 2026-10-03 00:55 permits the router's accumulation order to change, because superroc's order
 // was arbitrary to begin with and the block-2 near-tie moving is a numerics change like any
 // other. So this reports what actually matters: max_abs and max_rel of the logits against the
 // kernel shipped today, and -- the number Jay will care about most -- HOW MANY TOP-8 PICKS

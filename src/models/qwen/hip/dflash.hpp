@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_DFLASH_HPP_
-#define GUFO_MODELS_QWEN_HIP_DFLASH_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_DFLASH_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_DFLASH_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -20,7 +20,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 /// Optional synchronous host observation for the independent reference test.
 /// The span is valid only during the callback; production leaves it empty.
@@ -367,7 +367,7 @@ private:
   bool proposal_active_{false};
 };
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_QWEN_HIP_DFLASH_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_DFLASH_HPP_

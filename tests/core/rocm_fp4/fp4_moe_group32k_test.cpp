@@ -1,7 +1,7 @@
 // KPF2 SPEC1 step 4: the 32k multi-block grouper is bit-identical to the
 // serial oracle. For slots in {4096, 8192, 8193, 16384, 24576, 32768} with
 // three seeded random routings each (ids in [0, 256), top-8 per token,
-// random weights), run the oracle (GUFO_FP4_MOE_GROUP_SERIAL=1 path) and
+// random weights), run the oracle (SUPERROC_FP4_MOE_GROUP_SERIAL=1 path) and
 // the new batch32k path, and memcmp every output: slot_tok, slot_w,
 // token_slots, slot_dest, grp_e, grp_off, grp_cnt, grp_zp and the 4 header
 // words.
@@ -13,8 +13,8 @@
 #include <cstring>
 #include <vector>
 
-#include "src/core/rocm_fp4/gufo_fp4_moe_group.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_moe_group.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 
 namespace {
 
@@ -32,7 +32,7 @@ int g_failures = 0;
 
 #define KPF2_CHECK_RC(rc, what)                 \
   do {                                          \
-    if ((rc) != GUFO_FP4_OK) {                  \
+    if ((rc) != SUPERROC_FP4_OK) {                  \
       std::printf("FAIL %s rc=%d\n", what, rc); \
       return 1;                                 \
     }                                           \
@@ -119,14 +119,14 @@ int RunSlots(int slots, std::uint32_t seed_in) {
       hipMemset(d_grp_zp, 0, (std::size_t)(grp_capacity + 1) * sizeof(int)));
 
   // Oracle: the serial body via the env knob (read fresh on every call).
-  setenv("GUFO_FP4_MOE_GROUP_SERIAL", "1", 1);
-  KPF2_CHECK_RC(gufo_fp4_moe_group_batch(d_ids, d_wts, nullptr, n, kUsed, kUsed,
+  setenv("SUPERROC_FP4_MOE_GROUP_SERIAL", "1", 1);
+  KPF2_CHECK_RC(superroc_fp4_moe_group_batch(d_ids, d_wts, nullptr, n, kUsed, kUsed,
                                          kExperts, kCap, d_slot_tok, d_slot_w,
                                          d_token_slots, d_grp_e, d_grp_off,
                                          d_grp_cnt, d_grp_zp, d_slot_dest,
                                          grp_capacity, slots, ref_hdr.data()),
                 "oracle batch");
-  unsetenv("GUFO_FP4_MOE_GROUP_SERIAL");
+  unsetenv("SUPERROC_FP4_MOE_GROUP_SERIAL");
   KPF2_CHECK_HIP(hipMemcpy(ref_slot_tok.data(), d_slot_tok,
                            (std::size_t)slots * sizeof(int),
                            hipMemcpyDeviceToHost));
@@ -167,7 +167,7 @@ int RunSlots(int slots, std::uint32_t seed_in) {
       hipMemset(d_grp_zp, 0, (std::size_t)(grp_capacity + 1) * sizeof(int)));
   KPF2_CHECK_HIP(hipMemset(d_hdr, 0, 4 * sizeof(int)));
   KPF2_CHECK_RC(
-      gufo_fp4_moe_group_batch32k(
+      superroc_fp4_moe_group_batch32k(
           d_ids, d_wts, nullptr, n, kUsed, kUsed, kExperts, kCap, d_slot_tok,
           d_slot_w, d_token_slots, d_grp_e, d_grp_off, d_grp_cnt, d_grp_zp,
           d_slot_dest, grp_capacity, slots, d_hdr),

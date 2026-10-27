@@ -1,5 +1,5 @@
-#ifndef GUFO_CACHE_ADAPTER_HPP_
-#define GUFO_CACHE_ADAPTER_HPP_
+#ifndef SUPERROC_CACHE_ADAPTER_HPP_
+#define SUPERROC_CACHE_ADAPTER_HPP_
 
 #include <cstddef>
 #include <memory>
@@ -11,7 +11,7 @@
 #include "src/cache/stream.hpp"
 #include "src/cache/types.hpp"
 
-namespace gufo::cache {
+namespace superroc::cache {
 
 class MutationGuard {
 public:
@@ -152,6 +152,6 @@ public:
   [[nodiscard]] virtual bool Invalidate(Slot&) noexcept = 0;
 };
 
-}  // namespace gufo::cache
+}  // namespace superroc::cache
 
 #endif

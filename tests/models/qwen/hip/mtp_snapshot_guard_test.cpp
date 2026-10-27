@@ -25,7 +25,7 @@ void Expect(bool ok, const char* what) {
 
 void ExpectThrows(std::uint32_t draft, std::size_t target, const char* what) {
   try {
-    gufo::hip::CheckMtpSnapshotPosition(draft, target);
+    superroc::hip::CheckMtpSnapshotPosition(draft, target);
   } catch (const std::logic_error& error) {
     const std::string message = error.what();
     Expect(message.find(std::to_string(draft)) != std::string::npos &&
@@ -39,7 +39,7 @@ void ExpectThrows(std::uint32_t draft, std::size_t target, const char* what) {
 
 void ExpectPasses(std::uint32_t draft, std::size_t target, const char* what) {
   try {
-    gufo::hip::CheckMtpSnapshotPosition(draft, target);
+    superroc::hip::CheckMtpSnapshotPosition(draft, target);
   } catch (const std::exception& error) {
     std::cerr << "FAIL " << what << " (threw: " << error.what() << ")\n";
     ++fails;

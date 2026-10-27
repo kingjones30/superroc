@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-check-dependencies.py — Third-party dependency inventory consistency checker for gufo
+check-dependencies.py — Third-party dependency inventory consistency checker for SuperROC
 
 Validates that:
 1. The declared direct-dependency inventory includes required components.

@@ -57,7 +57,7 @@
 // LS1 PHASE8 item 1 (NUDGE 2): the ROUTER LOGITS kernel, tiled over tokens.
 //
 // LR1 MEASURED, both engines on the same 13.8K prompt: k_route_batch_logits costs
-// 3.39 ms per call x 1,080 calls = 3.66 s -- 5.1 % of gufo's prefill, and 13.3x the fork's
+// 3.39 ms per call x 1,080 calls = 3.66 s -- 5.1 % of superroc's prefill, and 13.3x the fork's
 // router (276 ms). That is ~136 ms of the ~155 ms `route` section per 512-token chunk.
 //
 // WHY IT IS SLOW, exactly. The old kernel is <<<n_expert, n_tokens>>>, 64 threads: one CTA
@@ -140,7 +140,7 @@ __global__ void k_route_logits_tiled(const float * __restrict__ x,
 // REPORT8 proved the bit-identical rewrites cannot win: k_route_batch_logits is
 // LATENCY-bound, and keeping its per-row dot order is exactly what forbids the fix.
 // Jay's decision (DECISIONS 2026-10-03 00:55) is that the router's accumulation order MAY
-// change -- gufo's order is arbitrary (the fork's differs) and the block-2 near-tie moving is
+// change -- superroc's order is arbitrary (the fork's differs) and the block-2 near-tie moving is
 // a numerics change like any other, so the WAVE 2 numerics gates decide, not byte-identity.
 //
 // THE PROBLEM. logits[t][e] = sum_i x[t][i] * gate[e][i] for t in [0,T), e in [0,E),

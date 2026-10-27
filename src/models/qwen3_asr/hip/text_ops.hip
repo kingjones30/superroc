@@ -12,7 +12,7 @@
 #include "src/models/qwen3_asr/hip/text_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::models::qwen3_asr::hip {
+namespace superroc::models::qwen3_asr::hip {
 namespace {
 
 // Preserve the descending shared-memory sum tree. Once only the first wave
@@ -773,7 +773,7 @@ bool LaunchTextQkNormRoPE(float* query, float* key, float* value,
       query, key, value, query_weight, key_weight, batch_size, num_heads,
       num_key_value_heads, head_dim, start_position, rope_theta, epsilon,
       key_cache, value_cache, layer_index, max_context);
-  if (::gufo::hip_check::LaunchFailed()) return false;
+  if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
 
@@ -787,7 +787,7 @@ void LaunchTextRMSNorm(const float* input, const float* weight,
   TextRMSNormKernel<<<static_cast<unsigned int>(batch_size), 256, 0, stream>>>(
       input, weight, static_cast<hip_bfloat16*>(output_bfloat16), batch_size,
       dimension, epsilon);
-  GUFO_CHECK_LAUNCH("TextRMSNormKernel");
+  SUPERROC_CHECK_LAUNCH("TextRMSNormKernel");
 }
 
 void LaunchTextResidualAddRMSNorm(float* hidden, const float* update,
@@ -801,7 +801,7 @@ void LaunchTextResidualAddRMSNorm(float* hidden, const float* update,
                                  stream>>>(
       hidden, update, weight, static_cast<hip_bfloat16*>(output_bfloat16),
       batch_size, dimension, epsilon);
-  GUFO_CHECK_LAUNCH("TextResidualAddRMSNormKernel");
+  SUPERROC_CHECK_LAUNCH("TextResidualAddRMSNormKernel");
 }
 
 void LaunchTextSwiGLU(const float* gate, const float* up, void* output_bfloat16,
@@ -811,14 +811,14 @@ void LaunchTextSwiGLU(const float* gate, const float* up, void* output_bfloat16,
   }
   TextSwiGLUKernel<<<Grid(count), 256, 0, stream>>>(
       gate, up, static_cast<hip_bfloat16*>(output_bfloat16), count);
-  GUFO_CHECK_LAUNCH("TextSwiGLUKernel");
+  SUPERROC_CHECK_LAUNCH("TextSwiGLUKernel");
 }
 
 void LaunchTextRoundBfloat16(float* values, std::size_t count,
                              hipStream_t stream) {
   if (count != 0U) {
     RoundBfloat16Kernel<<<Grid(count), 256, 0, stream>>>(values, count);
-    GUFO_CHECK_LAUNCH("RoundBfloat16Kernel");
+    SUPERROC_CHECK_LAUNCH("RoundBfloat16Kernel");
   }
 }
 
@@ -827,7 +827,7 @@ void LaunchTextBfloat16ToFloat(const void* input_bfloat16, float* output,
   if (count != 0U) {
     Bfloat16ToFloatKernel<<<Grid(count), 256, 0, stream>>>(
         static_cast<const hip_bfloat16*>(input_bfloat16), output, count);
-    GUFO_CHECK_LAUNCH("Bfloat16ToFloatKernel");
+    SUPERROC_CHECK_LAUNCH("Bfloat16ToFloatKernel");
   }
 }
 
@@ -845,7 +845,7 @@ void LaunchTextEmbeddingLookup(const void* table_bfloat16,
   TextEmbeddingLookupKernel<<<grid, kBlock, 0, stream>>>(
       static_cast<const hip_bfloat16*>(table_bfloat16), token_ids, output,
       batch_size, hidden_size);
-  GUFO_CHECK_LAUNCH("TextEmbeddingLookupKernel");
+  SUPERROC_CHECK_LAUNCH("TextEmbeddingLookupKernel");
 }
 
 void LaunchTextRowGemv(const void* weights_bfloat16, const float* input,
@@ -859,7 +859,7 @@ void LaunchTextRowGemv(const void* weights_bfloat16, const float* input,
   TextRowGemvKernel<kWaves><<<blocks, kWaves * 32, 0, stream>>>(
       static_cast<const hip_bfloat16*>(weights_bfloat16), input, output, rows,
       columns);
-  GUFO_CHECK_LAUNCH("TextRowGemvKernel<kWaves>");
+  SUPERROC_CHECK_LAUNCH("TextRowGemvKernel<kWaves>");
 }
 
 void LaunchTextBatchedAttention(
@@ -879,7 +879,7 @@ void LaunchTextBatchedAttention(
       static_cast<hip_bfloat16*>(out_context_bfloat16), layer_index,
       start_position, tokens, max_context, num_heads, num_key_value_heads,
       head_dim);
-  GUFO_CHECK_LAUNCH("TextBatchedAttentionKernel");
+  SUPERROC_CHECK_LAUNCH("TextBatchedAttentionKernel");
 }
 
 bool LaunchTextDecodeAttention(
@@ -902,7 +902,7 @@ bool LaunchTextDecodeAttention(
       query, key_cache, value_cache, out_context,
       static_cast<hip_bfloat16*>(out_context_bfloat16), layer_index, position,
       max_context, num_heads, num_key_value_heads, head_dim);
-  if (::gufo::hip_check::LaunchFailed()) return false;
+  if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
 
@@ -955,7 +955,7 @@ bool LaunchTextDecodeGemv(const TextDecodeGemvTensor* tensors,
                          k_vectors * kAlignment, stream>>>(
       packed, static_cast<const hip_bfloat16*>(input_bfloat16),
       static_cast<std::uint32_t>(k_vectors));
-  if (::gufo::hip_check::LaunchFailed()) return false;
+  if (::superroc::hip_check::LaunchFailed()) return false;
   return true;
 }
 
@@ -969,11 +969,11 @@ void LaunchTextArgmax(const float* logits, std::uint32_t* output_token,
   auto* partials = reinterpret_cast<ArgmaxValue*>(scratch);
   TextArgmaxKernel<false><<<blocks, kArgmaxThreads, 0, stream>>>(
       logits, partials, output_token, count);
-  GUFO_CHECK_LAUNCH("TextArgmaxKernel<false>");
+  SUPERROC_CHECK_LAUNCH("TextArgmaxKernel<false>");
   if (blocks > 1) {
     TextArgmaxKernel<true><<<1, kArgmaxThreads, 0, stream>>>(
         nullptr, partials, output_token, blocks);
-    GUFO_CHECK_LAUNCH("TextArgmaxKernel<true>");
+    SUPERROC_CHECK_LAUNCH("TextArgmaxKernel<true>");
   }
 }
 
@@ -981,6 +981,6 @@ std::size_t TextArgmaxScratchElements() {
   return 2 * kArgmaxBlocks;
 }
 
-}  // namespace gufo::models::qwen3_asr::hip
+}  // namespace superroc::models::qwen3_asr::hip
 
 #endif

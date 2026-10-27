@@ -1,8 +1,8 @@
 // FLASHNEXT G1-GPU (RV22 S6): dense-path type-mix qualification against the
 // real ROC artifact. For every sampled matrix this compares
 //   1. the float SmallGemm path (B3 device decode through RowElement) with
-//      the gufo::quant::DotProductROCMFP4_* CPU oracle: cosine >= 0.999999;
-//   2. Ling's activation-quantised gufo_fp4_gemv_m (the B4 narrow decode
+//      the superroc::quant::DotProductROCMFP4_* CPU oracle: cosine >= 0.999999;
+//   2. Ling's activation-quantised superroc_fp4_gemv_m (the B4 narrow decode
 //      intercept's kernel) with the same oracle: cosine >= 0.9999 (Q8_1
 //      activations carry real quantisation error);
 //   3. the executor's <=4-token chunk loop at m = 6 (4 + 2), which the
@@ -21,16 +21,16 @@
 
 #include "src/core/gguf_reader.hpp"
 #include "src/core/quant/ggml_dequant.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 #include "src/models/qwen38_flash_next/weights.hpp"
 
 namespace {
 
-namespace qfn = gufo::models::qwen38_flash_next;
+namespace qfn = superroc::models::qwen38_flash_next;
 namespace rocm = qfn::rocm;
-using gufo::core::GgmlType;
+using superroc::core::GgmlType;
 
 int failures = 0;
 int checked = 0;
@@ -156,8 +156,8 @@ void CheckMatrix(const char* what, const qfn::TensorRef& t, std::uint64_t e) {
     const std::span<const float> xv(x.data() + tok * cols, cols);
     for (std::size_t i = 0; i < sample.size(); ++i) {
       const std::uint8_t* row = host + sample[i] * rb;
-      ref[tok][i] = fast ? gufo::quant::DotProductROCMFP4_Fast(row, xv, cols)
-                         : gufo::quant::DotProductROCMFP4_Dual(row, xv, cols);
+      ref[tok][i] = fast ? superroc::quant::DotProductROCMFP4_Fast(row, xv, cols)
+                         : superroc::quant::DotProductROCMFP4_Dual(row, xv, cols);
     }
   }
 
@@ -204,12 +204,12 @@ void CheckMatrix(const char* what, const qfn::TensorRef& t, std::uint64_t e) {
   for (const std::uint32_t m : {1U, 4U, 6U}) {
     for (std::uint32_t t0 = 0; t0 < m; t0 += 4) {
       const int chunk = static_cast<int>(std::min(4U, m - t0));
-      const int rc = gufo_fp4_gemv_m(
+      const int rc = superroc_fp4_gemv_m(
           static_cast<int>(t.type), w_dev,
           x_dev + static_cast<std::size_t>(t0) * cols,
           y_dev + static_cast<std::size_t>(t0) * rows, static_cast<int>(cols),
           static_cast<int>(rows), chunk, nullptr);
-      Check(rc == GUFO_FP4_OK, tag + " gemv_m rc=" + std::to_string(rc) +
+      Check(rc == SUPERROC_FP4_OK, tag + " gemv_m rc=" + std::to_string(rc) +
                                    " m=" + std::to_string(m));
     }
     HIP_CHECK(hipDeviceSynchronize(), tag + " gemv_m sync");
@@ -237,7 +237,7 @@ void CheckMatrix(const char* what, const qfn::TensorRef& t, std::uint64_t e) {
   (void)hipFree(w_dev);
 }
 
-// S7: grouped FP4 expert FFN (gufo_fp4_expert_ffn_m) on the real l47 expert
+// S7: grouped FP4 expert FFN (superroc_fp4_expert_ffn_m) on the real l47 expert
 // tensors vs an exact CPU reference built from the oracle row dots:
 //   y[t] = sum_s w[t][s] * down_id( silu(gate_id . x_t) * (up_id . x_t) )
 // accumulated in double. The kernel quantises activations to Q8_1 internally
@@ -355,15 +355,15 @@ void CheckMoe(const char* what, const qfn::LayerWeights& l,
       break;
     }
 
-    const int rc = gufo_fp4_expert_ffn_m(
+    const int rc = superroc_fp4_expert_ffn_m(
         101, gate_dev, up_dev, down_dev, x_dev, ids_dev, w_dev,
         static_cast<int>(ntok), static_cast<int>(used),
         static_cast<int>(c.num_experts), static_cast<int>(k),
         static_cast<int>(nff), 0.0F, y_dev, nullptr);
-    Check(rc == GUFO_FP4_OK, tag + " expert_ffn_m rc=" + std::to_string(rc) +
+    Check(rc == SUPERROC_FP4_OK, tag + " expert_ffn_m rc=" + std::to_string(rc) +
                                  " m=" + std::to_string(ntok));
-    const int st = gufo_fp4_expert_ffn_m_check();
-    Check(st == GUFO_FP4_OK, tag + " expert_ffn_m_check=" + std::to_string(st));
+    const int st = superroc_fp4_expert_ffn_m_check();
+    Check(st == SUPERROC_FP4_OK, tag + " expert_ffn_m_check=" + std::to_string(st));
     Check(hipDeviceSynchronize() == hipSuccess, tag + " moe sync");
     std::vector<float> y(static_cast<std::size_t>(ntok) * k, 0.0F);
     Check(hipMemcpy(y.data(), y_dev, y.size() * 4, hipMemcpyDeviceToHost) ==
@@ -391,16 +391,16 @@ void CheckMoe(const char* what, const qfn::LayerWeights& l,
             down_h + static_cast<std::size_t>(id) * down_estride;
         for (std::size_t j2 = 0; j2 < nff; ++j2) {
           const double gv =
-              gufo::quant::DotProductROCMFP4_Fast(g_e + j2 * gate_rb, xt, k);
+              superroc::quant::DotProductROCMFP4_Fast(g_e + j2 * gate_rb, xt, k);
           const double uv =
-              gufo::quant::DotProductROCMFP4_Fast(u_e + j2 * up_rb, xt, k);
+              superroc::quant::DotProductROCMFP4_Fast(u_e + j2 * up_rb, xt, k);
           hf[j2] = static_cast<float>(gv / (1.0 + std::exp(-gv)) * uv);
         }
         const std::span<const float> hs(hf.data(), nff);
         for (std::size_t i = 0; i < k; ++i) {
           acc[i] +=
               static_cast<double>(wj) *
-              gufo::quant::DotProductROCMFP4_Fast(d_e + i * down_rb, hs, nff);
+              superroc::quant::DotProductROCMFP4_Fast(d_e + i * down_rb, hs, nff);
         }
       }
       for (std::size_t i = 0; i < k; ++i) {
@@ -440,7 +440,7 @@ int main(int argc, char** argv) {
     return 2;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(argv[1], &error);
+  auto reader = superroc::core::GgufReader::OpenFile(argv[1], &error);
   if (reader == nullptr) {
     std::fprintf(stderr, "open failed: %s\n", error.c_str());
     return 2;

@@ -21,7 +21,7 @@
 #include "src/models/ling3/kernels/ling3_ops.hpp"
 #include "src/models/ling3/rocm_backend.hpp"
 
-namespace gufo::models::ling3::mtp {
+namespace superroc::models::ling3::mtp {
 namespace {
 
 constexpr std::size_t kMaxExperts = 8;
@@ -2563,11 +2563,11 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   return true;
 }
 
-}  // namespace gufo::models::ling3::mtp
+}  // namespace superroc::models::ling3::mtp
 
 #else  // !LING3_WITH_ROCM
 
-namespace gufo::models::ling3::mtp {
+namespace superroc::models::ling3::mtp {
 
 bool Init(const ModelWeights&, HeadNorm, std::size_t*, std::string* error_msg) {
   if (error_msg != nullptr) {
@@ -2669,6 +2669,6 @@ bool SpecStep(void*, SpecState*, std::int32_t, const std::vector<float>&, bool,
   return false;
 }
 
-}  // namespace gufo::models::ling3::mtp
+}  // namespace superroc::models::ling3::mtp
 
 #endif  // LING3_WITH_ROCM

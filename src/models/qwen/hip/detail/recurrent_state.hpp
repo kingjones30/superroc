@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_DETAIL_RECURRENT_STATE_HPP_
-#define GUFO_MODELS_QWEN_HIP_DETAIL_RECURRENT_STATE_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_DETAIL_RECURRENT_STATE_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_DETAIL_RECURRENT_STATE_HPP_
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_runtime.h>
@@ -7,7 +7,7 @@
 #include <concepts>
 #include <cstddef>
 
-namespace gufo::hip::detail {
+namespace superroc::hip::detail {
 
 // Call only after the convolution launch has finished reading the old history.
 // Each thread owns one channel; load the short-batch tail from `state_in`,
@@ -59,6 +59,6 @@ __device__ __forceinline__ void StoreRecurrentState4(StateT* row,
   }
 }
 
-}  // namespace gufo::hip::detail
+}  // namespace superroc::hip::detail
 
-#endif  // GUFO_MODELS_QWEN_HIP_DETAIL_RECURRENT_STATE_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_DETAIL_RECURRENT_STATE_HPP_

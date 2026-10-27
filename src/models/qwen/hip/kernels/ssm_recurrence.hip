@@ -8,7 +8,7 @@
 #include "src/models/qwen/hip/ops/ssm.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // Batched Causal SSM Conv1D + token-serial DeltaNet recurrence (pure recurrence
 // unit). The fused per-head post-RMSNorm + gate epilogue lives in
@@ -282,7 +282,7 @@ void LaunchBatchedSSMConvRecurrence(
   BatchedSSMConvKernel<<<conv_grid, static_cast<unsigned int>(block_size), 0,
                          stream>>>(qkv_in, conv_weights, conv_layer_in,
                                    conv_out, batch_size, qkv_size);
-  GUFO_CHECK_LAUNCH("BatchedSSMConvKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedSSMConvKernel");
 
   const auto launch = [&]<typename StateT, bool Diverge>() {
     BatchedDeltaNetRecurrenceKernel<StateT, Diverge>
@@ -292,7 +292,7 @@ void LaunchBatchedSSMConvRecurrence(
             ssm_a, ssm_dt, out_buf, layer_idx, batch_size, qkv_size,
             num_key_heads, num_heads, key_dim, val_dim, conv_layer_in,
             static_cast<const StateT*>(state.recurrent_in));
-    GUFO_CHECK_LAUNCH("BatchedDeltaNetRecurrenceKernel<StateT, Diverge>");
+    SUPERROC_CHECK_LAUNCH("BatchedDeltaNetRecurrenceKernel<StateT, Diverge>");
   };
   const auto launch_diverge = [&]<typename StateT>() {
     if (state.Diverges())
@@ -311,8 +311,8 @@ void LaunchBatchedSSMConvRecurrence(
   BatchedSSMPostNormGateKernel<<<post_grid, 128, 0, stream>>>(
       out_buf, ssm_norm, gate, out_buf, batch_size, inner_size, num_heads,
       val_dim);
-  GUFO_CHECK_LAUNCH("BatchedSSMPostNormGateKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedSSMPostNormGateKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

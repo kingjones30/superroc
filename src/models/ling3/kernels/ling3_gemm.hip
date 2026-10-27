@@ -396,7 +396,7 @@ extern "C" int ling3_gemm_grp(int qtype, const void * W, size_t expert_stride,
             qtype, (const uint8_t *) W, rb, expert_stride, grp_expert, grp_off,
             grp_cnt, grp_zp, n_groups, x, x_rows, y, y_rows, y_scale, accumulate,
             k, n, m);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     } else {
         const dim3 grid((unsigned) n_groups,
                         (unsigned) ((n + LS3_TR - 1) / LS3_TR),
@@ -405,7 +405,7 @@ extern "C" int ling3_gemm_grp(int qtype, const void * W, size_t expert_stride,
             qtype, (const uint8_t *) W, rb, expert_stride, grp_expert, grp_off,
             grp_cnt, nullptr, 0, x, x_rows, y, y_rows, y_scale, accumulate,
             k, n, m);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     }
     return ls3_chk("gemm_grp");
 }
@@ -424,7 +424,7 @@ extern "C" int ling3_gemm_fast(int qtype, const void * W, const float * x, float
     k_gemm_grp<LS3_TC_DENSE><<<grid, 256>>>(
         qtype, (const uint8_t *) W, rb, 0, nullptr, nullptr, nullptr, nullptr, 0,
         x, nullptr, y, nullptr, nullptr, 0, k, n, m);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls3_chk("gemm_fast");
 }
 
@@ -455,7 +455,7 @@ extern "C" int ling3_slot_gather_sum(const float * partials, const int * slot,
         return LING3_ERR_ARG;
     }
     k_slot_gather_sum<<<(unsigned) n_tokens, 256>>>(partials, slot, y, n_used, k);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls3_chk("slot_gather_sum");
 }
 
@@ -743,12 +743,12 @@ extern "C" int ling3_route_batch(const float * x, const float * gate, const floa
         // 4096-token PPL run never enters here.
         k_route_batch_logits_m<<<n_expert, 64>>>(x, gate, k, n_expert, n_tokens,
                                                  logits_scratch);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         rc = ls3_chk("route_batch logits m");
     } else {
         k_route_batch_logits<<<dim3(n_expert, n_tokens), 64>>>(x, gate, k, n_expert,
                                                                logits_scratch);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         rc = ls3_chk("route_batch logits");
     }
     if (rc == LING3_OK) {
@@ -757,7 +757,7 @@ extern "C" int ling3_route_batch(const float * x, const float * gate, const floa
         k_route_batch<<<n_tokens, 256, smem>>>(x, gate, bias, k, n_expert, n_used,
                                                n_groups, n_group_used, w_scale, norm_w,
                                                ids, weights, logits_scratch, rc_out);
-        if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+        if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
         rc = ls3_chk("route_batch");
     }
     return rc;
@@ -775,12 +775,12 @@ extern "C" int ling3_route_logits_pair(const float * x, const float * gate,
     }
     k_route_batch_logits<<<dim3(n_expert, n_tokens), 64>>>(x, gate, k, n_expert,
                                                            logits_ref);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     int rc = ls3_chk("route logits ref");
     if (rc != LING3_OK) return rc;
     k_route_batch_logits_m<<<n_expert, 64>>>(x, gate, k, n_expert, n_tokens,
                                              logits_fused);
-    if (::gufo::hip_check::LaunchFailed()) return LING3_ERR_HIP;
+    if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
     return ls3_chk("route logits fused");
 }
 

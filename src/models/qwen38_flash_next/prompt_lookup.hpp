@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_PROMPT_LOOKUP_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_PROMPT_LOOKUP_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_PROMPT_LOOKUP_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_PROMPT_LOOKUP_HPP_
 
 #include <algorithm>
 #include <cstddef>
@@ -8,7 +8,7 @@
 #include <span>
 #include <vector>
 
-namespace gufo::models::qwen38_flash_next {
+namespace superroc::models::qwen38_flash_next {
 
 /// Prompt lookup: proposals copied from the session's own committed tokens.
 /// The drafter's context (committed tokens plus the cycle's chain so far)
@@ -310,6 +310,6 @@ private:
   std::size_t request_start_{kNoResume};
 };
 
-}  // namespace gufo::models::qwen38_flash_next
+}  // namespace superroc::models::qwen38_flash_next
 
-#endif  // GUFO_MODELS_QWEN38_FLASH_NEXT_PROMPT_LOOKUP_HPP_
+#endif  // SUPERROC_MODELS_QWEN38_FLASH_NEXT_PROMPT_LOOKUP_HPP_

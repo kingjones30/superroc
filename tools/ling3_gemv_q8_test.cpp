@@ -922,7 +922,7 @@ void RunShape(int qtype, int k, int n) {
   CHECK(worst_int < 1e-5, "kernel != CPU integer reference (rms-normalised)");
   // This number is NOT an indexing check -- it is the price of the activation
   // quantisation, and it is the numerical change this lane deliberately makes (it is
-  // llama.cpp's computation, so it moves gufo toward the reference, not away). It
+  // llama.cpp's computation, so it moves superroc toward the reference, not away). It
   // measures around 0.012 to 0.027 of rms for k = 2560, because an FP4 block's ue4m3
   // scale reaches 240 and one int8 step of the activation is therefore worth up to ~27
   // on a single term, which over 2560 terms random-signs to ~0.02 of rms. The gate is

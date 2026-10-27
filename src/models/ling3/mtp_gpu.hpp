@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_LING3_MTP_GPU_HPP_
-#define GUFO_MODELS_LING3_MTP_GPU_HPP_
+#ifndef SUPERROC_MODELS_LING3_MTP_GPU_HPP_
+#define SUPERROC_MODELS_LING3_MTP_GPU_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -27,7 +27,7 @@
 /// This file owns NO kernel source. It calls the existing entry points in
 /// ling3_ops.hip / ling3_mla.hip / ling3_moe.hip read-only, which stay LS1's
 /// and LS2's.
-namespace gufo::models::ling3::mtp {
+namespace superroc::models::ling3::mtp {
 
 /// Which vector normalises the head's final hidden state. See MTP_NOTES.md §2.
 enum class HeadNorm {
@@ -345,6 +345,6 @@ void InstallSpecReporter();
 void ReportSpecSession(const SpecStats& s, int final_draft_len, int req,
                        int prompt_tokens);
 
-}  // namespace gufo::models::ling3::mtp
+}  // namespace superroc::models::ling3::mtp
 
-#endif  // GUFO_MODELS_LING3_MTP_GPU_HPP_
+#endif  // SUPERROC_MODELS_LING3_MTP_GPU_HPP_

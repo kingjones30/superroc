@@ -9,7 +9,7 @@
 // the same prompt. With no flag this binary supervises: it runs each
 // scenario in a fresh child process (the slot table is process-global) and
 // reports both; --unconfigured / --configured-1-plus-4 run one scenario.
-// Needs GUFO_FP4_TEST_KAT_MODEL (a ROCmFP4 file); SKIP 77 without it.
+// Needs SUPERROC_FP4_TEST_KAT_MODEL (a ROCmFP4 file); SKIP 77 without it.
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -30,14 +30,15 @@
 #endif
 
 #include "src/core/gguf_reader.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_gemv_q8.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_quant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 #include "src/models/qwen/hip/executor.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
-using Token = gufo::tokenization::TokenId;
-using Executor = gufo::hip::QwenGpuExecutor;
-using Model = gufo::hip::QwenGpuModel;
+using Token = superroc::tokenization::TokenId;
+using Executor = superroc::hip::QwenGpuExecutor;
+using Model = superroc::hip::QwenGpuModel;
 
 constexpr int kSkipped = 77;
 constexpr int kExecutors = 4;
@@ -103,10 +104,10 @@ void ExpectRowsEqual(const std::vector<std::vector<float>>& got,
 
 std::shared_ptr<const Model> LoadModel(const char* model) {
   std::string error;
-  auto owner = gufo::core::GgufReader::OpenFile(model, &error);
+  auto owner = superroc::core::GgufReader::OpenFile(model, &error);
   Expect(owner != nullptr, error);
   auto shared = Model::CreateFromGguf(
-      std::shared_ptr<const gufo::core::GgufReader>(std::move(owner)), &error);
+      std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)), &error);
   Expect(shared != nullptr, error);
   return shared;
 }
@@ -114,20 +115,20 @@ std::shared_ptr<const Model> LoadModel(const char* model) {
 int RunUnconfigured(const char* model) {
   // The premise: this process never configures a count, so the table
   // starts at one set with zero refusals.
-  Expect(gufo_fp4_slot_sets_count() == 1, "unconfigured table starts at 1");
-  Expect(gufo_fp4_slot_refuse_count() == 0, "no refusals before load");
+  Expect(superroc_fp4_slot_sets_count() == 1, "unconfigured table starts at 1");
+  Expect(superroc_fp4_slot_refuse_count() == 0, "no refusals before load");
   auto shared = LoadModel(model);
 
   std::string error;
   auto first = Executor::Create(shared, &error, 128);
   Expect(first != nullptr, error);
-  Expect(gufo_fp4_slot_sets_count() == 1, "first executor keeps set 0");
-  Expect(gufo_fp4_slot_refuse_count() == 0, "first executor never refused");
+  Expect(superroc_fp4_slot_sets_count() == 1, "first executor keeps set 0");
+  Expect(superroc_fp4_slot_refuse_count() == 0, "first executor never refused");
 
   const auto tokens = PromptTokens(*first);
   const auto expected = RunPrompt(*first, tokens);
-  std::cout << "executor 1 sets=" << gufo_fp4_slot_sets_count()
-            << " refusals=" << gufo_fp4_slot_refuse_count() << '\n';
+  std::cout << "executor 1 sets=" << superroc_fp4_slot_sets_count()
+            << " refusals=" << superroc_fp4_slot_refuse_count() << '\n';
 
   // All sessions stay alive together (as in the target test's concurrency
   // check): each construction grows the table by exactly one set.
@@ -135,76 +136,76 @@ int RunUnconfigured(const char* model) {
   for (int index = 2; index <= kExecutors; ++index) {
     sessions.push_back(
         std::make_unique<Executor>(first->GetSharedModel(), 128));
-    Expect(gufo_fp4_slot_sets_count() == index,
+    Expect(superroc_fp4_slot_sets_count() == index,
            "executor " + std::to_string(index) + " grows the table");
-    Expect(gufo_fp4_slot_refuse_count() == 0,
+    Expect(superroc_fp4_slot_refuse_count() == 0,
            "executor " + std::to_string(index) + " never refused");
   }
   for (int index = 2; index <= kExecutors; ++index) {
     auto& session = *sessions[static_cast<std::size_t>(index - 2)];
     ExpectRowsEqual(RunPrompt(session, tokens), expected,
                     "executor " + std::to_string(index));
-    std::cout << "executor " << index << " sets=" << gufo_fp4_slot_sets_count()
-              << " refusals=" << gufo_fp4_slot_refuse_count()
+    std::cout << "executor " << index << " sets=" << superroc_fp4_slot_sets_count()
+              << " refusals=" << superroc_fp4_slot_refuse_count()
               << " prefill/decode exact=1\n";
   }
   sessions.clear();
-  Expect(gufo_fp4_slot_debug_map_size() == 1, "destroy releases sets");
-  Expect(gufo_fp4_slot_refuse_count() == 0, "no refusals at shutdown");
+  Expect(superroc_fp4_slot_debug_map_size() == 1, "destroy releases sets");
+  Expect(superroc_fp4_slot_refuse_count() == 0, "no refusals at shutdown");
   std::cout << "unconfigured: " << kExecutors
             << " executors, one set each, zero refusals, logits exact\n";
   return 0;
 }
 
 int RunConfigured1Plus4(const char* model) {
-  Expect(gufo_fp4_slot_sets_count() == 1, "configured table starts at 1");
-  Expect(gufo_fp4_slot_refuse_count() == 0, "no refusals before load");
+  Expect(superroc_fp4_slot_sets_count() == 1, "configured table starts at 1");
+  Expect(superroc_fp4_slot_refuse_count() == 0, "no refusals before load");
   auto shared = LoadModel(model);
 
   // Backend 1 with one session, as in serve -j 1.
-  Expect(gufo_fp4_slot_sets_configure(1) == GUFO_FP4_OK,
+  Expect(superroc_fp4_slot_sets_configure(1) == SUPERROC_FP4_OK,
          "configure(1) never fails");
-  Expect(gufo_fp4_slot_sets_count() == 1, "configure(1) pre-sizes to 1");
+  Expect(superroc_fp4_slot_sets_count() == 1, "configure(1) pre-sizes to 1");
   std::string error;
   auto backend1 = Executor::Create(shared, &error, 128);
   Expect(backend1 != nullptr, error);
-  Expect(gufo_fp4_slot_sets_count() == 1, "backend 1 keeps set 0");
-  Expect(gufo_fp4_slot_refuse_count() == 0, "backend 1 never refused");
+  Expect(superroc_fp4_slot_sets_count() == 1, "backend 1 keeps set 0");
+  Expect(superroc_fp4_slot_refuse_count() == 0, "backend 1 never refused");
 
   const auto tokens = PromptTokens(*backend1);
   const auto expected = RunPrompt(*backend1, tokens);
-  std::cout << "backend 1 sets=" << gufo_fp4_slot_sets_count()
-            << " refusals=" << gufo_fp4_slot_refuse_count() << '\n';
+  std::cout << "backend 1 sets=" << superroc_fp4_slot_sets_count()
+            << " refusals=" << superroc_fp4_slot_refuse_count() << '\n';
 
   // Backend 2 with four sessions while backend 1 is alive, as in the
   // serving test's C4 forks (oracle.load(1) then forks.load(4)). The second
   // configure must not fail and must not renumber backend 1's set.
-  Expect(gufo_fp4_slot_sets_configure(4) == GUFO_FP4_OK,
+  Expect(superroc_fp4_slot_sets_configure(4) == SUPERROC_FP4_OK,
          "configure(4) after configure(1) never fails");
-  Expect(gufo_fp4_slot_sets_count() == 4, "configure(4) pre-sizes to 4");
+  Expect(superroc_fp4_slot_sets_count() == 4, "configure(4) pre-sizes to 4");
   std::vector<std::unique_ptr<Executor>> backend2;
   for (int index = 1; index <= kExecutors; ++index) {
     backend2.push_back(Executor::Create(shared, &error, 128));
     Expect(backend2.back() != nullptr, error);
-    Expect(gufo_fp4_slot_refuse_count() == 0,
+    Expect(superroc_fp4_slot_refuse_count() == 0,
            "backend 2 session " + std::to_string(index) + " never refused");
   }
   // Sets 1..3 reused, the fourth session grows the table: 5 sets total.
-  Expect(gufo_fp4_slot_sets_count() == 1 + kExecutors,
+  Expect(superroc_fp4_slot_sets_count() == 1 + kExecutors,
          "configured 1+4 holds 5 sets");
   for (int index = 1; index <= kExecutors; ++index) {
     ExpectRowsEqual(
         RunPrompt(*backend2[static_cast<std::size_t>(index - 1)], tokens),
         expected, "backend 2 session " + std::to_string(index));
     std::cout << "backend 2 session " << index
-              << " sets=" << gufo_fp4_slot_sets_count()
-              << " refusals=" << gufo_fp4_slot_refuse_count()
+              << " sets=" << superroc_fp4_slot_sets_count()
+              << " refusals=" << superroc_fp4_slot_refuse_count()
               << " prefill/decode exact=1\n";
   }
   backend2.clear();
   backend1.reset();
-  Expect(gufo_fp4_slot_debug_map_size() == 0, "destroy releases every set");
-  Expect(gufo_fp4_slot_refuse_count() == 0, "no refusals at shutdown");
+  Expect(superroc_fp4_slot_debug_map_size() == 0, "destroy releases every set");
+  Expect(superroc_fp4_slot_refuse_count() == 0, "no refusals at shutdown");
   std::cout << "configured-1-plus-4: 5 executors, 5 sets, zero refusals, "
                "logits exact\n";
   return 0;
@@ -226,10 +227,10 @@ int main(int argc, const char* const* argv) {
       }
     }
     if (model == nullptr) {
-      model = std::getenv("GUFO_FP4_TEST_KAT_MODEL");
+      model = ::superroc::core::GetEnvCompat("SUPERROC_FP4_TEST_KAT_MODEL");
     }
     if (model == nullptr) {
-      std::cout << "Set GUFO_FP4_TEST_KAT_MODEL for fp4_slot_grow_test.\n";
+      std::cout << "Set SUPERROC_FP4_TEST_KAT_MODEL for fp4_slot_grow_test.\n";
       return kSkipped;
     }
     if (mode != nullptr) {

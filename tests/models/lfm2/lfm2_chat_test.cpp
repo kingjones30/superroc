@@ -19,11 +19,11 @@
 namespace {
 
 namespace fs = std::filesystem;
-namespace json = gufo::json;
-using gufo::tokenization::ChatMessage;
-using gufo::tokenization::ChatRole;
-using gufo::tokenization::ChatTemplateOptions;
-using gufo::tokenization::ChatTool;
+namespace json = superroc::json;
+using superroc::tokenization::ChatMessage;
+using superroc::tokenization::ChatRole;
+using superroc::tokenization::ChatTemplateOptions;
+using superroc::tokenization::ChatTool;
 
 std::string ReadFile(const fs::path& path) {
   std::ifstream input(path, std::ios::binary);
@@ -143,19 +143,19 @@ int main() {
   }
 
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(fs::path(gguf), &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(fs::path(gguf), &error);
   if (reader == nullptr) {
     std::cout << "FAIL lfm2_chat_test: cannot open GGUF: " << error << "\n";
     return 1;
   }
   auto tokenizer =
-      gufo::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
+      superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
   if (tokenizer == nullptr) {
     std::cout << "FAIL lfm2_chat_test: cannot load tokenizer: " << error
               << "\n";
     return 1;
   }
-  const auto* variant = gufo::tokenization::Lfm2TemplateVariantForGguf(*reader);
+  const auto* variant = superroc::tokenization::Lfm2TemplateVariantForGguf(*reader);
   if (variant == nullptr) {
     std::cout << "FAIL lfm2_chat_test: unsupported template\n";
     return 1;
@@ -214,7 +214,7 @@ int main() {
         gen != nullptr && gen->is_bool()) {
       options.add_generation_prompt = gen->as_bool(true);
     }
-    const auto rendered = gufo::tokenization::Lfm2Render(
+    const auto rendered = superroc::tokenization::Lfm2Render(
         std::span<const ChatMessage>(messages.data(), messages.size()),
         std::span<const ChatTool>(tools.data(), tools.size()), options, &error,
         nullptr, *variant);
@@ -242,7 +242,7 @@ int main() {
       // the required sentence inserted after the tool list's closing ']'.
       ChatTemplateOptions required_options = options;
       required_options.require_tool_call = true;
-      const auto required_rendered = gufo::tokenization::Lfm2Render(
+      const auto required_rendered = superroc::tokenization::Lfm2Render(
           std::span<const ChatMessage>(messages.data(), messages.size()),
           std::span<const ChatTool>(tools.data(), tools.size()),
           required_options, &error, nullptr, *variant);
@@ -304,7 +304,7 @@ int main() {
 
     if (name == "c09_special_in_content") {
       if (variant->name != "lfm2.5-1.2b-instruct") {
-        const auto tokens = gufo::tokenization::Lfm2RenderAndTokenize(
+        const auto tokens = superroc::tokenization::Lfm2RenderAndTokenize(
             *tokenizer,
             std::span<const ChatMessage>(messages.data(), messages.size()),
             std::span<const ChatTool>(tools.data(), tools.size()), options,

@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_SAMPLING_REQUEST_HPP_
-#define GUFO_SERVER_SAMPLING_REQUEST_HPP_
+#ifndef SUPERROC_SERVER_SAMPLING_REQUEST_HPP_
+#define SUPERROC_SERVER_SAMPLING_REQUEST_HPP_
 
 #include <cmath>
 #include <cstddef>
@@ -14,7 +14,7 @@
 #include "src/core/json.hpp"
 #include "src/core/sampling.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 struct SamplingRequestError {
   std::string message;
@@ -209,6 +209,6 @@ inline std::optional<SamplingRequestError> ParseSamplingConfig(
   return std::nullopt;
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_SAMPLING_REQUEST_HPP_
+#endif  // SUPERROC_SERVER_SAMPLING_REQUEST_HPP_

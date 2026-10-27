@@ -8,7 +8,7 @@
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void ResidualAddKernel(const float* __restrict__ a,
                                   const float* __restrict__ b,
@@ -24,8 +24,8 @@ void LaunchResidualAdd(const float* a, const float* b, float* out,
   const std::size_t block_size = 256;
   const std::size_t grid_size = (dim + block_size - 1) / block_size;
   ResidualAddKernel<<<grid_size, block_size, 0, stream>>>(a, b, out, dim);
-  GUFO_CHECK_LAUNCH("ResidualAddKernel");
+  SUPERROC_CHECK_LAUNCH("ResidualAddKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

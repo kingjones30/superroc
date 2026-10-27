@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_MODULES_LAYER_VIEW_HPP_
-#define GUFO_MODELS_QWEN_MODULES_LAYER_VIEW_HPP_
+#ifndef SUPERROC_MODELS_QWEN_MODULES_LAYER_VIEW_HPP_
+#define SUPERROC_MODELS_QWEN_MODULES_LAYER_VIEW_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +7,7 @@
 #include "src/models/qwen/ssm.hpp"
 #include "src/models/qwen/state.hpp"
 
-namespace gufo::models::qwen {
+namespace superroc::models::qwen {
 
 // Lightweight per-module views over QwenLayerWeights.
 //
@@ -109,6 +109,6 @@ inline FfnLayerView MakeFfnView(const QwenLayerWeights& w,
                       c.intermediate_size};
 }
 
-}  // namespace gufo::models::qwen
+}  // namespace superroc::models::qwen
 
-#endif  // GUFO_MODELS_QWEN_MODULES_LAYER_VIEW_HPP_
+#endif  // SUPERROC_MODELS_QWEN_MODULES_LAYER_VIEW_HPP_

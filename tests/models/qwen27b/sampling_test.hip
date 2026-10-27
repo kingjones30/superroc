@@ -33,8 +33,8 @@ void Expect(bool condition, std::string_view message) {
 
 std::uint32_t Sample(
     std::span<const float> logits,
-    const gufo::hip::GpuSamplingParameters& parameters,
-    std::span<const gufo::sampling::TokenPenalty> penalties = {}) {
+    const superroc::hip::GpuSamplingParameters& parameters,
+    std::span<const superroc::sampling::TokenPenalty> penalties = {}) {
   float* device_logits = nullptr;
   std::uint32_t* device_token = nullptr;
   CheckHip(hipMalloc(&device_logits, logits.size_bytes()), "allocate logits");
@@ -43,10 +43,10 @@ std::uint32_t Sample(
                      hipMemcpyHostToDevice),
            "upload logits");
 
-  gufo::hip::GpuSamplingWorkspace workspace;
-  gufo::hip::AllocateGpuSamplingWorkspace(&workspace, logits.size(),
+  superroc::hip::GpuSamplingWorkspace workspace;
+  superroc::hip::AllocateGpuSamplingWorkspace(&workspace, logits.size(),
                                           penalties.size());
-  gufo::hip::LaunchGPUSampling(device_logits, device_token, logits.size(),
+  superroc::hip::LaunchGPUSampling(device_logits, device_token, logits.size(),
                                parameters, penalties.data(), penalties.size(),
                                &workspace);
 
@@ -54,7 +54,7 @@ std::uint32_t Sample(
   CheckHip(
       hipMemcpy(&token, device_token, sizeof(token), hipMemcpyDeviceToHost),
       "download token");
-  gufo::hip::FreeGpuSamplingWorkspace(&workspace);
+  superroc::hip::FreeGpuSamplingWorkspace(&workspace);
   CheckHip(hipFree(device_token), "free token");
   CheckHip(hipFree(device_logits), "free logits");
   return token;
@@ -67,12 +67,12 @@ struct SpeculativeSample {
 
 SpeculativeSample SampleSpeculatively(
     std::span<const float> logits,
-    const gufo::hip::GpuSamplingParameters& parameters,
+    const superroc::hip::GpuSamplingParameters& parameters,
     std::uint32_t draft_token, float draft_token_probability,
     std::span<const std::uint32_t> draft_candidate_ids,
     std::span<const float> draft_candidate_probabilities,
     double acceptance_uniform, double residual_uniform,
-    std::span<const gufo::sampling::TokenPenalty> penalties = {}) {
+    std::span<const superroc::sampling::TokenPenalty> penalties = {}) {
   if (draft_candidate_ids.size() != draft_candidate_probabilities.size()) {
     throw std::invalid_argument("sparse vectors must have equal lengths");
   }
@@ -88,11 +88,11 @@ SpeculativeSample SampleSpeculatively(
                      hipMemcpyHostToDevice),
            "upload logits");
 
-  gufo::hip::GpuSamplingWorkspace workspace;
-  gufo::hip::AllocateGpuSamplingWorkspace(
+  superroc::hip::GpuSamplingWorkspace workspace;
+  superroc::hip::AllocateGpuSamplingWorkspace(
       &workspace, logits.size(),
       std::max(draft_candidate_ids.size(), penalties.size()));
-  gufo::hip::LaunchGPUSpeculativeSampling(
+  superroc::hip::LaunchGPUSpeculativeSampling(
       device_logits, device_token, device_accepted, logits.size(), parameters,
       draft_token, draft_token_probability, draft_candidate_ids.data(),
       draft_candidate_probabilities.data(), draft_candidate_ids.size(),
@@ -108,7 +108,7 @@ SpeculativeSample SampleSpeculatively(
                      hipMemcpyDeviceToHost),
            "download speculative acceptance");
   result.accepted = accepted != 0U;
-  gufo::hip::FreeGpuSamplingWorkspace(&workspace);
+  superroc::hip::FreeGpuSamplingWorkspace(&workspace);
   CheckHip(hipFree(device_accepted), "free acceptance");
   CheckHip(hipFree(device_token), "free token");
   CheckHip(hipFree(device_logits), "free logits");
@@ -118,7 +118,7 @@ SpeculativeSample SampleSpeculatively(
 void TestInvalidTargetRows() {
   bool failed = false;
   try {
-    (void)gufo::hip::CheckedSampleToken(gufo::hip::kInvalidSampleToken, 248320);
+    (void)superroc::hip::CheckedSampleToken(superroc::hip::kInvalidSampleToken, 248320);
   } catch (const std::runtime_error&) {
     failed = true;
   }
@@ -131,19 +131,19 @@ void TestInvalidTargetRows() {
     for (std::size_t i = 0; i < size; ++i)
       logits[i] = i % 3 == 0 ? nan : i % 3 == 1 ? inf : -inf;
     for (int route : {0, 1, 2, 3}) {
-      gufo::hip::GpuSamplingParameters config;
+      superroc::hip::GpuSamplingParameters config;
       config.temperature = route == 0 ? 0 : 1;
       config.top_k = route == 2 ? 40 : 0;
       config.top_p = route == 3 ? 0.9F : 1;
       config.uniform = 0.5;
-      Expect(Sample(logits, config) == gufo::hip::kInvalidSampleToken,
+      Expect(Sample(logits, config) == superroc::hip::kInvalidSampleToken,
              "ordinary sampler must report all-nonfinite target failure");
       if (route) {
         const std::vector<std::uint32_t> ids{0};
         const std::vector<float> mass{1};
         const auto sampled =
             SampleSpeculatively(logits, config, 0, 1, ids, mass, 0.0, 0.5);
-        Expect(sampled.token == gufo::hip::kInvalidSampleToken,
+        Expect(sampled.token == superroc::hip::kInvalidSampleToken,
                "speculative sampler must report all-nonfinite target failure");
       }
       logits.back() = -1e35F;
@@ -152,7 +152,7 @@ void TestInvalidTargetRows() {
       logits.back() = -inf;
     }
   }
-  gufo::hip::GpuSamplingParameters config;
+  superroc::hip::GpuSamplingParameters config;
   config.temperature = 1;
   config.uniform = 0.5 - 0x1.0p-40;
   Expect(Sample(std::vector<float>{0, 0}, config) == 0,
@@ -164,8 +164,8 @@ void TestInvalidTargetRows() {
 
 void TestGreedySparsePenalty() {
   const std::vector<float> logits = {5.0F, 4.0F, 3.0F};
-  const std::vector<gufo::sampling::TokenPenalty> penalties = {{0, 0, 1}};
-  gufo::hip::GpuSamplingParameters parameters;
+  const std::vector<superroc::sampling::TokenPenalty> penalties = {{0, 0, 1}};
+  superroc::hip::GpuSamplingParameters parameters;
   parameters.repeat_penalty = 2.0F;
 
   Expect(Sample(logits, parameters, penalties) == 1U,
@@ -174,7 +174,7 @@ void TestGreedySparsePenalty() {
 
 void TestLinearTemperatureAndMinP() {
   const std::vector<float> logits = {3.0F, 2.5F, 0.0F, -1.0F};
-  gufo::hip::GpuSamplingParameters parameters;
+  superroc::hip::GpuSamplingParameters parameters;
   parameters.temperature = 1.0F;
   parameters.min_p = 0.5F;
   parameters.uniform = 0.9F;
@@ -185,7 +185,7 @@ void TestLinearTemperatureAndMinP() {
 
 void TestOrderedFilterChain() {
   const std::vector<float> logits = {5.0F, 4.0F, 3.0F, 2.0F, 1.0F};
-  gufo::hip::GpuSamplingParameters parameters;
+  superroc::hip::GpuSamplingParameters parameters;
   parameters.temperature = 1.0F;
   parameters.top_k = 3;
   parameters.top_p = 0.8F;
@@ -204,7 +204,7 @@ void TestTemperedFilterExpectations() {
     logits[1] = -1;
     logits[2] = -2;
     for (const bool nucleus : {false, true}) {
-      gufo::hip::GpuSamplingParameters parameters{.temperature = 0.5F};
+      superroc::hip::GpuSamplingParameters parameters{.temperature = 0.5F};
       parameters.top_p = nucleus ? 0.8F : 1.0F;
       parameters.min_p = nucleus ? 0.0F : 0.2F;
       parameters.uniform = 0.99F;
@@ -230,7 +230,7 @@ void TestTemperedFilterExpectations() {
 
 void TestTopKOneIsDeterministic() {
   const std::vector<float> logits = {1.0F, 5.0F, 4.0F};
-  gufo::hip::GpuSamplingParameters parameters;
+  superroc::hip::GpuSamplingParameters parameters;
   parameters.temperature = 1.0F;
   parameters.top_k = 1;
   parameters.uniform = 0.99F;
@@ -241,11 +241,11 @@ void TestTopKOneIsDeterministic() {
 
 void TestFullGenerationPenalties() {
   const std::vector<float> logits{3, 2, 1};
-  gufo::sampling::SamplerState sampler({.repeat_last_n = 0,
+  superroc::sampling::SamplerState sampler({.repeat_last_n = 0,
                                         .frequency_penalty = 0.5F,
                                         .presence_penalty = 0.25F},
                                        std::vector<std::uint32_t>{0, 0, 0});
-  gufo::hip::GpuSamplingParameters p{.frequency_penalty = 0.5F,
+  superroc::hip::GpuSamplingParameters p{.frequency_penalty = 0.5F,
                                      .presence_penalty = 0.25F};
   Expect(Sample(logits, p, sampler.penalties()) == 0,
          "prompt occurrences must not count as generated text");
@@ -266,7 +266,7 @@ void TestFullGenerationPenalties() {
 
 void TestTopKOneRespectsMinimumKeep() {
   const std::vector<float> logits = {std::log(0.20F), std::log(0.80F)};
-  gufo::hip::GpuSamplingParameters parameters;
+  superroc::hip::GpuSamplingParameters parameters;
   parameters.temperature = 1.0F;
   parameters.top_k = 1;
   parameters.min_keep = 2;
@@ -281,21 +281,21 @@ void TestTopKOneRespectsMinimumKeep() {
          "top-k one with min-keep uses lossless sampled verification");
 }
 
-void CheckSamplingDistribution(const gufo::sampling::SamplingConfig& config) {
+void CheckSamplingDistribution(const superroc::sampling::SamplingConfig& config) {
   const std::vector<float> logits{0.4F, 2.0F, -1.0F, 1.1F, -0.3F};
   const std::vector<std::uint32_t> history{1, 1, 2, 3};
   const std::vector<std::uint32_t> generated{3, 1, 4};
   const auto distribution =
-      gufo::sampling::BuildDistribution(logits, config, history, generated);
-  gufo::sampling::SamplerState sampler(config, history);
+      superroc::sampling::BuildDistribution(logits, config, history, generated);
+  superroc::sampling::SamplerState sampler(config, history);
   sampler.Accept(generated);
   const auto penalties = sampler.penalties();
-  std::vector<gufo::sampling::Probability> ordered(
+  std::vector<superroc::sampling::Probability> ordered(
       distribution.entries().begin(), distribution.entries().end());
   const bool linear = config.top_k == 0 && config.top_p == 1.0F &&
                       !(config.min_p > 0.0F && config.min_keep > 1);
   if (linear)
-    std::ranges::sort(ordered, {}, &gufo::sampling::Probability::token);
+    std::ranges::sort(ordered, {}, &superroc::sampling::Probability::token);
   const auto quantile = [](const auto& entries, double uniform) {
     auto selected = entries.front().token;
     for (const auto& entry : entries) {
@@ -308,7 +308,7 @@ void CheckSamplingDistribution(const gufo::sampling::SamplingConfig& config) {
     }
     return selected;
   };
-  gufo::hip::GpuSamplingParameters parameters{
+  superroc::hip::GpuSamplingParameters parameters{
       .temperature = config.temperature,
       .top_k = config.top_k,
       .top_p = config.top_p,
@@ -393,7 +393,7 @@ void CheckSamplingDistribution(const gufo::sampling::SamplingConfig& config) {
 }
 
 void TestFilterCombinations() {
-  for (const auto& test : gufo::test::QwenSamplingCases()) {
+  for (const auto& test : superroc::test::QwenSamplingCases()) {
     std::cout << "Sampling strategy: " << test.name << '\n';
     CheckSamplingDistribution(test.config);
   }
@@ -403,7 +403,7 @@ void TestFilterCombinations() {
         for (const float min_p : {0.0F, 0.4F}) {
           for (const std::size_t minimum : {0U, 2U}) {
             for (const bool penalized : {false, true}) {
-              gufo::sampling::SamplingConfig config{
+              superroc::sampling::SamplingConfig config{
                   .temperature = temperature,
                   .top_k = top_k,
                   .top_p = top_p,
@@ -421,7 +421,7 @@ void TestFilterCombinations() {
       }
     }
   }
-  auto oversized = gufo::sampling::SamplingConfig{
+  auto oversized = superroc::sampling::SamplingConfig{
       .temperature = 0.8F, .top_k = 100, .top_p = 0.01F, .min_keep = 100};
   CheckSamplingDistribution(oversized);
   std::cout
@@ -432,7 +432,7 @@ void TestSpeculativeResidualSampling() {
   const std::vector<float> logits = {std::log(0.20F), std::log(0.80F)};
   const std::vector<std::uint32_t> draft_ids = {0U, 1U};
   const std::vector<float> draft_probabilities = {0.80F, 0.20F};
-  gufo::hip::GpuSamplingParameters parameters;
+  superroc::hip::GpuSamplingParameters parameters;
   parameters.temperature = 1.0F;
 
   const auto result =
@@ -451,7 +451,7 @@ void TestDuplicateDraftCandidates() {
   const std::vector<std::uint32_t> duplicate_ids{0, 1, 0, 99};
   const std::vector<float> duplicate_probabilities{0.4F, 0.2F, 0.4F, 0.0F};
   for (const int top_k : {0, 3}) {
-    gufo::hip::GpuSamplingParameters parameters{.temperature = 1.0F,
+    superroc::hip::GpuSamplingParameters parameters{.temperature = 1.0F,
                                                 .top_k = top_k};
     for (const float uniform : {0.0F, 0.1F, 0.5F, 0.99999994F}) {
       const auto expected =
@@ -470,7 +470,7 @@ void TestFilteredSpeculativeResidualSampling() {
   const std::vector<float> logits = {5.0F, 4.0F, 3.0F};
   const std::vector<std::uint32_t> draft_ids = {0U, 1U, 2U};
   const std::vector<float> draft_probabilities = {0.10F, 0.10F, 0.80F};
-  gufo::hip::GpuSamplingParameters parameters;
+  superroc::hip::GpuSamplingParameters parameters;
   parameters.temperature = 0.8F;
   parameters.top_k = 2;
   parameters.top_p = 0.95F;
@@ -489,7 +489,7 @@ void TestSamplingBoundaryValues() {
   // underflows to zero. A zero uniform must still choose nonzero mass.
   const std::vector<float> logits = {-1000.0F, -2.0F, 3.0F};
   for (const int top_k : {0, 2}) {
-    gufo::hip::GpuSamplingParameters parameters;
+    superroc::hip::GpuSamplingParameters parameters;
     parameters.temperature = 1e-38F;
     parameters.top_k = top_k;
     for (const float uniform : {0.0F, 0.5F, 0.99999994F}) {
@@ -514,7 +514,7 @@ void TestSamplingBoundaryValues() {
   // Inverse xorshift state whose next output is UINT64_MAX. The RNG keeps
   // 53 bits; passing a float here would round the largest draw to one.
   std::uint64_t maximum_draw_state = UINT64_C(0xa8d395be4b19cce8);
-  const double maximum_draw = gufo::sampling::Uniform(&maximum_draw_state);
+  const double maximum_draw = superroc::sampling::Uniform(&maximum_draw_state);
   const double gpu_draw = maximum_draw;
   Expect(maximum_draw == gpu_draw && gpu_draw == std::nextafter(1.0, 0.0),
          "the largest RNG draw remains exactly representable below one");
@@ -522,7 +522,7 @@ void TestSamplingBoundaryValues() {
   const std::vector<std::uint32_t> ids{0, 1, 2, 3};
   const std::vector<float> probabilities{0.25F, 0.5F, 0.125F, 0.125F};
   for (const int top_k : {0, 4}) {
-    gufo::hip::GpuSamplingParameters parameters;
+    superroc::hip::GpuSamplingParameters parameters;
     parameters.temperature = 1.0F;
     parameters.top_k = top_k;
     const auto result = SampleSpeculatively(
@@ -536,7 +536,7 @@ void TestExactNucleusBoundaryAndGreedyTies() {
   // Four candidates per GPU segment: the nucleus ends inside a segment,
   // exactly at 257 / 1024 of the unfiltered probability mass.
   const std::vector<float> equal_logits(1024, 0.0F);
-  gufo::hip::GpuSamplingParameters parameters;
+  superroc::hip::GpuSamplingParameters parameters;
   parameters.temperature = 1.0F;
   parameters.top_p = 257.0F / 1024.0F;
   parameters.uniform = 0.99999994F;
@@ -571,7 +571,7 @@ void TestExactNucleusBoundaryAndGreedyTies() {
   CheckHip(hipMemcpy(device_logits, tied_logits.data(),
                      tied_logits.size() * sizeof(float), hipMemcpyHostToDevice),
            "upload batched tie");
-  gufo::hip::LaunchBatchedGPUArgmax(device_logits, device_token, 1,
+  superroc::hip::LaunchBatchedGPUArgmax(device_logits, device_token, 1,
                                     tied_logits.size(), {});
   std::uint32_t batched_token = 0;
   CheckHip(hipMemcpy(&batched_token, device_token, sizeof(batched_token),
@@ -597,20 +597,20 @@ void TestFullVocabularyQuantiles() {
     const std::vector<std::uint32_t> draft_ids{1, 3, 4};
     const std::vector<float> draft_probabilities{0.5F, 0.25F, 0.25F};
     for (const auto& config :
-         {gufo::sampling::SamplingConfig{.temperature = 0.8F},
-          gufo::sampling::SamplingConfig{.temperature = 1e-38F},
-          gufo::sampling::SamplingConfig{.temperature = 0.8F, .min_p = 0.5F},
-          gufo::sampling::SamplingConfig{.temperature = 2.0F, .top_p = 0.9F},
-          gufo::sampling::SamplingConfig{.temperature = 0.8F, .top_k = 40},
-          gufo::sampling::SamplingConfig{
+         {superroc::sampling::SamplingConfig{.temperature = 0.8F},
+          superroc::sampling::SamplingConfig{.temperature = 1e-38F},
+          superroc::sampling::SamplingConfig{.temperature = 0.8F, .min_p = 0.5F},
+          superroc::sampling::SamplingConfig{.temperature = 2.0F, .top_p = 0.9F},
+          superroc::sampling::SamplingConfig{.temperature = 0.8F, .top_k = 40},
+          superroc::sampling::SamplingConfig{
               .temperature = 0.8F, .min_p = 0.8F, .min_keep = 3}}) {
       const auto distribution =
-          gufo::sampling::BuildDistribution(logits, config);
-      std::vector<gufo::sampling::Probability> ordered(
+          superroc::sampling::BuildDistribution(logits, config);
+      std::vector<superroc::sampling::Probability> ordered(
           distribution.entries().begin(), distribution.entries().end());
       if (config.top_k == 0 && config.top_p == 1.0F &&
           !(config.min_p > 0.0F && config.min_keep > 1))
-        std::ranges::sort(ordered, {}, &gufo::sampling::Probability::token);
+        std::ranges::sort(ordered, {}, &superroc::sampling::Probability::token);
       auto residual = ordered;
       double total = 0.0;
       for (auto& entry : residual) {
@@ -633,7 +633,7 @@ void TestFullVocabularyQuantiles() {
         }
         return false;
       };
-      gufo::hip::GpuSamplingParameters parameters{
+      superroc::hip::GpuSamplingParameters parameters{
           .temperature = config.temperature,
           .top_k = config.top_k,
           .top_p = config.top_p,
@@ -684,7 +684,7 @@ void TestBatchedArgmaxTiles() {
         values[17] = -2e35F;
       }
     }
-    std::vector<std::uint32_t> expected(rows, gufo::hip::kInvalidSampleToken);
+    std::vector<std::uint32_t> expected(rows, superroc::hip::kInvalidSampleToken);
     for (std::size_t row = 0; row < rows; ++row) {
       float maximum = -INFINITY;
       for (std::size_t id = 0; id < vocab; ++id) {
@@ -711,7 +711,7 @@ void TestBatchedArgmaxTiles() {
     CheckHip(hipMemset(scratch, 0xA5, (scratch_count + 2) * sizeof(float)),
              "poison argmax scratch");
     for (const std::size_t width : {1U, 2U, 4U, 6U, 8U}) {
-      gufo::hip::LaunchBatchedGPUArgmax(device_logits, tokens, width, vocab,
+      superroc::hip::LaunchBatchedGPUArgmax(device_logits, tokens, width, vocab,
                                         {scratch + 1, scratch_count});
       std::vector<std::uint32_t> actual(width);
       CheckHip(hipMemcpy(actual.data(), tokens, width * sizeof(std::uint32_t),

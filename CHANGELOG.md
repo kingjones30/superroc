@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+SuperROC rename: every `gufo` name that identifies this engine — the C++
+namespace (`gufo::` becomes `superroc::`), `GUFO_*` macros, options and
+environment variables, `gufo_*` functions, kernels, targets and JSON keys,
+the `gufo`, `gufo-quant` and `gufo-server` binaries and the `tools/gufo`
+paths, and user-visible `Gufo`/`gufo` prose — becomes `superroc`.
+Compatibility names keep working: the `gufo` binary link, the previous
+`GUFO_*` environment variables and CMake options (used with a deprecation
+warning when the new name is unset), previous CLI spellings as hidden
+aliases, previous Python import paths as shims, and previous kernel-resource
+keys. Upstream attribution (`LICENSE`, `THIRD_PARTY_NOTICES.md`,
+`docs/lineage/`) is unchanged.
+
 Notable user-facing changes are recorded here. Gufo follows
 [Semantic Versioning](https://semver.org/) under the compatibility policy in
 [the release guide](docs/RELEASING.md).

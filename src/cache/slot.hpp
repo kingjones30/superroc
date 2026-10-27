@@ -1,5 +1,5 @@
-#ifndef GUFO_CACHE_SLOT_HPP_
-#define GUFO_CACHE_SLOT_HPP_
+#ifndef SUPERROC_CACHE_SLOT_HPP_
+#define SUPERROC_CACHE_SLOT_HPP_
 
 #include <functional>
 #include <memory>
@@ -12,7 +12,7 @@
 #include "src/cache/adapter.hpp"
 #include "src/cache/ledger.hpp"
 
-namespace gufo::cache {
+namespace superroc::cache {
 namespace detail {
 struct SlotState;
 struct RowState;
@@ -171,5 +171,5 @@ public:
 // Busy races are retried; cancellation/other failures propagate.
 [[nodiscard]] SlotLease AcquireSlot(std::span<LeasedSlot* const>,
                                     std::stop_token = {});
-}  // namespace gufo::cache
+}  // namespace superroc::cache
 #endif

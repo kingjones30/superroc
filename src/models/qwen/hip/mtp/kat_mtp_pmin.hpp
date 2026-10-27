@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_MTP_KAT_MTP_PMIN_HPP_
-#define GUFO_MODELS_QWEN_HIP_MTP_KAT_MTP_PMIN_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MTP_PMIN_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MTP_PMIN_HPP_
 
 #include <algorithm>
 #include <atomic>
@@ -8,15 +8,16 @@
 #include <cstdio>
 #include <cstdlib>
 #include <span>
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
-// KAT-MTP: the effective GUFO_MTP_PMIN for this call, clamped to [0, 1].
+// KAT-MTP: the effective SUPERROC_MTP_PMIN for this call, clamped to [0, 1].
 // The single source of truth for the greedy p-min gate (mtp/backend.cpp)
 // and the /health summary, so the two can never disagree.
 [[nodiscard]] inline float MtpPMinFromEnv() {
   float p_min = 0.0F;
-  if (const char* env = std::getenv("GUFO_MTP_PMIN");
+  if (const char* env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PMIN");
       env != nullptr && *env != '\0') {
     char* end = nullptr;
     p_min = std::strtof(env, &end);
@@ -27,7 +28,7 @@ namespace gufo::hip {
       static std::atomic<bool> warned{false};
       if (!warned.exchange(true)) {
         std::fprintf(stderr,
-                     "KAT-MTP: GUFO_MTP_PMIN='%s' is not a number; using 0 "
+                     "KAT-MTP: SUPERROC_MTP_PMIN='%s' is not a number; using 0 "
                      "(no p-min gate)\n",
                      env);
       }
@@ -85,6 +86,6 @@ namespace gufo::hip {
   return static_cast<float>(1.0 / sum);
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 
-#endif  // GUFO_MODELS_QWEN_HIP_MTP_KAT_MTP_PMIN_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MTP_PMIN_HPP_

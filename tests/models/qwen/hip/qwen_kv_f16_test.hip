@@ -18,7 +18,7 @@ namespace {
 __global__ void StoreBoth(const float* in, std::uint16_t* sat, std::uint16_t* plain, int n) {
   const int i = static_cast<int>(blockIdx.x * blockDim.x + threadIdx.x);
   if (i >= n) return;
-  sat[i] = __half_as_ushort(gufo::hip::QwenKvF16(in[i]));
+  sat[i] = __half_as_ushort(superroc::hip::QwenKvF16(in[i]));
   plain[i] = __half_as_ushort(__float2half_rn(in[i]));
 }
 

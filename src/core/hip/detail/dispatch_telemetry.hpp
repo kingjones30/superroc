@@ -1,5 +1,5 @@
-#ifndef GUFO_CORE_HIP_DETAIL_DISPATCH_TELEMETRY_HPP_
-#define GUFO_CORE_HIP_DETAIL_DISPATCH_TELEMETRY_HPP_
+#ifndef SUPERROC_CORE_HIP_DETAIL_DISPATCH_TELEMETRY_HPP_
+#define SUPERROC_CORE_HIP_DETAIL_DISPATCH_TELEMETRY_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -8,12 +8,13 @@
 #include <mutex>
 #include <sstream>
 #include <string_view>
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip::detail {
+namespace superroc::hip::detail {
 
 [[nodiscard]] inline bool DispatchTelemetryEnabled() noexcept {
   static const bool enabled = [] {
-    const char* value = std::getenv("GUFO_DISPATCH_TELEMETRY");
+    const char* value = ::superroc::core::GetEnvCompat("SUPERROC_DISPATCH_TELEMETRY");
     if (value == nullptr) {
       return false;
     }
@@ -47,7 +48,7 @@ inline void EmitDispatchTelemetry(std::string_view event, Writer&& writer) {
   }
 
   std::ostringstream output;
-  output << "{\"component\":\"gufo.dispatch\",\"event\":\"" << event << '"';
+  output << "{\"component\":\"superroc.dispatch\",\"event\":\"" << event << '"';
   writer(output);
   output << "}\n";
 
@@ -135,6 +136,6 @@ inline void EmitQwenGraphEligibility(std::uint64_t policy_fingerprint,
       });
 }
 
-}  // namespace gufo::hip::detail
+}  // namespace superroc::hip::detail
 
-#endif  // GUFO_CORE_HIP_DETAIL_DISPATCH_TELEMETRY_HPP_
+#endif  // SUPERROC_CORE_HIP_DETAIL_DISPATCH_TELEMETRY_HPP_

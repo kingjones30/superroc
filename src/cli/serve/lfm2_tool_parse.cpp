@@ -11,7 +11,7 @@
 #include <utility>
 #include <vector>
 
-namespace gufo::server {
+namespace superroc::server {
 namespace {
 
 bool IsAlpha(char c) {
@@ -576,4 +576,4 @@ std::optional<std::vector<Lfm2Call>> ParseLfm2PythonicCalls(
   return calls;
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server

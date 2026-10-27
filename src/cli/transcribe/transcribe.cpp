@@ -15,12 +15,12 @@
 #include "src/core/json.hpp"
 #include "src/models/qwen3_asr/hip/transcription_runtime.hpp"
 
-namespace gufo::cli {
+namespace superroc::cli {
 namespace {
 
 namespace qwen3_asr = models::qwen3_asr;
 namespace qwen3_asr_hip = models::qwen3_asr::hip;
-namespace json = gufo::json;
+namespace json = superroc::json;
 
 constexpr std::uintmax_t kMaximumAudioBytes = 256U << 20U;
 volatile std::sig_atomic_t g_cancel_requested = 0;  // NOLINT
@@ -247,7 +247,7 @@ int RunTranscribe(std::span<const char* const> args) {
     return 0;
   }
   json::Value report = json::Value::object();
-  report["schema"] = "gufo.qwen3-asr.transcription.v1";
+  report["schema"] = "superroc.qwen3-asr.transcription.v1";
   report["backend"] = "native-hip";
   report["language"] = result.language;
   report["text"] = result.text;
@@ -276,4 +276,4 @@ int RunTranscribe(std::span<const char* const> args) {
   return 0;
 }
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli

@@ -1,4 +1,4 @@
-// ling3-chat-template test — runs on the Mac, no gufo_core needed.
+// ling3-chat-template test — runs on the Mac, no superroc_core needed.
 //
 // Renders the gate-(b) prompt and a few shapes, and checks the rendering
 // against the expected strings derived from the model's own
@@ -12,7 +12,7 @@
 
 #include "src/models/ling3/chat_template.hpp"
 
-namespace chat = gufo::models::ling3::chat;
+namespace chat = superroc::models::ling3::chat;
 
 namespace {
 

@@ -28,24 +28,24 @@
 
 namespace {
 
-using gufo::server::ChatRequest;
-using gufo::server::ContinuationDiskEvent;
-using gufo::server::ContinuationDiskEventAction;
-using gufo::server::ContinuationDiskEventReason;
-using gufo::server::ContinuationDiskStore;
-using gufo::server::ContinuationDiskStoreOptions;
-using gufo::server::TextDecodeSelection;
-using gufo::server::TextExecutionPlan;
-using gufo::server::TextExecutionPlanKind;
-using gufo::server::TextModelRunner;
-using gufo::server::TextPrefillStep;
-using gufo::server::TextRunnerCapabilities;
-using gufo::server::TextRunnerDescriptor;
-using gufo::server::TextRunnerPersistenceDescriptor;
-using gufo::server::TextRunnerResourceClaim;
-using gufo::server::TextRunnerSnapshot;
-using gufo::server::TextRunnerState;
-using gufo::server::TextRunnerToken;
+using superroc::server::ChatRequest;
+using superroc::server::ContinuationDiskEvent;
+using superroc::server::ContinuationDiskEventAction;
+using superroc::server::ContinuationDiskEventReason;
+using superroc::server::ContinuationDiskStore;
+using superroc::server::ContinuationDiskStoreOptions;
+using superroc::server::TextDecodeSelection;
+using superroc::server::TextExecutionPlan;
+using superroc::server::TextExecutionPlanKind;
+using superroc::server::TextModelRunner;
+using superroc::server::TextPrefillStep;
+using superroc::server::TextRunnerCapabilities;
+using superroc::server::TextRunnerDescriptor;
+using superroc::server::TextRunnerPersistenceDescriptor;
+using superroc::server::TextRunnerResourceClaim;
+using superroc::server::TextRunnerSnapshot;
+using superroc::server::TextRunnerState;
+using superroc::server::TextRunnerToken;
 
 constexpr std::size_t kChunkBytes = std::size_t{4} * 1024U * 1024U;
 constexpr std::size_t kDiskHeaderBytes = 96;
@@ -62,7 +62,7 @@ class TemporaryDirectory {
 public:
   TemporaryDirectory() {
     std::string pattern = (std::filesystem::temp_directory_path() /
-                           "gufo-continuation-disk-v2-XXXXXX")
+                           "superroc-continuation-disk-v2-XXXXXX")
                               .string();
     char* created = ::mkdtemp(pattern.data());
     if (created == nullptr) {
@@ -182,7 +182,7 @@ public:
     throw std::logic_error("pattern runner does not prefill");
   }
   [[nodiscard]] TextDecodeSelection SelectNext(
-      TextRunnerState&, gufo::sampling::SamplerState&) const override {
+      TextRunnerState&, superroc::sampling::SamplerState&) const override {
     throw std::logic_error("pattern runner does not decode");
   }
   void Advance(TextRunnerState&, TextRunnerToken) const override {
@@ -385,7 +385,7 @@ std::vector<std::uint8_t> MakeVersionOneImage(
     image[offset + index] = static_cast<std::uint8_t>(index % 251U);
   }
   (void)runner;
-  const std::string digest = gufo::crypto::Sha256Hex(image);
+  const std::string digest = superroc::crypto::Sha256Hex(image);
   std::copy(digest.begin(), digest.end(), image.begin() + 32);
   return image;
 }
@@ -557,7 +557,7 @@ void TestThreadedVerificationIsDeterministic() {
   const std::size_t payload_bytes = 2 * kChunkBytes + 1024;
   const char* const thread_counts[] = {"1", "2", "8", "16"};
   for (const char* const threads : thread_counts) {
-    ::setenv("GUFOKVC_VERIFY_THREADS", threads, 1);
+    ::setenv("SUPERROC_KVC_VERIFY_THREADS", threads, 1);
     for (const bool corrupt : {false, true}) {
       TemporaryDirectory directory;
       PatternRunner runner("threaded", payload_bytes);
@@ -587,7 +587,7 @@ void TestThreadedVerificationIsDeterministic() {
       }
     }
   }
-  ::unsetenv("GUFOKVC_VERIFY_THREADS");
+  ::unsetenv("SUPERROC_KVC_VERIFY_THREADS");
 }
 
 void TestMmapAndLegacyStagingAgree() {
@@ -603,17 +603,17 @@ void TestMmapAndLegacyStagingAgree() {
   std::uint64_t mapped_value = 0;
   std::uint64_t legacy_value = 0;
   {
-    ::unsetenv("GUFOKVC_LEGACY_STAGING");
+    ::unsetenv("SUPERROC_KVC_LEGACY_STAGING");
     ContinuationDiskStore store(StoreOptions(directory.path()));
     Expect(RestorePrefix(store, runner, {41, 42, 43}, &mapped_value),
            "the mapped staging path restores");
   }
   {
-    ::setenv("GUFOKVC_LEGACY_STAGING", "1", 1);
+    ::setenv("SUPERROC_KVC_LEGACY_STAGING", "1", 1);
     ContinuationDiskStore store(StoreOptions(directory.path()));
     Expect(RestorePrefix(store, runner, {41, 42, 43}, &legacy_value),
            "the legacy heap staging path restores");
-    ::unsetenv("GUFOKVC_LEGACY_STAGING");
+    ::unsetenv("SUPERROC_KVC_LEGACY_STAGING");
   }
   Expect(mapped_value == legacy_value && mapped_value == 0x51525354ULL,
          "both staging paths restore identical bytes");

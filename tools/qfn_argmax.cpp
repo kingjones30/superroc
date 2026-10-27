@@ -1,8 +1,8 @@
-// LFT SPEC2 item 1: G2 checkpoint top-2 gaps from the gufo executor.
+// LFT SPEC2 item 1: G2 checkpoint top-2 gaps from the superroc executor.
 //
 // Jay's G2 arbiter rule (DECISIONS 14:39) ties a flip against the fork when the
 // FLOAT reference path (LFN_FP4_PREFILL_W8A8=0) has a top-2 gap < 0.05 nats at
-// that checkpoint. gufo serve prints no logprobs, so the clause was
+// that checkpoint. superroc serve prints no logprobs, so the clause was
 // unmeasurable (RV-LFP1-final section 7). This tool teacher-forces each G2
 // checkpoint prefix through the linked executor and prints the argmax, the
 // runner-up, their logprobs and the gap in nats for ONE binary and ONE env.
@@ -127,13 +127,13 @@ int main(int argc, char** argv) {
       throw std::runtime_error("no checkpoints in file");
 
     std::string error;
-    namespace qfn = gufo::models::qwen38_flash_next;
+    namespace qfn = superroc::models::qwen38_flash_next;
     auto model = qfn::Model::Load(
         argv[1], qfn::ModelOptions{.max_context = n_ctx}, &error);
     if (model == nullptr)
       throw std::runtime_error(error);
     auto session = model->CreateSession(
-        gufo::core::SessionMode::kAutoregressive, n_ctx, &error);
+        superroc::core::SessionMode::kAutoregressive, n_ctx, &error);
     if (session == nullptr)
       throw std::runtime_error(error);
 
@@ -188,9 +188,9 @@ int main(int argc, char** argv) {
       const double lp1 = static_cast<double>(logits[top1]) - log_z;
       const double lp2 = static_cast<double>(logits[top2]) - log_z;
       const std::string s1 = model->tokenizer().DecodeTokenCopy(
-          static_cast<gufo::tokenization::TokenId>(top1));
+          static_cast<superroc::tokenization::TokenId>(top1));
       const std::string s2 = model->tokenizer().DecodeTokenCopy(
-          static_cast<gufo::tokenization::TokenId>(top2));
+          static_cast<superroc::tokenization::TokenId>(top2));
       std::printf("CP chars=%zu ntok=%zu top1=%zu %s lp1=%.6f top2=%zu %s "
                   "lp2=%.6f gap=%.6f\n",
                   cut, ids.size(), top1, JsonQuote(s1).c_str(), lp1, top2,

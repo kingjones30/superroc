@@ -17,8 +17,9 @@
 
 #include "src/core/crypto/sha256.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::testing::ds4 {
+namespace superroc::testing::ds4 {
 void CheckTokenGoldens(const models::deepseek_v4_flash::Model& model);
 void ScoreOfficialReference(
     const std::shared_ptr<models::deepseek_v4_flash::Model>& model,
@@ -26,7 +27,7 @@ void ScoreOfficialReference(
 void DumpReferenceFrontiers(
     const std::shared_ptr<models::deepseek_v4_flash::Model>& model,
     const std::string& output_directory, bool prefill_only);
-}  // namespace gufo::testing::ds4
+}  // namespace superroc::testing::ds4
 
 namespace {
 
@@ -42,24 +43,24 @@ void Expect(bool condition, const std::string& message) {
 }
 
 void CheckIndexerBoundary(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model,
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model,
     bool batched) {
   // Shared pp2048 benchmark recipe, seed 100000, at 2035 actual tokens.
   // Generation crosses ratio-4's 512-entry sparse attention boundary.
-  std::ifstream file(GUFO_DS4_BOUNDARY_PROMPT);
+  std::ifstream file(SUPERROC_DS4_BOUNDARY_PROMPT);
   Expect(file.good(), "open indexer boundary prompt");
   const std::string text{std::istreambuf_iterator<char>(file), {}};
   const auto prompt = model->EncodeChat("", text);
   Expect(prompt.size() == 2035, "indexer boundary prompt token identity");
   std::string error;
-  auto ar = model->CreateSession(gufo::core::SessionMode::kAutoregressive,
+  auto ar = model->CreateSession(superroc::core::SessionMode::kAutoregressive,
                                  133760, &error);
   auto spec =
-      model->CreateSession(batched ? gufo::core::SessionMode::kAutoregressive
-                                   : gufo::core::SessionMode::kSpeculative,
+      model->CreateSession(batched ? superroc::core::SessionMode::kAutoregressive
+                                   : superroc::core::SessionMode::kSpeculative,
                            133760, &error);
   auto peer =
-      batched ? model->CreateSession(gufo::core::SessionMode::kAutoregressive,
+      batched ? model->CreateSession(superroc::core::SessionMode::kAutoregressive,
                                      133760, &error)
               : nullptr;
   Expect(ar && spec, error);
@@ -100,7 +101,7 @@ void CheckIndexerBoundary(
     std::vector<int> emitted;
     if (batched) {
       const int token = spec->SelectNext(0.0F, nullptr);
-      const std::array<gufo::models::deepseek_v4_flash::SessionBatchItem, 2>
+      const std::array<superroc::models::deepseek_v4_flash::SessionBatchItem, 2>
           items{{{spec.get(), token}, {peer.get(), token}}};
       Expect(model->EvaluateBatch(items, &error), error);
       emitted.push_back(token);
@@ -148,14 +149,14 @@ constexpr std::array<int, 128> kPinnedDs4Trajectory{
 };
 
 void CheckPinnedTrajectory(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
   std::string error;
   const auto prompt = model->Tokenize(kTrajectoryPrompt);
   Expect(!prompt.empty(), "trajectory prompt tokenization");
 
   auto session = model->CreateSession(
-      model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                         : gufo::core::SessionMode::kAutoregressive,
+      model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                         : superroc::core::SessionMode::kAutoregressive,
       512, &error);
   Expect(session != nullptr, error);
   Expect(session->Sync(prompt, &error), error);
@@ -163,7 +164,7 @@ void CheckPinnedTrajectory(
   int top1_matches = 0;
   std::uint64_t rank_sum = 0;
   int worst_rank = 0;
-  gufo::crypto::Sha256Hasher fingerprint;
+  superroc::crypto::Sha256Hasher fingerprint;
   for (const int expected_token : kPinnedDs4Trajectory) {
     const auto logits = session->CopyLogits(&error);
     Expect(!logits.empty(), error);
@@ -197,11 +198,11 @@ void CheckPinnedTrajectory(
 }
 
 void CheckSessionBounds(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
   std::string error;
   auto session = model->CreateSession(
-      model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                         : gufo::core::SessionMode::kAutoregressive,
+      model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                         : superroc::core::SessionMode::kAutoregressive,
       32, &error);
   Expect(session != nullptr, error);
   Expect(session->PrefillCapacity() > 0 && session->PrefillCapacity() <= 32,
@@ -241,7 +242,7 @@ void CheckSessionBounds(
 }
 
 void CheckWidePrefill(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
   const auto pattern = model->Tokenize(kTrajectoryPrompt);
   Expect(!pattern.empty(), "wide prefill prompt tokenization");
   std::vector<int> tokens(2048);
@@ -251,8 +252,8 @@ void CheckWidePrefill(
   const auto run = [&](std::uint32_t context_capacity) {
     std::string error;
     auto session = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         context_capacity, &error);
     Expect(session != nullptr, error);
     Expect(session->Sync(tokens, &error), error);
@@ -279,13 +280,13 @@ void CheckWidePrefill(
       "2K prefill and continuation retain exact logits with a 262K capacity");
   const auto* bytes = reinterpret_cast<const std::uint8_t*>(reference.data());
   std::cout << "Wide prefill fingerprint "
-            << gufo::crypto::Sha256Hex(
+            << superroc::crypto::Sha256Hex(
                    std::span(bytes, reference.size() * sizeof(float)))
             << '\n';
 }
 
 void CheckBatchedPrefill(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
   constexpr int kTrajectoryRepetitions = 2;
 
   std::string error;
@@ -298,8 +299,8 @@ void CheckBatchedPrefill(
   }
 
   auto batched = model->CreateSession(
-      model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                         : gufo::core::SessionMode::kAutoregressive,
+      model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                         : superroc::core::SessionMode::kAutoregressive,
       4096, &error);
   Expect(batched != nullptr, error);
   Expect(batched->Sync(tokens, &error), error);
@@ -307,8 +308,8 @@ void CheckBatchedPrefill(
   Expect(!batched_logits.empty(), error);
 
   auto sequential = model->CreateSession(
-      model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                         : gufo::core::SessionMode::kAutoregressive,
+      model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                         : superroc::core::SessionMode::kAutoregressive,
       4096, &error);
   Expect(sequential != nullptr, error);
   Expect(sequential->Sync(prompt, &error), error);
@@ -376,7 +377,7 @@ void CheckBatchedPrefill(
 }
 
 void CheckConversationalPrefill(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
   constexpr std::array<std::size_t, 3> kWidths{32, 64, 96};
 
   std::string error;
@@ -390,8 +391,8 @@ void CheckConversationalPrefill(
     }
 
     auto batched = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         512, &error);
     Expect(batched != nullptr, error);
     Expect(batched->Sync(tokens, &error), error);
@@ -399,8 +400,8 @@ void CheckConversationalPrefill(
     Expect(!batched_logits.empty(), error);
 
     auto sequential = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         512, &error);
     Expect(sequential != nullptr, error);
     const std::vector<int> first_token{tokens.front()};
@@ -470,8 +471,8 @@ void CheckConversationalPrefill(
 }
 
 void CheckSessionBatch(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
-  using gufo::models::deepseek_v4_flash::SessionBatchItem;
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
+  using superroc::models::deepseek_v4_flash::SessionBatchItem;
 
   constexpr std::array<std::string_view, 8> kPrompts{
       "Explain virtual memory in one paragraph.",
@@ -489,9 +490,9 @@ void CheckSessionBatch(
 
   std::string error;
   std::array<std::vector<int>, 8> session_prompts;
-  std::array<std::unique_ptr<gufo::models::deepseek_v4_flash::Session>, 8>
+  std::array<std::unique_ptr<superroc::models::deepseek_v4_flash::Session>, 8>
       batched;
-  std::array<std::unique_ptr<gufo::models::deepseek_v4_flash::Session>, 8>
+  std::array<std::unique_ptr<superroc::models::deepseek_v4_flash::Session>, 8>
       sequential;
   for (std::size_t index = 0; index < kPrompts.size(); ++index) {
     const auto prompt =
@@ -508,12 +509,12 @@ void CheckSessionBatch(
   const auto reset_sessions = [&] {
     for (std::size_t index = 0; index < kPrompts.size(); ++index) {
       batched[index] = model->CreateSession(
-          model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                             : gufo::core::SessionMode::kAutoregressive,
+          model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                             : superroc::core::SessionMode::kAutoregressive,
           512, &error);
       sequential[index] = model->CreateSession(
-          model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                             : gufo::core::SessionMode::kAutoregressive,
+          model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                             : superroc::core::SessionMode::kAutoregressive,
           512, &error);
       Expect(batched[index] != nullptr, error);
       Expect(sequential[index] != nullptr, error);
@@ -684,7 +685,7 @@ void CheckSessionBatch(
 }
 
 void CheckDsparkPromptSeed(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
   std::string error;
   const auto prompt = model->EncodeChat(
       "You are a helpful assistant",
@@ -692,8 +693,8 @@ void CheckDsparkPromptSeed(
   Expect(!prompt.empty(), "DSpark seed prompt tokenization");
 
   auto session = model->CreateSession(
-      model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                         : gufo::core::SessionMode::kAutoregressive,
+      model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                         : superroc::core::SessionMode::kAutoregressive,
       512, &error);
   Expect(session != nullptr, error);
   Expect(session->Sync(prompt, &error), error);
@@ -718,8 +719,8 @@ void CheckDsparkPromptSeed(
   session.reset();
 
   auto extended = model->CreateSession(
-      model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                         : gufo::core::SessionMode::kAutoregressive,
+      model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                         : superroc::core::SessionMode::kAutoregressive,
       512, &error);
   Expect(extended != nullptr, error);
   Expect(extended->Sync(prompt, &error), error);
@@ -734,14 +735,14 @@ void CheckDsparkPromptSeed(
 
   // A short output budget still permits a shorter useful draft.
   for (const std::size_t concurrency : {1U, 2U}) {
-    std::vector<std::unique_ptr<gufo::models::deepseek_v4_flash::Session>>
+    std::vector<std::unique_ptr<superroc::models::deepseek_v4_flash::Session>>
         sessions;
     std::vector<std::vector<int>> output(concurrency);
-    std::vector<gufo::models::deepseek_v4_flash::SessionDsparkBatchItem> items;
+    std::vector<superroc::models::deepseek_v4_flash::SessionDsparkBatchItem> items;
     for (std::size_t i = 0; i < concurrency; ++i) {
       auto member = model->CreateSession(
-          model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                             : gufo::core::SessionMode::kAutoregressive,
+          model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                             : superroc::core::SessionMode::kAutoregressive,
           static_cast<uint32_t>(prompt.size() + 5), &error);
       Expect(member != nullptr && member->Sync(prompt, &error), error);
       items.push_back({.session = member.get(),
@@ -761,8 +762,8 @@ void CheckDsparkPromptSeed(
 }
 
 void CheckDsparkSnapshots(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
-  using gufo::models::deepseek_v4_flash::Session;
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
+  using superroc::models::deepseek_v4_flash::Session;
   std::string error;
   const auto pattern = model->Tokenize(kTrajectoryPrompt);
   for (const std::size_t depth : {53U, 4608U, 16384U}) {
@@ -770,12 +771,12 @@ void CheckDsparkSnapshots(
     for (std::size_t i = 0; i < depth; ++i)
       prompt[i] = pattern[i % pattern.size()];
     auto source = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         20480, &error);
     auto fork = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         20480, &error);
     Expect(source != nullptr && fork != nullptr, error);
     Expect(source->Sync(prompt, &error), error);
@@ -842,8 +843,8 @@ void CheckDsparkSnapshots(
 }
 
 void CheckDsparkScalarQuality(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
-  using namespace gufo::models::deepseek_v4_flash;
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
+  using namespace superroc::models::deepseek_v4_flash;
   constexpr std::array<std::string_view, 4> kPrompts{
       "Continue the pattern for twenty more terms and briefly state the rule: "
       "red, blue, blue, red, blue, blue, red,",
@@ -882,8 +883,8 @@ void CheckDsparkScalarQuality(
     std::unique_ptr<SessionSnapshot> snapshot;
     if (depth != 0) {
       auto base = model->CreateSession(
-          model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                             : gufo::core::SessionMode::kAutoregressive,
+          model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                             : superroc::core::SessionMode::kAutoregressive,
           context, &error);
       Expect(base && base->Sync(prefix, &error), error);
       snapshot = base->SaveSnapshot(&error);
@@ -903,8 +904,8 @@ void CheckDsparkScalarQuality(
       std::vector<std::vector<int>> emitted(concurrency);
       const auto make_session = [&](std::size_t member) {
         auto session = model->CreateSession(
-            model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                               : gufo::core::SessionMode::kAutoregressive,
+            model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                               : superroc::core::SessionMode::kAutoregressive,
             context, &error);
         Expect(session != nullptr, error);
         if (snapshot)
@@ -1034,8 +1035,8 @@ void CheckDsparkScalarQuality(
 }
 
 void CheckConcurrentPolicySnapshot(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
-  using namespace gufo::models::deepseek_v4_flash;
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
+  using namespace superroc::models::deepseek_v4_flash;
   for (const std::size_t concurrency : {2u, 8u}) {
     std::string error;
     std::vector<std::unique_ptr<Session>> sessions(concurrency);
@@ -1044,8 +1045,8 @@ void CheckConcurrentPolicySnapshot(
     std::vector<SessionDsparkBatchItem> items(concurrency);
     for (std::size_t i = 0; i < concurrency; ++i) {
       sessions[i] = model->CreateSession(
-          model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                             : gufo::core::SessionMode::kAutoregressive,
+          model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                             : superroc::core::SessionMode::kAutoregressive,
           512, &error);
       Expect(sessions[i] != nullptr, error);
       auto prompt = model->Tokenize(kTrajectoryPrompt);
@@ -1106,9 +1107,9 @@ void CheckConcurrentPolicySnapshot(
 }
 
 void CheckDsparkChangingMembership(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
-  using gufo::models::deepseek_v4_flash::Session;
-  using gufo::models::deepseek_v4_flash::SessionDsparkBatchItem;
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
+  using superroc::models::deepseek_v4_flash::Session;
+  using superroc::models::deepseek_v4_flash::SessionDsparkBatchItem;
   struct Observation {
     std::vector<int> emitted;
     std::vector<float> logits;
@@ -1123,8 +1124,8 @@ void CheckDsparkChangingMembership(
       // Grow shared scratch while older sessions remain live. Their borrowed
       // buffers must survive; the repeat can reuse the largest cached arena.
       sessions[i] = model->CreateSession(
-          model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                             : gufo::core::SessionMode::kAutoregressive,
+          model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                             : superroc::core::SessionMode::kAutoregressive,
           512 + 256 * i, &error);
       Expect(sessions[i] != nullptr, error);
       auto prompt = model->Tokenize(kTrajectoryPrompt);
@@ -1183,9 +1184,9 @@ void CheckDsparkChangingMembership(
 }
 
 void CheckDsparkReproducibility(
-    const std::shared_ptr<gufo::models::deepseek_v4_flash::Model>& model) {
-  using gufo::models::deepseek_v4_flash::Session;
-  using gufo::models::deepseek_v4_flash::SessionDsparkBatchItem;
+    const std::shared_ptr<superroc::models::deepseek_v4_flash::Model>& model) {
+  using superroc::models::deepseek_v4_flash::Session;
+  using superroc::models::deepseek_v4_flash::SessionDsparkBatchItem;
 
   constexpr std::array<std::string_view, 4> kPrompts{
       "Continue the pattern: red, blue, blue, red, blue, blue, red,",
@@ -1204,12 +1205,12 @@ void CheckDsparkReproducibility(
   std::string error;
   for (const std::uint32_t tail : {1U, 3U, 7U}) {
     auto configured = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         512, &error);
     auto legacy = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         512, &error);
     Expect(configured != nullptr && legacy != nullptr, error);
     const auto prompt = model->Tokenize(kPrompts[0]);
@@ -1249,8 +1250,8 @@ void CheckDsparkReproducibility(
       std::vector<std::unique_ptr<Session>> sessions;
       for (std::size_t i = 0; i < concurrency; ++i) {
         auto session = model->CreateSession(
-            model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                               : gufo::core::SessionMode::kAutoregressive,
+            model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                               : superroc::core::SessionMode::kAutoregressive,
             512, &error);
         Expect(session != nullptr, error);
         auto prompt = model->Tokenize(kPrompts[i % kPrompts.size()]);
@@ -1317,7 +1318,7 @@ void CheckDsparkReproducibility(
           observation.stats.verifier_rows});
     }
     std::cout << "DSpark fingerprint C" << concurrency << " "
-              << gufo::crypto::Sha256Hex(fingerprint) << '\n';
+              << superroc::crypto::Sha256Hex(fingerprint) << '\n';
     Expect(reference.size() == candidate.size(), "same observation count");
     std::uint64_t drafted = 0;
     for (std::size_t i = 0; i < reference.size(); ++i) {
@@ -1397,14 +1398,14 @@ void CheckDsparkReproducibility(
 
 int main(int argc, char** argv) try {
   std::cout << std::unitbuf;
-  const char* model_path = std::getenv("GUFO_DEEPSEEK_V4_FLASH_MODEL");
+  const char* model_path = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
   if (model_path == nullptr || model_path[0] == '\0') {
-    std::cout << "SKIP: GUFO_DEEPSEEK_V4_FLASH_MODEL is not set\n";
+    std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_MODEL is not set\n";
     return 77;
   }
 
-  using gufo::models::deepseek_v4_flash::Model;
-  using gufo::models::deepseek_v4_flash::ModelOptions;
+  using superroc::models::deepseek_v4_flash::Model;
+  using superroc::models::deepseek_v4_flash::ModelOptions;
 
   const bool dspark_replay =
       argc == 2 && std::string_view(argv[1]) == "--dspark-replay";
@@ -1431,9 +1432,9 @@ int main(int argc, char** argv) try {
     return 2;
   }
   const char* dspark_model_path =
-      dspark ? std::getenv("GUFO_DEEPSEEK_V4_FLASH_DSPARK_MODEL") : nullptr;
+      dspark ? ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL") : nullptr;
   if (dspark && (dspark_model_path == nullptr || *dspark_model_path == '\0')) {
-    std::cout << "SKIP: GUFO_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
+    std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
     return 77;
   }
   std::string error;
@@ -1450,11 +1451,11 @@ int main(int argc, char** argv) try {
   Expect(!model->ModelName().empty(), "model name");
 
   if (official) {
-    gufo::testing::ds4::ScoreOfficialReference(model, argv[2]);
+    superroc::testing::ds4::ScoreOfficialReference(model, argv[2]);
     return 0;
   }
   if (frontiers) {
-    gufo::testing::ds4::DumpReferenceFrontiers(model, argv[2], prefill_only);
+    superroc::testing::ds4::DumpReferenceFrontiers(model, argv[2], prefill_only);
     return 0;
   }
   if (wide_prefill) {
@@ -1483,7 +1484,7 @@ int main(int argc, char** argv) try {
     return 0;
   }
 
-  gufo::testing::ds4::CheckTokenGoldens(*model);
+  superroc::testing::ds4::CheckTokenGoldens(*model);
   if (template_only) {
     std::cout << "DeepSeek Hugging Face template token goldens passed\n";
     return 0;
@@ -1493,8 +1494,8 @@ int main(int argc, char** argv) try {
   Expect(!prompt.empty(), "chat prompt tokenization");
 
   auto session = model->CreateSession(
-      model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                         : gufo::core::SessionMode::kAutoregressive,
+      model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                         : superroc::core::SessionMode::kAutoregressive,
       4096, &error);
   Expect(session != nullptr, error);
   Expect(session->Sync(prompt, &error), error);

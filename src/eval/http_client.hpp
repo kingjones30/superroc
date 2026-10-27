@@ -1,11 +1,11 @@
-#ifndef GUFO_EVAL_HTTP_CLIENT_HPP_
-#define GUFO_EVAL_HTTP_CLIENT_HPP_
+#ifndef SUPERROC_EVAL_HTTP_CLIENT_HPP_
+#define SUPERROC_EVAL_HTTP_CLIENT_HPP_
 
 #include <chrono>
 #include <string>
 #include <string_view>
 
-namespace gufo::eval {
+namespace superroc::eval {
 
 struct HttpResult {
   bool transport_ok{false};
@@ -44,6 +44,6 @@ private:
 
 [[nodiscard]] std::string NormalizeBaseUrl(std::string base_url);
 
-}  // namespace gufo::eval
+}  // namespace superroc::eval
 
-#endif  // GUFO_EVAL_HTTP_CLIENT_HPP_
+#endif  // SUPERROC_EVAL_HTTP_CLIENT_HPP_

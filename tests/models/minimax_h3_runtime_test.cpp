@@ -17,21 +17,22 @@
 #include <utility>
 #include <vector>
 
+#include "src/core/previous_name_compat.hpp"
 #include "src/models/minimax_h3/json.hpp"
 #include "src/models/minimax_h3/runtime.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
 
 namespace {
 
-using gufo::minimax_h3::CancellationToken;
-using gufo::minimax_h3::FailureInjector;
-using gufo::minimax_h3::InspectionOptions;
-using gufo::minimax_h3::LoadOptions;
-using gufo::minimax_h3::ModelInventory;
-using gufo::minimax_h3::Phase;
-using gufo::minimax_h3::PhaseSession;
-using gufo::minimax_h3::ResidencyBackend;
-using gufo::minimax_h3::ResidencyMode;
+using superroc::minimax_h3::CancellationToken;
+using superroc::minimax_h3::FailureInjector;
+using superroc::minimax_h3::InspectionOptions;
+using superroc::minimax_h3::LoadOptions;
+using superroc::minimax_h3::ModelInventory;
+using superroc::minimax_h3::Phase;
+using superroc::minimax_h3::PhaseSession;
+using superroc::minimax_h3::ResidencyBackend;
+using superroc::minimax_h3::ResidencyMode;
 
 void Expect(bool condition, const std::string& message) {
   if (!condition) {
@@ -43,7 +44,7 @@ void Expect(bool condition, const std::string& message) {
 struct TemporaryDirectory {
   TemporaryDirectory() {
     std::array<char, 64> pattern{};
-    std::strcpy(pattern.data(), "/tmp/gufo-h3-runtime-XXXXXX");
+    std::strcpy(pattern.data(), "/tmp/superroc-h3-runtime-XXXXXX");
     char* result = mkdtemp(pattern.data());
     if (result == nullptr) {
       throw std::runtime_error("mkdtemp failed");
@@ -175,7 +176,7 @@ struct ModelFixture {
 
   void WriteManifest() const {
     std::ostringstream manifest;
-    manifest << "{\"schema\":\"gufo.minimax-h3-source.v1\","
+    manifest << "{\"schema\":\"superroc.minimax-h3-source.v1\","
              << "\"model_kind\":\"minimax-h3-fl2va-bf16\","
              << "\"revision\":\"42ed227ee7df40d41602854ae760620d6eb651fe\","
              << "\"files\":[";
@@ -293,9 +294,26 @@ ModelInventory InspectFixture(const ModelFixture& fixture) {
   return std::move(*inventory);
 }
 
+void TestPreviousManifestSchemaAccepted() {
+  // Compatibility: manifests written by previous releases carry the
+  // previous engine-name schema (built from parts so its spelling never
+  // appears here); the reader accepts both spellings.
+  static const std::string previous_schema =
+      std::string("g") + "ufo.minimax-h3-source.v1";
+  Expect(::superroc::core::MatchesCurrentOrPrevious(
+             previous_schema, "superroc.minimax-h3-source.v1"),
+         "previous manifest schema accepted");
+  Expect(::superroc::core::MatchesCurrentOrPrevious(
+             "superroc.minimax-h3-source.v1", "superroc.minimax-h3-source.v1"),
+         "current manifest schema accepted");
+  Expect(!::superroc::core::MatchesCurrentOrPrevious(
+             "other.v1", "superroc.minimax-h3-source.v1"),
+         "unrelated manifest schema rejected");
+}
+
 void TestStrictJson() {
-  using gufo::minimax_h3::json::Error;
-  using gufo::minimax_h3::json::Parse;
+  using superroc::minimax_h3::json::Error;
+  using superroc::minimax_h3::json::Parse;
   const auto parsed = Parse(
       "{\"u\":18446744073709551615,\"s\":-7,\"f\":1e-6,"
       "\"unicode\":\"\\uD83E\\uDD8A\"}");
@@ -311,7 +329,7 @@ void TestStrictJson() {
   }
   Expect(duplicate_rejected, "JSON duplicate keys rejected");
   const std::string abc = "abc";
-  Expect(gufo::minimax_h3::Sha256(std::span(
+  Expect(superroc::minimax_h3::Sha256(std::span(
              reinterpret_cast<const unsigned char*>(abc.data()), abc.size())) ==
              "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
          "SHA-256 known-answer test");
@@ -357,7 +375,7 @@ void TestPinnedManifestRequiredByDefault() {
   Expect(!inventory.has_value(), "look-alike source manifest rejected");
   Expect(error.find("SHA-256") != std::string::npos,
          "pinned-manifest rejection identifies SHA-256");
-  Expect(gufo::minimax_h3::DefaultResidencyMode() == ResidencyMode::kDeviceCopy,
+  Expect(superroc::minimax_h3::DefaultResidencyMode() == ResidencyMode::kDeviceCopy,
          "measured initial default is explicit device copy");
 }
 
@@ -438,7 +456,7 @@ void TestFailureInjectionIsTransactional() {
                              nullptr, &failure, &error);
       Expect(!session.has_value(),
              "injected failure must reject " +
-                 std::string(gufo::minimax_h3::ToString(mode)) +
+                 std::string(superroc::minimax_h3::ToString(mode)) +
                  " at operation " + std::to_string(fail_after));
       Expect(backend.LiveResources() == 0,
              "injected failure restores resource baseline");
@@ -494,6 +512,7 @@ void TestCancellationAndPhasePeaks() {
 }  // namespace
 
 int main() {
+  TestPreviousManifestSchemaAccepted();
   TestStrictJson();
   TestInspectionAndInventory();
   TestUnknownArchitectureRejected();

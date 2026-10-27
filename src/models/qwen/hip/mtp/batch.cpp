@@ -16,8 +16,9 @@
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
 #include "src/models/qwen/hip/ops/swiglu.hpp"
 #include "src/models/qwen/hip/ops/token.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 /// LaunchMtpFusionNorms lives in kernels/mtp_batch.hip.
 void LaunchMtpFusionNorms(const float* embed_rows, const float* h_rows,
@@ -55,7 +56,7 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
   // GEMM and fault the GPU with King's seats resident. Refuse before any
   // device work. The caller (PrimeTargetContext) catches this and falls back
   // to the serial prime, which runs the real MoE FFN.
-  if (layer.is_moe && std::getenv("GUFO_MTP_PRIME_FULL") != nullptr) {
+  if (layer.is_moe && ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_FULL") != nullptr) {
     static bool announced_full_moe = false;
     if (!announced_full_moe) {
       announced_full_moe = true;
@@ -117,8 +118,8 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
   // SPEC4 item 2. Priming only fills the draft KV. K and V are projections of
   // this fused hidden, taken before attention, so Q, attention, the output
   // projection, and the FFN do not change the cache. Decode runs the full
-  // block itself. GUFO_MTP_PRIME_FULL=1 keeps the old full block.
-  const bool full_block = std::getenv("GUFO_MTP_PRIME_FULL") != nullptr;
+  // block itself. SUPERROC_MTP_PRIME_FULL=1 keeps the old full block.
+  const bool full_block = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_FULL") != nullptr;
   static bool announced = false;
   if (!announced) {
     announced = true;
@@ -284,5 +285,5 @@ std::vector<float> QwenMtpGpuExecutor::CopyKvCacheF32() {
   return host;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

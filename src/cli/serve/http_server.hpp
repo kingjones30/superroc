@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_HTTP_SERVER_HPP_
-#define GUFO_SERVER_HTTP_SERVER_HPP_
+#ifndef SUPERROC_SERVER_HTTP_SERVER_HPP_
+#define SUPERROC_SERVER_HTTP_SERVER_HPP_
 
 #include <algorithm>
 #include <atomic>
@@ -17,7 +17,7 @@
 #include "src/cli/serve/generation_metrics.hpp"
 #include "src/cli/serve/text_generation_backend.hpp"
 
-namespace gufo::server {
+namespace superroc::server {
 
 class VideoJobService;
 class TtsService;
@@ -218,6 +218,6 @@ inline void RecordServerMetrics(const TextGenerationBackend::Result& result) {
   RecordRequestMetrics(result);
 }
 
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_HTTP_SERVER_HPP_
+#endif  // SUPERROC_SERVER_HTTP_SERVER_HPP_

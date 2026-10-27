@@ -1,5 +1,5 @@
-#ifndef GUFO_SERVER_TEXT_PUBLICATION_WAIT_HPP_
-#define GUFO_SERVER_TEXT_PUBLICATION_WAIT_HPP_
+#ifndef SUPERROC_SERVER_TEXT_PUBLICATION_WAIT_HPP_
+#define SUPERROC_SERVER_TEXT_PUBLICATION_WAIT_HPP_
 
 #include <algorithm>
 #include <array>
@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <optional>
 
-namespace gufo::server {
+namespace superroc::server {
 
 struct TextPendingPublication {
   static constexpr std::size_t kMinimumGainTokens = 4096;
@@ -60,6 +60,6 @@ private:
 };
 
 }  // namespace detail
-}  // namespace gufo::server
+}  // namespace superroc::server
 
-#endif  // GUFO_SERVER_TEXT_PUBLICATION_WAIT_HPP_
+#endif  // SUPERROC_SERVER_TEXT_PUBLICATION_WAIT_HPP_

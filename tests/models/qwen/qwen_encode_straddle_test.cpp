@@ -15,11 +15,11 @@
 #include "src/models/qwen/tokenizer.hpp"
 
 namespace {
-using gufo::tokenization::ContentSpan;
-using gufo::tokenization::QwenChatTemplate;
-using gufo::tokenization::QwenTokenizer;
-using gufo::tokenization::TokenId;
-using gufo::tokenization::TokenizerOptions;
+using superroc::tokenization::ContentSpan;
+using superroc::tokenization::QwenChatTemplate;
+using superroc::tokenization::QwenTokenizer;
+using superroc::tokenization::TokenId;
+using superroc::tokenization::TokenizerOptions;
 int failures = 0;
 void Check(bool ok, const std::string& what) {
   std::cout << (ok ? "PASS " : "FAIL ") << what << "\n";
@@ -85,7 +85,7 @@ int main() {
     return 77;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   if (reader == nullptr) {
     std::cout << "FAIL open: " << error << "\n";
     return 1;

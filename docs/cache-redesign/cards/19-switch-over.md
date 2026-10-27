@@ -148,7 +148,7 @@ while an execution lease is active.
 
 Raw logs, production binaries, source patches and hashes are retained outside
 Git at `/home/mixer/gufo-qualification/pr543-followup`. The initial measured
-candidate was `candidate-r3-gufo`, SHA-256
+candidate was `candidate-r3-superroc`, SHA-256
 `b2b271a70620e91e5d95e78fea8563f78c4f76b9b59796dfcbb0e68991b86eec`.
 The core run uses C2, context 32768, 8 GiB cache RAM, 8 GiB disk and 1 GiB
 staging, selecting growth, depth, edits, shared-prefix, rotation, concurrency,
@@ -160,7 +160,7 @@ the final per-request 5% / 3 ms timing gate. The PR remains draft.
 
 ### Backing assignment follow-up
 
-The `candidate-r3-gufo` AR run passed all 54 growth requests, then exposed
+The `candidate-r3-superroc` AR run passed all 54 growth requests, then exposed
 77.65 seconds of snapshot work on a cold 23,521-token depth request. The
 retained CPU profile shows exception unwinding in `ReserveBacking`: every
 assignment restarted its scan at block zero, repeatedly trying occupied
@@ -172,7 +172,7 @@ atomic cursor is only a hint; ledger ownership still arbitrates races. The
 passes afterwards. Existing allocation/failure/persistence-pin/concurrent-owner
 checks and the AR/MTP adapter restoration tests also pass.
 
-The restarted matrix uses `candidate-r4-gufo`, SHA-256
+The restarted matrix uses `candidate-r4-superroc`, SHA-256
 `618c9cbe3baf4d9e3e77a05217436ceb4c965090377f7bea392d2e786584d001`.
 Main is still `665fc182` after checking the remote. Both production builds now
 have external RSS/high-water and global HIP/UMA memory sampling for a matched
@@ -231,7 +231,7 @@ failure from a numerical restoration defect.
 
 ### Capture batching and capacity planning
 
-`candidate-r6-gufo` (SHA-256
+`candidate-r6-superroc` (SHA-256
 `bceaef2cb4399e8edc5dda88d81b395183af055bcc314290684ff6d64928ae2d`)
 coalesces adjacent chunks from the same physical allocation and batches four
 independent transfers. Capture admits all buffers before submission and waits
@@ -255,7 +255,7 @@ and MTP at 2/8 GiB, C2/32K, C8/4K and C1/100K+ capacities. A delayed-transfer
 test verifies that a failed capture leaves the preceding published boundary
 restorable; existing branch, restart and corruption checks also pass.
 
-The revised production build is `candidate-r7-gufo`, SHA-256
+The revised production build is `candidate-r7-superroc`, SHA-256
 `ae09ee54a37ef2ea1e6595709445428bce45ce560fb76c8f5f64b2a98739e432`.
 Its AR/MTP model sampling and EOS replay checks pass, including all 25
 strategies, concurrent interleaving and short output budgets. The complete RAM-side functional histories pass in both modes at the original
@@ -285,7 +285,7 @@ rate and about 78.65% of prompt tokens reused. Cold controls are excluded.
 ### Fresh matched RAM benchmark
 
 A separate fresh standard `memory` table compares main `665fc182` with
-`candidate-r8-gufo`, SHA-256
+`candidate-r8-superroc`, SHA-256
 `0ab38a58aed6715d92adc92649f152f40366c099be2a2e176c4818a701f1e86e`.
 Both use AR, C1, context 133121, 8 GiB cache RAM, no disk/staging, the same
 weights, pinned production toolchain and standard HTTP harness. Source

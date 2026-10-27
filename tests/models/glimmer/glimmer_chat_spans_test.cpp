@@ -15,7 +15,7 @@
 
 namespace {
 
-namespace tok = gufo::tokenization;
+namespace tok = superroc::tokenization;
 
 int fails = 0;
 
@@ -64,7 +64,7 @@ int main() {
     return 77;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(env, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(env, &error);
   if (reader == nullptr) {
     std::cerr << "SKIP glimmer_chat_spans_test: " << env
               << " unreadable: " << error << "\n";

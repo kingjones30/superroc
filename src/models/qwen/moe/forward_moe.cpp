@@ -10,11 +10,11 @@
 #include <limits>
 
 #include "src/core/quant/ggml_dequant.hpp"
-#include "src/core/rocm_fp4/gufo_fp4_route.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_route.hpp"
 #include "src/models/qwen/forward.hpp"
 #include "src/models/qwen/oracles.hpp"
 
-namespace gufo::models {
+namespace superroc::models {
 namespace {
 
 [[noreturn]] void KatMoeFail(const char* msg) {
@@ -124,14 +124,14 @@ bool KatRouteSoftmaxTopK(std::span<const float> logits, int n_used,
   int order[256];
   int work_a[512];
   int work_b[512];
-  const int pad = gufo_fp4_pow2_ge(n_expert);
+  const int pad = superroc_fp4_pow2_ge(n_expert);
   if (pad < 0 || pad > 256) {
     return false;
   }
   // work arrays must cover `pad`, which equals n_expert when n_expert is a
   // power of two and is larger otherwise. 512 covers pad<=256.
-  if (gufo_fp4_bitonic_argsort_desc(probs, order, work_a, work_b, n_expert) !=
-      GUFO_FP4_OK) {
+  if (superroc_fp4_bitonic_argsort_desc(probs, order, work_a, work_b, n_expert) !=
+      SUPERROC_FP4_OK) {
     return false;
   }
   // Fork norm_w (llama-graph): sum the picked probabilities in ascending
@@ -258,4 +258,4 @@ void ForwardMoe(std::span<const float> x, const QwenLayerWeights& layer,
   }
 }
 
-}  // namespace gufo::models
+}  // namespace superroc::models

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_LFM2_CHAT_HPP_
-#define GUFO_MODELS_QWEN_LFM2_CHAT_HPP_
+#ifndef SUPERROC_MODELS_QWEN_LFM2_CHAT_HPP_
+#define SUPERROC_MODELS_QWEN_LFM2_CHAT_HPP_
 
 #include <array>
 #include <cstdint>
@@ -12,7 +12,7 @@
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/chat_template.hpp"
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 
 // LFM2: pinned sha256 of tokenizer.chat_template in the LFM2.5 GGUFs.
 inline constexpr std::string_view kLfm2ChatTemplateSha256 =
@@ -66,6 +66,6 @@ inline constexpr std::array<Lfm2TemplateVariant, 3> kLfm2TemplateVariants{{
     std::string* error_msg = nullptr,
     const Lfm2TemplateVariant& variant = kLfm2TemplateVariants[0]);
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization
 
-#endif  // GUFO_MODELS_QWEN_LFM2_CHAT_HPP_
+#endif  // SUPERROC_MODELS_QWEN_LFM2_CHAT_HPP_

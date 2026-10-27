@@ -58,10 +58,10 @@ float TableScale(std::uint8_t e) {
   return mantissa * scale;
 }
 
-float IndependentDot(gufo::core::GgmlType type, const std::uint8_t* raw,
+float IndependentDot(superroc::core::GgmlType type, const std::uint8_t* raw,
                      const float* x, std::size_t k) {
   const std::size_t stride =
-      type == gufo::core::GgmlType::kQ4_0_ROCMFP4 ? 18U : 17U;
+      type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ? 18U : 17U;
   double acc = 0.0;
   for (std::size_t i = 0; i < k; ++i) {
     const std::uint8_t* blk = raw + (i / 32U) * stride;
@@ -69,14 +69,14 @@ float IndependentDot(gufo::core::GgmlType type, const std::uint8_t* raw,
     const std::uint8_t byte = blk[local & 15];
     const unsigned nib = local < 16 ? (byte & 0x0FU) : (byte >> 4);
     const std::uint8_t eb =
-        (type == gufo::core::GgmlType::kQ4_0_ROCMFP4 && local >= 16) ? blk[17]
+        (type == superroc::core::GgmlType::kQ4_0_ROCMFP4 && local >= 16) ? blk[17]
                                                                      : blk[16];
     acc += static_cast<double>(kTable[nib]) * TableScale(eb) * x[i];
   }
   return static_cast<float>(acc);
 }
 
-bool ConfigOk(const gufo::core::ModelConfig& config, std::string* why) {
+bool ConfigOk(const superroc::core::ModelConfig& config, std::string* why) {
   auto bad = [&](const char* msg) {
     *why = msg;
     return false;
@@ -118,11 +118,11 @@ bool ConfigOk(const gufo::core::ModelConfig& config, std::string* why) {
   return true;
 }
 
-bool MathOk(const gufo::models::QwenModelWeights& weights, std::string* why) {
+bool MathOk(const superroc::models::QwenModelWeights& weights, std::string* why) {
   const float x[4] = {1.0F, -2.0F, 0.5F, 0.25F};
   const float w[4] = {1.0F, 1.0F, 1.0F, 1.0F};
   float got[4];
-  gufo::models::GlimmerRmsNorm(x, w, 1.0e-5F, got);
+  superroc::models::GlimmerRmsNorm(x, w, 1.0e-5F, got);
   double sum = 0.0;
   for (float v : x) {
     sum += static_cast<double>(v) * v;
@@ -132,13 +132,13 @@ bool MathOk(const gufo::models::QwenModelWeights& weights, std::string* why) {
   for (int i = 0; i < 4; ++i) {
     ref[i] = static_cast<float>(x[i] * inv);
   }
-  if (gufo::models::GlimmerCosine(got, ref) < 0.999999) {
+  if (superroc::models::GlimmerCosine(got, ref) < 0.999999) {
     *why = "rmsnorm";
     return false;
   }
   float bare[4];
-  gufo::models::GlimmerRmsNorm(x, {}, 1.0e-5F, bare);
-  if (gufo::models::GlimmerCosine(bare, ref) < 0.999999) {
+  superroc::models::GlimmerRmsNorm(x, {}, 1.0e-5F, bare);
+  if (superroc::models::GlimmerCosine(bare, ref) < 0.999999) {
     *why = "unweighted rmsnorm";
     return false;
   }
@@ -152,7 +152,7 @@ bool MathOk(const gufo::models::QwenModelWeights& weights, std::string* why) {
   for (int i = 0; i < 128; ++i) {
     head[i] = static_cast<float>((i % 9) - 4) * 0.1F;
   }
-  gufo::models::GlimmerRmsNorm(CSpan(head), qn, 1.0e-5F, MSpan(normed));
+  superroc::models::GlimmerRmsNorm(CSpan(head), qn, 1.0e-5F, MSpan(normed));
   double hsum = 0.0;
   for (float v : head) {
     hsum += static_cast<double>(v) * v;
@@ -162,13 +162,13 @@ bool MathOk(const gufo::models::QwenModelWeights& weights, std::string* why) {
     local[i] =
         static_cast<float>(head[i] * hinv * qn[static_cast<std::size_t>(i)]);
   }
-  if (gufo::models::GlimmerCosine(CSpan(normed), CSpan(local)) < 0.999999) {
+  if (superroc::models::GlimmerCosine(CSpan(normed), CSpan(local)) < 0.999999) {
     *why = "real q_norm";
     return false;
   }
 
   std::vector<float> rope = head;
-  gufo::models::GlimmerNormRope(MSpan(rope), 128, 7, 500000.0F);
+  superroc::models::GlimmerNormRope(MSpan(rope), 128, 7, 500000.0F);
   std::vector<float> rope_ref = head;
   for (std::size_t i = 0; i < 64; ++i) {
     const double freq =
@@ -181,13 +181,13 @@ bool MathOk(const gufo::models::QwenModelWeights& weights, std::string* why) {
     rope_ref[2 * i] = static_cast<float>(x0 * c - x1 * s);
     rope_ref[2 * i + 1] = static_cast<float>(x0 * s + x1 * c);
   }
-  if (gufo::models::GlimmerCosine(CSpan(rope), CSpan(rope_ref)) < 0.999999) {
+  if (superroc::models::GlimmerCosine(CSpan(rope), CSpan(rope_ref)) < 0.999999) {
     *why = "norm rope";
     return false;
   }
-  if (gufo::models::GlimmerSwaBegin(10, 2048) != 0 ||
-      gufo::models::GlimmerSwaBegin(2048, 2048) != 1 ||
-      gufo::models::GlimmerSwaBegin(3, 0) != 0) {
+  if (superroc::models::GlimmerSwaBegin(10, 2048) != 0 ||
+      superroc::models::GlimmerSwaBegin(2048, 2048) != 1 ||
+      superroc::models::GlimmerSwaBegin(3, 0) != 0) {
     *why = "swa begin";
     return false;
   }
@@ -199,15 +199,15 @@ bool MathOk(const gufo::models::QwenModelWeights& weights, std::string* why) {
     const float y = logits[i] * scale;
     expect[i] = 20.0F * std::tanh(y / 20.0F);
   }
-  gufo::models::GlimmerScaleSoftcap(logits, scale, 20.0F);
-  if (gufo::models::GlimmerCosine(logits, expect) < 0.999999) {
+  superroc::models::GlimmerScaleSoftcap(logits, scale, 20.0F);
+  if (superroc::models::GlimmerCosine(logits, expect) < 0.999999) {
     *why = "softcap";
     return false;
   }
   return true;
 }
 
-bool SampleTensor(const gufo::core::GgufTensorInfo& tensor, double* min_float,
+bool SampleTensor(const superroc::core::GgufTensorInfo& tensor, double* min_float,
                   double* min_q8, std::string* why) {
   if (tensor.dimensions.size() < 2 || tensor.data == nullptr) {
     return true;
@@ -221,7 +221,7 @@ bool SampleTensor(const gufo::core::GgufTensorInfo& tensor, double* min_float,
     *why = std::string(tensor.name) + " bad shape";
     return false;
   }
-  const std::size_t row_bytes = gufo::quant::QuantizedRowBytes(tensor.type, k);
+  const std::size_t row_bytes = superroc::quant::QuantizedRowBytes(tensor.type, k);
   if (row_bytes == 0) {
     *why = std::string(tensor.name) + " row bytes";
     return false;
@@ -239,17 +239,17 @@ bool SampleTensor(const gufo::core::GgufTensorInfo& tensor, double* min_float,
   for (int s = 0; s < kRows; ++s) {
     const std::size_t row = (static_cast<std::size_t>(s) * rows) / kRows;
     const auto* raw = base + row * row_bytes;
-    dot_a[s] = gufo::quant::Dot(tensor.type, raw, CSpan(rnd), k);
+    dot_a[s] = superroc::quant::Dot(tensor.type, raw, CSpan(rnd), k);
     ind_a[s] = IndependentDot(tensor.type, raw, rnd.data(), k);
-    q8_a[s] = gufo::models::GlimmerQ8Dot(tensor.type, raw, CSpan(rnd), k);
-    dot_b[s] = gufo::quant::Dot(tensor.type, raw, CSpan(ramp), k);
+    q8_a[s] = superroc::models::GlimmerQ8Dot(tensor.type, raw, CSpan(rnd), k);
+    dot_b[s] = superroc::quant::Dot(tensor.type, raw, CSpan(ramp), k);
     ind_b[s] = IndependentDot(tensor.type, raw, ramp.data(), k);
-    q8_b[s] = gufo::models::GlimmerQ8Dot(tensor.type, raw, CSpan(ramp), k);
+    q8_b[s] = superroc::models::GlimmerQ8Dot(tensor.type, raw, CSpan(ramp), k);
   }
-  const double c0 = gufo::models::GlimmerCosine(CSpan(dot_a), CSpan(ind_a));
-  const double c1 = gufo::models::GlimmerCosine(CSpan(dot_b), CSpan(ind_b));
-  const double q0 = gufo::models::GlimmerCosine(CSpan(q8_a), CSpan(ind_a));
-  const double q1 = gufo::models::GlimmerCosine(CSpan(q8_b), CSpan(ind_b));
+  const double c0 = superroc::models::GlimmerCosine(CSpan(dot_a), CSpan(ind_a));
+  const double c1 = superroc::models::GlimmerCosine(CSpan(dot_b), CSpan(ind_b));
+  const double q0 = superroc::models::GlimmerCosine(CSpan(q8_a), CSpan(ind_a));
+  const double q1 = superroc::models::GlimmerCosine(CSpan(q8_b), CSpan(ind_b));
   *min_float = std::min(*min_float, std::min(c0, c1));
   *min_q8 = std::min(*min_q8, std::min(q0, q1));
   if (!(c0 >= 0.999999) || !(c1 >= 0.999999)) {
@@ -294,7 +294,7 @@ int main(int argc, char** argv) {
   for (int arg = 0; arg < 2; ++arg) {
     const std::string path = paths[arg];
     std::string err;
-    auto reader = gufo::core::GgufReader::OpenFile(path, &err);
+    auto reader = superroc::core::GgufReader::OpenFile(path, &err);
     if (reader == nullptr) {
       std::cerr << "SKIP glimmer_g1_test: " << path << " unreadable: " << err
                 << '\n';
@@ -308,7 +308,7 @@ int main(int argc, char** argv) {
     if (!ConfigOk(*config, &why)) {
       return Fail(path + " " + why);
     }
-    auto weights = gufo::models::QwenModelWeights::LoadFromGguf(*reader, &err);
+    auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &err);
     if (!weights.has_value()) {
       return Fail(path + " bind " + err);
     }
@@ -320,7 +320,7 @@ int main(int argc, char** argv) {
       return Fail(path + " post_attention_norm alias or attn_q shape");
     }
     auto tokenizer =
-        gufo::tokenization::QwenTokenizer::CreateFromGguf(*reader, &err);
+        superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &err);
     if (tokenizer == nullptr || !tokenizer->UsesLlama4PreTokenizer() ||
         !tokenizer->AddBosToken() || tokenizer->GetBosTokenId() != 200000 ||
         tokenizer->GetEosTokenId() != 200001 ||
@@ -352,21 +352,21 @@ int main(int argc, char** argv) {
       return Fail(path + " llama4 pieces");
     }
     auto chat =
-        gufo::tokenization::QwenChatTemplate::CreateFromGguf(*reader, &err);
+        superroc::tokenization::QwenChatTemplate::CreateFromGguf(*reader, &err);
     if (chat == nullptr ||
         chat->GetTemplateSha256() !=
-            gufo::tokenization::QwenChatTemplate::MuseGlimmerTemplateSha256() ||
+            superroc::tokenization::QwenChatTemplate::MuseGlimmerTemplateSha256() ||
         chat->GetProfile() !=
-            gufo::tokenization::QwenChatTemplate::Profile::kMuseGlimmer ||
-        !gufo::tokenization::QwenChatTemplate::ValidateGgufTemplate(*reader,
+            superroc::tokenization::QwenChatTemplate::Profile::kMuseGlimmer ||
+        !superroc::tokenization::QwenChatTemplate::ValidateGgufTemplate(*reader,
                                                                     &err)) {
       return Fail(path + " chat sha " + err);
     }
-    gufo::tokenization::ChatMessage user{gufo::tokenization::ChatRole::kUser,
+    superroc::tokenization::ChatMessage user{superroc::tokenization::ChatRole::kUser,
                                          "Hello", "", ""};
     std::string chat_err;
-    const auto rendered = gufo::tokenization::GlimmerRender(
-        *tokenizer, std::span<const gufo::tokenization::ChatMessage>(&user, 1),
+    const auto rendered = superroc::tokenization::GlimmerRender(
+        *tokenizer, std::span<const superroc::tokenization::ChatMessage>(&user, 1),
         {}, {}, &chat_err);
     if (!rendered.has_value() ||
         rendered->find("<|im_start|>") != std::string::npos ||
@@ -381,12 +381,12 @@ int main(int argc, char** argv) {
     // call a tool. This is the contract serve relies on
     // (inference_backend.cpp "including tool definitions"). Only tool *history*
     // -- tool-role messages and assistant tool_calls -- fails closed.
-    gufo::tokenization::ChatTool tool;
+    superroc::tokenization::ChatTool tool;
     tool.name = "now";
     std::string tool_err;
-    const auto with_tool = gufo::tokenization::GlimmerRender(
-        *tokenizer, std::span<const gufo::tokenization::ChatMessage>(&user, 1),
-        std::span<const gufo::tokenization::ChatTool>(&tool, 1), {}, &tool_err);
+    const auto with_tool = superroc::tokenization::GlimmerRender(
+        *tokenizer, std::span<const superroc::tokenization::ChatMessage>(&user, 1),
+        std::span<const superroc::tokenization::ChatTool>(&tool, 1), {}, &tool_err);
     if (!with_tool.has_value() ||
         with_tool->find("\"name\": \"now\"") == std::string::npos ||
         with_tool->find("atem:function_calls") == std::string::npos ||
@@ -394,34 +394,34 @@ int main(int argc, char** argv) {
             std::string::npos) {
       return Fail(path + " tool definition not rendered " + tool_err);
     }
-    gufo::tokenization::ChatMessage tool_result{
-        gufo::tokenization::ChatRole::kTool, "result", "now", ""};
+    superroc::tokenization::ChatMessage tool_result{
+        superroc::tokenization::ChatRole::kTool, "result", "now", ""};
     std::string result_err;
-    const auto history_blocked = gufo::tokenization::GlimmerRender(
+    const auto history_blocked = superroc::tokenization::GlimmerRender(
         *tokenizer,
-        std::span<const gufo::tokenization::ChatMessage>(&tool_result, 1), {},
+        std::span<const superroc::tokenization::ChatMessage>(&tool_result, 1), {},
         {}, &result_err);
     if (history_blocked.has_value() ||
         result_err.find("are not rendered") == std::string::npos) {
       return Fail(path + " tool-result history was rendered");
     }
-    gufo::tokenization::ChatMessage assistant_call{
-        gufo::tokenization::ChatRole::kAssistant, "on it", "", ""};
+    superroc::tokenization::ChatMessage assistant_call{
+        superroc::tokenization::ChatRole::kAssistant, "on it", "", ""};
     assistant_call.tool_calls.push_back(
-        gufo::tokenization::ChatMessage::ToolCall{"call-1", "now", {}});
+        superroc::tokenization::ChatMessage::ToolCall{"call-1", "now", {}});
     std::string call_err;
-    const auto call_blocked = gufo::tokenization::GlimmerRender(
+    const auto call_blocked = superroc::tokenization::GlimmerRender(
         *tokenizer,
-        std::span<const gufo::tokenization::ChatMessage>(&assistant_call, 1),
+        std::span<const superroc::tokenization::ChatMessage>(&assistant_call, 1),
         {}, {}, &call_err);
     if (call_blocked.has_value() ||
         call_err.find("are not rendered") == std::string::npos) {
       return Fail(path + " assistant tool_calls were rendered");
     }
 
-    using gufo::hip::detail::AttentionSupportParams;
-    using gufo::hip::detail::IsSplitKDecodeAttentionSupported;
-    using gufo::hip::detail::IsTiledAttentionSupported;
+    using superroc::hip::detail::AttentionSupportParams;
+    using superroc::hip::detail::IsSplitKDecodeAttentionSupported;
+    using superroc::hip::detail::IsTiledAttentionSupported;
     AttentionSupportParams params;
     params.batch_size = 4096;
     params.num_heads = 32;
@@ -437,8 +437,8 @@ int main(int argc, char** argv) {
     }
 
     for (const auto& tensor : reader->GetTensors()) {
-      if (tensor.type != gufo::core::GgmlType::kQ4_0_ROCMFP4 &&
-          tensor.type != gufo::core::GgmlType::kQ4_0_ROCMFP4_FAST) {
+      if (tensor.type != superroc::core::GgmlType::kQ4_0_ROCMFP4 &&
+          tensor.type != superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST) {
         continue;
       }
       if (!SampleTensor(tensor, &min_float, &min_q8, &why)) {
@@ -447,18 +447,18 @@ int main(int argc, char** argv) {
       ++fp4_tensors;
     }
 
-    gufo::models::QwenScratchArena arena(*config);
-    gufo::models::QwenKvCache cache(
+    superroc::models::QwenScratchArena arena(*config);
+    superroc::models::QwenKvCache cache(
         config->num_layers, config->num_key_value_heads, 8, config->head_dim);
-    gufo::models::ForwardEmbedding(1, weights->token_embd, config->hidden_size,
+    superroc::models::ForwardEmbedding(1, weights->token_embd, config->hidden_size,
                                    arena.hidden);
-    gufo::models::GlimmerRmsNorm(arena.hidden.first(config->hidden_size), {},
+    superroc::models::GlimmerRmsNorm(arena.hidden.first(config->hidden_size), {},
                                  config->norm_eps_pre,
                                  arena.normed.first(config->hidden_size));
     std::copy_n(arena.normed.begin(), config->hidden_size,
                 arena.hidden.begin());
     for (const std::uint32_t layer_index : {0U, 3U}) {
-      gufo::models::GlimmerForwardLayer(arena.hidden,
+      superroc::models::GlimmerForwardLayer(arena.hidden,
                                         weights->layers[layer_index], *config,
                                         cache, layer_index, 0, arena);
       double energy = 0.0;

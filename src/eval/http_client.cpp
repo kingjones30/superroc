@@ -11,7 +11,7 @@
 #include <string>
 #include <utility>
 
-namespace gufo::eval {
+namespace superroc::eval {
 namespace {
 
 constexpr std::size_t kMaximumResponseBytes =
@@ -188,4 +188,4 @@ std::string NormalizeBaseUrl(std::string base_url) {
   return base_url;
 }
 
-}  // namespace gufo::eval
+}  // namespace superroc::eval

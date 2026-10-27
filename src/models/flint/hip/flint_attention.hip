@@ -9,7 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::uint32_t kCombineBlock = 128U;
@@ -293,5 +293,5 @@ FlintLaunchStatus LaunchFlintDecodeAttention(
   return CheckLaunch("flint combine launch failed");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

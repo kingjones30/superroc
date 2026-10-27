@@ -12,7 +12,7 @@
 
 namespace {
 
-namespace qwen3_tts = gufo::models::qwen3_tts;
+namespace qwen3_tts = superroc::models::qwen3_tts;
 
 [[noreturn]] void Fail(const std::string& message) {
   std::cerr << "FAIL qwen3_tts_audio_test: " << message << '\n';

@@ -1,5 +1,5 @@
-#ifndef GUFO_TESTS_CACHE_TIERED_FIXTURE_HPP_
-#define GUFO_TESTS_CACHE_TIERED_FIXTURE_HPP_
+#ifndef SUPERROC_TESTS_CACHE_TIERED_FIXTURE_HPP_
+#define SUPERROC_TESTS_CACHE_TIERED_FIXTURE_HPP_
 
 #include <cassert>
 #include <filesystem>
@@ -9,11 +9,11 @@
 #include "src/cache/streaming.hpp"
 #include "tests/cache/fake_adapter.hpp"
 
-namespace gufo::cache::testing {
+namespace superroc::cache::testing {
 struct TieredDirectory {
   std::filesystem::path path;
   TieredDirectory() {
-    char pattern[] = "/tmp/gufo-tiered-test-XXXXXX";
+    char pattern[] = "/tmp/superroc-tiered-test-XXXXXX";
     path = mkdtemp(pattern);
   }
   ~TieredDirectory() { std::filesystem::remove_all(path); }
@@ -163,5 +163,5 @@ struct TieredFixture {
             InputIdentity(tokens.size()), 0};
   }
 };
-}  // namespace gufo::cache::testing
+}  // namespace superroc::cache::testing
 #endif

@@ -31,7 +31,7 @@ def main():
     args = parser.parse_args()
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if len(command) < 3 or command[1:3] != ["serve", "llm"]:
-        parser.error("pass a production gufo serve llm command after --")
+        parser.error("pass a production superroc serve llm command after --")
     if option(command, "--speculative") != "mtp":
         parser.error("this test requires Flash-Next with --speculative mtp")
     for flag in ("--host", "--port", "--sessions", "--served-model-name"):
@@ -106,7 +106,7 @@ def main():
                         response = metrics.get(base + "/metrics")
                         response.raise_for_status()
                     match = re.search(
-                        r"^gufo_spec_lookup_accepted_tokens_total (\d+)$",
+                        r"^superroc_spec_lookup_accepted_tokens_total (\d+)$",
                         response.text, re.MULTILINE)
                     assert match, "missing accepted lookup metric"
                     return int(match[1])
@@ -124,7 +124,7 @@ def main():
                     record(f"C{width}", results)
                     assert copied() > start, "cohort accepted no lookup copies"
                     actual_width = max(
-                        r["usage"]["gufo"]["physical_execution_width"]
+                        r["usage"]["superroc"]["physical_execution_width"]
                         for r in results)
                     assert actual_width == width, (
                         "requested cohort never executed together",
@@ -155,7 +155,7 @@ def main():
                     results = list(pool.map(run_mixed, mixed))
                 record("mixed-greedy-C8", results)
                 assert copied() > start, "mixed greedy cohort accepted no copies"
-                assert max(r["usage"]["gufo"]["physical_execution_width"]
+                assert max(r["usage"]["superroc"]["physical_execution_width"]
                            for r in results) == 8, "mixed cohort never ran at C8"
                 for row, result in enumerate(results):
                     same(ordinary_control if row % 2 else controls[row], result)
@@ -217,7 +217,7 @@ def main():
                             f"image-resume-{row}", chat_result(client, body, True))
                         same(control, replay)
                         assert replay["usage"]["cached_tokens"] > 0, replay
-                        assert replay["usage"]["gufo"]["prefill_tokens"] == 0, replay
+                        assert replay["usage"]["superroc"]["prefill_tokens"] == 0, replay
                 report["accepted_lookup_tokens"] = copied()
         join_server_timings(output)
         report["execution"] = execution_coverage(output, "mtp")

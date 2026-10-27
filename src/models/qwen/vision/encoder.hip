@@ -22,7 +22,7 @@
 #include "src/models/qwen/vision/encoder.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::models::qwen::vision {
+namespace superroc::models::qwen::vision {
 namespace {
 using Bf16 = hip_bfloat16;
 constexpr unsigned kHidden = 1152;
@@ -53,7 +53,7 @@ struct Allocation {
     // Movable managed pages can evict text inference queues even when no
     // image request is using this sidecar.
     Allocation allocation;
-    Check(gufo::hip::AllocateDevice(&allocation.data, bytes));
+    Check(superroc::hip::AllocateDevice(&allocation.data, bytes));
     return allocation;
   }
   ~Allocation() {
@@ -106,7 +106,7 @@ public:
 
 private:
   static constexpr std::size_t kBytes = 16ULL << 20;
-  gufo::hip::HostAllocations allocations_;
+  superroc::hip::HostAllocations allocations_;
   void* data_{nullptr};
   std::size_t capacity_;
   hipStream_t stream_;
@@ -367,7 +367,7 @@ struct Encoder::Impl {
   std::unordered_map<std::string, Allocation> weights;
   hipStream_t stream{nullptr};
   hipblasHandle_t blas{nullptr};
-  std::unique_ptr<gufo::hip::HipblasLtGemm> lt;
+  std::unique_ptr<superroc::hip::HipblasLtGemm> lt;
   bool uploaded{false};
 
   Impl(const std::filesystem::path& path, std::uint32_t width)
@@ -500,8 +500,8 @@ struct Encoder::Impl {
     if (blas == nullptr)
       CheckBlas(hipblasCreate(&blas));
     CheckBlas(hipblasSetStream(blas, stream));
-    lt = std::make_unique<gufo::hip::HipblasLtGemm>(
-        gufo::hip::HipblasLtGemmOptions{.ignore_environment = true});
+    lt = std::make_unique<superroc::hip::HipblasLtGemm>(
+        superroc::hip::HipblasLtGemmOptions{.ignore_environment = true});
     PinnedUpload upload(stream);
     for (const auto& tensor : reader->GetTensors()) {
       if (tensor.name == "v.patch_embd.weight" ||
@@ -651,7 +651,7 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
   Patchify<<<(count * kPatchDim + kThreads - 1) / kThreads, kThreads, 0,
              stream>>>(pixels.As<std::uint8_t>(), normalized.As<Bf16>(),
                        image.width, image.width / 16, count);
-  if (::gufo::hip_check::LaunchFailed()) return nullptr;
+  if (::superroc::hip_check::LaunchFailed()) return nullptr;
   impl_->Gemm("patch", normalized.As<Bf16>(), hidden.As<float>(), count,
               kHidden, kPatchDim);
   PatchPosition<<<(count * kHidden + kThreads - 1) / kThreads, kThreads, 0,
@@ -659,7 +659,7 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
                             impl_->FloatWeight("v.patch_embd.bias"),
                             impl_->FloatWeight("v.position_embd.weight"),
                             image.height / 16, image.width / 16, count);
-  if (::gufo::hip_check::LaunchFailed()) return nullptr;
+  if (::superroc::hip_check::LaunchFailed()) return nullptr;
   const auto observe = [&](const std::string& stage, const float* data,
                            std::size_t size) {
     if (!observer)
@@ -678,7 +678,7 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
         hidden.As<float>(), normalized.As<Bf16>(),
         impl_->FloatWeight(prefix + "ln1.weight"),
         impl_->FloatWeight(prefix + "ln1.bias"), kHidden);
-    if (::gufo::hip_check::LaunchFailed()) return nullptr;
+    if (::superroc::hip_check::LaunchFailed()) return nullptr;
     impl_->Gemm(prefix + "attn_qkv.weight", normalized.As<Bf16>(),
                 work.As<float>(), count, 3 * kHidden, kHidden);
     auto* q = qkv.As<Bf16>();
@@ -688,7 +688,7 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
               stream>>>(work.As<float>(),
                         impl_->FloatWeight(prefix + "attn_qkv.bias"), q, k, v,
                         count, image.width / 16);
-    if (::gufo::hip_check::LaunchFailed()) return nullptr;
+    if (::superroc::hip_check::LaunchFailed()) return nullptr;
     for (unsigned begin = 0; begin < count; begin += tile) {
       check_cancelled();
       const unsigned rows = std::min(tile, count - begin);
@@ -702,27 +702,27 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
       if (count <= 1024) {
         Softmax<4><<<kHeads * rows, kThreads, 0, stream>>>(
             scores.As<float>(), probabilities.As<Bf16>(), count);
-        if (::gufo::hip_check::LaunchFailed()) return nullptr;
+        if (::superroc::hip_check::LaunchFailed()) return nullptr;
       }
       else if (count <= 2048) {
         Softmax<8><<<kHeads * rows, kThreads, 0, stream>>>(
             scores.As<float>(), probabilities.As<Bf16>(), count);
-        if (::gufo::hip_check::LaunchFailed()) return nullptr;
+        if (::superroc::hip_check::LaunchFailed()) return nullptr;
       }
       else if (count <= 4096) {
         Softmax<16><<<kHeads * rows, kThreads, 0, stream>>>(
             scores.As<float>(), probabilities.As<Bf16>(), count);
-        if (::gufo::hip_check::LaunchFailed()) return nullptr;
+        if (::superroc::hip_check::LaunchFailed()) return nullptr;
       }
       else if (count <= 8192) {
         Softmax<32><<<kHeads * rows, kThreads, 0, stream>>>(
             scores.As<float>(), probabilities.As<Bf16>(), count);
-        if (::gufo::hip_check::LaunchFailed()) return nullptr;
+        if (::superroc::hip_check::LaunchFailed()) return nullptr;
       }
       else
         Softmax<0><<<kHeads * rows, kThreads, 0, stream>>>(
             scores.As<float>(), probabilities.As<Bf16>(), count);
-        if (::gufo::hip_check::LaunchFailed()) return nullptr;
+        if (::superroc::hip_check::LaunchFailed()) return nullptr;
       CheckBlas(hipblasGemmStridedBatchedEx(
           impl_->blas, HIPBLAS_OP_N, HIPBLAS_OP_N, kHeadDim, rows, count, &one,
           v, HIP_R_16BF, kHeadDim, count * kHeadDim, probabilities.data,
@@ -732,7 +732,7 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
       AttentionRows<<<(rows * kHidden + kThreads - 1) / kThreads, kThreads, 0,
                       stream>>>(output_tile.As<float>(), attention.As<Bf16>(),
                                 begin, rows);
-      if (::gufo::hip_check::LaunchFailed()) return nullptr;
+      if (::superroc::hip_check::LaunchFailed()) return nullptr;
     }
     impl_->Gemm(prefix + "attn_out.weight", attention.As<Bf16>(),
                 work.As<float>(), count, kHidden, kHidden);
@@ -740,25 +740,25 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
                    stream>>>(hidden.As<float>(), work.As<float>(),
                              impl_->FloatWeight(prefix + "attn_out.bias"),
                              count * kHidden, kHidden);
-    if (::gufo::hip_check::LaunchFailed()) return nullptr;
+    if (::superroc::hip_check::LaunchFailed()) return nullptr;
     LayerNorm<<<count, kThreads, 0, stream>>>(
         hidden.As<float>(), normalized.As<Bf16>(),
         impl_->FloatWeight(prefix + "ln2.weight"),
         impl_->FloatWeight(prefix + "ln2.bias"), kHidden);
-    if (::gufo::hip_check::LaunchFailed()) return nullptr;
+    if (::superroc::hip_check::LaunchFailed()) return nullptr;
     impl_->Gemm(prefix + "ffn_up.weight", normalized.As<Bf16>(),
                 work.As<float>(), count, kFfn, kHidden);
     Activate<<<(count * kFfn + kThreads - 1) / kThreads, kThreads, 0, stream>>>(
         work.As<float>(), impl_->FloatWeight(prefix + "ffn_up.bias"),
         normalized.As<Bf16>(), count * kFfn, kFfn, true);
-    if (::gufo::hip_check::LaunchFailed()) return nullptr;
+    if (::superroc::hip_check::LaunchFailed()) return nullptr;
     impl_->Gemm(prefix + "ffn_down.weight", normalized.As<Bf16>(),
                 work.As<float>(), count, kHidden, kFfn);
     BiasResidual<<<(count * kHidden + kThreads - 1) / kThreads, kThreads, 0,
                    stream>>>(hidden.As<float>(), work.As<float>(),
                              impl_->FloatWeight(prefix + "ffn_down.bias"),
                              count * kHidden, kHidden);
-    if (::gufo::hip_check::LaunchFailed()) return nullptr;
+    if (::superroc::hip_check::LaunchFailed()) return nullptr;
     observe("layer" + std::to_string(layer), hidden.As<float>(),
             std::size_t{count} * kHidden);
   }
@@ -766,14 +766,14 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
       hidden.As<float>(), normalized.As<Bf16>(),
       impl_->FloatWeight("v.post_ln.weight"),
       impl_->FloatWeight("v.post_ln.bias"), kHidden);
-  if (::gufo::hip_check::LaunchFailed()) return nullptr;
+  if (::superroc::hip_check::LaunchFailed()) return nullptr;
   impl_->Gemm("mm.0.weight", normalized.As<Bf16>(), work.As<float>(), merged,
               kMergeHidden, kMergeHidden);
   Activate<<<(merged * kMergeHidden + kThreads - 1) / kThreads, kThreads, 0,
              stream>>>(work.As<float>(), impl_->FloatWeight("mm.0.bias"),
                        normalized.As<Bf16>(), merged * kMergeHidden,
                        kMergeHidden, false);
-  if (::gufo::hip_check::LaunchFailed()) return nullptr;
+  if (::superroc::hip_check::LaunchFailed()) return nullptr;
   auto embedding = std::shared_ptr<Embedding>(new Embedding);
   embedding->rows_ = merged;
   embedding->width_ = impl_->output_width;
@@ -791,4 +791,4 @@ std::shared_ptr<const Encoder::Embedding> Encoder::Encode(
           std::size_t{merged} * embedding->width_);
   return embedding;
 }
-}  // namespace gufo::models::qwen::vision
+}  // namespace superroc::models::qwen::vision

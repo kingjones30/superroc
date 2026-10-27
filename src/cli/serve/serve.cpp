@@ -45,8 +45,9 @@
 #include "src/cli/serve/video_jobs.hpp"
 #include "src/cli/video/video.hpp"
 #include "src/models/qwen3_tts/audio.hpp"
+#include "src/core/env_compat.hpp"
 
-namespace gufo::cli {
+namespace superroc::cli {
 namespace {
 
 class ModelLoadLog {
@@ -220,8 +221,8 @@ std::optional<ReasoningEffort> ParseReasoningEffort(std::string_view value) {
 }
 
 // Server-level options are accepted on either side of the modality
-// subcommand. Registering them from one place keeps `gufo serve --help`, every
-// `gufo serve <modality> --help`, and the parser that actually consumes them
+// subcommand. Registering them from one place keeps `superroc serve --help`, every
+// `superroc serve <modality> --help`, and the parser that actually consumes them
 // from drifting apart.
 
 /// `--log-level` and its `-v/--verbose` shorthand share one sink. `level`
@@ -232,7 +233,7 @@ struct ServerLogOptions {
   std::optional<server::LogLevel> level;
 };
 
-// Verbosity help text. `gufo serve --help` lists these options by hand while
+// Verbosity help text. `superroc serve --help` lists these options by hand while
 // every modality help registers them through the parser, so both readings share
 // one source for the wording.
 constexpr std::string_view kLogLevelHelp =
@@ -242,7 +243,7 @@ constexpr std::string_view kTraceHelp =
     "Append text request bodies, rendered prompts, generated text and replies "
     "to PATH as JSON Lines; the file holds client content";
 
-void AddServerOptions(gufo::cli::ArgParser& parser, std::string* host,
+void AddServerOptions(superroc::cli::ArgParser& parser, std::string* host,
                       int* port, std::size_t* session_count,
                       std::size_t* max_connections,
                       std::size_t* max_request_body_bytes, std::string* api_key,
@@ -278,7 +279,7 @@ void AddServerOptions(gufo::cli::ArgParser& parser, std::string* host,
 }
 
 // Help-only sinks for AddServerOptions, so subcommand help can list the
-// server options it shares with `gufo serve` without parsing into them.
+// server options it shares with `superroc serve` without parsing into them.
 struct ServerOptionHelpTargets {
   std::string host = "127.0.0.1";
   int port = 8080;
@@ -291,7 +292,7 @@ struct ServerOptionHelpTargets {
   ServerLogOptions log;
 };
 
-void AddServerOptionsForHelp(gufo::cli::ArgParser& parser,
+void AddServerOptionsForHelp(superroc::cli::ArgParser& parser,
                              ServerOptionHelpTargets* targets,
                              bool include_sessions = true) {
   AddServerOptions(parser, &targets->host, &targets->port,
@@ -600,7 +601,7 @@ void PrintServeHelp(std::string_view program_name,
     std::filesystem::path video_manifest = DefaultH3SourceManifest();
     std::uint64_t video_ttl_seconds = 3600;
 
-    gufo::cli::ArgParser parser(
+    superroc::cli::ArgParser parser(
         std::string(program_name) + " serve video",
         "Start the MiniMax H3 text-to-video HTTP generation server.");
     parser.AddOption("-m", "--model", "DIR",
@@ -676,7 +677,7 @@ void PrintServeHelp(std::string_view program_name,
     bool log_progress = false;
     std::string trace_path;
 
-    gufo::cli::ArgParser parser(
+    superroc::cli::ArgParser parser(
         std::string(program_name) + " serve llm",
         "Start the OpenAI/Anthropic-compatible text LLM HTTP server.");
 
@@ -876,7 +877,7 @@ int RunServe(std::span<const char* const> args) {
   if (const char* env_host = std::getenv("HOST");
       env_host != nullptr && *env_host != '\0') {
     host = env_host;
-  } else if (const char* env_strix_host = std::getenv("GUFO_HOST");
+  } else if (const char* env_strix_host = ::superroc::core::GetEnvCompat("SUPERROC_HOST");
              env_strix_host != nullptr && *env_strix_host != '\0') {
     host = env_strix_host;
   }
@@ -891,7 +892,7 @@ int RunServe(std::span<const char* const> args) {
     if (ec == std::errc{} && ptr == sv.data() + sv.size()) {
       port = parsed_port;
     }
-  } else if (const char* env_strix_port = std::getenv("GUFO_PORT");
+  } else if (const char* env_strix_port = ::superroc::core::GetEnvCompat("SUPERROC_PORT");
              env_strix_port != nullptr && *env_strix_port != '\0') {
     const std::string_view sv(env_strix_port);
     int parsed_port = 0;
@@ -959,7 +960,7 @@ int RunServe(std::span<const char* const> args) {
   // and returns before that point.
 
   const auto prepare_server_options = [&] {
-    if (!gufo::server::IsListenAddress(host)) {
+    if (!superroc::server::IsListenAddress(host)) {
       std::cerr << "Error: --host must be an IPv4 or IPv6 address\n";
       return false;
     }
@@ -1093,7 +1094,7 @@ int RunServe(std::span<const char* const> args) {
     std::filesystem::path video_manifest = DefaultH3SourceManifest();
     std::uint64_t video_ttl_seconds = 3600;
 
-    gufo::cli::ArgParser video_parser(
+    superroc::cli::ArgParser video_parser(
         "superroc serve video",
         "Start the MiniMax H3 video generation server.");
     video_parser.AddOption("-m", "--model", "DIR",
@@ -1281,7 +1282,7 @@ int RunServe(std::span<const char* const> args) {
     bool log_progress = false;
     std::string trace_path;
 
-    gufo::cli::ArgParser llm_parser(
+    superroc::cli::ArgParser llm_parser(
         "superroc serve llm",
         "Start the OpenAI/Anthropic-compatible text LLM HTTP server.");
     llm_parser.AddOption("-m", "--model", "PATH",
@@ -1616,9 +1617,9 @@ int RunServe(std::span<const char* const> args) {
       return 1;
     }
     backend->set_model_id(served_model_name);
-    // As `gufo --version` prints it; CMake defines both for this target.
+    // As `superroc --version` prints it; CMake defines both for this target.
     backend->set_served_artifact(model,
-                                 GUFO_RELEASE_VERSION " (" GUFO_REVISION ")");
+                                 SUPERROC_RELEASE_VERSION " (" SUPERROC_REVISION ")");
     backend->set_sampling_defaults(
         max_tokens < 0 ? 0 : static_cast<std::size_t>(max_tokens),
         sampling_config, SamplingOptionsSupplied(llm_parser));
@@ -1711,4 +1712,4 @@ int RunServe(std::span<const char* const> args) {
   return 0;
 }
 
-}  // namespace gufo::cli
+}  // namespace superroc::cli

@@ -67,23 +67,23 @@ int main(int argc, char** argv) {
     const std::string text = ss.str();
 
     std::string error;
-    auto owner = gufo::core::GgufReader::OpenFile(argv[1], &error);
+    auto owner = superroc::core::GgufReader::OpenFile(argv[1], &error);
     if (owner == nullptr) {
       throw std::runtime_error(error);
     }
-    gufo::hip::QwenExecutionPolicy policy;
-    policy.kv_cache_storage = gufo::hip::QwenKvCacheStorage::kFp32;
+    superroc::hip::QwenExecutionPolicy policy;
+    policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
     policy.glimmer_fp16_kv = true;
-    auto executor = gufo::hip::QwenGpuExecutor::CreateFromGguf(
-        std::shared_ptr<const gufo::core::GgufReader>(std::move(owner)),
+    auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
+        std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)),
         &error, static_cast<std::uint32_t>(n_ctx), policy);
     if (executor == nullptr) {
       throw std::runtime_error(error);
     }
     const auto& tokenizer = executor->GetTokenizer();
     const bool add_bos = tokenizer.AddBosToken();
-    gufo::tokenization::TokenizerOptions options;
+    superroc::tokenization::TokenizerOptions options;
     options.add_bos = add_bos;
     const auto tokens = tokenizer.Encode(text, options);
     const int n_chunk_max = static_cast<int>(tokens.size()) / n_ctx;
@@ -106,7 +106,7 @@ int main(int argc, char** argv) {
     std::size_t count = 0;
     for (int chunk = 0; chunk < n_chunk; ++chunk) {
       const std::size_t start = static_cast<std::size_t>(chunk) * n_ctx;
-      std::vector<gufo::tokenization::TokenId> ids(
+      std::vector<superroc::tokenization::TokenId> ids(
           tokens.begin() + static_cast<std::ptrdiff_t>(start),
           tokens.begin() + static_cast<std::ptrdiff_t>(start + n_ctx));
       if (add_bos) {

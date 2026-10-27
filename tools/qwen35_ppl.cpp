@@ -33,7 +33,7 @@
 namespace {
 
 double ScoreToken(std::span<const float> view,
-                  gufo::tokenization::TokenId target, std::size_t* argmax_hit) {
+                  superroc::tokenization::TokenId target, std::size_t* argmax_hit) {
   if (view.empty() || target >= view.size() ||
       !std::all_of(view.begin(), view.end(),
                    [](float v) { return std::isfinite(v); }))
@@ -63,7 +63,7 @@ struct ScoredPos {
 };
 
 ScoredPos ScoreView(std::span<const float> view,
-                    gufo::tokenization::TokenId target) {
+                    superroc::tokenization::TokenId target) {
   if (view.empty() || target >= view.size() ||
       !std::all_of(view.begin(), view.end(),
                    [](float v) { return std::isfinite(v); }))
@@ -119,7 +119,7 @@ int main(int argc, char** argv) {
     const std::string text = ss.str();
 
     std::string error;
-    auto owner = gufo::core::GgufReader::OpenFile(argv[1], &error);
+    auto owner = superroc::core::GgufReader::OpenFile(argv[1], &error);
     if (owner == nullptr)
       throw std::runtime_error(error);
     bool add_bos = false;
@@ -133,13 +133,13 @@ int main(int argc, char** argv) {
       add_bos_src = "u32";
     }
 
-    auto executor = gufo::hip::QwenGpuExecutor::CreateFromGguf(
-        std::shared_ptr<const gufo::core::GgufReader>(std::move(owner)),
+    auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
+        std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)),
         &error, 12288);
     if (executor == nullptr)
       throw std::runtime_error(error);
     const auto bos = executor->GetTokenizer().GetBosTokenId();
-    if (add_bos && bos == gufo::tokenization::kInvalidTokenId)
+    if (add_bos && bos == superroc::tokenization::kInvalidTokenId)
       throw std::runtime_error("add_bos is set but the vocab has no BOS id");
     const auto tokens = executor->GetTokenizer().Encode(text);
     std::size_t n_chunk = tokens.size() / n_ctx;
@@ -164,7 +164,7 @@ int main(int argc, char** argv) {
     std::size_t scored_paired = 0, agree = 0, hits_d = 0, hits_p = 0;
     for (std::size_t chunk = 0; chunk < n_chunk; ++chunk) {
       executor->Reset();
-      std::vector<gufo::tokenization::TokenId> window(
+      std::vector<superroc::tokenization::TokenId> window(
           tokens.begin() + static_cast<std::ptrdiff_t>(chunk * n_ctx),
           tokens.begin() + static_cast<std::ptrdiff_t>((chunk + 1) * n_ctx));
       if (add_bos)
@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
       if (!dual) {
         // SQ18 step 3: phase timing on stderr only (stdout unchanged).
         const auto t0 = std::chrono::steady_clock::now();
-        (void)executor->ForwardPromptBatch(std::span<const gufo::tokenization::TokenId>(
+        (void)executor->ForwardPromptBatch(std::span<const superroc::tokenization::TokenId>(
             window.data(), first + 1));
         const auto t1 = std::chrono::steady_clock::now();
         double chunk_nll = 0.0;
@@ -211,7 +211,7 @@ int main(int argc, char** argv) {
       // gate loop (same prefill + same ForwardToken steps), so its PPL must
       // reproduce the gate number; per-position records are kept for pairing.
       std::vector<ScoredPos> dec(scored_per);
-      (void)executor->ForwardPromptBatch(std::span<const gufo::tokenization::TokenId>(
+      (void)executor->ForwardPromptBatch(std::span<const superroc::tokenization::TokenId>(
           window.data(), first + 1));
       double chunk_nll_d = 0.0;
       for (std::size_t i = 0; i < scored_per; ++i) {
@@ -239,7 +239,7 @@ int main(int argc, char** argv) {
                                   : (j * (scored_per - 1)) / (n_prefill - 1);
         const std::size_t pos = first + i;
         executor->Reset();
-        (void)executor->ForwardPromptBatch(std::span<const gufo::tokenization::TokenId>(
+        (void)executor->ForwardPromptBatch(std::span<const superroc::tokenization::TokenId>(
             window.data(), pos + 1));
         const auto view = executor->CopyLastLogits();
         const ScoredPos pre = ScoreView(view, window[pos + 1]);

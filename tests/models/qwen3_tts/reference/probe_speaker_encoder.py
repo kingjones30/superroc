@@ -66,14 +66,14 @@ def main():
     parser.add_argument(
         "--audio",
         default=(
-            "/home/fbozzo/projects/gufo/"
+            "/home/fbozzo/projects/superroc/"
             "artifacts/qwen3_tts/base/reference.wav"
         ),
     )
     parser.add_argument(
         "--out",
         default=(
-            "/home/fbozzo/projects/gufo/"
+            "/home/fbozzo/projects/superroc/"
             "artifacts/qwen3_tts/base/speaker_encoder"
         ),
     )

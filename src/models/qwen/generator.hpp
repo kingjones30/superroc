@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_GENERATOR_HPP_
-#define GUFO_MODELS_QWEN_GENERATOR_HPP_
+#ifndef SUPERROC_MODELS_QWEN_GENERATOR_HPP_
+#define SUPERROC_MODELS_QWEN_GENERATOR_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -16,7 +16,7 @@
 #include "src/models/qwen/state.hpp"
 #include "src/models/qwen/tokenizer.hpp"
 
-namespace gufo::models {
+namespace superroc::models {
 
 /// Generation parameters for controlling the auto-regressive decode loop.
 struct GenerationOptions {
@@ -64,6 +64,6 @@ private:
   QwenScratchArena arena_;
 };
 
-}  // namespace gufo::models
+}  // namespace superroc::models
 
-#endif  // GUFO_MODELS_QWEN_GENERATOR_HPP_
+#endif  // SUPERROC_MODELS_QWEN_GENERATOR_HPP_

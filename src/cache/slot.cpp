@@ -12,7 +12,7 @@
 #include <unordered_map>
 #include <utility>
 
-namespace gufo::cache {
+namespace superroc::cache {
 namespace detail {
 struct SlotState {
   std::mutex mutex;
@@ -755,4 +755,4 @@ SlotLease AcquireSlot(std::span<LeasedSlot* const> slots,
     }
   throw std::runtime_error("no idle execution slot");
 }
-}  // namespace gufo::cache
+}  // namespace superroc::cache

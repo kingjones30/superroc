@@ -19,7 +19,7 @@
 namespace {
 
 namespace fs = std::filesystem;
-namespace json = gufo::json;
+namespace json = superroc::json;
 
 void Fail(const std::string& msg) {
   std::cerr << "FAIL llama_tokenizer_test: " << msg << "\n";
@@ -130,10 +130,10 @@ std::vector<std::uint8_t> BuildSyntheticTokenizer(
   return buf;
 }
 
-std::unique_ptr<gufo::core::GgufReader> OpenSynthetic(
+std::unique_ptr<superroc::core::GgufReader> OpenSynthetic(
     const std::vector<std::uint8_t>& file, std::string& error) {
   auto reader =
-      gufo::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
+      superroc::core::GgufReader::OpenMemory(file.data(), file.size(), &error);
   Expect(reader != nullptr, "open synthetic tokenizer GGUF: " + error);
   return reader;
 }
@@ -144,19 +144,19 @@ void TestTokenizerVocabValidation() {
   std::string error;
   const auto short_vocab =
       BuildSyntheticTokenizer("default", /*vocab_size=*/3, /*bos=*/1);
-  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+  Expect(!superroc::models::llama::SpmTokenizer::FromGguf(
               *OpenSynthetic(short_vocab, error), &error)
               .has_value(),
          "tokenizer longer than llama.vocab_size must be refused");
   const auto bad_bos =
       BuildSyntheticTokenizer("default", /*vocab_size=*/4, /*bos=*/99);
-  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+  Expect(!superroc::models::llama::SpmTokenizer::FromGguf(
               *OpenSynthetic(bad_bos, error), &error)
               .has_value(),
          "out-of-range bos_token_id must be refused");
   const auto good =
       BuildSyntheticTokenizer("default", /*vocab_size=*/4, /*bos=*/1);
-  Expect(gufo::models::llama::SpmTokenizer::FromGguf(
+  Expect(superroc::models::llama::SpmTokenizer::FromGguf(
              *OpenSynthetic(good, error), &error)
              .has_value(),
          "matching vocab with in-range ids must load: " + error);
@@ -168,10 +168,10 @@ void TestByteFallbackNeverNegative() {
   std::string error;
   const auto file =
       BuildSyntheticTokenizer("default", /*vocab_size=*/4, /*bos=*/1);
-  auto tokenizer = gufo::models::llama::SpmTokenizer::FromGguf(
+  auto tokenizer = superroc::models::llama::SpmTokenizer::FromGguf(
       *OpenSynthetic(file, error), &error);
   Expect(tokenizer.has_value(), "synthetic tokenizer must load: " + error);
-  gufo::models::llama::SpmTokenizer::EncodeOptions options;
+  superroc::models::llama::SpmTokenizer::EncodeOptions options;
   options.add_special = false;
   options.parse_special = false;
   const auto ids = tokenizer->Encode("~", options);
@@ -189,11 +189,11 @@ void TestUnknownTokenIdFallback() {
   const auto control_unk = BuildSyntheticTokenizer("default", /*vocab_size=*/4,
                                                    /*bos=*/1, /*unk_type=*/3,
                                                    /*unknown_id=*/0);
-  auto tokenizer = gufo::models::llama::SpmTokenizer::FromGguf(
+  auto tokenizer = superroc::models::llama::SpmTokenizer::FromGguf(
       *OpenSynthetic(control_unk, error), &error);
   Expect(tokenizer.has_value(),
          "CONTROL <unk> with unknown_token_id must load: " + error);
-  gufo::models::llama::SpmTokenizer::EncodeOptions options;
+  superroc::models::llama::SpmTokenizer::EncodeOptions options;
   options.add_special = false;
   options.parse_special = false;
   const auto ids = tokenizer->Encode("~", options);
@@ -203,14 +203,14 @@ void TestUnknownTokenIdFallback() {
   }
   const auto no_key = BuildSyntheticTokenizer("default", /*vocab_size=*/4,
                                               /*bos=*/1, /*unk_type=*/3);
-  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+  Expect(!superroc::models::llama::SpmTokenizer::FromGguf(
               *OpenSynthetic(no_key, error), &error)
               .has_value(),
          "CONTROL <unk> without unknown_token_id must be refused");
   const auto bad_id = BuildSyntheticTokenizer("default", /*vocab_size=*/4,
                                               /*bos=*/1, /*unk_type=*/3,
                                               /*unknown_id=*/99);
-  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+  Expect(!superroc::models::llama::SpmTokenizer::FromGguf(
               *OpenSynthetic(bad_id, error), &error)
               .has_value(),
          "out-of-range unknown_token_id must be refused");
@@ -221,7 +221,7 @@ void TestNonDefaultPreRefused() {
   std::string error;
   const auto file =
       BuildSyntheticTokenizer("llama-bpe", /*vocab_size=*/4, /*bos=*/1);
-  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+  Expect(!superroc::models::llama::SpmTokenizer::FromGguf(
               *OpenSynthetic(file, error), &error)
               .has_value(),
          "non-default tokenizer.ggml.pre must be refused");
@@ -254,11 +254,11 @@ int main() {
   }
 
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(gguf, &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(gguf, &error);
   if (reader == nullptr) {
     Fail("open GGUF: " + error);
   }
-  auto tokenizer = gufo::models::llama::SpmTokenizer::FromGguf(*reader, &error);
+  auto tokenizer = superroc::models::llama::SpmTokenizer::FromGguf(*reader, &error);
   if (!tokenizer.has_value()) {
     Fail("FromGguf: " + error);
   }
@@ -274,7 +274,7 @@ int main() {
     Fail("tokref must contain 6 cases");
   }
 
-  gufo::models::llama::SpmTokenizer::EncodeOptions options;
+  superroc::models::llama::SpmTokenizer::EncodeOptions options;
   options.add_special = true;
   options.parse_special = true;
 

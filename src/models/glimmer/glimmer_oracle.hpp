@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_GLIMMER_GLIMMER_ORACLE_HPP_
-#define GUFO_MODELS_GLIMMER_GLIMMER_ORACLE_HPP_
+#ifndef SUPERROC_MODELS_GLIMMER_GLIMMER_ORACLE_HPP_
+#define SUPERROC_MODELS_GLIMMER_GLIMMER_ORACLE_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -7,7 +7,7 @@
 
 #include "src/models/qwen/state.hpp"
 
-namespace gufo::models {
+namespace superroc::models {
 
 /// GLIMMER: RMSNorm. An empty weight is the all-ones scale (unweighted embed
 /// norm). Writes `out`; does not read and write the same buffer.
@@ -51,6 +51,6 @@ void GlimmerForwardModel(std::uint32_t token_id, std::uint32_t pos,
                          QwenScratchArena& arena,
                          std::span<float> logits_out) noexcept;
 
-}  // namespace gufo::models
+}  // namespace superroc::models
 
-#endif  // GUFO_MODELS_GLIMMER_GLIMMER_ORACLE_HPP_
+#endif  // SUPERROC_MODELS_GLIMMER_GLIMMER_ORACLE_HPP_

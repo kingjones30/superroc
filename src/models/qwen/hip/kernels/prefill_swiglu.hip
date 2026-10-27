@@ -12,7 +12,7 @@
 #include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __global__ void BatchedSwiGLUActivationKernel(
     const float* __restrict__ gate, const float* __restrict__ up,
@@ -47,7 +47,7 @@ void LaunchBatchedSwiGLUActivation(const float* gate, const float* up,
       static_cast<unsigned int>((num_elements + block_size - 1) / block_size);
   BatchedSwiGLUActivationKernel<<<num_blocks, block_size, 0, stream>>>(
       gate, up, out, static_cast<hip_bfloat16*>(out_bf16), num_elements);
-  GUFO_CHECK_LAUNCH("BatchedSwiGLUActivationKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedSwiGLUActivationKernel");
 }
 
 void LaunchPackedSwiGLUActivation(const float* gate_up, float* out,
@@ -61,8 +61,8 @@ void LaunchPackedSwiGLUActivation(const float* gate_up, float* out,
                   static_cast<unsigned int>(batch_size));
   BatchedSwiGLUActivationKernel<<<grid, 256, 0, stream>>>(
       gate_up, gate_up + intermediate_size, out, nullptr, intermediate_size);
-  GUFO_CHECK_LAUNCH("BatchedSwiGLUActivationKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedSwiGLUActivationKernel");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

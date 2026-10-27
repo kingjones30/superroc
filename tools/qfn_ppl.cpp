@@ -1,4 +1,4 @@
-// FLASHNEXT S8 / G3: llama-perplexity's protocol on the gufo executor.
+// FLASHNEXT S8 / G3: llama-perplexity's protocol on the superroc executor.
 //
 // Matches rocmfpx tools/perplexity/perplexity.cpp perplexity() (ppl_stride == 0):
 //   * tokenize the whole file the way common_tokenize(ctx, text, true) does
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     const std::string text = ss.str();
 
     std::string error;
-    auto reader = gufo::core::GgufReader::OpenFile(argv[1], &error);
+    auto reader = superroc::core::GgufReader::OpenFile(argv[1], &error);
     if (reader == nullptr)
       throw std::runtime_error(error);
     const bool add_bos =
@@ -93,14 +93,14 @@ int main(int argc, char** argv) {
         reader->GetMetadataUint32("tokenizer.ggml.bos_token_id");
     reader.reset();
 
-    namespace qfn = gufo::models::qwen38_flash_next;
+    namespace qfn = superroc::models::qwen38_flash_next;
     auto model = qfn::Model::Load(
         argv[1], qfn::ModelOptions{.max_context = n_ctx}, &error);
     if (model == nullptr)
       throw std::runtime_error(error);
     const auto bos = static_cast<std::int32_t>(
         bos_meta.value_or(model->tokenizer().GetBosTokenId()));
-    gufo::tokenization::TokenizerOptions opt;
+    superroc::tokenization::TokenizerOptions opt;
     opt.add_bos = add_bos;
     opt.add_eos = false;
     opt.parse_special_tokens = false;
@@ -124,7 +124,7 @@ int main(int argc, char** argv) {
               << " token0=" << tokens[0] << "\n";
 
     auto session = model->CreateSession(
-        gufo::core::SessionMode::kAutoregressive, n_ctx, &error);
+        superroc::core::SessionMode::kAutoregressive, n_ctx, &error);
     if (session == nullptr)
       throw std::runtime_error(error);
 

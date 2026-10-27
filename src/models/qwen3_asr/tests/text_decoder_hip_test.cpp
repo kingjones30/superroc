@@ -22,8 +22,8 @@
 #include "src/models/qwen3_asr/prompt.hpp"
 #include "src/models/qwen3_asr/tokenizer.hpp"
 
-namespace qwen3_asr_hip = gufo::models::qwen3_asr::hip;
-namespace qwen3_asr = gufo::models::qwen3_asr;
+namespace qwen3_asr_hip = superroc::models::qwen3_asr::hip;
+namespace qwen3_asr = superroc::models::qwen3_asr;
 
 namespace {
 

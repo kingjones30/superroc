@@ -6,7 +6,7 @@
 #include <utility>
 #include <variant>
 
-namespace gufo::models::llama {
+namespace superroc::models::llama {
 namespace {
 
 constexpr char kUnderline[] = "\xE2\x96\x81";  // U+2581
@@ -410,4 +410,4 @@ std::string SpmTokenizer::Decode(std::span<const std::int32_t> tokens) const {
   return out;
 }
 
-}  // namespace gufo::models::llama
+}  // namespace superroc::models::llama

@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_KERNELS_ATTENTION_DECODE_VERIFY_WAVE64_HPP_
-#define GUFO_MODELS_QWEN_HIP_KERNELS_ATTENTION_DECODE_VERIFY_WAVE64_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_KERNELS_ATTENTION_DECODE_VERIFY_WAVE64_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_KERNELS_ATTENTION_DECODE_VERIFY_WAVE64_HPP_
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_fp16.h>
@@ -7,7 +7,7 @@
 
 #include <cstdint>
 
-namespace gufo::hip::detail {
+namespace superroc::hip::detail {
 
 // Split-K fp16 attention partials for verification rows > 1, packaged as
 // three wave64 per pair of KV heads. Requires num_heads == 6 * num_kv_heads,
@@ -20,7 +20,7 @@ void LaunchVerifySplitKAttentionHalfPartialsWave64(
     unsigned rows, std::uint32_t max_context, std::uint32_t num_heads,
     std::uint32_t num_kv_heads, std::uint32_t splits, hipStream_t stream);
 
-}  // namespace gufo::hip::detail
+}  // namespace superroc::hip::detail
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_QWEN_HIP_KERNELS_ATTENTION_DECODE_VERIFY_WAVE64_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_KERNELS_ATTENTION_DECODE_VERIFY_WAVE64_HPP_

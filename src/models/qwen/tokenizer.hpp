@@ -1,5 +1,5 @@
-#ifndef GUFO_TOKENIZATION_QWEN_TOKENIZER_HPP_
-#define GUFO_TOKENIZATION_QWEN_TOKENIZER_HPP_
+#ifndef SUPERROC_TOKENIZATION_QWEN_TOKENIZER_HPP_
+#define SUPERROC_TOKENIZATION_QWEN_TOKENIZER_HPP_
 
 #include <array>
 #include <cstddef>
@@ -13,11 +13,11 @@
 #include <utility>
 #include <vector>
 
-namespace gufo::core {
+namespace superroc::core {
 class GgufReader;
 }
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 
 using TokenId = std::uint32_t;
 
@@ -168,6 +168,6 @@ private:
                                          kInvalidTokenId};
 };
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization
 
-#endif  // GUFO_TOKENIZATION_QWEN_TOKENIZER_HPP_
+#endif  // SUPERROC_TOKENIZATION_QWEN_TOKENIZER_HPP_

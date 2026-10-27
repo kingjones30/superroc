@@ -23,8 +23,8 @@ void Expect(bool ok, const char* what) {
 
 int dummy = 0;
 
-gufo::models::QwenTensorRef Present(gufo::core::GgmlType type) {
-  gufo::models::QwenTensorRef ref;
+superroc::models::QwenTensorRef Present(superroc::core::GgmlType type) {
+  superroc::models::QwenTensorRef ref;
   ref.data = &dummy;
   ref.type = type;
   ref.num_elements = 1;
@@ -33,9 +33,9 @@ gufo::models::QwenTensorRef Present(gufo::core::GgmlType type) {
 
 // The shipped KAT-Coder-V2.5 block: Q8_0 routed and shared experts, Q8_0
 // nextn.eh_proj, Q8_0 attention K and V (verified against the GGUF).
-gufo::speculative::QwenMtpWeights KatLikeBlock() {
-  using gufo::core::GgmlType;
-  gufo::speculative::QwenMtpWeights weights;
+superroc::speculative::QwenMtpWeights KatLikeBlock() {
+  using superroc::core::GgmlType;
+  superroc::speculative::QwenMtpWeights weights;
   weights.config.is_moe = true;
   weights.config.expert_count = 256;
   weights.config.expert_used_count = 8;
@@ -55,10 +55,10 @@ gufo::speculative::QwenMtpWeights KatLikeBlock() {
 }  // namespace
 
 int main() {
-  using gufo::core::GgmlType;
-  using gufo::hip::KatMtpExpertGemmTypeSupported;
-  using gufo::hip::KatMtpPrimeGemmTypeSupported;
-  using gufo::hip::KatMtpValidateEmbeddedBlockTypes;
+  using superroc::core::GgmlType;
+  using superroc::hip::KatMtpExpertGemmTypeSupported;
+  using superroc::hip::KatMtpPrimeGemmTypeSupported;
+  using superroc::hip::KatMtpValidateEmbeddedBlockTypes;
 
   // The expert GEMV accepts Q8_0 and Q8_K only.
   Expect(KatMtpExpertGemmTypeSupported(GgmlType::kQ8_0), "expert Q8_0");
@@ -126,9 +126,9 @@ int main() {
   // ...but an entirely absent shared expert is fine.
   {
     auto weights = KatLikeBlock();
-    weights.layer.ffn_gate_shexp = gufo::models::QwenTensorRef{};
-    weights.layer.ffn_up_shexp = gufo::models::QwenTensorRef{};
-    weights.layer.ffn_down_shexp = gufo::models::QwenTensorRef{};
+    weights.layer.ffn_gate_shexp = superroc::models::QwenTensorRef{};
+    weights.layer.ffn_up_shexp = superroc::models::QwenTensorRef{};
+    weights.layer.ffn_down_shexp = superroc::models::QwenTensorRef{};
     std::string error;
     Expect(KatMtpValidateEmbeddedBlockTypes(weights, &error),
            "absent shared expert accepted");

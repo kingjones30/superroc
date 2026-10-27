@@ -8,7 +8,7 @@
 
 #include "src/models/qwen/state.hpp"
 
-namespace gufo::models {
+namespace superroc::models {
 namespace {
 
 QwenTensorRef ExtractTensorRef(const core::GgufReader& reader,
@@ -133,7 +133,7 @@ bool ValidateTensor(const QwenTensorRef& tensor, std::size_t expected_elements,
                          tensor.type != core::GgmlType::kF16 &&
                          tensor.type != core::GgmlType::kBF16;
   if (quantized && row_elements != 0 &&
-      gufo::quant::QuantizedRowBytes(tensor.type, row_elements) == 0) {
+      superroc::quant::QuantizedRowBytes(tensor.type, row_elements) == 0) {
     if (error_msg != nullptr) {
       *error_msg =
           "Quantized tensor row is not block aligned: " + std::string(name) +
@@ -315,7 +315,7 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
       if (error_msg != nullptr) {
         *error_msg = "lfm2moe experts must be ROCmFP4 (Q4_0_ROCMFP4/_FAST); " +
                      name + " is " + std::string(core::ToString(ref.type)) +
-                     ": build the file with gufo-quant LEAN";
+                     ": build the file with superroc-quant LEAN";
       }
       return false;
     }
@@ -631,7 +631,7 @@ std::optional<QwenModelWeights> BindFlintWeights(
       if (error_msg != nullptr) {
         *error_msg = "flint experts must be ROCmFP4 (Q4_0_ROCMFP4/_FAST); " +
                      name + " is " + std::string(core::ToString(ref.type)) +
-                     ": build the file with gufo-quant LEAN";
+                     ": build the file with superroc-quant LEAN";
       }
       return false;
     }
@@ -880,7 +880,7 @@ std::optional<QwenModelWeights> BindFlintWeights(
 
 // KAT: ffn_gate_inp present (or config.is_moe) selects the routed expert
 // branch. Expert row stride is n_rows * QuantizedRowBytes, matching
-// gufo_fp4 / ling3_moe. The scalar shared-expert gate is a norm-role F32
+// superroc_fp4 / ling3_moe. The scalar shared-expert gate is a norm-role F32
 // vector. Router logits are an F32 projection.
 bool BindKatMoe(const core::GgufReader& reader, QwenLayerWeights& layer,
                 const core::ModelConfig& config, const std::string& prefix,
@@ -1345,4 +1345,4 @@ std::optional<QwenModelWeights> QwenModelWeights::LoadFromGguf(
   return weights;
 }
 
-}  // namespace gufo::models
+}  // namespace superroc::models

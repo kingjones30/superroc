@@ -23,7 +23,7 @@
 #include "src/models/qwen/moe/forward_moe.hpp"  // KAT:
 #include "src/models/qwen/oracles.hpp"
 
-namespace gufo::models {
+namespace superroc::models {
 namespace {
 
 const void* QuantizedRow(const QwenTensorRef& tensor, std::size_t row,
@@ -352,4 +352,4 @@ std::uint32_t GreedyArgmax(std::span<const float> logits) noexcept {
   return static_cast<std::uint32_t>(best_idx);
 }
 
-}  // namespace gufo::models
+}  // namespace superroc::models

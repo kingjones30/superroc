@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN3_TTS_TOKENIZER_HPP_
-#define GUFO_MODELS_QWEN3_TTS_TOKENIZER_HPP_
+#ifndef SUPERROC_MODELS_QWEN3_TTS_TOKENIZER_HPP_
+#define SUPERROC_MODELS_QWEN3_TTS_TOKENIZER_HPP_
 
 #include <array>
 #include <cstdint>
@@ -9,7 +9,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace gufo::models::qwen3_tts {
+namespace superroc::models::qwen3_tts {
 
 /// Qwen2 byte-level BPE tokenizer used by Qwen3-TTS.
 ///
@@ -61,6 +61,6 @@ private:
   std::array<std::string, 256> byte_encoder_;
 };
 
-}  // namespace gufo::models::qwen3_tts
+}  // namespace superroc::models::qwen3_tts
 
-#endif  // GUFO_MODELS_QWEN3_TTS_TOKENIZER_HPP_
+#endif  // SUPERROC_MODELS_QWEN3_TTS_TOKENIZER_HPP_

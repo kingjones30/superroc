@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN38_FLASH_NEXT_CPU_OPS_HPP_
-#define GUFO_MODELS_QWEN38_FLASH_NEXT_CPU_OPS_HPP_
+#ifndef SUPERROC_MODELS_QWEN38_FLASH_NEXT_CPU_OPS_HPP_
+#define SUPERROC_MODELS_QWEN38_FLASH_NEXT_CPU_OPS_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +9,7 @@
 
 /// Scalar CPU operators for the reference model: one row at a time, every
 /// format decoded on the fly. Correctness oracle only; nothing here is tuned.
-namespace gufo::models::qwen38_flash_next::cpu {
+namespace superroc::models::qwen38_flash_next::cpu {
 
 /// Decodes one row of `t` (expert `e`) into `out` (t.cols floats).
 void DequantizeRow(const TensorRef& t, std::uint64_t e, std::uint64_t row,
@@ -39,6 +39,6 @@ void L2Norm(std::span<float> x, float eps);
 void Rope(float* x, std::uint32_t heads, std::uint32_t head_dim,
           std::uint32_t rotary_dim, std::uint32_t pos, float theta);
 
-}  // namespace gufo::models::qwen38_flash_next::cpu
+}  // namespace superroc::models::qwen38_flash_next::cpu
 
-#endif  // GUFO_MODELS_QWEN38_FLASH_NEXT_CPU_OPS_HPP_
+#endif  // SUPERROC_MODELS_QWEN38_FLASH_NEXT_CPU_OPS_HPP_

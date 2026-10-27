@@ -9,7 +9,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::uint32_t kBlock = 256U;
@@ -467,5 +467,5 @@ Lfm2LaunchStatus LaunchLfm2AddRMSNorm(float* hidden, const float* add,
   return CheckLaunch("lfm2 add rmsnorm launch failed");
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

@@ -18,7 +18,7 @@
 #include "src/models/qwen/hip/ops/ssm.hpp"
 #include "src/core/hip_launch_check.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 // Defined in kernels/ssm_recurrence.hip and hip/batched_ssm.hip respectively;
 // the row-split route shares the convolution and post-normalization kernels.
@@ -400,12 +400,12 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
   BatchedSSMConvKernel<<<conv_grid, static_cast<unsigned int>(block_size), 0,
                          stream>>>(qkv_in, conv_weights, conv_layer_in,
                                    conv_out, batch_size, qkv_size);
-  GUFO_CHECK_LAUNCH("BatchedSSMConvKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedSSMConvKernel");
 
   const dim3 kq_grid(num_key_heads, static_cast<unsigned int>(batch_size));
   BatchedDeltaNetPrepKqKernel<<<kq_grid, 32, 0, stream>>>(
       conv_out, kq_scales, qkv_size, num_key_heads);
-  GUFO_CHECK_LAUNCH("BatchedDeltaNetPrepKqKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedDeltaNetPrepKqKernel");
 
   const std::size_t ab_count = batch_size * num_heads;
   const std::size_t prep_count = std::max(ab_count, qkv_size);
@@ -413,7 +413,7 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
       static_cast<unsigned int>((prep_count + 255) / 256), 256, 0, stream>>>(
       alpha_buf, beta_buf, ssm_a, ssm_dt, alpha_beta, ab_count, num_heads,
       qkv_in, conv_layer_in, conv_layer_state, batch_size, qkv_size);
-  GUFO_CHECK_LAUNCH("BatchedDeltaNetPrepAlphaBetaKernel");
+  SUPERROC_CHECK_LAUNCH("BatchedDeltaNetPrepAlphaBetaKernel");
 
   const std::size_t inner_size = static_cast<std::size_t>(num_heads) * val_dim;
   const auto batch_i = static_cast<int>(batch_size);
@@ -432,7 +432,7 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
             static_cast<StateT*>(state.recurrent_out), out_buf, layer_idx,
             batch_i, qkv_i, inner_i, kh_i, h_i,
             static_cast<const StateT*>(state.recurrent_in));
-    GUFO_CHECK_LAUNCH("BatchedDeltaNetRowSplitKernel<StateT, 32, kRowsPerLane, kPrefetch, kDiverge>");
+    SUPERROC_CHECK_LAUNCH("BatchedDeltaNetRowSplitKernel<StateT, 32, kRowsPerLane, kPrefetch, kDiverge>");
   };
   const auto launch_diverge =
       [&]<typename StateT, int kRowsPerLane, bool kPrefetch>() {
@@ -465,7 +465,7 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
   if (fp16_out != nullptr) {
     BatchedSSMPostNormGateFp16Kernel<<<(ab_count + 7) / 8, 256, 0, stream>>>(
         out_buf, ssm_norm, gate, static_cast<__half*>(fp16_out), ab_count);
-    GUFO_CHECK_LAUNCH("BatchedSSMPostNormGateFp16Kernel");
+    SUPERROC_CHECK_LAUNCH("BatchedSSMPostNormGateFp16Kernel");
   } else if (q8_out != nullptr) {
     LaunchBatchedFusedSSMPostNormGateQuantizeQ8_1(
         out_buf, ssm_norm, gate, q8_out, batch_size, inner_size, num_heads,
@@ -475,9 +475,9 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
     BatchedSSMPostNormGateKernel<<<post_grid, 128, 0, stream>>>(
         out_buf, ssm_norm, gate, out_buf, batch_size, inner_size, num_heads,
         val_dim);
-    GUFO_CHECK_LAUNCH("BatchedSSMPostNormGateKernel");
+    SUPERROC_CHECK_LAUNCH("BatchedSSMPostNormGateKernel");
   }
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

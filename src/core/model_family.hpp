@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace gufo::core {
+namespace superroc::core {
 
 enum class ModelFamilyId : std::uint8_t {
   kQwen35,       // qwen35 and every other "qwen*" GGUF: Qwen hybrid chassis
@@ -100,4 +100,4 @@ constexpr std::string_view ModelFamilyArch(ModelFamilyId id) noexcept {
   return {};
 }
 
-}  // namespace gufo::core
+}  // namespace superroc::core

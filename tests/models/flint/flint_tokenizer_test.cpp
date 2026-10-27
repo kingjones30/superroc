@@ -15,7 +15,7 @@
 namespace {
 
 namespace fs = std::filesystem;
-namespace json = gufo::json;
+namespace json = superroc::json;
 
 std::string ReadFile(const fs::path& path) {
   std::ifstream input(path, std::ios::binary);
@@ -51,14 +51,14 @@ int main() {
   }
 
   std::string error;
-  const auto reader = gufo::core::GgufReader::OpenFile(gguf, &error);
+  const auto reader = superroc::core::GgufReader::OpenFile(gguf, &error);
   if (reader == nullptr) {
     std::cout << "FAIL flint_tokenizer_test: cannot open GGUF: " << error
               << "\n";
     return 1;
   }
   auto tokenizer =
-      gufo::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
+      superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
   if (tokenizer == nullptr) {
     std::cout << "FAIL flint_tokenizer_test: cannot load tokenizer: " << error
               << "\n";
@@ -82,7 +82,7 @@ int main() {
   std::cout << "PASS flint_tokenizer_test: IsStopToken "
             << "150001/150003/150005/150018 true, 150004/150006 false\n";
 
-  gufo::tokenization::TokenizerOptions options;
+  superroc::tokenization::TokenizerOptions options;
   options.add_bos = false;
   options.add_eos = false;
   options.parse_special_tokens = true;
@@ -111,10 +111,10 @@ int main() {
       ++failures;
       continue;
     }
-    std::vector<gufo::tokenization::TokenId> expected;
+    std::vector<superroc::tokenization::TokenId> expected;
     for (const json::Value& id : ids_node->items()) {
       expected.push_back(
-          static_cast<gufo::tokenization::TokenId>(id.as_size(0)));
+          static_cast<superroc::tokenization::TokenId>(id.as_size(0)));
     }
     const auto actual = tokenizer->Encode(text, options);
     if (actual == expected) {

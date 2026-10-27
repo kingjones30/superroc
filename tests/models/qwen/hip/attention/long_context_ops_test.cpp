@@ -95,7 +95,7 @@ void TestLongContextDecodeAttention(bool fp16) {
   HIP_CHECK(hipMalloc(&d_out, attention_width * sizeof(float)));
   HIP_CHECK(hipMalloc(
       &d_split_k_scratch,
-      gufo::hip::detail::DecodeAttentionScratchElements(num_heads, head_dim) *
+      superroc::hip::detail::DecodeAttentionScratchElements(num_heads, head_dim) *
           sizeof(float)));
 
   HIP_CHECK(hipMemcpy(d_q, h_q.data(), attention_width * sizeof(float),
@@ -115,7 +115,7 @@ void TestLongContextDecodeAttention(bool fp16) {
     HIP_CHECK(
         hipMemcpy(d_v_cache, cache_data, cache_bytes, hipMemcpyHostToDevice));
 
-    gufo::hip::LaunchAttention(
+    superroc::hip::LaunchAttention(
         d_q, d_k, d_v, d_gate, fp16 ? nullptr : static_cast<float*>(d_k_cache),
         fp16 ? nullptr : static_cast<float*>(d_v_cache),
         fp16 ? d_k_cache : nullptr, fp16 ? d_v_cache : nullptr, d_out, 0,
@@ -268,7 +268,7 @@ void TestBaselineToTiledKvCacheTransition() {
 
   // 1. Golden sequential reference token-by-token
   for (std::size_t token = 0; token < total_batch; ++token) {
-    gufo::hip::LaunchAttention(d_q + token * attention_width,
+    superroc::hip::LaunchAttention(d_q + token * attention_width,
                                d_k + token * kv_width, d_v + token * kv_width,
                                d_gate + token * attention_width, d_cache_seq,
                                d_cache_seq + cache_elements, nullptr, nullptr,
@@ -279,7 +279,7 @@ void TestBaselineToTiledKvCacheTransition() {
 
   // 2. Incremental transition:
   // Chunk 0 (0..512): LaunchBatchedAttention (Baseline)
-  gufo::hip::LaunchBatchedAttention(
+  superroc::hip::LaunchBatchedAttention(
       d_q, d_k, d_v, d_gate, d_cache_trans, d_cache_trans + cache_elements,
       d_cache_trans_f16,
       static_cast<std::uint16_t*>(d_cache_trans_f16) + cache_elements,
@@ -288,7 +288,7 @@ void TestBaselineToTiledKvCacheTransition() {
 
   // Chunk 1 (512..1536): LaunchBatchedAttentionTile (Tiled FP16 at start_pos =
   // 512)
-  const bool chunk1_ok = gufo::hip::LaunchBatchedAttentionTile(
+  const bool chunk1_ok = superroc::hip::LaunchBatchedAttentionTile(
       d_q + chunk0_size * attention_width, d_k + chunk0_size * kv_width,
       d_v + chunk0_size * kv_width, d_gate + chunk0_size * attention_width,
       d_cache_trans, d_cache_trans + cache_elements, d_cache_trans_f16,
@@ -296,7 +296,7 @@ void TestBaselineToTiledKvCacheTransition() {
       d_out_trans + chunk0_size * attention_width, 0,
       static_cast<std::uint32_t>(chunk0_size), chunk1_size, max_context,
       num_heads, num_kv_heads, head_dim);
-  gufo::test::Expect(chunk1_ok,
+  superroc::test::Expect(chunk1_ok,
                      "long-context tiled attention launch was rejected");
 
   HIP_CHECK(hipDeviceSynchronize());
@@ -328,7 +328,7 @@ done_diff:
     max_diff = std::max(max_diff, std::abs(golden[i] - transition[i]));
   }
   std::cout << "Baseline-to-Tiled transition max diff: " << max_diff << "\n";
-  gufo::test::Expect(max_diff < 5e-3F,
+  superroc::test::Expect(max_diff < 5e-3F,
                      "baseline-to-tiled attention transition mismatch");
 
   HIP_CHECK(hipFree(d_q));
@@ -347,9 +347,9 @@ done_diff:
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
   const int device_status =
-      gufo::test::GateHipDevice(gufo::test::HipDeviceRequirement::kOptional,
+      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
                                 "Qwen long-context attention ops test");
-  if (device_status != gufo::test::kHipTestSuccess) {
+  if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }
 

@@ -18,7 +18,7 @@
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
-namespace gufo::models::qwen38_flash_next::rocm {
+namespace superroc::models::qwen38_flash_next::rocm {
 namespace {
 
 /// The quantized GEMM tier reads whole 256-element k-iterations, so a row
@@ -68,10 +68,10 @@ bool HostF32Rows(const TensorRef& t, std::vector<float>* rows) {
       const std::size_t row_bytes = t.RowBytes();
       for (std::size_t r = 0; r < static_cast<std::size_t>(t.rows); ++r) {
         if (t.type == core::GgmlType::kQ5_K) {
-          gufo::quant::DequantizeQ5_K(base + r * row_bytes,
+          superroc::quant::DequantizeQ5_K(base + r * row_bytes,
                                       rows->data() + r * cols, cols);
         } else {
-          gufo::quant::DequantizeQ6_K(base + r * row_bytes,
+          superroc::quant::DequantizeQ6_K(base + r * row_bytes,
                                       rows->data() + r * cols, cols);
         }
       }
@@ -81,7 +81,7 @@ bool HostF32Rows(const TensorRef& t, std::vector<float>* rows) {
       const auto* bits =
           static_cast<const std::uint16_t*>(static_cast<const void*>(base));
       for (std::size_t i = 0; i < count; ++i) {
-        (*rows)[i] = gufo::quant::Fp16ToFloat(bits[i]);
+        (*rows)[i] = superroc::quant::Fp16ToFloat(bits[i]);
       }
       return true;
     }
@@ -624,4 +624,4 @@ std::unique_ptr<DeviceModel> DeviceModel::Upload(
   return m;
 }
 
-}  // namespace gufo::models::qwen38_flash_next::rocm
+}  // namespace superroc::models::qwen38_flash_next::rocm

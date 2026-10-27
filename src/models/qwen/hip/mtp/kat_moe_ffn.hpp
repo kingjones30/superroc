@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_HIP_MTP_KAT_MOE_FFN_HPP_
-#define GUFO_MODELS_QWEN_HIP_MTP_KAT_MOE_FFN_HPP_
+#ifndef SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MOE_FFN_HPP_
+#define SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MOE_FFN_HPP_
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +10,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 struct KatMtpMoeScratch {
   float* logits{nullptr};
@@ -41,7 +41,7 @@ void LaunchKatMtpWriteKv(const float* k, const float* v, float* k_cache,
                          std::uint32_t max_context, std::uint32_t num_kv_heads,
                          std::uint32_t head_dim, hipStream_t stream);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)
 
-#endif  // GUFO_MODELS_QWEN_HIP_MTP_KAT_MOE_FFN_HPP_
+#endif  // SUPERROC_MODELS_QWEN_HIP_MTP_KAT_MOE_FFN_HPP_

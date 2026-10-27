@@ -24,7 +24,7 @@
 #include "src/models/qwen/control_tokens.hpp"
 #include "src/models/qwen/tokenizer.hpp"
 
-namespace gufo::tokenization {
+namespace superroc::tokenization {
 
 std::size_t RenderedPromptBoundBytes(std::uint32_t context_tokens) noexcept {
   constexpr std::size_t kFloor = 1024ULL * 1024ULL;
@@ -529,9 +529,9 @@ std::unique_ptr<QwenChatTemplate> QwenChatTemplate::CreateFromGguf(
     const core::GgufReader& reader, std::string* error_msg) {
   auto template_str = reader.GetMetadataString("tokenizer.chat_template");
   // GLIMMER: never fall through to default ChatML.
-  if (gufo::core::IsModelFamily(
+  if (superroc::core::IsModelFamily(
           reader.GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kMuseGlimmer)) {
+          superroc::core::ModelFamilyId::kMuseGlimmer)) {
     if (!template_str.has_value() || template_str->empty()) {
       if (error_msg != nullptr) {
         *error_msg = "muse-glimmer GGUF is missing tokenizer.chat_template";
@@ -551,7 +551,7 @@ std::unique_ptr<QwenChatTemplate> QwenChatTemplate::CreateFromGguf(
         std::string(*template_str), sha, Profile::kMuseGlimmer));
   }
   // LFM2: pinned lfm2moe template, never fall through to default ChatML.
-  if (gufo::core::IsLfm2Family(
+  if (superroc::core::IsLfm2Family(
           reader.GetMetadataString("general.architecture").value_or(""))) {
     if (!template_str.has_value() || template_str->empty()) {
       if (error_msg != nullptr) {
@@ -570,9 +570,9 @@ std::unique_ptr<QwenChatTemplate> QwenChatTemplate::CreateFromGguf(
     return std::unique_ptr<QwenChatTemplate>(
         new QwenChatTemplate(std::string(*template_str), sha, Profile::kLfm2));
   }
-  if (gufo::core::IsModelFamily(
+  if (superroc::core::IsModelFamily(
           reader.GetMetadataString("general.architecture").value_or(""),
-          gufo::core::ModelFamilyId::kFlint)) {
+          superroc::core::ModelFamilyId::kFlint)) {
     if (!template_str.has_value() || template_str->empty()) {
       if (error_msg != nullptr) {
         *error_msg = "flint GGUF is missing tokenizer.chat_template";
@@ -635,10 +635,10 @@ bool QwenChatTemplate::ValidateGgufTemplate(const core::GgufReader& reader,
   // LFM2: same pin for lfm2moe.
   const auto arch =
       reader.GetMetadataString("general.architecture").value_or("");
-  if (gufo::core::IsModelFamily(arch,
-                                gufo::core::ModelFamilyId::kMuseGlimmer) ||
-      gufo::core::IsLfm2Family(arch) ||
-      gufo::core::IsModelFamily(arch, gufo::core::ModelFamilyId::kFlint)) {
+  if (superroc::core::IsModelFamily(arch,
+                                superroc::core::ModelFamilyId::kMuseGlimmer) ||
+      superroc::core::IsLfm2Family(arch) ||
+      superroc::core::IsModelFamily(arch, superroc::core::ModelFamilyId::kFlint)) {
     return CreateFromGguf(reader, error_msg) != nullptr;
   }
   if (!IsQwen38Artifact(reader)) {
@@ -1043,4 +1043,4 @@ std::optional<std::vector<TokenId>> QwenChatTemplate::RenderAndTokenize(
                         content_spans, tok_opts);
 }
 
-}  // namespace gufo::tokenization
+}  // namespace superroc::tokenization

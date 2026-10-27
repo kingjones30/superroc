@@ -62,7 +62,7 @@ void Report(const std::string& cas, float gap) {
 
 int main() {
   const int gate =
-      gufo::test::GateHipDevice(gufo::test::HipDeviceRequirement::kOptional,
+      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
                                 "flint_splitk_attention_test");
   if (gate != 0) {
     return gate;
@@ -133,10 +133,10 @@ int main() {
     for (std::uint32_t window : kWin) {
       for (int with_sinks = 0; with_sinks < 2; ++with_sinks) {
         const float* sinks = with_sinks ? d_sinks : nullptr;
-        const auto glim = gufo::hip::LaunchGlimmerWindowAttention(
+        const auto glim = superroc::hip::LaunchGlimmerWindowAttention(
             d_q, nullptr, d_k, d_v, d_ref, kLayer, pos, window, kMaxCtx, kHeads,
             kKv, kHeadDim, q_elems, 0, cache_elems, q_elems, nullptr, sinks);
-        const auto split = gufo::hip::LaunchFlintDecodeAttention(
+        const auto split = superroc::hip::LaunchFlintDecodeAttention(
             d_q, d_k, d_v, d_out, kLayer, d_pos, window, kMaxCtx, kHeads, kKv,
             kHeadDim, kSplits, d_partial, sinks, nullptr);
         if (!glim.ok || !split.ok || !HipOk(hipDeviceSynchronize(), "sync") ||

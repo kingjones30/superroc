@@ -17,10 +17,11 @@
 #include "src/core/crypto/sha256.hpp"
 #include "src/core/json.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
+#include "src/core/previous_name_compat.hpp"
 
-namespace gufo::testing::ds4 {
+namespace superroc::testing::ds4 {
 namespace {
-namespace json = gufo::json;
+namespace json = superroc::json;
 
 void Require(bool condition, const std::string& message) {
   if (!condition)
@@ -89,17 +90,19 @@ void ScoreOfficialReference(
     const std::shared_ptr<models::deepseek_v4_flash::Model>& model,
     const std::string& output_path) {
   Require(!model->HasDspark(), "official scoring requires ordinary decoding");
-  std::ifstream input(GUFO_DS4_OFFICIAL_FIXTURE, std::ios::binary);
+  std::ifstream input(SUPERROC_DS4_OFFICIAL_FIXTURE, std::ios::binary);
   Require(input.good(), "cannot open official continuation fixture");
   const std::string bytes{std::istreambuf_iterator<char>(input), {}};
   const auto fixture = json::parse(bytes);
-  Require(fixture.member_str("schema") == "gufo.ds4-official-continuations.v1",
+  Require(::superroc::core::MatchesCurrentOrPrevious(
+              fixture.member_str("schema"),
+              "superroc.ds4-official-continuations.v1"),
           "unexpected official fixture schema");
   const auto& cases = Field(fixture, "cases").items();
   Require(cases.size() == 105, "incomplete official fixture");
 
   json::Value report = json::Value::object();
-  report["schema"] = "gufo.ds4-official-score.v1";
+  report["schema"] = "superroc.ds4-official-score.v1";
   report["source_revision"] = fixture.member_str("source_revision");
   report["fixture_sha256"] = crypto::Sha256Hex(std::span(
       reinterpret_cast<const std::uint8_t*>(bytes.data()), bytes.size()));
@@ -127,8 +130,8 @@ void ScoreOfficialReference(
             id + ": official case exceeds context");
     std::string error;
     auto session = model->CreateSession(
-        model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                           : gufo::core::SessionMode::kAutoregressive,
+        model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                           : superroc::core::SessionMode::kAutoregressive,
         context, &error);
     Require(session != nullptr, error);
     Require(session->Sync(prompt, &error), error);
@@ -285,8 +288,8 @@ void DumpReferenceFrontiers(
     for (const std::size_t prefill_step : {2048u, 4096u}) {
       std::string error;
       auto session = model->CreateSession(
-          model->HasDspark() ? gufo::core::SessionMode::kSpeculative
-                             : gufo::core::SessionMode::kAutoregressive,
+          model->HasDspark() ? superroc::core::SessionMode::kSpeculative
+                             : superroc::core::SessionMode::kAutoregressive,
           20480, &error);
       Require(session != nullptr, error);
       manifest << prefill_step << '\t' << depth << '\t' << prefix << '\t'
@@ -358,4 +361,4 @@ void DumpReferenceFrontiers(
   output << '\n';
   Require(output.good(), "cannot write frontier summary");
 }
-}  // namespace gufo::testing::ds4
+}  // namespace superroc::testing::ds4

@@ -125,8 +125,8 @@ void RefScaleAdd(const float* x, const float* scale, float* out, int n) {
 // OLD host-loop path (pre-SPEC1-step-2 algorithm): route on device, read
 // ids/weights back, loop slots on the host. Uses the same public GEMM
 // (LaunchBatchedQuantGEMMFp32, batch 1) the old GemvQ8 called.
-void ReferenceMoe(const gufo::models::QwenLayerWeights& layer,
-                  const gufo::core::ModelConfig& config, const float* d_x,
+void ReferenceMoe(const superroc::models::QwenLayerWeights& layer,
+                  const superroc::core::ModelConfig& config, const float* d_x,
                   float* d_out, const float* d_router, const float* d_gatevec,
                   float* d_logits, int* d_ids, float* d_w, float* d_sig,
                   float* d_gate, float* d_up, float* d_act, float* d_h,
@@ -152,21 +152,21 @@ void ReferenceMoe(const gufo::models::QwenLayerWeights& layer,
     Expect(host_ids[static_cast<std::size_t>(slot)] >= 0 &&
                host_ids[static_cast<std::size_t>(slot)] < n_expert,
            "ref id range");
-    const auto gate_w = gufo::models::KatExpertSlice(
+    const auto gate_w = superroc::models::KatExpertSlice(
         layer.ffn_gate_exps, host_ids[static_cast<std::size_t>(slot)], ff,
         hidden);
-    const auto up_w = gufo::models::KatExpertSlice(
+    const auto up_w = superroc::models::KatExpertSlice(
         layer.ffn_up_exps, host_ids[static_cast<std::size_t>(slot)], ff,
         hidden);
-    const auto down_w = gufo::models::KatExpertSlice(
+    const auto down_w = superroc::models::KatExpertSlice(
         layer.ffn_down_exps, host_ids[static_cast<std::size_t>(slot)], hidden,
         ff);
-    gufo::hip::LaunchBatchedQuantGEMMFp32(gate_w.type, gate_w.data, d_x,
+    superroc::hip::LaunchBatchedQuantGEMMFp32(gate_w.type, gate_w.data, d_x,
                                           d_gate, 1, ff, hidden, stream);
-    gufo::hip::LaunchBatchedQuantGEMMFp32(up_w.type, up_w.data, d_x, d_up, 1,
+    superroc::hip::LaunchBatchedQuantGEMMFp32(up_w.type, up_w.data, d_x, d_up, 1,
                                           ff, hidden, stream);
     RefSwiglu(d_gate, d_up, d_act, ff);
-    gufo::hip::LaunchBatchedQuantGEMMFp32(down_w.type, down_w.data, d_act,
+    superroc::hip::LaunchBatchedQuantGEMMFp32(down_w.type, down_w.data, d_act,
                                           d_h, 1, hidden, ff, stream);
     RefAxpy(d_h, host_w[static_cast<std::size_t>(slot)], d_out, hidden);
   }
@@ -175,17 +175,17 @@ void ReferenceMoe(const gufo::models::QwenLayerWeights& layer,
                                            stream) == 0,
            "ref sigmoid launch");
     const auto gate_w =
-        gufo::models::KatExpertSlice(layer.ffn_gate_shexp, -1, ff_s, hidden);
+        superroc::models::KatExpertSlice(layer.ffn_gate_shexp, -1, ff_s, hidden);
     const auto up_w =
-        gufo::models::KatExpertSlice(layer.ffn_up_shexp, -1, ff_s, hidden);
+        superroc::models::KatExpertSlice(layer.ffn_up_shexp, -1, ff_s, hidden);
     const auto down_w =
-        gufo::models::KatExpertSlice(layer.ffn_down_shexp, -1, hidden, ff_s);
-    gufo::hip::LaunchBatchedQuantGEMMFp32(gate_w.type, gate_w.data, d_x,
+        superroc::models::KatExpertSlice(layer.ffn_down_shexp, -1, hidden, ff_s);
+    superroc::hip::LaunchBatchedQuantGEMMFp32(gate_w.type, gate_w.data, d_x,
                                           d_gate, 1, ff_s, hidden, stream);
-    gufo::hip::LaunchBatchedQuantGEMMFp32(up_w.type, up_w.data, d_x, d_up, 1,
+    superroc::hip::LaunchBatchedQuantGEMMFp32(up_w.type, up_w.data, d_x, d_up, 1,
                                           ff_s, hidden, stream);
     RefSwiglu(d_gate, d_up, d_act, ff_s);
-    gufo::hip::LaunchBatchedQuantGEMMFp32(down_w.type, down_w.data, d_act,
+    superroc::hip::LaunchBatchedQuantGEMMFp32(down_w.type, down_w.data, d_act,
                                           d_h, 1, hidden, ff_s, stream);
     RefScaleAdd(d_h, d_sig, d_out, hidden);
   }
@@ -206,15 +206,15 @@ int main() {
     return 77;
   }
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open: " + error);
-  auto weights = gufo::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+  auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "bind: " + error);
   const auto& cfg = weights->config;
   Expect(weights->mtp.has_value(), "mtp block bound");
   // The MTP block (blk.40) carries the Q8_0 experts the production step
   // executes; blk.0's experts are FP4 and cannot run on this path.
-  gufo::models::QwenLayerWeights layer = *weights->mtp;
+  superroc::models::QwenLayerWeights layer = *weights->mtp;
   const int hidden = static_cast<int>(cfg.hidden_size);
   const int n_expert = static_cast<int>(cfg.expert_count);
   const int n_used = static_cast<int>(cfg.expert_used_count);
@@ -223,17 +223,17 @@ int main() {
   Expect(hidden == 2048 && n_expert == 256 && n_used == 8 && ff == 512 &&
              ff_s == 512,
          "kat shape");
-  Expect(layer.ffn_gate_exps.type == gufo::core::GgmlType::kQ8_0 &&
-             layer.ffn_up_exps.type == gufo::core::GgmlType::kQ8_0 &&
-             layer.ffn_down_exps.type == gufo::core::GgmlType::kQ8_0,
+  Expect(layer.ffn_gate_exps.type == superroc::core::GgmlType::kQ8_0 &&
+             layer.ffn_up_exps.type == superroc::core::GgmlType::kQ8_0 &&
+             layer.ffn_down_exps.type == superroc::core::GgmlType::kQ8_0,
          "mtp experts q8");
   Expect(!layer.ffn_up_shexp.empty(), "mtp shexp bound");
   std::cout << "KAT_DISPATCH shape hidden=" << hidden << " experts="
             << n_expert << " topk=" << n_used << " ff=" << ff << "\n";
 
-  const std::size_t rb_k = gufo::quant::QuantizedRowBytes(
+  const std::size_t rb_k = superroc::quant::QuantizedRowBytes(
       layer.ffn_gate_exps.type, static_cast<std::size_t>(hidden));
-  const std::size_t rb_ff = gufo::quant::QuantizedRowBytes(
+  const std::size_t rb_ff = superroc::quant::QuantizedRowBytes(
       layer.ffn_down_exps.type, static_cast<std::size_t>(ff));
   Expect(rb_k > 0 && rb_ff > 0, "row bytes");
   DeviceBuf d_gate(static_cast<std::size_t>(n_expert) * ff * rb_k);
@@ -248,9 +248,9 @@ int main() {
   HIP_REQUIRE(hipMemcpy(d_down.p, layer.ffn_down_exps.data,
                         static_cast<std::size_t>(n_expert) * hidden * rb_ff,
                         hipMemcpyHostToDevice));
-  const std::size_t sh_rb_k = gufo::quant::QuantizedRowBytes(
+  const std::size_t sh_rb_k = superroc::quant::QuantizedRowBytes(
       layer.ffn_gate_shexp.type, static_cast<std::size_t>(hidden));
-  const std::size_t sh_rb_ff = gufo::quant::QuantizedRowBytes(
+  const std::size_t sh_rb_ff = superroc::quant::QuantizedRowBytes(
       layer.ffn_down_shexp.type, static_cast<std::size_t>(ff_s));
   Expect(sh_rb_k > 0 && sh_rb_ff > 0, "shexp row bytes");
   DeviceBuf d_shgate(static_cast<std::size_t>(ff_s) * sh_rb_k);
@@ -299,7 +299,7 @@ int main() {
   DeviceBuf d_ref(static_cast<std::size_t>(hidden) * sizeof(float));
   DeviceBuf d_new(static_cast<std::size_t>(hidden) * sizeof(float));
 
-  gufo::hip::KatMtpMoeScratch scratch;
+  superroc::hip::KatMtpMoeScratch scratch;
   scratch.logits = d_logits.f32();
   scratch.ids = d_ids.i32();
   scratch.weights = d_w.f32();
@@ -323,7 +323,7 @@ int main() {
                  d_sh.f32(), nullptr);
     HIP_REQUIRE(hipMemcpy(ref.data(), d_ref.p, ref.size() * sizeof(float),
                           hipMemcpyDeviceToHost));
-    gufo::hip::LaunchKatMtpMoeFfn(layer, cfg, d_x.f32(), d_new.f32(), scratch,
+    superroc::hip::LaunchKatMtpMoeFfn(layer, cfg, d_x.f32(), d_new.f32(), scratch,
                                   nullptr);
     HIP_REQUIRE(hipDeviceSynchronize());
     HIP_REQUIRE(hipMemcpy(got.data(), d_new.p, got.size() * sizeof(float),

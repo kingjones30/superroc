@@ -13,6 +13,7 @@
 
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/dflash_weights.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -223,10 +224,10 @@ void TestDflash2HeaderStillLoads() {
   }
 
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open synth reader: " + error);
   auto weights =
-      gufo::speculative::QwenDFlashWeights::LoadFromGguf(*reader, &error);
+      superroc::speculative::QwenDFlashWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "dflash2-style header must still load: " + error);
   Expect(weights->dflash_config.has_selector, "dflash2 has_selector");
   Expect(weights->dflash_config.has_dynamic_conv, "dflash2 has_dynamic_conv");
@@ -246,10 +247,10 @@ void TestDflash2HeaderStillLoads() {
 
 void TestRealDsparkFile(const char* path) {
   std::string error;
-  auto reader = gufo::core::GgufReader::OpenFile(path, &error);
+  auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open dspark: " + error);
   auto weights =
-      gufo::speculative::QwenDFlashWeights::LoadFromGguf(*reader, &error);
+      superroc::speculative::QwenDFlashWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "DSpark LoadFromGguf: " + error);
   const auto& cfg = weights->config;
   const auto& df = weights->dflash_config;
@@ -257,14 +258,14 @@ void TestRealDsparkFile(const char* path) {
   Expect(df.num_layers == 5, "5 blocks");
   Expect(df.block_size == 15, "block_size 15");
   Expect(df.target_layer_ids.size() == 5, "5 taps");
-  const char* tap_minus1 = std::getenv("GUFO_DSPARK_TAP_MINUS1");
+  const char* tap_minus1 = ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_TAP_MINUS1");
   const bool want_minus1 = tap_minus1 != nullptr && tap_minus1[0] != '\0' &&
                            !(tap_minus1[0] == '0' && tap_minus1[1] == '\0');
   if (want_minus1) {
     Expect(df.target_layer_ids[0] == 3 && df.target_layer_ids[1] == 11 &&
                df.target_layer_ids[2] == 19 && df.target_layer_ids[3] == 27 &&
                df.target_layer_ids[4] == 35,
-           "taps 3 11 19 27 35 with GUFO_DSPARK_TAP_MINUS1");
+           "taps 3 11 19 27 35 with SUPERROC_DSPARK_TAP_MINUS1");
   } else {
     Expect(df.target_layer_ids[0] == 4 && df.target_layer_ids[1] == 12 &&
                df.target_layer_ids[2] == 20 && df.target_layer_ids[3] == 28 &&
@@ -300,9 +301,9 @@ void TestRealDsparkFile(const char* path) {
 int main() {
   try {
     TestDflash2HeaderStillLoads();
-    const char* path = std::getenv("GUFO_DSPARK_MODEL");
+    const char* path = ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_MODEL");
     if (path == nullptr || path[0] == '\0') {
-      std::cout << "SKIP real DSpark file (GUFO_DSPARK_MODEL unset)\n";
+      std::cout << "SKIP real DSpark file (SUPERROC_DSPARK_MODEL unset)\n";
       return 0;
     }
     if (access(path, R_OK) != 0) {

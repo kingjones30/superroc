@@ -21,7 +21,7 @@
 #include "src/models/qwen/hip/ops/swiglu.hpp"
 #include "src/models/qwen/hip/ops/token.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 void LlamaCheckGpu(const char* what) {
@@ -714,5 +714,5 @@ QwenGpuExecutor::ForwardLlamaVerificationChunk(
   return predictions;
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif  // defined(ENGINE_ENABLE_HIP)

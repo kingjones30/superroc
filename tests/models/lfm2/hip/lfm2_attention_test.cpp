@@ -111,7 +111,7 @@ double MaxRatio(const float* out, const float* ref, std::size_t n) {
   return worst;
 }
 
-bool CheckOk(const gufo::hip::Lfm2LaunchStatus& st, const char* what,
+bool CheckOk(const superroc::hip::Lfm2LaunchStatus& st, const char* what,
              const std::string& cas) {
   if (st.ok) {
     return true;
@@ -122,7 +122,7 @@ bool CheckOk(const gufo::hip::Lfm2LaunchStatus& st, const char* what,
   return false;
 }
 
-bool CheckOk(const gufo::hip::GlimmerLaunchStatus& st, const char* what,
+bool CheckOk(const superroc::hip::GlimmerLaunchStatus& st, const char* what,
              const std::string& cas) {
   if (st.ok) {
     return true;
@@ -136,8 +136,8 @@ bool CheckOk(const gufo::hip::GlimmerLaunchStatus& st, const char* what,
 }  // namespace
 
 int main() {
-  const int gate = gufo::test::GateHipDevice(
-      gufo::test::HipDeviceRequirement::kOptional, "lfm2_attention_test");
+  const int gate = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional, "lfm2_attention_test");
   if (gate != 0) {
     return gate;
   }
@@ -204,13 +204,13 @@ int main() {
         char cas[128];
         std::snprintf(cas, sizeof(cas), "attn layer=%u pos=%u splits=%u", layer,
                       pos, ns);
-        if (!CheckOk(gufo::hip::LaunchLfm2DecodeAttention(
+        if (!CheckOk(superroc::hip::LaunchLfm2DecodeAttention(
                          d_q, d_kc, d_vc, d_out, layer, d_pos, kMaxCtx, kHeads,
                          kKvHeads, kHeadDim, ns, d_partial, nullptr),
                      "launch", cas)) {
           continue;
         }
-        if (!CheckOk(gufo::hip::LaunchGlimmerWindowAttention(
+        if (!CheckOk(superroc::hip::LaunchGlimmerWindowAttention(
                          d_q, nullptr, d_kc, d_vc, d_out_g, layer, pos, 0,
                          kMaxCtx, kHeads, kKvHeads, kHeadDim, q_elems, 0, plane,
                          q_elems, nullptr),
@@ -273,13 +273,13 @@ int main() {
                  "copy pos")) {
         return 1;
       }
-      if (!CheckOk(gufo::hip::LaunchLfm2WriteKvDev(d_k, d_v, d_kc, d_vc, layer,
+      if (!CheckOk(superroc::hip::LaunchLfm2WriteKvDev(d_k, d_v, d_kc, d_vc, layer,
                                                    d_pos, kMaxCtx, kKvHeads,
                                                    kHeadDim, nullptr),
                    "launch", cas)) {
         continue;
       }
-      if (!CheckOk(gufo::hip::LaunchGlimmerWriteKv(
+      if (!CheckOk(superroc::hip::LaunchGlimmerWriteKv(
                        d_k, d_v, d_k2, d_v2, layer, pos, kMaxCtx, kKvHeads,
                        kHeadDim, kv_elems, plane, nullptr),
                    "glimmer", cas)) {

@@ -1,12 +1,12 @@
-#ifndef GUFO_MODELS_QWEN_MODULES_MODULE_CTX_HPP_
-#define GUFO_MODELS_QWEN_MODULES_MODULE_CTX_HPP_
+#ifndef SUPERROC_MODELS_QWEN_MODULES_MODULE_CTX_HPP_
+#define SUPERROC_MODELS_QWEN_MODULES_MODULE_CTX_HPP_
 
 #include <cstdint>
 
 #include "src/core/model_config.hpp"
 #include "src/models/qwen/state.hpp"
 
-namespace gufo::models::qwen {
+namespace superroc::models::qwen {
 
 /// Capability token for stateless CPU module calls.
 struct CpuModuleContext final {};
@@ -57,6 +57,6 @@ private:
   std::uint32_t position_;
 };
 
-}  // namespace gufo::models::qwen
+}  // namespace superroc::models::qwen
 
-#endif  // GUFO_MODELS_QWEN_MODULES_MODULE_CTX_HPP_
+#endif  // SUPERROC_MODELS_QWEN_MODULES_MODULE_CTX_HPP_

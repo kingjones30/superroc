@@ -14,19 +14,19 @@
 
 namespace {
 
-using gufo::minimax_h3::BuildEulerPlan;
-using gufo::minimax_h3::BuildInitialNoise;
-using gufo::minimax_h3::BuildModulationRowMap;
-using gufo::minimax_h3::BuildReuseSelection;
-using gufo::minimax_h3::BuildServingSchedule;
-using gufo::minimax_h3::BuildTextOnlyLayout;
-using gufo::minimax_h3::BuildTimeRowSchedule;
-using gufo::minimax_h3::GenerationGeometry;
-using gufo::minimax_h3::ModulationRowMapSha256;
-using gufo::minimax_h3::PackedLayoutSha256;
-using gufo::minimax_h3::ResolveGenerationGeometry;
-using gufo::minimax_h3::Sha256;
-using gufo::minimax_h3::SigmaSchedule;
+using superroc::minimax_h3::BuildEulerPlan;
+using superroc::minimax_h3::BuildInitialNoise;
+using superroc::minimax_h3::BuildModulationRowMap;
+using superroc::minimax_h3::BuildReuseSelection;
+using superroc::minimax_h3::BuildServingSchedule;
+using superroc::minimax_h3::BuildTextOnlyLayout;
+using superroc::minimax_h3::BuildTimeRowSchedule;
+using superroc::minimax_h3::GenerationGeometry;
+using superroc::minimax_h3::ModulationRowMapSha256;
+using superroc::minimax_h3::PackedLayoutSha256;
+using superroc::minimax_h3::ResolveGenerationGeometry;
+using superroc::minimax_h3::Sha256;
+using superroc::minimax_h3::SigmaSchedule;
 
 int failures = 0;
 
@@ -173,13 +173,13 @@ void TestLayouts() {
   };
   constexpr Case cases[] = {
       {256, 528,
-       "080663c29e42fd3859e0a81f2b9e26bf504c6bac9cce5c74d380dd382c0cced5",
-       "9e017a1625d24cc7fdc5f43ccd92f820788ec20d6a0b17ac99b133a04926c6ff"},
+       "2e0f381a447b5cf2eb351a4991217e05ec8dd2e7da3baedea0b88037e452cdb2",
+       "396b60f9d6a53024aa97c813bb968b780b3463cc2a48560f9aec75b2982957ad"},
       {320, 780, nullptr, nullptr},
       {384, 1088, nullptr, nullptr},
       {512, 1872,
-       "c78f49c365e1bbab95388f2f9f9e7a7e3281a46f820534e4c821492d027365cb",
-       "155afa2335594655653cbff6722cdc6853cac7185576cfd43d5bb8ceee3288f4"},
+       "58f69f5cea87dc8cac5c41d75a437ef281ea701829f7cc04f6fc078843c5c5ff",
+       "c2f544ec79026c6cf4200948c90041fa9d013403dd00762ed278777cf16d7891"},
   };
   for (const Case& expected : cases) {
     std::string error;
@@ -330,18 +330,18 @@ void TestPacking() {
   std::vector<float> rows(elements);
   std::vector<float> round_trip(elements);
   std::string error;
-  CHECK(gufo::minimax_h3::PatchifyVideo(latent, channels, time, height, width,
+  CHECK(superroc::minimax_h3::PatchifyVideo(latent, channels, time, height, width,
                                         rows, &error));
   constexpr float first[] = {0, 1, 6, 7, 48, 49, 54, 55, 96, 97, 102, 103};
   CHECK(std::memcmp(rows.data(), first, sizeof(first)) == 0);
-  CHECK(gufo::minimax_h3::UnpatchifyVideo(rows, channels, time, height, width,
+  CHECK(superroc::minimax_h3::UnpatchifyVideo(rows, channels, time, height, width,
                                           round_trip, &error));
   CHECK(std::memcmp(latent.data(), round_trip.data(),
                     latent.size() * sizeof(float)) == 0);
-  CHECK(!gufo::minimax_h3::PatchifyVideo(
+  CHECK(!superroc::minimax_h3::PatchifyVideo(
       latent, channels, time, height, width,
       std::span<float>(rows.data(), rows.size() - 1), &error));
-  CHECK(!gufo::minimax_h3::PatchifyVideo({}, std::numeric_limits<int>::max(),
+  CHECK(!superroc::minimax_h3::PatchifyVideo({}, std::numeric_limits<int>::max(),
                                          std::numeric_limits<int>::max(), 4, 4,
                                          {}, &error));
 
@@ -354,12 +354,12 @@ void TestPacking() {
   }
   std::vector<float> packed(audio_elements);
   std::vector<float> unpacked(audio_elements);
-  CHECK(gufo::minimax_h3::PackAudio(audio, audio_channels, audio_time, packed,
+  CHECK(superroc::minimax_h3::PackAudio(audio, audio_channels, audio_time, packed,
                                     &error));
   constexpr float expected[] = {0, 6, 12, 18, 1, 7,  13, 19, 2, 8,  14, 20,
                                 3, 9, 15, 21, 4, 10, 16, 22, 5, 11, 17, 23};
   CHECK(std::memcmp(packed.data(), expected, sizeof(expected)) == 0);
-  CHECK(gufo::minimax_h3::UnpackAudio(packed, audio_channels, audio_time,
+  CHECK(superroc::minimax_h3::UnpackAudio(packed, audio_channels, audio_time,
                                       unpacked, &error));
   CHECK(std::memcmp(audio.data(), unpacked.data(),
                     audio.size() * sizeof(float)) == 0);
@@ -370,7 +370,7 @@ void TestNoise() {
       0x8daf78a1U, 0x78625b1aU, 0x843daf20U, 0x3314b8ddU,
       0xf33e7a58U, 0x7a10c688U, 0x77a0a5e8U, 0xdba4433bU,
   };
-  gufo::minimax_h3::NormalRng rng(42);
+  superroc::minimax_h3::NormalRng rng(42);
   for (const std::uint32_t expected : expected_u32) {
     CHECK(rng.NextU32() == expected);
   }
@@ -396,11 +396,11 @@ void TestNoise() {
   CHECK(first->video == second->video);
   CHECK(first->audio == second->audio);
   std::vector<float> packed_audio(audio_elements);
-  CHECK(gufo::minimax_h3::PackAudio(first->audio, audio_channels, audio_time,
+  CHECK(superroc::minimax_h3::PackAudio(first->audio, audio_channels, audio_time,
                                     packed_audio, &error));
   CHECK(std::memcmp(first->video.data(), packed_audio.data(),
                     audio_elements * sizeof(float)) != 0);
-  gufo::minimax_h3::NormalRng sequential(42);
+  superroc::minimax_h3::NormalRng sequential(42);
   std::vector<float> expected_video(video_elements);
   std::vector<float> expected_audio_rows(audio_elements);
   sequential.Fill(expected_video);
@@ -518,7 +518,7 @@ void TestReuseAndEulerPlan() {
   }
 
 #if !defined(ENGINE_ENABLE_HIP)
-  CHECK(!gufo::minimax_h3::HipEulerUpdate(nullptr, 0, 0, nullptr, nullptr, 0,
+  CHECK(!superroc::minimax_h3::HipEulerUpdate(nullptr, 0, 0, nullptr, nullptr, 0,
                                           0.25F, 0.5F, 0.0F, nullptr, &error));
   CHECK(error.find("ENGINE_ENABLE_HIP") != std::string::npos);
 #endif

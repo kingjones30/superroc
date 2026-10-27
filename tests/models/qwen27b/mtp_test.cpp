@@ -17,6 +17,7 @@
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/mtp_reference.hpp"
+#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -74,9 +75,9 @@ Comparison Compare(std::span<const float> actual,
 int main(int argc, const char* const* argv) {
   try {
     const char* base_path =
-        argc > 1 ? argv[1] : std::getenv("GUFO_QWEN27B_MODEL");
+        argc > 1 ? argv[1] : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
     const char* draft_path =
-        argc > 2 ? argv[2] : std::getenv("GUFO_QWEN27B_MTP_MODEL");
+        argc > 2 ? argv[2] : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MTP_MODEL");
     if (base_path == nullptr || draft_path == nullptr) {
       std::cout << "qwen_mtp_gpu_test: skipped "
                    "(pass base and MTP GGUF paths)\n";
@@ -84,27 +85,27 @@ int main(int argc, const char* const* argv) {
     }
 
     std::string error;
-    auto base_owner = gufo::core::GgufReader::OpenFile(base_path, &error);
+    auto base_owner = superroc::core::GgufReader::OpenFile(base_path, &error);
     Expect(base_owner != nullptr, error);
-    auto mtp_owner = gufo::core::GgufReader::OpenFile(draft_path, &error);
+    auto mtp_owner = superroc::core::GgufReader::OpenFile(draft_path, &error);
     Expect(mtp_owner != nullptr, error);
-    std::shared_ptr<const gufo::core::GgufReader> base_reader(
+    std::shared_ptr<const superroc::core::GgufReader> base_reader(
         std::move(base_owner));
-    std::shared_ptr<const gufo::core::GgufReader> mtp_reader(
+    std::shared_ptr<const superroc::core::GgufReader> mtp_reader(
         std::move(mtp_owner));
 
-    auto reference = gufo::speculative::QwenMtpReference::CreateWithTiedWeights(
+    auto reference = superroc::speculative::QwenMtpReference::CreateWithTiedWeights(
         mtp_reader, base_reader, 8, &error);
     Expect(reference != nullptr, error);
     auto target_model =
-        gufo::hip::QwenGpuModel::CreateFromGguf(base_reader, &error);
+        superroc::hip::QwenGpuModel::CreateFromGguf(base_reader, &error);
     Expect(target_model != nullptr, error);
 
     const auto pack_start = std::chrono::steady_clock::now();
     auto mtp_model =
-        gufo::hip::QwenMtpGpuModel::Create(mtp_reader, target_model, &error);
+        superroc::hip::QwenMtpGpuModel::Create(mtp_reader, target_model, &error);
     Expect(mtp_model != nullptr, error);
-    auto executor = gufo::hip::QwenMtpGpuExecutor::Create(mtp_model, 8, &error);
+    auto executor = superroc::hip::QwenMtpGpuExecutor::Create(mtp_model, 8, &error);
     Expect(executor != nullptr, error);
     const double setup_seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() -
@@ -149,21 +150,21 @@ int main(int argc, const char* const* argv) {
     Expect(repeated_token == token, "reset token determinism");
     Expect(repeat_comparison.rmse == 0.0, "reset hidden determinism");
 
-    gufo::hip::QwenMtpGpuDraftConfig draft_config{
+    superroc::hip::QwenMtpGpuDraftConfig draft_config{
         .max_context = 8,
         .max_draft_tokens = 2,
     };
-    auto draft_backend = gufo::hip::QwenMtpGpuDraftBackend::Create(
+    auto draft_backend = superroc::hip::QwenMtpGpuDraftBackend::Create(
         mtp_model, draft_config, &error);
     Expect(draft_backend != nullptr, error);
-    const std::array<gufo::tokenization::TokenId, 2> prompt_tokens{5, 17};
+    const std::array<superroc::tokenization::TokenId, 2> prompt_tokens{5, 17};
     std::vector<float> prompt_hidden(target_hidden.size() * 2);
     std::ranges::copy(target_hidden, prompt_hidden.begin());
     for (std::size_t index = 0; index < target_hidden.size(); ++index) {
       prompt_hidden[target_hidden.size() + index] =
           target_hidden[index] * 0.75F;
     }
-    const gufo::speculative::DraftTargetContext draft_context{
+    const superroc::speculative::DraftTargetContext draft_context{
         .prompt_tokens = prompt_tokens,
         .prompt_hidden_states = prompt_hidden,
         .hidden_size = target_hidden.size(),
@@ -172,7 +173,7 @@ int main(int argc, const char* const* argv) {
     Expect(draft_backend->PrimeTargetContext(draft_context),
            draft_backend->GetLastError());
 
-    std::vector<gufo::tokenization::TokenId> sequence{prompt_tokens[0],
+    std::vector<superroc::tokenization::TokenId> sequence{prompt_tokens[0],
                                                       prompt_tokens[1], token};
     const auto first_proposal = draft_backend->Propose(sequence, 2, 2);
     Expect(first_proposal.tokens.size() == 2, "first GPU MTP proposal size");
@@ -186,14 +187,14 @@ int main(int argc, const char* const* argv) {
       value *= 0.5F;
     draft_backend->UpdateTargetHidden(anchor_hidden);
     draft_backend->UpdateTargetHidden(committed_hidden);
-    draft_backend->AcceptFeedback(std::span<const gufo::tokenization::TokenId>(
+    draft_backend->AcceptFeedback(std::span<const superroc::tokenization::TokenId>(
                                       first_proposal.tokens.data(), 1),
                                   42);
     sequence.push_back(first_proposal.tokens.front());
     const auto committed_sequence = sequence;
     sequence.push_back(42);
     const auto second_proposal = draft_backend->Propose(sequence, 4, 2);
-    auto teacher_forced = gufo::hip::QwenMtpGpuDraftBackend::Create(
+    auto teacher_forced = superroc::hip::QwenMtpGpuDraftBackend::Create(
         mtp_model, draft_config, &error);
     Expect(teacher_forced != nullptr, error);
     std::vector<float> committed_features(prompt_hidden);

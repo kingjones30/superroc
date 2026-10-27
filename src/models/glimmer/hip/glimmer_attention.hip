@@ -8,7 +8,7 @@
 
 #include "src/models/qwen/hip/ops/attention.hpp"
 
-namespace gufo::hip {
+namespace superroc::hip {
 namespace {
 
 constexpr std::uint32_t kRowsPerBlock = 4U;
@@ -426,5 +426,5 @@ GlimmerLaunchStatus LaunchGlimmerWmmaPrefillAttention(
   return {true, nullptr};
 }
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif

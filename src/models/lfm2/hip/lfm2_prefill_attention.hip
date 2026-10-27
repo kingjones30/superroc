@@ -9,7 +9,7 @@
 #include <cstddef>  // LFM2
 #include <cstdint>  // LFM2
 
-namespace gufo::hip {  // LFM2
+namespace superroc::hip {  // LFM2
 namespace {  // LFM2
 
 // LFM2: fixed geometry (SPEC2 step 1): head_dim 64, group 4, 64 rows x 4 // LFM2
@@ -231,5 +231,5 @@ Lfm2LaunchStatus LaunchLfm2BatchedWriteKvF16(  // LFM2 (SPEC3)
   return Lfm2AttnCheckLaunch("lfm2 batched writekv f16 launch failed");  // LFM2
 }  // LFM2
 
-}  // namespace gufo::hip  // LFM2
+}  // namespace superroc::hip  // LFM2
 #endif  // defined(ENGINE_ENABLE_HIP)  // LFM2

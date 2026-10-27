@@ -1,5 +1,5 @@
-#ifndef GUFO_MODELS_QWEN_IMAGE_21_MODEL_HPP_
-#define GUFO_MODELS_QWEN_IMAGE_21_MODEL_HPP_
+#ifndef SUPERROC_MODELS_QWEN_IMAGE_21_MODEL_HPP_
+#define SUPERROC_MODELS_QWEN_IMAGE_21_MODEL_HPP_
 
 #include <cstdint>
 #include <filesystem>
@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-namespace gufo::models::qwen_image_21 {
+namespace superroc::models::qwen_image_21 {
 
 struct Image {
   int width{0};
@@ -80,5 +80,5 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
-}  // namespace gufo::models::qwen_image_21
+}  // namespace superroc::models::qwen_image_21
 #endif

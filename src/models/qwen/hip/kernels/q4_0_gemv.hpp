@@ -10,7 +10,7 @@
 #include <cstdint>
 #include <cstring>
 
-namespace gufo::hip {
+namespace superroc::hip {
 
 __device__ inline float Q4_0Scale(const std::uint8_t* block) {
   __half h;
@@ -40,5 +40,5 @@ void LaunchQ4_0Swiglu(const void* gate, const void* up, const float* x,
 void LaunchDequantQ4_0ToBf16(const void* src, void* dst, std::size_t elements,
                              hipStream_t stream);
 
-}  // namespace gufo::hip
+}  // namespace superroc::hip
 #endif
