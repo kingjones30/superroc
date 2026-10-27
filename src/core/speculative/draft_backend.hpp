@@ -195,6 +195,23 @@ public:
     throw std::logic_error("draft backend does not support snapshots");
   }
 
+  /// Exact payload bytes that SnapshotAtPosition() will allocate for the
+  /// draft state truncated to an earlier committed target position.
+  [[nodiscard]] virtual std::size_t SnapshotPayloadBytesAtPosition(
+      std::uint32_t position) const {
+    (void)position;
+    throw std::logic_error(
+        "draft backend does not support position snapshot sizing");
+  }
+
+  /// Snapshot of the draft state as of an earlier committed target position.
+  /// Providers whose state cannot be truncated to a position must refuse.
+  [[nodiscard]] virtual std::unique_ptr<IDraftBackendSnapshot>
+  SnapshotAtPosition(std::uint32_t position) const {
+    (void)position;
+    throw std::logic_error("draft backend does not support position snapshots");
+  }
+
   virtual void RestoreSnapshot(const IDraftBackendSnapshot&) {
     throw std::logic_error("draft backend does not support snapshot restore");
   }

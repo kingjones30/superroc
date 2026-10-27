@@ -284,6 +284,14 @@ public:
   QwenGpuArena& operator=(QwenGpuArena&&) noexcept;
 
   void Reset();
+  /// Leading rows of the fp16 KV mirror that match the fp32 cache; casts
+  /// advance it and RestoreState clamps it to the saved position.
+  [[nodiscard]] std::uint32_t GlimmerKvF16ValidRows() const noexcept {
+    return glimmer_kv_f16_valid_rows_;
+  }
+  void SetGlimmerKvF16ValidRows(std::uint32_t rows) noexcept {
+    glimmer_kv_f16_valid_rows_ = rows;
+  }
   /// Pins the live recurrent state for rollback. Neither save nor restore
   /// copies anything: the state lives in one of two buffers, and the first
   /// pass after either call reads the pinned buffer and writes the other one.
@@ -437,6 +445,10 @@ private:
   float* d_ssm_replay_beta_{nullptr};
   std::uint32_t* d_ssm_replay_enabled_{nullptr};
   std::uint32_t saved_context_{0};
+  // LGA mirror freshness: leading rows of d_glimmer_kv_f16 that match the
+  // fp32 cache. Casts advance it; a rollback (RestoreState) clamps it to the
+  // saved position so rewritten rows are re-cast.
+  std::uint32_t glimmer_kv_f16_valid_rows_{0};
   std::uint32_t replay_last_position_{0};
   std::size_t replay_captured_positions_{0};
   bool has_saved_state_{false};

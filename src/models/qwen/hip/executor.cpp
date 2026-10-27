@@ -448,6 +448,17 @@ std::span<const float> QwenGpuExecutor::CopyVerificationLogits(
 
 void QwenGpuExecutor::SetPromptHiddenCapture(
     bool enabled, std::span<const std::uint32_t> target_layer_ids) {
+  // Re-arming the same capture between prompt chunks must not drop the
+  // accumulated target features: speculative priming reads them later.
+  const auto& current_layers = arena_.GetTargetLayerCapture();
+  const bool unchanged =
+      capture_prompt_hidden_ == enabled &&
+      current_layers.size() == target_layer_ids.size() &&
+      std::equal(current_layers.begin(), current_layers.end(),
+                 target_layer_ids.begin());
+  if (unchanged) {
+    return;
+  }
   capture_prompt_hidden_ = enabled;
   h_prompt_hidden_.clear();
   h_verification_hidden_.clear();

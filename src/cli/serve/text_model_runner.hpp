@@ -299,6 +299,19 @@ struct TextRunnerAdvance {
   std::exception_ptr* failure{nullptr};
 };
 
+/// Frontier pieces of a prompt-boundary capture that must wait for the
+/// speculative drafter to prime. Priming is deferred out of time-to-first-
+/// token and drains with the first decoded token, so a prompt capture that
+/// finds the queue non-empty copies the boundary's frontier here and the
+/// capture itself is retried after the request's last token is sent, against
+/// device state that has since advanced past the boundary.
+struct TextDeferredPromptBoundary {
+  std::size_t position{0};
+  std::optional<TextRunnerToken> frontier;
+  std::vector<float> frontier_logits;
+  std::vector<TextRunnerToken> pending_tokens;
+};
+
 struct TextRunnerDecode {
   std::reference_wrapper<TextRunnerState> state;
   std::size_t max_tokens{0};
@@ -517,6 +530,39 @@ public:
   /// while the session resumes prefill. Defaults to the ordinary snapshot.
   [[nodiscard]] virtual std::unique_ptr<TextRunnerSnapshot>
   SnapshotForPersistence(const TextRunnerState& state) const;
+
+  /// True while speculative drafter priming is still queued, so a prompt
+  /// capture at the current committed boundary must defer to request end.
+  [[nodiscard]] virtual bool HasPendingSpeculativePrime(
+      const TextRunnerState& state) const {
+    (void)state;
+    return false;
+  }
+
+  /// Drains queued speculative priming into the drafter. Called at request
+  /// end, off the response path, before a deferred boundary is captured.
+  virtual void DrainSpeculativePrime(TextRunnerState& state) const {
+    (void)state;
+  }
+
+  /// Copies the frontier pieces of the current committed boundary for a
+  /// capture deferred to request end. The default fails explicitly.
+  [[nodiscard]] virtual TextDeferredPromptBoundary
+  CaptureDeferredPromptBoundary(const TextRunnerState& state) const;
+
+  /// Exact payload bytes of the deferred capture: the device state truncated
+  /// to the recorded boundary plus the drafter state at that boundary. The
+  /// default fails explicitly.
+  [[nodiscard]] virtual std::size_t DeferredPromptSnapshotPayloadBytes(
+      const TextRunnerState& state,
+      const TextDeferredPromptBoundary& boundary) const;
+
+  /// Captures the deferred prompt-boundary snapshot. The drafter priming must
+  /// have drained first. The default fails explicitly.
+  [[nodiscard]] virtual std::unique_ptr<TextRunnerSnapshot>
+  SnapshotDeferredPromptBoundary(
+      const TextRunnerState& state,
+      const TextDeferredPromptBoundary& boundary) const;
 
   virtual void RestoreOrFork(TextRunnerState& state,
                              const TextRunnerSnapshot& snapshot) const;

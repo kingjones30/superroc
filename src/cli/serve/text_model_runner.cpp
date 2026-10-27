@@ -803,6 +803,25 @@ std::size_t TextModelRunner::SnapshotPayloadBytes(
   throw std::logic_error("text runner does not support snapshot sizing");
 }
 
+TextDeferredPromptBoundary TextModelRunner::CaptureDeferredPromptBoundary(
+    const TextRunnerState&) const {
+  throw std::logic_error(
+      "text runner does not support deferred prompt snapshots");
+}
+
+std::size_t TextModelRunner::DeferredPromptSnapshotPayloadBytes(
+    const TextRunnerState&, const TextDeferredPromptBoundary&) const {
+  throw std::logic_error(
+      "text runner does not support deferred prompt snapshots");
+}
+
+std::unique_ptr<TextRunnerSnapshot>
+TextModelRunner::SnapshotDeferredPromptBoundary(
+    const TextRunnerState&, const TextDeferredPromptBoundary&) const {
+  throw std::logic_error(
+      "text runner does not support deferred prompt snapshots");
+}
+
 void TextModelRunner::RestoreOrFork(TextRunnerState&,
                                     const TextRunnerSnapshot&) const {
   throw std::logic_error("text runner does not support snapshot restore/fork");
@@ -1033,6 +1052,18 @@ void TextModelRunner::StreamPersistentSnapshot(
 }
 
 struct TextRunnerPool::Request::Impl {
+  /// Prompt-boundary captures refused while the speculative drafter was
+  /// unprimed (its prime queue drains with the first decoded token). The
+  /// frontier pieces are copied at the boundary; the device capture is
+  /// retried at request end, after the queue has drained.
+  struct DeferredPromptCapture {
+    std::vector<TextRunnerToken> tokens;
+    TextDeferredPromptBoundary boundary;
+    bool reserve_preserve_source{false};
+    SnapshotPurpose reserve_purpose{SnapshotPurpose::kContinuation};
+  };
+  std::vector<DeferredPromptCapture> deferred_prompt_captures;
+
   Impl(std::shared_ptr<TextModelRunner> model_runner,
        std::shared_ptr<ContinuationDiskStore> persistent_store,
        ServingCacheLease state_lease,
@@ -1192,6 +1223,107 @@ struct TextRunnerPool::Request::Impl {
     prompt_snapshot_attempted = false;
   }
 
+  /// Records a prompt-boundary capture refused because the speculative
+  /// drafter is not primed yet. The queue drains with the first decoded
+  /// token, so the capture is retried at request end. Returns false when the
+  /// runner cannot defer; the caller then records the ordinary skip.
+  bool DeferPromptSnapshot(const TextRunnerState& state) noexcept {
+    try {
+      if (!runner->HasPendingSpeculativePrime(state)) {
+        return false;
+      }
+      DeferredPromptCapture deferred;
+      deferred.boundary = runner->CaptureDeferredPromptBoundary(state);
+      deferred.tokens = snapshot_tokens;
+      if (deferred.boundary.position != snapshot_tokens.size() ||
+          !deferred.boundary.frontier.has_value()) {
+        return false;
+      }
+      // Mirror the reserve flags StartPromptSnapshot would have used at this
+      // boundary; the prompt and fallback positions do not change after the
+      // attempt.
+      deferred.reserve_preserve_source =
+          retain_fallback &&
+          (fallback_position == 0 || snapshot_tokens.size() == prompt.size());
+      deferred.reserve_purpose =
+          retain_fallback && snapshot_tokens.size() == prompt.size()
+              ? SnapshotPurpose::kRetry
+              : SnapshotPurpose::kContinuation;
+      deferred_prompt_captures.push_back(std::move(deferred));
+      if (Logger::Enabled(LogLevel::kDebug)) {
+        std::ostringstream line;
+        line << "event=prompt_snapshot_defer tokens=" << snapshot_tokens.size();
+        Logger::Debug("cache", line.str());
+      }
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  /// Retries the deferred prompt-boundary captures at request end, after the
+  /// last token is sent: drain the drafter prime queue first, then capture
+  /// the device state truncated to each recorded boundary.
+  void CaptureDeferredSnapshots() noexcept {
+    if (deferred_prompt_captures.empty() || !lease) {
+      return;
+    }
+    TextRunnerState* state = nullptr;
+    try {
+      state = &dynamic_cast<TextRunnerState&>(lease.state());
+    } catch (...) {
+      deferred_prompt_captures.clear();
+      return;
+    }
+    // A request that decoded drained its queue at the first verify step; one
+    // that never decoded still holds it, so drain it here before capturing.
+    runner->DrainSpeculativePrime(*state);
+    for (auto& deferred : deferred_prompt_captures) {
+      CaptureDeferredSnapshot(*state, deferred);
+    }
+    deferred_prompt_captures.clear();
+  }
+
+  void CaptureDeferredSnapshot(TextRunnerState& state,
+                               DeferredPromptCapture& deferred) noexcept {
+    const auto position = deferred.boundary.position;
+    std::size_t bytes = 0;
+    try {
+      bytes =
+          runner->DeferredPromptSnapshotPayloadBytes(state, deferred.boundary);
+      if (FloorRefusesSnapshotBytes(floor_bytes, bytes)) {
+        lease.SkipSnapshot(SnapshotEventReason::kHostFloor, bytes, position);
+        return;
+      }
+      if (!lease.TryReserveSnapshot(
+              bytes, position, deferred.reserve_preserve_source,
+              deferred.reserve_purpose, deferred.tokens)) {
+        // Admission refused and recorded its own event.
+        return;
+      }
+      auto snapshot =
+          runner->SnapshotDeferredPromptBoundary(state, deferred.boundary);
+      if (snapshot == nullptr || snapshot->PayloadBytes() != bytes) {
+        lease.SkipSnapshot(SnapshotEventReason::kReservationMismatch, bytes,
+                           position);
+        return;
+      }
+      snapshot_metrics.snapshot_bytes +=
+          lease.PublishSnapshot(std::move(deferred.tokens), std::move(snapshot),
+                                fallback_position != 0);
+    } catch (const std::exception& e) {
+      try {
+        Logger::Warn("cache", "event=deferred_capture_failed what=" +
+                                  std::string(e.what()) +
+                                  " tokens=" + std::to_string(position));
+      } catch (...) {
+      }
+      lease.SkipSnapshot(SnapshotEventReason::kCaptureFailure, bytes, position);
+    } catch (...) {
+      lease.SkipSnapshot(SnapshotEventReason::kCaptureFailure, bytes, position);
+    }
+  }
+
   void StartPromptSnapshot(bool wait) noexcept {
     if (prompt_snapshot_attempted || prefill_offset != snapshot_tokens.size()) {
       return;
@@ -1250,6 +1382,12 @@ struct TextRunnerPool::Request::Impl {
       snapshot_bytes = lease.component() ? lease.CaptureBytes()
                                          : runner->SnapshotPayloadBytes(*state);
     } catch (...) {
+      // The speculative drafter primes only with the first decoded token;
+      // defer this boundary to request end instead of skipping it, so the
+      // cache keeps the prompt-boundary checkpoint plain decoding produces.
+      if (DeferPromptSnapshot(*state)) {
+        return;
+      }
       lease.SkipSnapshot(SnapshotEventReason::kCaptureFailure, 0,
                          snapshot_tokens.size());
       return;
@@ -2019,6 +2157,7 @@ TextRunnerPool::Request::CommitMetrics TextRunnerPool::Request::Commit() {
   }
 
   impl_->CapturePromptSnapshot();
+  impl_->CaptureDeferredSnapshots();
   auto& state = dynamic_cast<TextRunnerState&>(impl_->lease.state());
   state.SetCancellationCheck({});
   if (!impl_->runner->Descriptor().capabilities.prefix_reuse) {

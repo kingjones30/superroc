@@ -189,6 +189,9 @@ if (ENGINE_ENABLE_HIP)
   add_qwen_hip_test(qwen_prefill_quant_gemm_ops_test
     tests/models/qwen/hip/quant/prefill_quant_gemm_ops_test.cpp
     "hip;gpu;kernels;qwen;qwen-kernel-oracle;slow;quant;gemm;prefill;q8;opt-c163-blocked-w8a8;opt-c192-swiglu-epilogue")
+  add_qwen_hip_test(llama_prefill_gemm_bench
+    tests/models/llama/hip/llama_prefill_gemm_bench.cpp
+    "hip;gpu;kernels;llama;quant;gemm;prefill;bench;nbfast-t2")
   add_qwen_hip_test(qwen_q4kxl_quant_ops_test
     tests/models/qwen/hip/quant/q4kxl_quant_ops_test.cpp
     "hip;gpu;kernels;qwen;qwen-kernel-oracle;slow;quant;gemv;gemm;k-quant;iquant;opt-q4kxl")

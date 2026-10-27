@@ -409,6 +409,58 @@ bool BuildVoicePresets(
   return true;
 }
 
+// Parses "--spec-plain-rates" into an ascending (context, tok/s) guard
+// table. Every pair must be "tokens:rate" with positive values, and the
+// contexts must be strictly ascending.
+bool ParsePlainDecodeRates(
+    const std::string& text,
+    std::vector<speculative::PlainDecodeRatePoint>* rates, std::string* error) {
+  rates->clear();
+  std::size_t start = 0;
+  while (start < text.size()) {
+    const auto comma = text.find(',', start);
+    const auto end = comma == std::string::npos ? text.size() : comma;
+    const auto pair = std::string_view(text).substr(start, end - start);
+    start = end == text.size() ? text.size() : end + 1;
+    const auto colon = pair.find(':');
+    if (colon == std::string_view::npos || colon == 0 ||
+        colon + 1 >= pair.size()) {
+      *error = "--spec-plain-rates entries must be 'context:tok_s' pairs";
+      return false;
+    }
+    std::uint32_t context = 0;
+    auto head = pair.substr(0, colon);
+    if (std::from_chars(head.data(), head.data() + head.size(), context).ec !=
+            std::errc{} ||
+        context == 0) {
+      *error = "--spec-plain-rates context must be a positive integer";
+      return false;
+    }
+    double rate = 0.0;
+    const auto tail = std::string(pair.substr(colon + 1));
+    try {
+      std::size_t parsed = 0;
+      rate = std::stod(tail, &parsed);
+      if (parsed != tail.size() || !std::isfinite(rate) || rate <= 0.0) {
+        throw std::invalid_argument("rate");
+      }
+    } catch (...) {
+      *error = "--spec-plain-rates tok_s must be a positive number";
+      return false;
+    }
+    if (!rates->empty() && context <= rates->back().context_tokens) {
+      *error = "--spec-plain-rates contexts must be strictly ascending";
+      return false;
+    }
+    rates->push_back({context, rate});
+  }
+  if (rates->empty()) {
+    *error = "--spec-plain-rates must list 'context:tok_s' pairs";
+    return false;
+  }
+  return true;
+}
+
 std::optional<ReasoningOptions> ResolveReasoningDefaults(
     std::string_view mode, std::string_view effort, std::string_view preserve,
     std::string* error) {
@@ -597,6 +649,7 @@ void PrintServeHelp(std::string_view program_name,
     std::string speculative_backend;
     std::string dflash_model_path;
     std::string draft_policy;
+    std::string spec_plain_rates;
     std::string dspark_model_path;
     std::string mtp_model_path;
     std::string vision_model_path;
@@ -697,6 +750,11 @@ void PrintServeHelp(std::string_view program_name,
     parser.AddOption("", "--min-draft-tokens", "N",
                      "Adaptive draft floor (default: 1)", "Speculative",
                      &min_draft_tokens);
+    parser.AddOption(
+        "", "--spec-plain-rates", "ctx:tps,...",
+        "Measured plain-decode tok/s per context length, ascending; a "
+        "request whose speculation runs slower switches to plain decoding",
+        "Speculative", &spec_plain_rates);
     parser.AddOption(
         "", "--prefill-chunk", "N",
         "Maximum prompt tokens between active decode rounds (default: 512)",
@@ -1195,6 +1253,7 @@ int RunServe(std::span<const char* const> args) {
     std::string speculative_backend;
     std::string dflash_model_path;
     std::string draft_policy;
+    std::string spec_plain_rates;
     std::string dspark_model_path;
     std::string mtp_model_path;
     std::string vision_model_path;
@@ -1291,6 +1350,11 @@ int RunServe(std::span<const char* const> args) {
     llm_parser.AddOption("", "--min-draft-tokens", "N",
                          "Adaptive draft floor (default: 1)", "Speculative",
                          &min_draft_tokens);
+    llm_parser.AddOption(
+        "", "--spec-plain-rates", "ctx:tps,...",
+        "Measured plain-decode tok/s per context length, ascending; a "
+        "request whose speculation runs slower switches to plain decoding",
+        "Speculative", &spec_plain_rates);
     llm_parser.AddOption(
         "", "--prefill-chunk", "N",
         "Maximum prompt tokens between active decode rounds (default: 512)",
@@ -1496,6 +1560,14 @@ int RunServe(std::span<const char* const> args) {
         static_cast<std::uint32_t>(draft_tokens);
     speculative_config.min_draft_tokens =
         static_cast<std::uint32_t>(min_draft_tokens);
+    if (!spec_plain_rates.empty()) {
+      if (!ParsePlainDecodeRates(spec_plain_rates,
+                                 &speculative_config.plain_decode_rates,
+                                 &parse_err)) {
+        std::cerr << "Error: " << parse_err << '\n';
+        return 2;
+      }
+    }
     if (model.empty()) {
       std::cerr << "Error: --model <PATH> is required\n";
       return 2;

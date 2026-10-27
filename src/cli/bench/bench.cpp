@@ -1503,8 +1503,12 @@ int RunBench(std::span<const char* const> args) {
         const auto cache_begin = preparation_end;
         prepared_target =
             gpu_exec->SaveSnapshot(static_cast<std::uint32_t>(depth));
-        if (dflash_verifier)
+        if (dflash_verifier) {
+          // Deferred drafter priming (out of time-to-first-token) must
+          // reach the drafter before the depth checkpoint is captured.
+          dflash_verifier->FlushPendingDraftContext();
           prepared_draft = dflash_verifier->Snapshot();
+        }
         const auto cache_end = std::chrono::steady_clock::now();
         if (opt.verbose) {
           const double preparation_seconds =

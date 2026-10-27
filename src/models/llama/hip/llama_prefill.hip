@@ -1,6 +1,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include "src/models/qwen/hip/executor.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -151,6 +152,14 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
   hipEvent_t time_b = nullptr;
   float layer0_gemm_ms = 0.0F;
   float layer0_attn_ms = 0.0F;
+  // NBFAST T2 diagnostics: subdivide the two coarse regions so the prefill
+  // overhead is attributable (norm / qkv gemm / rope+kv write / attention /
+  // attn output / ffn). Layer-0 only, behind LLAMA_PREFILL_TIME.
+  float layer0_norm_ms = 0.0F;
+  float layer0_qkv_ms = 0.0F;
+  float layer0_ropekv_ms = 0.0F;
+  float layer0_out_ms = 0.0F;
+  float layer0_ffn_ms = 0.0F;
   if (time_parts) {
     if (hipEventCreate(&timers.first) != hipSuccess ||
         hipEventCreate(&timers.second) != hipSuccess) {
@@ -174,6 +183,12 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
     return ms;
   };
 
+  // The fp16 KV mirror is cast per layer over the SAME row range, so the
+  // watermark is read once here and advanced once after the loop; casting
+  // [watermark, end_pos) covers exactly the rows this forward wrote.
+  const bool prefill_wmma = LlamaWmmaEnabled() && k_f16 != nullptr;
+  const std::uint32_t prefill_cast_from = std::min(
+      arena_.GlimmerKvF16ValidRows(), static_cast<std::uint32_t>(end_pos));
   for (std::uint32_t l = 0; l < config.num_layers; ++l) {
     PrefillLayerCheckpoint(l);
     const auto& layer = weights_.layers[l];
@@ -182,6 +197,11 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
                              static_cast<const float*>(layer.attn_norm.data),
                              nullptr, act_f16, batch, H, eps, arena_.stream);
     LlamaCheckGpu("llama prefill attn norm failed");
+    stamp(time_b);
+    if (l == 0) {
+      layer0_norm_ms += elapsed_ms();
+    }
+    stamp(time_a);
     LaunchBatchedQuantGEMMFp16(layer.attn_q.type, layer.attn_q.data, act_f16,
                                arena_.d_q, batch, attn, H, arena_.stream);
     LaunchBatchedQuantGEMMFp16(layer.attn_k.type, layer.attn_k.data, act_f16,
@@ -189,6 +209,11 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
     LaunchBatchedQuantGEMMFp16(layer.attn_v.type, layer.attn_v.data, act_f16,
                                arena_.d_v, batch, kv, H, arena_.stream);
     LlamaCheckGpu("llama prefill qkv gemm failed");
+    stamp(time_b);
+    if (l == 0) {
+      layer0_qkv_ms += elapsed_ms();
+    }
+    stamp(time_a);
     LaunchBatchedRoPENorm(arena_.d_q, arena_.d_k, batch, heads, kv_heads,
                           head_dim, rotary_dim, start_pos, rope_theta,
                           arena_.stream);
@@ -199,20 +224,23 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
         batch * kv, plane, arena_.stream));
     stamp(time_b);
     if (l == 0) {
-      layer0_gemm_ms += elapsed_ms();
+      layer0_ropekv_ms += elapsed_ms();
+      layer0_gemm_ms +=
+          layer0_norm_ms + layer0_qkv_ms + layer0_ropekv_ms;
     }
     stamp(time_a);
     bool wmma_ok = false;
-    if (LlamaWmmaEnabled() && k_f16 != nullptr) {
+    if (prefill_wmma) {
       const std::size_t per_layer =
           static_cast<std::size_t>(arena_.GetMaxContext()) *
           config.num_key_value_heads * config.head_dim;
       const std::uint32_t plane_layers =
           per_layer == 0 ? 0U : static_cast<std::uint32_t>(plane / per_layer);
-      LlamaRequire(LaunchGlimmerCastKvFp16(
+      LlamaRequire(LaunchGlimmerCastKvFp16Range(
           arena_.d_kv_cache, k_f16, /*layers=*/1, arena_.GetMaxContext(),
-          config.num_key_value_heads, config.head_dim,
-          static_cast<std::uint32_t>(end_pos), arena_.stream, l, plane_layers));
+          config.num_key_value_heads, config.head_dim, prefill_cast_from,
+          static_cast<std::uint32_t>(end_pos), arena_.stream, l,
+          plane_layers));
       wmma_ok = LaunchQwenWmmaAttention(
           arena_.d_q, nullptr, nullptr, nullptr, nullptr, nullptr, k_f16,
           v_f16, arena_.d_ssm_out, l, start_pos, batch, max_ctx, heads,
@@ -247,6 +275,11 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
                                        arena_.d_hidden, batch, H, attn,
                                        arena_.stream);
     LlamaCheckGpu("llama prefill attn residual failed");
+    stamp(time_b);
+    if (l == 0) {
+      layer0_out_ms += elapsed_ms();
+    }
+    stamp(time_a);
     LaunchBatchedRMSNormFp16(arena_.d_hidden, nullptr,
                              static_cast<const float*>(layer.ffn_norm.data),
                              nullptr, act_f16, batch, H, eps, arena_.stream);
@@ -285,14 +318,21 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
     }
     stamp(time_b);
     if (l == 0) {
-      layer0_gemm_ms += elapsed_ms();
+      layer0_ffn_ms += elapsed_ms();
+      layer0_gemm_ms += layer0_out_ms + layer0_ffn_ms;
     }
+  }
+  if (prefill_wmma) {
+    arena_.SetGlimmerKvF16ValidRows(static_cast<std::uint32_t>(end_pos));
   }
   if (time_parts) {
     std::fprintf(stderr,
                  "llama prefill timing layer0 gemm_ms=%.3f attn_ms=%.3f "
-                 "batch=%zu start_pos=%u wmma=%d\n",
-                 layer0_gemm_ms, layer0_attn_ms, batch, start_pos,
+                 "norm_ms=%.3f qkv_ms=%.3f ropekv_ms=%.3f out_ms=%.3f "
+                 "ffn_ms=%.3f batch=%zu start_pos=%u wmma=%d\n",
+                 layer0_gemm_ms, layer0_attn_ms, layer0_norm_ms, layer0_qkv_ms,
+                 layer0_ropekv_ms, layer0_out_ms, layer0_ffn_ms, batch,
+                 start_pos,
                  static_cast<int>(LlamaWmmaEnabled() && k_f16 != nullptr));
     // Events are destroyed by the ScopedPrefillTimers guard above.
   }
@@ -445,6 +485,57 @@ QwenGpuExecutor::ForwardLlamaVerificationChunk(
   // ~480 ms per verify step). The FP32 small-batch GEMMs below share one
   // weight stream across the block at exact width, like the Qwen verify
   // projections; attention stays on the FP32 prefill kernel.
+  // Same mirror discipline as the prefill path: one row range per forward,
+  // watermark advanced once after every layer cast it.
+  const bool verify_wmma = LlamaWmmaEnabled() && arena_.d_glimmer_kv_f16 != nullptr;
+  const std::uint32_t verify_cast_from = std::min(
+      arena_.GlimmerKvF16ValidRows(), static_cast<std::uint32_t>(end_pos));
+  // NBFAST A2 diagnostics: layer-0 phase split behind LLAMA_PREFILL_TIME,
+  // mirroring the prefill timers above (pre-attn / attention+cast /
+  // post-attn), to attribute context-proportional verify cost.
+  const bool verify_time = [] {
+    const char* env = std::getenv("LLAMA_PREFILL_TIME");
+    return env != nullptr && env[0] != '\0' && env[0] != '0';
+  }();
+  struct ScopedVerifyTimers {
+    hipEvent_t first{nullptr};
+    hipEvent_t second{nullptr};
+    ~ScopedVerifyTimers() {
+      if (first != nullptr) {
+        (void)hipEventDestroy(first);
+      }
+      if (second != nullptr) {
+        (void)hipEventDestroy(second);
+      }
+    }
+  } verify_timers;
+  hipEvent_t verify_t0 = nullptr;
+  hipEvent_t verify_t1 = nullptr;
+  float verify_preattn_ms = 0.0F;
+  float verify_attn_ms = 0.0F;
+  float verify_postattn_ms = 0.0F;
+  if (verify_time) {
+    if (hipEventCreate(&verify_timers.first) != hipSuccess ||
+        hipEventCreate(&verify_timers.second) != hipSuccess) {
+      throw std::runtime_error("llama verify timer create failed");
+    }
+    verify_t0 = verify_timers.first;
+    verify_t1 = verify_timers.second;
+  }
+  const auto verify_stamp = [&](hipEvent_t ev) {
+    if (verify_time) {
+      hipEventRecord(ev, arena_.stream);
+    }
+  };
+  const auto verify_elapsed = [&]() -> float {
+    if (!verify_time) {
+      return 0.0F;
+    }
+    hipEventSynchronize(verify_t1);
+    float ms = 0.0F;
+    hipEventElapsedTime(&ms, verify_t0, verify_t1);
+    return ms;
+  };
   for (std::uint32_t l = 0; l < config.num_layers; ++l) {
     PrefillLayerCheckpoint(l);
     const auto& layer = weights_.layers[l];
@@ -470,11 +561,17 @@ QwenGpuExecutor::ForwardLlamaVerificationChunk(
         arena_.d_k, arena_.d_v, arena_.d_kv_cache, v_cache, l, start_pos,
         static_cast<std::uint32_t>(batch), max_ctx, kv_heads, head_dim,
         batch * kv, plane, arena_.stream));
+    if (l == 0) {
+      verify_stamp(verify_t0);
+      verify_stamp(verify_t1);
+      verify_preattn_ms += verify_elapsed();
+      verify_stamp(verify_t0);
+    }
     // WMMA attention over the FP16 KV copy, as in prefill: the FP32
     // Glimmer kernel re-reads the KV cache per query row and dominated
     // verify time at 4K context (~430 ms/step vs ~145 ms at 512).
     bool wmma_ok = false;
-    if (LlamaWmmaEnabled() && arena_.d_glimmer_kv_f16 != nullptr) {
+    if (verify_wmma) {
       void* k_f16 = arena_.d_glimmer_kv_f16;
       void* v_f16 = static_cast<std::uint16_t*>(k_f16) + plane;
       const std::size_t per_layer =
@@ -482,10 +579,14 @@ QwenGpuExecutor::ForwardLlamaVerificationChunk(
           config.num_key_value_heads * config.head_dim;
       const std::uint32_t plane_layers =
           per_layer == 0 ? 0U : static_cast<std::uint32_t>(plane / per_layer);
-      LlamaRequire(LaunchGlimmerCastKvFp16(
+      // Convert only the rows written since the previous cast: the mirror
+      // keeps the accepted prefix, so an 8-row verify block no longer pays
+      // an O(context) conversion per layer per step.
+      LlamaRequire(LaunchGlimmerCastKvFp16Range(
           arena_.d_kv_cache, k_f16, /*layers=*/1, arena_.GetMaxContext(),
-          config.num_key_value_heads, config.head_dim,
-          static_cast<std::uint32_t>(end_pos), arena_.stream, l, plane_layers));
+          config.num_key_value_heads, config.head_dim, verify_cast_from,
+          static_cast<std::uint32_t>(end_pos), arena_.stream, l,
+          plane_layers));
       const auto ws = arena_.GetScratchView(arena_.GetMaxBatch()).ffn;
       wmma_ok = LaunchQwenWmmaAttention(
           arena_.d_q, nullptr, nullptr, nullptr, nullptr, nullptr, k_f16,
@@ -499,6 +600,11 @@ QwenGpuExecutor::ForwardLlamaVerificationChunk(
           start_pos, static_cast<std::uint32_t>(batch), 0U, max_ctx, heads,
           kv_heads, head_dim, batch * attn, 0, plane, batch * attn,
           arena_.stream, nullptr));
+    }
+    if (l == 0) {
+      verify_stamp(verify_t1);
+      verify_attn_ms += verify_elapsed();
+      verify_stamp(verify_t0);
     }
     LaunchBatchedQuantGEMMFp32(layer.attn_output.type, layer.attn_output.data,
                                arena_.d_ssm_out, arena_.d_attn_out, batch, H,
@@ -524,6 +630,17 @@ QwenGpuExecutor::ForwardLlamaVerificationChunk(
     LaunchBatchedResidualAdd(arena_.d_hidden, arena_.d_ffn_out,
                              arena_.d_hidden, batch, H, arena_.stream);
     LlamaCheckGpu("llama verification layer failed");
+    if (l == 0) {
+      verify_stamp(verify_t1);
+      verify_postattn_ms += verify_elapsed();
+    }
+    if (verify_time && l == 1) {
+      std::fprintf(stderr,
+                   "llama verify timing layer0 preattn_ms=%.3f attn_ms=%.3f "
+                   "postattn_ms=%.3f batch=%zu start_pos=%u wmma=%d\n",
+                   verify_preattn_ms, verify_attn_ms, verify_postattn_ms,
+                   batch, start_pos, static_cast<int>(verify_wmma));
+    }
     if (capture_prompt_hidden_) {
       if (const auto tap_index = arena_.GetTargetLayerCaptureIndex(l);
           tap_index.has_value()) {
@@ -538,6 +655,9 @@ QwenGpuExecutor::ForwardLlamaVerificationChunk(
         }
       }
     }
+  }
+  if (verify_wmma) {
+    arena_.SetGlimmerKvF16ValidRows(static_cast<std::uint32_t>(end_pos));
   }
 
   if (capture_prompt_hidden_ && target_layer_count == 0) {

@@ -375,7 +375,11 @@ void QwenDFlashGpuExecutor::Allocate() {
   if (error != hipSuccess) {
     throw std::runtime_error("DFlash hipStreamCreate failed");
   }
-  if (block_size > kDFlashMaxSharedBatch) {
+  // NBFAST A2: the batched injection route needs the BLAS handles even when
+  // the block path never takes its wide branch (block_size <= 8); the
+  // capacity below mirrors the injection_capacity_ assignment underneath.
+  if (block_size > kDFlashMaxSharedBatch ||
+      std::min(max_context_, std::uint32_t{256}) > 16) {
     HIPBLAS_CHECK(hipblasCreate(&hipblas_handle_));
     HIPBLAS_CHECK(hipblasSetStream(hipblas_handle_, stream_));
     hipblaslt_gemm_ = std::make_unique<HipblasLtGemm>();
@@ -413,6 +417,12 @@ void QwenDFlashGpuExecutor::Allocate() {
   allocate_scratch(
       d_v_block_,
       std::max<std::size_t>(injection_capacity_, block_size) * kv_dim);
+  // NBFAST A2: BF16 activation staging for the batched injection GEMMs. One
+  // full injection chunk of target features is the widest operand; the k/v
+  // projections (input = hidden) fit inside the same buffer.
+  if (injection_capacity_ > 16) {
+    allocate_scratch(d_inject_bf16_, injection_capacity_ * enc_in_dim);
+  }
 
   // Scratch buffers for block drafting (size = block_size)
   allocate_scratch(d_block_hidden_, block_size * hidden_size);
@@ -592,6 +602,12 @@ void QwenDFlashGpuExecutor::RunInjectGemm(const models::QwenTensorRef& weight,
     return;
   }
 
+  if (is_bf16 && num_tokens > 16 && d_inject_bf16_ != nullptr) {
+    RunInjectGemmWide(weight, input, output, num_tokens, output_size,
+                      input_size);
+    return;
+  }
+
   for (std::size_t offset = 0; offset < num_tokens;) {
     const std::size_t chunk =
         is_bf16 && num_tokens - offset >= 16
@@ -610,6 +626,26 @@ void QwenDFlashGpuExecutor::RunInjectGemm(const models::QwenTensorRef& weight,
     }
     offset += chunk;
   }
+}
+
+// NBFAST A2: large injections (the drafter prime over a full prompt) paid one
+// whole-BF16-matrix read per sixteen rows, so a 256-token chunk re-read the
+// 308 MB fc projection sixteen times (~0.125 ms/token of prime at 8K context).
+// Route wide batches through the one-read hipBLASLt path the block GEMMs
+// already use; the verifier keeps the emitted greedy tokens exact regardless
+// of drafter numerics.
+void QwenDFlashGpuExecutor::RunInjectGemmWide(
+    const models::QwenTensorRef& weight, const float* input, float* output,
+    std::size_t num_tokens, std::size_t output_size, std::size_t input_size) {
+  LaunchFloatToBfloat16(input, d_inject_bf16_, num_tokens * input_size,
+                        stream_);
+  if (hipblaslt_gemm_ != nullptr &&
+      hipblaslt_gemm_->RunBf16(weight.data, d_inject_bf16_, output, num_tokens,
+                               output_size, input_size, stream_)) {
+    return;
+  }
+  LaunchHipblasGEMMBF16(hipblas_handle_, weight.data, d_inject_bf16_, output,
+                        num_tokens, output_size, input_size, stream_);
 }
 
 void QwenDFlashGpuExecutor::Free() noexcept {
@@ -673,6 +709,8 @@ void QwenDFlashGpuExecutor::Free() noexcept {
     (void)hipFree(d_out_token_);
   if (d_bf16_input_ != nullptr)
     (void)hipFree(d_bf16_input_);
+  if (d_inject_bf16_ != nullptr)
+    (void)hipFree(d_inject_bf16_);
   if (d_batch_scratch_ != nullptr)
     (void)hipFree(d_batch_scratch_);
   hipblaslt_gemm_.reset();
@@ -774,6 +812,62 @@ std::unique_ptr<QwenDFlashGpuSnapshot> QwenDFlashGpuExecutor::SaveSnapshot()
   snapshot->valid_context_ = injected_context_len_;
   snapshot->history_capacity_ = history_capacity_;
   snapshot->payload_bytes_ = SnapshotPayloadBytes();
+
+  if (bytes == 0) {
+    return snapshot;
+  }
+  HIP_CHECK(hipMalloc(&snapshot->d_k_, bytes));
+  HIP_CHECK(hipMalloc(&snapshot->d_v_, bytes));
+  auto* snapshot_k = static_cast<float*>(snapshot->d_k_);
+  auto* snapshot_v = static_cast<float*>(snapshot->d_v_);
+  for (std::size_t layer = 0; layer < snapshot->num_layers_; ++layer) {
+    HIP_CHECK(hipMemcpyAsync(
+        snapshot_k + layer * elements_per_layer, d_injected_k_[layer],
+        elements_per_layer * sizeof(float), hipMemcpyDeviceToDevice, stream_));
+    HIP_CHECK(hipMemcpyAsync(
+        snapshot_v + layer * elements_per_layer, d_injected_v_[layer],
+        elements_per_layer * sizeof(float), hipMemcpyDeviceToDevice, stream_));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream_));
+  return snapshot;
+}
+
+std::size_t QwenDFlashGpuExecutor::SnapshotPayloadBytesAt(
+    std::uint32_t valid_context) const {
+  if (valid_context > injected_context_len_ ||
+      injected_context_len_ > history_capacity_) {
+    throw std::logic_error("DFlash snapshot position is not truncatable");
+  }
+  const std::size_t kv_width =
+      static_cast<std::size_t>(model_->GetConfig().num_key_value_heads) *
+      model_->GetConfig().head_dim;
+  return 2U * model_->GetDFlashConfig().num_layers *
+         static_cast<std::size_t>(valid_context) * kv_width * sizeof(float);
+}
+
+std::unique_ptr<QwenDFlashGpuSnapshot> QwenDFlashGpuExecutor::SaveSnapshotAt(
+    std::uint32_t valid_context) const {
+  // Rows sit at absolute slots only while the whole context fits the ring;
+  // a wrapped cache cannot be truncated by copying a prefix.
+  const std::size_t truncated_bytes = SnapshotPayloadBytesAt(valid_context);
+  const std::size_t kv_width =
+      static_cast<std::size_t>(model_->GetConfig().num_key_value_heads) *
+      model_->GetConfig().head_dim;
+  const std::size_t elements_per_layer =
+      static_cast<std::size_t>(valid_context) * kv_width;
+  const std::size_t total_elements =
+      model_->GetDFlashConfig().num_layers * elements_per_layer;
+  const std::size_t bytes = total_elements * sizeof(float);
+
+  auto snapshot =
+      std::unique_ptr<QwenDFlashGpuSnapshot>(new QwenDFlashGpuSnapshot());
+  snapshot->elements_per_layer_ = elements_per_layer;
+  snapshot->num_layers_ = model_->GetDFlashConfig().num_layers;
+  snapshot->kv_width_ = static_cast<std::uint32_t>(kv_width);
+  snapshot->max_context_ = max_context_;
+  snapshot->valid_context_ = valid_context;
+  snapshot->history_capacity_ = history_capacity_;
+  snapshot->payload_bytes_ = truncated_bytes;
 
   if (bytes == 0) {
     return snapshot;

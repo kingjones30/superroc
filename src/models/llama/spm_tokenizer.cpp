@@ -138,6 +138,19 @@ std::optional<SpmTokenizer> SpmTokenizer::FromGguf(
     }
   }
   if (unk < 0) {
+    // NBFAST: some published GGUFs (bartowski Nanbeige4.3-33B instruct)
+    // type <unk> as CONTROL instead of UNKNOWN; honor the explicit
+    // unknown_token_id metadata before refusing the file. Files with an
+    // UNKNOWN-typed token never reach this branch.
+    if (const auto unk_id =
+            reader.GetMetadataUint32("tokenizer.ggml.unknown_token_id")) {
+      if (*unk_id >= tokens.size()) {
+        return fail("tokenizer.ggml.unknown_token_id out of range");
+      }
+      unk = static_cast<std::int32_t>(*unk_id);
+    }
+  }
+  if (unk < 0) {
     return fail("tokenizer has no unknown token");
   }
   for (unsigned i = 0; i < 256; ++i) {

@@ -69,17 +69,20 @@ void AppendUint32Value(std::vector<std::uint8_t>& buf, std::string_view key,
 }
 
 // Builds a 4-token llama SPM tokenizer GGUF: <unk>=0, <s>=1, </s>=2,
-// hello=3. `pre` empty means the key is absent.
-std::vector<std::uint8_t> BuildSyntheticTokenizer(std::string_view pre,
-                                                  std::uint32_t vocab_size,
-                                                  std::uint32_t bos) {
+// hello=3. `pre` empty means the key is absent. `unk_type` is the
+// token_type of token 0; `unknown_id` >= 0 adds the
+// tokenizer.ggml.unknown_token_id key with that value.
+std::vector<std::uint8_t> BuildSyntheticTokenizer(
+    std::string_view pre, std::uint32_t vocab_size, std::uint32_t bos,
+    std::uint32_t unk_type = 2, std::int64_t unknown_id = -1) {
   std::vector<std::uint8_t> buf;
   buf.insert(buf.end(), {'G', 'G', 'U', 'F'});
   AppendPod(buf, 3, 4);  // version
   AppendPod(buf, 0, 8);  // tensor count
   // arch, model, vocab_size, bos, eos, pad, tokens, scores, token_type,
-  // plus pre when present.
-  std::uint64_t metadata_count = 9 + (pre.empty() ? 0 : 1);
+  // plus pre when present, plus unknown_token_id when present.
+  std::uint64_t metadata_count =
+      9 + (pre.empty() ? 0 : 1) + (unknown_id < 0 ? 0 : 1);
   AppendPod(buf, metadata_count, 8);
   AppendStringValue(buf, "general.architecture", "llama");
   AppendStringValue(buf, "tokenizer.ggml.model", "llama");
@@ -90,6 +93,10 @@ std::vector<std::uint8_t> BuildSyntheticTokenizer(std::string_view pre,
   AppendUint32Value(buf, "tokenizer.ggml.bos_token_id", bos);
   AppendUint32Value(buf, "tokenizer.ggml.eos_token_id", 2);
   AppendUint32Value(buf, "tokenizer.ggml.padding_token_id", 0);
+  if (unknown_id >= 0) {
+    AppendUint32Value(buf, "tokenizer.ggml.unknown_token_id",
+                      static_cast<std::uint32_t>(unknown_id));
+  }
   // tokens array
   AppendString(buf, "tokenizer.ggml.tokens");
   AppendPod(buf, 9, 4);  // kArray
@@ -106,12 +113,12 @@ std::vector<std::uint8_t> BuildSyntheticTokenizer(std::string_view pre,
   for (int i = 0; i < 4; ++i) {
     AppendPod(buf, 0, 4);
   }
-  // token_type array: unknown, control, control, normal
+  // token_type array: unk_type, control, control, normal
   AppendString(buf, "tokenizer.ggml.token_type");
   AppendPod(buf, 9, 4);
   AppendPod(buf, 4, 4);  // kUint32
   AppendPod(buf, 4, 8);
-  for (std::uint32_t type : {2, 3, 3, 1}) {
+  for (std::uint32_t type : {unk_type, 3U, 3U, 1U}) {
     AppendPod(buf, type, 4);
   }
   // ParseHeaders aligns the tensor payload base to the 32-byte GGUF
@@ -174,6 +181,41 @@ void TestByteFallbackNeverNegative() {
   }
 }
 
+// NBFAST: a file that types <unk> as CONTROL (bartowski instruct GGUF)
+// loads through tokenizer.ggml.unknown_token_id; without the key, or with
+// an out-of-range id, it is still refused.
+void TestUnknownTokenIdFallback() {
+  std::string error;
+  const auto control_unk = BuildSyntheticTokenizer("default", /*vocab_size=*/4,
+                                                   /*bos=*/1, /*unk_type=*/3,
+                                                   /*unknown_id=*/0);
+  auto tokenizer = gufo::models::llama::SpmTokenizer::FromGguf(
+      *OpenSynthetic(control_unk, error), &error);
+  Expect(tokenizer.has_value(),
+         "CONTROL <unk> with unknown_token_id must load: " + error);
+  gufo::models::llama::SpmTokenizer::EncodeOptions options;
+  options.add_special = false;
+  options.parse_special = false;
+  const auto ids = tokenizer->Encode("~", options);
+  Expect(!ids.empty(), "byte fallback must emit a token");
+  for (const auto id : ids) {
+    Expect(id == 0, "byte fallback must emit unknown_token_id 0");
+  }
+  const auto no_key = BuildSyntheticTokenizer("default", /*vocab_size=*/4,
+                                              /*bos=*/1, /*unk_type=*/3);
+  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+              *OpenSynthetic(no_key, error), &error)
+              .has_value(),
+         "CONTROL <unk> without unknown_token_id must be refused");
+  const auto bad_id = BuildSyntheticTokenizer("default", /*vocab_size=*/4,
+                                              /*bos=*/1, /*unk_type=*/3,
+                                              /*unknown_id=*/99);
+  Expect(!gufo::models::llama::SpmTokenizer::FromGguf(
+              *OpenSynthetic(bad_id, error), &error)
+              .has_value(),
+         "out-of-range unknown_token_id must be refused");
+}
+
 // F12: only the default pre-tokenizer is implemented.
 void TestNonDefaultPreRefused() {
   std::string error;
@@ -190,6 +232,7 @@ void TestNonDefaultPreRefused() {
 int main() {
   TestTokenizerVocabValidation();
   TestByteFallbackNeverNegative();
+  TestUnknownTokenIdFallback();
   TestNonDefaultPreRefused();
   const char* gguf_env = std::getenv("NANBEIGE_GGUF");
   if (gguf_env == nullptr || gguf_env[0] == '\0') {
