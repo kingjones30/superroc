@@ -38,8 +38,8 @@ bool WarmupRocmFp4Slots(std::size_t k, hipStream_t stream) {
   }
   // SQ10: pre-grow every set's five Q8 slots (the verify pair rides inside,
   // as before). The MoE scratch rides in model_loader beside this call.
-  const bool ok =
-      superroc_fp4_slots_warm_q8(static_cast<int>(k), stream) == SUPERROC_FP4_OK;
+  const bool ok = superroc_fp4_slots_warm_q8(static_cast<int>(k), stream) ==
+                  SUPERROC_FP4_OK;
   if (ok) {
     if (k > g_warm.k) {
       g_warm.k = k;

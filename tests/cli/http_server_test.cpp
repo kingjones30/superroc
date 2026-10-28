@@ -614,8 +614,9 @@ void TestContentTrace() {
   }
   fs::remove(path);
   assert(records.size() == 6);
-  const auto record = [&](std::string_view event,
-                          const std::string& id) -> const superroc::json::Value& {
+  const auto record =
+      [&](std::string_view event,
+          const std::string& id) -> const superroc::json::Value& {
     for (const auto& candidate : records) {
       if (candidate.member_str("event") == event &&
           candidate.member_str("request") == id) {
@@ -898,7 +899,8 @@ void TestLlamaProps() {
   const auto props = [&](const std::string& path) {
     const auto response = server.Send("GET " + path + " HTTP/1.1\r\n\r\n");
     ExpectStatus(response, 200);
-    return superroc::json::parse(response.substr(response.find("\r\n\r\n") + 4));
+    return superroc::json::parse(
+        response.substr(response.find("\r\n\r\n") + 4));
   };
 
   // Nothing is invented for what the backend does not report.
@@ -1010,12 +1012,14 @@ void TestLlamaSlotsAndMetrics() {
          token.member_size("n_decoded") == 3);
 
   const auto metrics = get("/metrics");
-  assert(metrics.find("# HELP superroc_device_lost_total ") != std::string::npos);
+  assert(metrics.find("# HELP superroc_device_lost_total ") !=
+         std::string::npos);
   assert(metrics.find("# TYPE superroc_device_lost_total counter\n") !=
          std::string::npos);
   assert(metrics.find("superroc_device_lost_total 0\n") != std::string::npos);
-  for (const std::string counter : {"superroc_spec_lookup_tokens_total",
-                                    "superroc_spec_lookup_accepted_tokens_total"}) {
+  for (const std::string counter :
+       {"superroc_spec_lookup_tokens_total",
+        "superroc_spec_lookup_accepted_tokens_total"}) {
     assert(metrics.find("# TYPE " + counter + " counter\n") !=
            std::string::npos);
   }
@@ -1173,7 +1177,8 @@ void TestCompatibilityRequests() {
              ids[1].as_double() == 8.0 && ids[2].as_double() == 9.0);
     }
     assert(server.backend->LastCall().max_tokens == 0);
-    server.backend->defaults.model = superroc::sampling::TextModelPreset::kQwen38;
+    server.backend->defaults.model =
+        superroc::sampling::TextModelPreset::kQwen38;
     server.backend->defaults.supplied = {};
     server.backend->reasoning.enabled = false;
     response_body(server.Post(endpoint.path, body.dump()));
@@ -1491,7 +1496,8 @@ void TestCompatibilityRequests() {
   assert(in_place.member_str("status") == "completed");
   const auto in_place_messages = server.backend->LastCall().chat.messages;
   assert(in_place_messages.size() == 5 &&
-         in_place_messages[0].role == superroc::tokenization::ChatRole::kSystem &&
+         in_place_messages[0].role ==
+             superroc::tokenization::ChatRole::kSystem &&
          in_place_messages[0].content == "Base rules." &&
          in_place_messages[1].content == "first" &&
          in_place_messages[2].content == "noted" &&
@@ -1509,8 +1515,8 @@ void TestCompatibilityRequests() {
       {"type":"function_call","call_id":"call_1","name":"lookup",
        "arguments":"{\"key\":\"state\"}"},
       {"type":"function_call_output","call_id":"call_1","output":"OK"}])");
-  const auto developer =
-      superroc::json::parse(R"({"role":"developer","content":"Follow policy."})");
+  const auto developer = superroc::json::parse(
+      R"({"role":"developer","content":"Follow policy."})");
   for (const std::size_t position : {2U, 3U}) {
     auto input = superroc::json::Value::array();
     for (std::size_t i = 0; i < replay_items.size(); ++i) {
@@ -1568,7 +1574,8 @@ void TestCompatibilityRequests() {
          hosted_call.chat.tools[0].name == "exec_command" &&
          hosted_call.chat.tools[1].name == "close_agent");
   assert(hosted_call.chat.reasoning.enabled == true &&
-         hosted_call.chat.reasoning.effort == superroc::ReasoningEffort::kMedium);
+         hosted_call.chat.reasoning.effort ==
+             superroc::ReasoningEffort::kMedium);
   assert(hosted_call.chat.messages.size() == 3 &&
          hosted_call.chat.messages[0].role ==
              superroc::tokenization::ChatRole::kSystem &&
@@ -1591,7 +1598,8 @@ void TestCompatibilityRequests() {
   assert(tool_replay.member_str("status") == "completed");
   const auto tool_messages = server.backend->LastCall().chat.messages;
   assert(tool_messages.size() == 4);
-  assert(tool_messages[1].role == superroc::tokenization::ChatRole::kAssistant &&
+  assert(tool_messages[1].role ==
+             superroc::tokenization::ChatRole::kAssistant &&
          tool_messages[1].tool_calls.size() == 1 &&
          tool_messages[1].tool_calls[0].id == "call_1" &&
          tool_messages[1].tool_calls[0].name == "exec_command");
@@ -2333,7 +2341,8 @@ void TestDeviceLoss() {
       server.Post("/v1/completions", R"({"prompt":"hello","stream":true})");
   ExpectStatus(stream, 200);
   assert(stream.find("\"code\":\"device_lost\"") != std::string::npos);
-  assert(stream.find(superroc::server::kDeviceLostMessage) != std::string::npos);
+  assert(stream.find(superroc::server::kDeviceLostMessage) !=
+         std::string::npos);
   assert(hook_calls == 1);
 
   server.backend->failure = 0;
@@ -2841,7 +2850,8 @@ void TestResponseSamplingDefaults() {
     }
   }
   // Responses must preserve the same request-owned cache control as Chat.
-  auto body = superroc::json::parse(R"({"input":"hello","max_output_tokens":1})");
+  auto body =
+      superroc::json::parse(R"({"input":"hello","max_output_tokens":1})");
   ExpectStatus(server.Post("/v1/responses", body.dump()), 200);
   assert(server.backend->LastCall().chat.cache_prompt);
   for (const bool stream : {false, true}) {
@@ -2999,7 +3009,8 @@ void TestAdmittedStreamHeaders() {
     lost.backend->failure = 3;
     const auto failed = lost.Post(path, body);
     ExpectStatus(failed, 200);
-    assert(failed.find(superroc::server::kDeviceLostMessage) != std::string::npos);
+    assert(failed.find(superroc::server::kDeviceLostMessage) !=
+           std::string::npos);
     assert(failed.find("data: ") != std::string::npos);
     assert(failed.ends_with("0\r\n\r\n"));
   }

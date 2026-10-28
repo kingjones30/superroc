@@ -1143,8 +1143,8 @@ void TestBatchedSSMRowSplitRecurrenceEquivalence(std::size_t batch) {
     const auto storage = bf16_state
                              ? superroc::hip::QwenRecurrentStateStorage::kBf16
                              : superroc::hip::QwenRecurrentStateStorage::kFp32;
-    superroc::hip::LaunchFloatToFp16(output, expected.data(), batch * inner_size,
-                                 nullptr);
+    superroc::hip::LaunchFloatToFp16(output, expected.data(),
+                                     batch * inner_size, nullptr);
     upload(conv_state, h_history);
     if (bf16_state) {
       HIP_CHECK(hipMemcpy(state, h_delta0_bf16.data(),
@@ -1181,7 +1181,8 @@ void TestBatchedSSMRowSplitRecurrenceEquivalence(std::size_t batch) {
   // read back. That has to be byte-for-byte identical to the FP32 path followed
   // by an FP32 quantize, including the per-block scales and the tail-tile
   // zeros.
-  if (superroc::hip::IsFusedSSMEpilogueQuantizeQ8_1Supported(val_dim, inner_size)) {
+  if (superroc::hip::IsFusedSSMEpilogueQuantizeQ8_1Supported(val_dim,
+                                                             inner_size)) {
     const std::size_t q8_bytes =
         superroc::hip::QuantizedActivationBytes(batch, inner_size) + 4096;
     void* d_q8_ref = nullptr;
@@ -1200,8 +1201,8 @@ void TestBatchedSSMRowSplitRecurrenceEquivalence(std::size_t batch) {
     HIP_CHECK(hipMemset(d_q8_got, 0xA5, q8_bytes));
 
     // Reference: the FP32 epilogue that just ran, quantized separately.
-    superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_out_new, d_q8_ref, batch,
-                                                    inner_size);
+    superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_out_new, d_q8_ref,
+                                                        batch, inner_size);
 
     // Candidate: the same recurrence from the same starting state, but with the
     // epilogue writing Q8_1.

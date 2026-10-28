@@ -4,8 +4,8 @@
 #include <iostream>
 #include <string>
 
-#include "src/models/minimax_h3/runtime.hpp"
 #include "src/core/env_compat.hpp"
+#include "src/models/minimax_h3/runtime.hpp"
 
 namespace {
 
@@ -17,8 +17,10 @@ double Seconds(const std::chrono::steady_clock::time_point& start) {
 }  // namespace
 
 int main() {
-  const char* model_root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* manifest = ::superroc::core::GetEnvCompat("SUPERROC_H3_SOURCE_MANIFEST");
+  const char* model_root =
+      ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* manifest =
+      ::superroc::core::GetEnvCompat("SUPERROC_H3_SOURCE_MANIFEST");
   if (model_root == nullptr || manifest == nullptr) {
     std::cerr << "SKIP: set SUPERROC_H3_MODEL_ROOT and "
                  "SUPERROC_H3_SOURCE_MANIFEST\n";
@@ -26,8 +28,8 @@ int main() {
   }
   std::string error;
   const auto inspection_start = std::chrono::steady_clock::now();
-  auto inventory =
-      superroc::minimax_h3::ModelInventory::Inspect(model_root, manifest, &error);
+  auto inventory = superroc::minimax_h3::ModelInventory::Inspect(
+      model_root, manifest, &error);
   if (!inventory.has_value()) {
     std::cerr << error << '\n';
     return 1;
@@ -64,7 +66,8 @@ int main() {
     return elapsed;
   };
 
-  const double mapped = load(superroc::minimax_h3::ResidencyMode::kMappedReadOnly);
+  const double mapped =
+      load(superroc::minimax_h3::ResidencyMode::kMappedReadOnly);
   const double copied = load(superroc::minimax_h3::ResidencyMode::kDeviceCopy);
   std::cout << "inspection: " << inspection_seconds
             << " s; audio-VAE mapped/device-copy load ratio: "

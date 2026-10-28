@@ -425,7 +425,7 @@ superroc::bench::KernelBenchResult BenchmarkDecodeAttention(
   HipBuffer<float> output(query_elements);
   HipBuffer<float> split_k_scratch(
       superroc::hip::detail::DecodeAttentionScratchElements(kAttentionHeads,
-                                                        kAttentionHeadDim));
+                                                            kAttentionHeadDim));
 
   FillBytes(query, 0x3c, stream);
   FillBytes(gate, 0x3c, stream);
@@ -439,8 +439,9 @@ superroc::bench::KernelBenchResult BenchmarkDecodeAttention(
 
   const std::uint32_t split_count =
       superroc::hip::detail::SelectDecodeAttentionSplitCount(context);
-  const bool use_split_k = superroc::hip::detail::IsSplitKDecodeAttentionSupported(
-      context, kAttentionHeads, kAttentionKvHeads, kAttentionHeadDim);
+  const bool use_split_k =
+      superroc::hip::detail::IsSplitKDecodeAttentionSupported(
+          context, kAttentionHeads, kAttentionKvHeads, kAttentionHeadDim);
   const std::string backend = use_split_k ? "split_k_fp32" : "online_fp32";
   const std::string marker =
       "decode_attention/context=" + std::to_string(context) +
@@ -474,8 +475,8 @@ superroc::bench::KernelBenchResult BenchmarkDecodeAttention(
   if (use_split_k) {
     result.estimated_bytes_per_iteration +=
         2U *
-        superroc::hip::detail::DecodeAttentionScratchElements(kAttentionHeads,
-                                                          kAttentionHeadDim) *
+        superroc::hip::detail::DecodeAttentionScratchElements(
+            kAttentionHeads, kAttentionHeadDim) *
         sizeof(float);
     result.dispatch.selected_attention_backend = "decode_split_k_fp32";
   } else {
@@ -486,15 +487,15 @@ superroc::bench::KernelBenchResult BenchmarkDecodeAttention(
   return FinalizeResult(std::move(result), std::move(samples_us));
 }
 
-superroc::bench::KernelBenchResult BenchmarkGemv(const CommandLineOptions& options,
-                                             hipStream_t stream) {
+superroc::bench::KernelBenchResult BenchmarkGemv(
+    const CommandLineOptions& options, hipStream_t stream) {
   const bool is_bf16 = options.data_type == "bf16";
   HipBuffer<float> input(options.k);
   HipBuffer<float> output(options.m);
   FillBytes(input, 0x3c, stream);
 
-  const auto weight_type =
-      is_bf16 ? superroc::core::GgmlType::kBF16 : superroc::core::GgmlType::kF32;
+  const auto weight_type = is_bf16 ? superroc::core::GgmlType::kBF16
+                                   : superroc::core::GgmlType::kF32;
   const auto resolution = superroc::models::qwen::ResolveQwenGemmRoute(
       {.type = weight_type,
        .batch_size = 1,
@@ -518,8 +519,8 @@ superroc::bench::KernelBenchResult BenchmarkGemv(const CommandLineOptions& optio
     weight_value = Bf16FromBits(kBf16PatternBits);
     samples_us = MeasureKernel(options, marker, stream, [&] {
       superroc::hip::LaunchGEMV(weights.Get(), superroc::core::GgmlType::kBF16,
-                            input.Get(), output.Get(), options.m, options.k,
-                            stream);
+                                input.Get(), output.Get(), options.m, options.k,
+                                stream);
     });
   } else {
     HipBuffer<float> weights(options.m * options.k);
@@ -527,8 +528,8 @@ superroc::bench::KernelBenchResult BenchmarkGemv(const CommandLineOptions& optio
     weight_value = FloatFromBits(kFloatPatternBits);
     samples_us = MeasureKernel(options, marker, stream, [&] {
       superroc::hip::LaunchGEMV(weights.Get(), superroc::core::GgmlType::kF32,
-                            input.Get(), output.Get(), options.m, options.k,
-                            stream);
+                                input.Get(), output.Get(), options.m, options.k,
+                                stream);
     });
   }
 
@@ -560,9 +561,9 @@ superroc::bench::KernelBenchResult BenchmarkGemv(const CommandLineOptions& optio
   return FinalizeResult(std::move(result), std::move(samples_us));
 }
 
-superroc::bench::KernelBenchResult BenchmarkGemm(std::size_t batch_size,
-                                             const CommandLineOptions& options,
-                                             hipStream_t stream) {
+superroc::bench::KernelBenchResult BenchmarkGemm(
+    std::size_t batch_size, const CommandLineOptions& options,
+    hipStream_t stream) {
   const bool is_bf16 = options.data_type == "bf16";
   HipBuffer<float> output(batch_size * options.m);
   HipblasHandle hipblas;
@@ -597,9 +598,9 @@ superroc::bench::KernelBenchResult BenchmarkGemm(std::size_t batch_size,
         }
       } else {
         hipblaslt_rejected = true;
-        superroc::hip::LaunchHipblasGEMMBF16(hipblas.Get(), weights.Get(),
-                                         input.Get(), output.Get(), batch_size,
-                                         options.m, options.k, stream);
+        superroc::hip::LaunchHipblasGEMMBF16(
+            hipblas.Get(), weights.Get(), input.Get(), output.Get(), batch_size,
+            options.m, options.k, stream);
       }
     });
   } else {
@@ -610,8 +611,8 @@ superroc::bench::KernelBenchResult BenchmarkGemm(std::size_t batch_size,
     operand_value = FloatFromBits(kFloatPatternBits);
     samples_us = MeasureKernel(options, marker, stream, [&] {
       superroc::hip::LaunchHipblasGEMM(hipblas.Get(), weights.Get(), false,
-                                   input.Get(), output.Get(), batch_size,
-                                   options.m, options.k, nullptr, stream);
+                                       input.Get(), output.Get(), batch_size,
+                                       options.m, options.k, nullptr, stream);
     });
   }
 
@@ -829,7 +830,7 @@ superroc::bench::KernelBenchResult BenchmarkDeltaNet(
     superroc::hip::LaunchBatchedSSMConvRecurrence(
         qkv.Get(), conv_weights.Get(),
         superroc::hip::QwenRecurrentStateIo::InPlace(conv_state.Get(),
-                                                 deltanet_state.Get()),
+                                                     deltanet_state.Get()),
         conv_output.Get(), alpha.Get(), beta.Get(), ssm_a.Get(), ssm_dt.Get(),
         ssm_norm.Get(), gate.Get(), output.Get(), 0, batch_size, qkv_size,
         num_key_heads, num_heads, key_dim, val_dim, stream);
@@ -878,8 +879,8 @@ superroc::bench::KernelBenchResult BenchmarkRmsNorm(
                              "/dim=" + std::to_string(options.k);
   auto samples_us = MeasureKernel(options, marker, stream, [&] {
     superroc::hip::LaunchBatchedRMSNorm(input.Get(), weight.Get(), output.Get(),
-                                    nullptr, batch_size, options.k, 1e-6F,
-                                    stream);
+                                        nullptr, batch_size, options.k, 1e-6F,
+                                        stream);
   });
   const float input_value = FloatFromBits(kFloatPatternBits);
   const float expected =
@@ -919,7 +920,7 @@ superroc::bench::KernelBenchResult BenchmarkResidualAdd(
       "/dim=" + std::to_string(options.k);
   auto samples_us = MeasureKernel(options, marker, stream, [&] {
     superroc::hip::LaunchBatchedResidualAdd(a.Get(), b.Get(), output.Get(),
-                                        batch_size, options.k, stream);
+                                            batch_size, options.k, stream);
   });
   const float expected =
       FloatFromBits(kFloatPatternBits) + FloatFromBits(0x3d3d3d3dU);
@@ -955,8 +956,8 @@ superroc::bench::KernelBenchResult BenchmarkSwiGlu(
   const std::string marker = "swiglu/batch=" + std::to_string(batch_size) +
                              "/dim=" + std::to_string(options.k);
   auto samples_us = MeasureKernel(options, marker, stream, [&] {
-    superroc::hip::LaunchBatchedSwiGLUActivation(gate.Get(), up.Get(), output.Get(),
-                                             nullptr, elements, stream);
+    superroc::hip::LaunchBatchedSwiGLUActivation(
+        gate.Get(), up.Get(), output.Get(), nullptr, elements, stream);
   });
   const float gate_value = FloatFromBits(kFloatPatternBits);
   const float up_value = FloatFromBits(0x3d3d3d3dU);

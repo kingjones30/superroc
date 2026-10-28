@@ -285,7 +285,7 @@ int main() {
         std::make_shared<superroc::sampling::ConstraintVocabulary>(
             pieces.size(), [&](std::uint32_t i) {
               return superroc::sampling::ConstraintVocabulary::Piece{pieces[i],
-                                                                 false};
+                                                                     false};
             });
     SamplerState constrained({.seed = 19, .constraint = constraint});
     DsparkSamplerBridge fast(constrained);

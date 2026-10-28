@@ -303,11 +303,13 @@ void ResolvePromptSampling(const core::GgufReader& reader, PromptOptions* opt) {
   sampling::TextModelPreset preset = sampling::TextModelPreset::kUnspecified;
   const auto artifact_architecture =
       reader.GetMetadataString("general.architecture");
-  if (superroc::core::IsModelFamily(artifact_architecture.value_or(""),
-                                superroc::core::ModelFamilyId::kDeepSeek4)) {
+  if (superroc::core::IsModelFamily(
+          artifact_architecture.value_or(""),
+          superroc::core::ModelFamilyId::kDeepSeek4)) {
     preset = sampling::TextModelPreset::kDeepSeekV4Flash;
-  } else if (superroc::core::IsModelFamily(artifact_architecture.value_or(""),
-                                       superroc::core::ModelFamilyId::kQwen4Exp)) {
+  } else if (superroc::core::IsModelFamily(
+                 artifact_architecture.value_or(""),
+                 superroc::core::ModelFamilyId::kQwen4Exp)) {
     preset = sampling::TextModelPreset::kQwen38;
   } else if (const auto config = reader.ExtractModelConfig()) {
     preset = sampling::TextPreset(*config);
@@ -532,10 +534,11 @@ int RunDeepSeekPrompt(const PromptOptions& opt, const core::GgufReader& reader,
   if (!model)
     return 1;
   std::string error;
-  auto session = model->CreateSession(
-      opt.speculative_backend.empty() ? superroc::core::SessionMode::kAutoregressive
-                                      : superroc::core::SessionMode::kSpeculative,
-      kDefaultContext, &error);
+  auto session =
+      model->CreateSession(opt.speculative_backend.empty()
+                               ? superroc::core::SessionMode::kAutoregressive
+                               : superroc::core::SessionMode::kSpeculative,
+                           kDefaultContext, &error);
   if (!session) {
     std::cerr << "DeepSeek session creation failed: " << error << '\n';
     return 1;
@@ -574,10 +577,11 @@ int RunDeepSeekChat(const PromptOptions& opt, const core::GgufReader& reader,
   if (!model)
     return 1;
   std::string error;
-  auto session = model->CreateSession(
-      opt.speculative_backend.empty() ? superroc::core::SessionMode::kAutoregressive
-                                      : superroc::core::SessionMode::kSpeculative,
-      kDefaultContext, &error);
+  auto session =
+      model->CreateSession(opt.speculative_backend.empty()
+                               ? superroc::core::SessionMode::kAutoregressive
+                               : superroc::core::SessionMode::kSpeculative,
+                           kDefaultContext, &error);
   if (!session) {
     std::cerr << "DeepSeek session creation failed: " << error << '\n';
     return 1;
@@ -872,8 +876,9 @@ superroc::hip::QwenExecutionPolicy GlimmerAwarePolicy(
     policy.glimmer_fp16_kv = true;  // LGA: Glimmer fp16-KV plane
   } else if (superroc::core::IsLfm2Family(
                  reader.GetMetadataString("general.architecture")
-                     .value_or(""))) {                          // LFM2
-    policy.kv_cache_storage = superroc::hip::Lfm2KvCacheStorage();  // LFM2 (SPEC3)
+                     .value_or(""))) {  // LFM2
+    policy.kv_cache_storage =
+        superroc::hip::Lfm2KvCacheStorage();  // LFM2 (SPEC3)
     policy.fuse_qk_norm_rope_kv = false;
   } else if (superroc::core::IsModelFamily(
                  reader.GetMetadataString("general.architecture").value_or(""),
@@ -894,7 +899,7 @@ static std::optional<PromptOptions> ParseTextOptions(
     std::string_view command) {
   PromptOptions opt;
   superroc::cli::ArgParser parser("superroc prompt",
-                              "Execute one prompt request and exit.");
+                                  "Execute one prompt request and exit.");
   bool speculative_explicit = false;
   RegisterTextOptions(parser, opt, speculative_explicit, command);
 
@@ -1041,7 +1046,8 @@ int RunPrompt(std::span<const char* const> args) {
 
   const auto model_load_start = std::chrono::steady_clock::now();
   std::string err;
-  auto reader_owner = superroc::core::GgufReader::OpenFile(opt.model_path, &err);
+  auto reader_owner =
+      superroc::core::GgufReader::OpenFile(opt.model_path, &err);
   if (!reader_owner) {
     std::cerr << "Error loading GGUF model '" << opt.model_path << "': " << err
               << "\n";
@@ -1340,7 +1346,8 @@ int RunChat(std::span<const char* const> args) {
 
   const auto model_load_start = std::chrono::steady_clock::now();
   std::string err;
-  auto reader_owner = superroc::core::GgufReader::OpenFile(opt.model_path, &err);
+  auto reader_owner =
+      superroc::core::GgufReader::OpenFile(opt.model_path, &err);
   if (!reader_owner) {
     std::cerr << "Error loading GGUF model '" << opt.model_path << "': " << err
               << "\n";
@@ -1391,8 +1398,8 @@ int RunChat(std::span<const char* const> args) {
       return 1;
     }
     tokenizer = &flash_model->tokenizer();
-    architecture = std::string(
-        superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kQwen4Exp));
+    architecture = std::string(superroc::core::ModelFamilyArch(
+        superroc::core::ModelFamilyId::kQwen4Exp));
     vision_encoder = flash_model->VisionEncoder();
   }
   int device_count = 0;

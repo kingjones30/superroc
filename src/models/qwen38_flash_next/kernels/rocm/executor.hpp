@@ -600,7 +600,8 @@ private:
     void* gdn_q8_1;  ///< by the GDN epilogue (ssm_out's input)
     void* ctx_q8_1;  ///< by the attention output gate (attn_out's input)
     void* x_q8t;     ///< tiled Q8 activations of a wide batch (W8A8 route)
-    // FLASHNEXT: S8 -- superroc_fp4's own 576-byte Q8_1 tile layout (NOT x_q8t's).
+    // FLASHNEXT: S8 -- superroc_fp4's own 576-byte Q8_1 tile layout (NOT
+    // x_q8t's).
     void* fp4_q8_act;  ///< dense FP4 prefill activations
     void* fp4_q8_e;    ///< routed gate/up activations (group tile order)
     void* fp4_q8_h;    ///< routed SwiGLU rows for the down projection
@@ -697,8 +698,8 @@ private:
   };
   mutable Scratch s_{};
   // FLASHNEXT: S7 -- device all-ones router weights so the MoE epilogue can
-  // fold the superroc_fp4 expert path's already-weighted expert sum with used=1.
-  // Sized for max_batch (S8 prefill folds a whole chunk through it).
+  // fold the superroc_fp4 expert path's already-weighted expert sum with
+  // used=1. Sized for max_batch (S8 prefill folds a whole chunk through it).
   mutable float* moe_ones_ = nullptr;
   mutable std::uint32_t moe_ones_cap_ = 0;
   // FLASHNEXT: S8 -- bounds for the grouped FP4 prefill buffers, and the

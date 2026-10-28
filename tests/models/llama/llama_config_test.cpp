@@ -53,8 +53,8 @@ namespace {
 void TestLlamaGetTokenizerThrows() {
   superroc::models::QwenModelWeights weights;
   weights.config.llama = true;
-  const superroc::hip::QwenGpuModel model(nullptr, std::move(weights), nullptr, {},
-                                      {}, nullptr);
+  const superroc::hip::QwenGpuModel model(nullptr, std::move(weights), nullptr,
+                                          {}, {}, nullptr);
   bool threw = false;
   try {
     model.GetTokenizer();

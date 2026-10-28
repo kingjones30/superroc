@@ -14,7 +14,7 @@
 namespace {
 
 superroc::eval::EvalCase MultipleChoiceCase(std::string answer,
-                                        std::size_t choices = 10) {
+                                            std::size_t choices = 10) {
   superroc::eval::EvalCase eval_case;
   eval_case.kind = superroc::eval::AnswerKind::kMultipleChoice;
   eval_case.answer = std::move(answer);
@@ -60,19 +60,22 @@ void TestMultipleChoiceExtraction() {
              eval_case,
              "</think>Answer: F\nThis answer is final; option H is tempting.")
              .passed);
-  assert(superroc::eval::GradeAnswer(eval_case, "</think>Answer: I think it is F")
-             .passed);
-  assert(superroc::eval::GradeAnswer(eval_case, "</think>Answer: I'll go with F.")
-             .passed);
+  assert(
+      superroc::eval::GradeAnswer(eval_case, "</think>Answer: I think it is F")
+          .passed);
+  assert(
+      superroc::eval::GradeAnswer(eval_case, "</think>Answer: I'll go with F.")
+          .passed);
 
   eval_case.answer = "D";
-  assert(superroc::eval::GradeAnswer(eval_case,
-                                 "</think>Answer: It is not B, the answer is D")
+  assert(superroc::eval::GradeAnswer(
+             eval_case, "</think>Answer: It is not B, the answer is D")
              .passed);
   assert(superroc::eval::GradeAnswer(eval_case,
-                                 "</think>Answer: rules out C, leaving D")
+                                     "</think>Answer: rules out C, leaving D")
              .passed);
-  assert(superroc::eval::GradeAnswer(eval_case, "</think>Answer: D, not B").passed);
+  assert(superroc::eval::GradeAnswer(eval_case, "</think>Answer: D, not B")
+             .passed);
 
   const auto ambiguous =
       superroc::eval::ExtractAnswer(eval_case, "</think>Answer: B or D");
@@ -86,9 +89,9 @@ void TestIntegerExtraction() {
   superroc::eval::EvalCase eval_case;
   eval_case.kind = superroc::eval::AnswerKind::kInteger;
   eval_case.answer = "293";
-  assert(
-      superroc::eval::GradeAnswer(eval_case, "</think>Answer: m+n = 256+37 = 293")
-          .passed);
+  assert(superroc::eval::GradeAnswer(eval_case,
+                                     "</think>Answer: m+n = 256+37 = 293")
+             .passed);
   eval_case.answer = "82";
   assert(superroc::eval::GradeAnswer(
              eval_case, "</think>Answer: 082\nThe value 2025 is just the year.")
@@ -96,7 +99,8 @@ void TestIntegerExtraction() {
   const auto ambiguous =
       superroc::eval::ExtractAnswer(eval_case, "</think>Answer: 81 or 82");
   assert(ambiguous.status == superroc::eval::ExtractionStatus::kAmbiguous);
-  const auto missing = superroc::eval::ExtractAnswer(eval_case, "No number given.");
+  const auto missing =
+      superroc::eval::ExtractAnswer(eval_case, "No number given.");
   assert(missing.status == superroc::eval::ExtractionStatus::kNoAnswer);
 }
 

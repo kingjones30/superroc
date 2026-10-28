@@ -86,7 +86,8 @@ void TestPositionLayout() {
 }
 
 void TestPreprocessing() {
-  superroc::core::Image input{48, 32, std::vector<std::uint8_t>(48 * 32 * 3, 123)};
+  superroc::core::Image input{48, 32,
+                              std::vector<std::uint8_t>(48 * 32 * 3, 123)};
   const auto result = ResizeImage(input);
   assert(result.width == 320 && result.height == 224);
   assert(std::all_of(result.pixels.begin(), result.pixels.end(),
@@ -174,7 +175,8 @@ void TestImageTransportLimits() {
     const bool v4 =
         std::string_view(address).find(':') == std::string_view::npos;
     assert(inet_pton(v4 ? AF_INET : AF_INET6, address, bytes.data()) == 1);
-    assert(!superroc::core::IsPublicImageAddress({bytes.data(), v4 ? 4U : 16U}));
+    assert(
+        !superroc::core::IsPublicImageAddress({bytes.data(), v4 ? 4U : 16U}));
   }
   for (const auto* address : {"1.1.1.1", "8.8.8.8", "2001:4860:4860::8888"}) {
     std::array<std::uint8_t, 16> bytes{};
@@ -200,9 +202,8 @@ void TestImageTransportLimits() {
     rejects(url, budget);
   budget = {};
   budget.remaining_bytes = 3;
-  assert(
-      superroc::core::ReadImageUrl("data:image/png;base64,AQID", budget).size() ==
-      3);
+  assert(superroc::core::ReadImageUrl("data:image/png;base64,AQID", budget)
+             .size() == 3);
   rejects("data:image/png;base64,AQID", budget);
   budget = {};
   budget.deadline = std::chrono::steady_clock::now();
@@ -210,9 +211,8 @@ void TestImageTransportLimits() {
   budget = {};
   budget.remaining_bytes = 17 * 3;
   for (unsigned i = 0; i < 17; ++i)
-    assert(
-        superroc::core::ReadImageUrl("data:image/png;base64,AQID", budget).size() ==
-        3);
+    assert(superroc::core::ReadImageUrl("data:image/png;base64,AQID", budget)
+               .size() == 3);
   assert(budget.remaining_bytes == 0);
   rejects("data:image/png;base64,AQID", budget);
 }

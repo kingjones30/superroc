@@ -1,7 +1,7 @@
 // LFP item 1: per-shape dense GEMM timing. Q8_0 via DenseF16Gemm (the ceiling),
 // Q8_0 via QuantizeQ8Tiled+W8A8Gemm, type-101 via
-// superroc_fp4_wmma_quant+gemm_dense. Random weights (timing only). HIP events, 20
-// reps, median. Run under gpu-run.
+// superroc_fp4_wmma_quant+gemm_dense. Random weights (timing only). HIP events,
+// 20 reps, median. Run under gpu-run.
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hipblas/hipblas.h>
@@ -48,12 +48,12 @@ inline void LfpBlasCheck(hipblasStatus_t e, const char* what, int line) {
 #define LFP_BLAS_CHECK(x) LfpBlasCheck((x), #x, __LINE__)
 // superroc_fp4 lib calls return 0 (SUPERROC_FP4_OK) or an error code.
 #define LFP_SUPERROC4_CHECK(x)                                        \
-  do {                                                            \
-    if ((x) != 0) {                                               \
+  do {                                                                \
+    if ((x) != 0) {                                                   \
       std::printf("SUPERROC4 FATAL [%s]:%d\n", g_hip_case, __LINE__); \
-      std::fflush(stdout);                                        \
-      std::exit(1);                                               \
-    }                                                             \
+      std::fflush(stdout);                                            \
+      std::exit(1);                                                   \
+    }                                                                 \
   } while (0)
 
 std::uint64_t rng = 0x123456789ABCDEFULL;
@@ -184,10 +184,10 @@ int Run(std::size_t batch, std::size_t m, std::size_t k) {
       st, "w8a8");
   const double t_fp4 = time_it(
       [&] {
-        LFP_SUPERROC4_CHECK(superroc_fp4_wmma_quant(xfp, nullptr, nullptr, d_fq8.p,
-                                            (int)batch, (int)k));
-        LFP_SUPERROC4_CHECK(superroc_fp4_wmma_gemm_dense(101, wf, d_fq8.p, out, (int)k,
-                                                 (int)m, (int)batch));
+        LFP_SUPERROC4_CHECK(superroc_fp4_wmma_quant(
+            xfp, nullptr, nullptr, d_fq8.p, (int)batch, (int)k));
+        LFP_SUPERROC4_CHECK(superroc_fp4_wmma_gemm_dense(
+            101, wf, d_fq8.p, out, (int)k, (int)m, (int)batch));
       },
       nullptr, "fp4");
   double t_sgemm = -1.0;

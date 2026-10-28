@@ -7,10 +7,10 @@
 #include <string_view>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/models/minimax_h3/prompt_encoder.hpp"
 #include "src/models/minimax_h3/tokenizer.hpp"
 #include "src/models/qwen/control_tokens.hpp"
-#include "src/core/env_compat.hpp"
 
 using superroc::tokenization::kImStart;
 
@@ -229,8 +229,8 @@ void CheckNoCpuTensorFallback() {
   superroc::minimax_h3::PromptEmbedding output;
   superroc::minimax_h3::PromptEncoderTelemetry telemetry;
   std::string error;
-  CHECK(!superroc::minimax_h3::EncodePromptLayer50(inventory, ids, {}, nullptr,
-                                               &output, &telemetry, &error));
+  CHECK(!superroc::minimax_h3::EncodePromptLayer50(
+      inventory, ids, {}, nullptr, &output, &telemetry, &error));
   CHECK(error == "MiniMax H3 prompt encoder requires ENGINE_ENABLE_HIP");
 #endif
 }
@@ -243,8 +243,8 @@ void CheckPromptTokenLimit() {
   superroc::minimax_h3::PromptEmbedding output;
   superroc::minimax_h3::PromptEncoderTelemetry telemetry;
   std::string error;
-  CHECK(!superroc::minimax_h3::EncodePromptLayer50(inventory, ids, {}, nullptr,
-                                               &output, &telemetry, &error));
+  CHECK(!superroc::minimax_h3::EncodePromptLayer50(
+      inventory, ids, {}, nullptr, &output, &telemetry, &error));
   CHECK(error == "MiniMax H3 prompt exceeds 4096 tokens");
   CHECK(output.values.empty() && telemetry.peak_device_bytes == 0);
 #endif

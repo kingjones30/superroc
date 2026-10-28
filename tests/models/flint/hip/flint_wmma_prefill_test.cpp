@@ -65,7 +65,8 @@ void Report(const std::string& cas, float gap) {
 
 int main() {
   const int gate = superroc::test::GateHipDevice(
-      superroc::test::HipDeviceRequirement::kOptional, "flint_wmma_prefill_test");
+      superroc::test::HipDeviceRequirement::kOptional,
+      "flint_wmma_prefill_test");
   if (gate != 0) {
     return gate;
   }

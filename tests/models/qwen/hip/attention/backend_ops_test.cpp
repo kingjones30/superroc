@@ -98,10 +98,10 @@ void TestBatchedAttentionEquivalence() {
   }
 
   // Batched
-  superroc::hip::LaunchBatchedAttention(d_q, d_k, d_v, d_gate, d_cache_batch,
-                                    d_cache_batch + total_k, nullptr, nullptr,
-                                    d_out_batch, 0, 0, batch, max_context,
-                                    num_heads, num_kv_heads, head_dim);
+  superroc::hip::LaunchBatchedAttention(
+      d_q, d_k, d_v, d_gate, d_cache_batch, d_cache_batch + total_k, nullptr,
+      nullptr, d_out_batch, 0, 0, batch, max_context, num_heads, num_kv_heads,
+      head_dim);
   superroc::hip::LaunchBatchedAttentionGemm(
       hipblas_handle, d_q, d_k, d_v, d_gate, d_cache_gemm,
       d_cache_gemm + total_k, nullptr, nullptr, d_scores, d_out_gemm, 0, 0,
@@ -214,13 +214,13 @@ void TestAttentionBackendEquivalence() {
                       2 * cache_elements * sizeof(hip_bfloat16)));
 
   for (std::size_t token = 0; token < batch; ++token) {
-    superroc::hip::LaunchAttention(d_q + token * attention_width,
-                               d_k + token * kv_width, d_v + token * kv_width,
-                               d_gate + token * attention_width, d_cache_seq,
-                               d_cache_seq + cache_elements, nullptr, nullptr,
-                               d_out_seq + token * attention_width, 0,
-                               static_cast<std::uint32_t>(token), max_context,
-                               num_heads, num_kv_heads, head_dim);
+    superroc::hip::LaunchAttention(
+        d_q + token * attention_width, d_k + token * kv_width,
+        d_v + token * kv_width, d_gate + token * attention_width, d_cache_seq,
+        d_cache_seq + cache_elements, nullptr, nullptr,
+        d_out_seq + token * attention_width, 0,
+        static_cast<std::uint32_t>(token), max_context, num_heads, num_kv_heads,
+        head_dim);
   }
   const bool tile_launched = superroc::hip::LaunchBatchedAttentionTile(
       d_q, d_k, d_v, d_gate, d_cache_tile, d_cache_tile + cache_elements,
@@ -359,9 +359,9 @@ void TestAttentionBackendEquivalence() {
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen attention backend ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen attention backend ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

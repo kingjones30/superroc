@@ -85,8 +85,9 @@ int main() {
       if (mtp.has_value()) {
         Expect(mtp->mtp.has_value(), "mtp block bound");
         if (mtp->mtp.has_value()) {
-          Expect(mtp->mtp->ffn_gate_exps.type == superroc::core::GgmlType::kQ8_0,
-                 "mtp draft experts stay Q8_0");
+          Expect(
+              mtp->mtp->ffn_gate_exps.type == superroc::core::GgmlType::kQ8_0,
+              "mtp draft experts stay Q8_0");
         }
       }
     }

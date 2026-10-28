@@ -282,7 +282,8 @@ void TestQueueLifecycleAndRecovery(const std::filesystem::path& root) {
               parameters.find("private prompt") == std::string::npos &&
               parameters.find("/private/") == std::string::npos,
           "persisted job data excludes prompts and private paths");
-    std::ofstream(directory / "job.json.superroc-partial-injected") << "incomplete";
+    std::ofstream(directory / "job.json.superroc-partial-injected")
+        << "incomplete";
   }
 
   {

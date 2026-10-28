@@ -9,9 +9,9 @@
 #include <span>
 #include <stdexcept>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/sampling.hpp"
 #include "src/models/deepseek_v4_flash/runtime/model.h"
-#include "src/core/env_compat.hpp"
 
 namespace superroc::models::deepseek_v4_flash {
 

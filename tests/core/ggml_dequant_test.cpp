@@ -14,8 +14,8 @@
 #include <string_view>
 #include <vector>
 
-#include "src/core/gguf_reader.hpp"
 #include "src/core/env_compat.hpp"
+#include "src/core/gguf_reader.hpp"
 
 namespace {
 
@@ -144,8 +144,9 @@ void TestQ4() {
   std::iota(vector.begin(), vector.end(), -0.5F);
   const float expected_dot = std::inner_product(
       expected.begin(), expected.end(), vector.begin(), 0.0F);
-  ExpectNear(superroc::quant::DotProductQ4_K(block.data(), vector, vector.size()),
-             expected_dot, "Q4_K dot product");
+  ExpectNear(
+      superroc::quant::DotProductQ4_K(block.data(), vector, vector.size()),
+      expected_dot, "Q4_K dot product");
 }
 
 void TestQ6() {
@@ -173,8 +174,9 @@ void TestQ6() {
   std::iota(vector.begin(), vector.end(), -0.25F);
   const float expected_dot = std::inner_product(
       expected.begin(), expected.end(), vector.begin(), 0.0F);
-  ExpectNear(superroc::quant::DotProductQ6_K(block.data(), vector, vector.size()),
-             expected_dot, "Q6_K dot product");
+  ExpectNear(
+      superroc::quant::DotProductQ6_K(block.data(), vector, vector.size()),
+      expected_dot, "Q6_K dot product");
 }
 
 void TestQ3() {
@@ -201,8 +203,9 @@ void TestQ3() {
   std::iota(vector.begin(), vector.end(), 0.125F);
   const float expected_dot = std::inner_product(
       expected.begin(), expected.end(), vector.begin(), 0.0F);
-  ExpectNear(superroc::quant::DotProductQ3_K(block.data(), vector, vector.size()),
-             expected_dot, "Q3_K dot product");
+  ExpectNear(
+      superroc::quant::DotProductQ3_K(block.data(), vector, vector.size()),
+      expected_dot, "Q3_K dot product");
 }
 
 void TestQ8() {
@@ -253,8 +256,8 @@ void TestQ8_0() {
 
   std::array<float, kQ8_0Elements> expected{};
   for (std::size_t index = 0; index < kQ8_0Elements; ++index) {
-    expected[index] =
-        superroc::quant::Fp16ToFloat(block.d) * static_cast<float>(block.qs[index]);
+    expected[index] = superroc::quant::Fp16ToFloat(block.d) *
+                      static_cast<float>(block.qs[index]);
     ExpectNear(actual[index], expected[index], "Q8_0 dequant value");
   }
 
@@ -300,7 +303,8 @@ void TestQ4_0() {
     extremes.qs[j] = 0x00;  // -8 in both nibbles
   }
   std::array<float, kQ4_0Elements> low_values{};
-  superroc::quant::DequantizeQ4_0(&extremes, low_values.data(), low_values.size());
+  superroc::quant::DequantizeQ4_0(&extremes, low_values.data(),
+                                  low_values.size());
   for (std::size_t index = 0; index < kQ4_0Elements; ++index) {
     ExpectNear(low_values[index], -8.0F, "Q4_0 minimum");
   }
@@ -308,13 +312,15 @@ void TestQ4_0() {
   extremes.qs[0] = 0xFF;  // +7 in both nibbles
   std::array<float, kQ4_0Elements> high_values{};
   superroc::quant::DequantizeQ4_0(&extremes, high_values.data(),
-                              high_values.size());
+                                  high_values.size());
   ExpectNear(high_values[0], 7.0F, "Q4_0 maximum (low nibble)");
   ExpectNear(high_values[16], 7.0F, "Q4_0 maximum (high nibble)");
   ExpectNear(high_values[1], -8.0F, "Q4_0 untouched neighbour");
 
-  if (superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ4_0, 32) != 18 ||
-      superroc::quant::QuantizedBlockElements(superroc::core::GgmlType::kQ4_0) != 32) {
+  if (superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ4_0, 32) !=
+          18 ||
+      superroc::quant::QuantizedBlockElements(
+          superroc::core::GgmlType::kQ4_0) != 32) {
     std::cerr << "Assertion failed: Q4_0 stride contract\n";
     std::exit(1);
   }
@@ -334,12 +340,17 @@ void TestQ5_K() {
   // QuantizedRowBytes covers every packed projection/embedding format used by
   // Qwen, including both Q8 layouts.
   if (superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ5_K,
-                                     kQ5Elements) != 176 ||
-      superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ8_K, 256) != 292 ||
-      superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ8_0, 32) != 34 ||
-      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kF32, 8) != 32 ||
-      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kBF16, 8) != 16 ||
-      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kQ8_K, 256) != 292) {
+                                         kQ5Elements) != 176 ||
+      superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ8_K,
+                                         256) != 292 ||
+      superroc::quant::QuantizedRowBytes(superroc::core::GgmlType::kQ8_0, 32) !=
+          34 ||
+      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kF32, 8) !=
+          32 ||
+      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kBF16, 8) !=
+          16 ||
+      superroc::quant::EncodedSizeBytes(superroc::core::GgmlType::kQ8_K, 256) !=
+          292) {
     std::cerr << "Assertion failed: QuantizedRowBytes contract\n";
     std::exit(1);
   }
@@ -403,9 +414,10 @@ struct ModelSample {
   float value;
 };
 
-void TestModelRow(const superroc::core::GgufReader& reader, std::string_view name,
-                  superroc::core::GgmlType expected_type, std::size_t expected_k,
-                  std::span<const ModelSample> samples, double expected_dot) {
+void TestModelRow(const superroc::core::GgufReader& reader,
+                  std::string_view name, superroc::core::GgmlType expected_type,
+                  std::size_t expected_k, std::span<const ModelSample> samples,
+                  double expected_dot) {
   const auto* tensor = reader.FindTensor(name);
   if (tensor == nullptr || tensor->data == nullptr ||
       tensor->dimensions.empty()) {

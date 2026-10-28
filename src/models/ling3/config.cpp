@@ -10,8 +10,8 @@
 namespace superroc::models::ling3 {
 namespace {
 
-constexpr std::string_view kArchitecture =
-    superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kBailingMoe3);
+constexpr std::string_view kArchitecture = superroc::core::ModelFamilyArch(
+    superroc::core::ModelFamilyId::kBailingMoe3);
 
 /// GGML_ROPE_TYPE_NORM: pairs of CONSECUTIVE head values (2i, 2i+1) -- see
 /// llama_model_rope_type, which puts BAILINGMOE3 under "a normal RoPE,

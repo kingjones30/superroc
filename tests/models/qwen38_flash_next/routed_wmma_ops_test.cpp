@@ -925,7 +925,8 @@ void CheckFp4DecodeExact() {
   double max_abs = 0.0;
   std::uint64_t cases = 0;
   for (int fast = 0; fast <= 1; ++fast) {
-    const int qtype = fast ? SUPERROC_FP4_Q4_0_ROCMFP4_FAST : SUPERROC_FP4_Q4_0_ROCMFP4;
+    const int qtype =
+        fast ? SUPERROC_FP4_Q4_0_ROCMFP4_FAST : SUPERROC_FP4_Q4_0_ROCMFP4;
     for (int s0 = 0; s0 < 256; ++s0) {
       for (int s1 = 0; s1 < (fast ? 1 : 256); ++s1) {
         for (int nib = 0; nib < 16; ++nib) {
@@ -1308,7 +1309,8 @@ struct PathCmp {
 PathCmp RunFp4VsW8A8(std::uint32_t seed, bool fast) {
   const std::size_t n = 2048, used = 10, experts = 512;
   const std::size_t hidden = 2560, ff = 640;
-  const int qtype = fast ? SUPERROC_FP4_Q4_0_ROCMFP4_FAST : SUPERROC_FP4_Q4_0_ROCMFP4;
+  const int qtype =
+      fast ? SUPERROC_FP4_Q4_0_ROCMFP4_FAST : SUPERROC_FP4_Q4_0_ROCMFP4;
   const q::WeightType wt =
       fast ? q::WeightType::kQ4_0_ROCMFP4_FAST : q::WeightType::kQ4_0_ROCMFP4;
   const std::size_t slots = n * used;
@@ -1399,29 +1401,29 @@ PathCmp RunFp4VsW8A8(std::uint32_t seed, bool fast) {
     throw std::runtime_error("FP4 path-A grouping failed");
   }
   if (superroc_fp4_wmma_quant(d_x, d_slot_tok, d_slot_dest, d_q8_e,
-                          static_cast<int>(slots),
-                          static_cast<int>(hidden)) != SUPERROC_FP4_OK ||
+                              static_cast<int>(slots),
+                              static_cast<int>(hidden)) != SUPERROC_FP4_OK ||
       superroc_fp4_wmma_gemm_grp(qtype, d_gateW, stride_k, d_grp_e, d_grp_off,
-                             d_grp_cnt, d_grp_zp, hdr[0], hdr[2], d_q8_e,
-                             d_gate_e, nullptr, static_cast<int>(hidden),
-                             static_cast<int>(ff)) != SUPERROC_FP4_OK ||
+                                 d_grp_cnt, d_grp_zp, hdr[0], hdr[2], d_q8_e,
+                                 d_gate_e, nullptr, static_cast<int>(hidden),
+                                 static_cast<int>(ff)) != SUPERROC_FP4_OK ||
       superroc_fp4_wmma_gemm_grp(qtype, d_upW, stride_k, d_grp_e, d_grp_off,
-                             d_grp_cnt, d_grp_zp, hdr[0], hdr[2], d_q8_e,
-                             d_up_e, nullptr, static_cast<int>(hidden),
-                             static_cast<int>(ff)) != SUPERROC_FP4_OK) {
+                                 d_grp_cnt, d_grp_zp, hdr[0], hdr[2], d_q8_e,
+                                 d_up_e, nullptr, static_cast<int>(hidden),
+                                 static_cast<int>(ff)) != SUPERROC_FP4_OK) {
     throw std::runtime_error("FP4 path-A gate/up failed");
   }
   q::Swiglu(d_gate_e, d_up_e, slots * ff, nullptr);
   if (superroc_fp4_wmma_quant(d_gate_e, nullptr, d_slot_dest, d_q8_h,
-                          static_cast<int>(slots),
-                          static_cast<int>(ff)) != SUPERROC_FP4_OK ||
+                              static_cast<int>(slots),
+                              static_cast<int>(ff)) != SUPERROC_FP4_OK ||
       superroc_fp4_wmma_gemm_grp(qtype, d_downW, stride_ff, d_grp_e, d_grp_off,
-                             d_grp_cnt, d_grp_zp, hdr[0], hdr[2], d_q8_h,
-                             d_down_e, d_slot_w, static_cast<int>(ff),
-                             static_cast<int>(hidden)) != SUPERROC_FP4_OK ||
-      superroc_fp4_slot_gather_sum(d_down_e, d_token_slots, d_out_a,
-                               static_cast<int>(used), static_cast<int>(hidden),
-                               static_cast<int>(n)) != SUPERROC_FP4_OK) {
+                                 d_grp_cnt, d_grp_zp, hdr[0], hdr[2], d_q8_h,
+                                 d_down_e, d_slot_w, static_cast<int>(ff),
+                                 static_cast<int>(hidden)) != SUPERROC_FP4_OK ||
+      superroc_fp4_slot_gather_sum(
+          d_down_e, d_token_slots, d_out_a, static_cast<int>(used),
+          static_cast<int>(hidden), static_cast<int>(n)) != SUPERROC_FP4_OK) {
     throw std::runtime_error("FP4 path-A down/gather failed");
   }
   // Path B: the new F16 chain (executor's separate-projection layout).

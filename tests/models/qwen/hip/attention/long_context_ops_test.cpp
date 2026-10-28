@@ -93,10 +93,10 @@ void TestLongContextDecodeAttention(bool fp16) {
   HIP_CHECK(hipMalloc(&d_k_cache, cache_bytes));
   HIP_CHECK(hipMalloc(&d_v_cache, cache_bytes));
   HIP_CHECK(hipMalloc(&d_out, attention_width * sizeof(float)));
-  HIP_CHECK(hipMalloc(
-      &d_split_k_scratch,
-      superroc::hip::detail::DecodeAttentionScratchElements(num_heads, head_dim) *
-          sizeof(float)));
+  HIP_CHECK(hipMalloc(&d_split_k_scratch,
+                      superroc::hip::detail::DecodeAttentionScratchElements(
+                          num_heads, head_dim) *
+                          sizeof(float)));
 
   HIP_CHECK(hipMemcpy(d_q, h_q.data(), attention_width * sizeof(float),
                       hipMemcpyHostToDevice));
@@ -268,13 +268,13 @@ void TestBaselineToTiledKvCacheTransition() {
 
   // 1. Golden sequential reference token-by-token
   for (std::size_t token = 0; token < total_batch; ++token) {
-    superroc::hip::LaunchAttention(d_q + token * attention_width,
-                               d_k + token * kv_width, d_v + token * kv_width,
-                               d_gate + token * attention_width, d_cache_seq,
-                               d_cache_seq + cache_elements, nullptr, nullptr,
-                               d_out_seq + token * attention_width, 0,
-                               static_cast<std::uint32_t>(token), max_context,
-                               num_heads, num_kv_heads, head_dim);
+    superroc::hip::LaunchAttention(
+        d_q + token * attention_width, d_k + token * kv_width,
+        d_v + token * kv_width, d_gate + token * attention_width, d_cache_seq,
+        d_cache_seq + cache_elements, nullptr, nullptr,
+        d_out_seq + token * attention_width, 0,
+        static_cast<std::uint32_t>(token), max_context, num_heads, num_kv_heads,
+        head_dim);
   }
 
   // 2. Incremental transition:
@@ -297,7 +297,7 @@ void TestBaselineToTiledKvCacheTransition() {
       static_cast<std::uint32_t>(chunk0_size), chunk1_size, max_context,
       num_heads, num_kv_heads, head_dim);
   superroc::test::Expect(chunk1_ok,
-                     "long-context tiled attention launch was rejected");
+                         "long-context tiled attention launch was rejected");
 
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -329,7 +329,7 @@ done_diff:
   }
   std::cout << "Baseline-to-Tiled transition max diff: " << max_diff << "\n";
   superroc::test::Expect(max_diff < 5e-3F,
-                     "baseline-to-tiled attention transition mismatch");
+                         "baseline-to-tiled attention transition mismatch");
 
   HIP_CHECK(hipFree(d_q));
   HIP_CHECK(hipFree(d_k));
@@ -346,9 +346,9 @@ done_diff:
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen long-context attention ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen long-context attention ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

@@ -36,8 +36,8 @@ std::string Escaper(const std::string& s) {
 }  // namespace
 
 std::string Tool::to_json() const {
-  // Hand-built rather than pulled from superroc's JSON writer so the key order is
-  // fixed: the template embeds this verbatim, and a different order would
+  // Hand-built rather than pulled from superroc's JSON writer so the key order
+  // is fixed: the template embeds this verbatim, and a different order would
   // change the token ids of the prompt.
   std::string out = "{\"type\": \"function\", \"function\": {\"name\": \"";
   out += Escaper(name);

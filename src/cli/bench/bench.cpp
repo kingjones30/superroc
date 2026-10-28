@@ -1259,7 +1259,8 @@ int RunBench(std::span<const char* const> args) {
 
   const auto model_load_start = std::chrono::steady_clock::now();
   std::string err;
-  auto reader_owner = superroc::core::GgufReader::OpenFile(opt.model_path, &err);
+  auto reader_owner =
+      superroc::core::GgufReader::OpenFile(opt.model_path, &err);
   if (!reader_owner) {
     std::cerr << "Error loading GGUF model '" << opt.model_path << "': " << err
               << "\n";

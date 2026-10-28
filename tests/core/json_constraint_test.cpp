@@ -1139,13 +1139,13 @@ void TestAutomaticTools() {
           });
       for (const float temperature : {0.0F, 0.7F, 1.4F}) {
         superroc::sampling::SamplingConfig config{.temperature = temperature,
-                                              .top_k = 20,
-                                              .top_p = .8F,
-                                              .min_p = .05F,
-                                              .seed = 41,
-                                              .frequency_penalty = .2F,
-                                              .presence_penalty = .3F,
-                                              .constraint = binding};
+                                                  .top_k = 20,
+                                                  .top_p = .8F,
+                                                  .min_p = .05F,
+                                                  .seed = 41,
+                                                  .frequency_penalty = .2F,
+                                                  .presence_penalty = .3F,
+                                                  .constraint = binding};
         SamplerState sampler(config);
         auto plain = sampler.WithoutConstraint();
         assert(!sampler.NeedsConstraintMask());
@@ -1293,7 +1293,8 @@ void TestNativeTools() {
                        std::string(1, static_cast<char>(byte)));
     const superroc::sampling::ConstraintVocabulary vocabulary(
         pieces.size(), [&](std::uint32_t i) {
-          return superroc::sampling::ConstraintVocabulary::Piece{pieces[i], i == 6};
+          return superroc::sampling::ConstraintVocabulary::Piece{pieces[i],
+                                                                 i == 6};
         });
     auto binding = std::make_shared<superroc::sampling::TokenConstraint>();
     binding->grammar = grammar;

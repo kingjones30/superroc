@@ -95,9 +95,9 @@ int main(int argc, char** argv) {
                           .decode_concurrency = count},
                          &error);
     Require(bool(model), error);
-    const auto session_mode = mode == "mtp"
-                                  ? superroc::core::SessionMode::kSpeculative
-                                  : superroc::core::SessionMode::kAutoregressive;
+    const auto session_mode =
+        mode == "mtp" ? superroc::core::SessionMode::kSpeculative
+                      : superroc::core::SessionMode::kAutoregressive;
     qfn::ContinuationAdapter adapter(model, session_mode, slot_context,
                                      {'p', 'r', 'o', 'b', 'e'});
     std::vector<Guard> guards(count);
@@ -144,7 +144,8 @@ int main(int argc, char** argv) {
         const auto tokens = adapter.GetSession(*slot).Tokens();
         samplers.emplace_back(
             superroc::sampling::SamplingConfig{.temperature = 0.0F},
-            std::vector<superroc::sampling::TokenId>(tokens.begin(), tokens.end()));
+            std::vector<superroc::sampling::TokenId>(tokens.begin(),
+                                                     tokens.end()));
       }
       std::vector<qfn::Session::DecodeResult> results(count);
       std::vector<qfn::Session::DecodeRequest> requests;
@@ -271,9 +272,11 @@ int main(int argc, char** argv) {
     }
     const auto initial = source.Tokens();
     const std::vector<superroc::sampling::TokenId> history(initial.begin(),
-                                                       initial.end());
-    superroc::sampling::SamplerState first_sampler({.temperature = 0.0F}, history);
-    superroc::sampling::SamplerState second_sampler({.temperature = 0.0F}, history);
+                                                           initial.end());
+    superroc::sampling::SamplerState first_sampler({.temperature = 0.0F},
+                                                   history);
+    superroc::sampling::SamplerState second_sampler({.temperature = 0.0F},
+                                                    history);
     qfn::Session::DecodeResult first_step, second_step;
     Require(source.DecodeStep(16, first_sampler, &first_step, &error, false),
             error);

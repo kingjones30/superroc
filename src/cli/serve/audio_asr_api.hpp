@@ -8,7 +8,8 @@
 
 namespace superroc::server {
 
-inline constexpr std::string_view kAudioAsrApiSchema = "superroc.audio-asr-api.v1";
+inline constexpr std::string_view kAudioAsrApiSchema =
+    "superroc.audio-asr-api.v1";
 
 [[nodiscard]] bool IsAudioAsrApiPath(std::string_view path) noexcept;
 [[nodiscard]] HttpResponse HandleAudioAsrApiRequest(const HttpRequest& request,

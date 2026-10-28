@@ -11,12 +11,14 @@
 // prefill chunk goes through THIS kernel instead; the single-token Step() path
 // keeps using superroc_fp4_gemv.
 //
-// Layout contract (identical to superroc_fp4_moe.hpp, so the two never transpose):
+// Layout contract (identical to superroc_fp4_moe.hpp, so the two never
+// transpose):
 //   * weights: ggml rows, ne[0] = K contiguous, row r of a matrix at
 //     r * superroc_fp4_row_bytes(qtype, K); an expert stack stores expert e at
 //     e * expert_stride bytes (caller passes n_rows * row_bytes).
 //   * activations x and outputs y are F32 token-major: x[t*K + i], y[t*N + r].
-//   * every device allocation of weights/activations needs SUPERROC_FP4_TAIL_PAD
+//   * every device allocation of weights/activations needs
+//   SUPERROC_FP4_TAIL_PAD
 //     readable bytes past the last element (same rule as superroc_fp4_moe.hpp).
 //
 // Grouping contract for superroc_fp4_gemm_grp: n_groups independent (expert,
@@ -31,8 +33,9 @@
 // write local scratch rows, while down reads local h rows and scatters back
 // into y with the router weights (global slot array).
 //
-// All device entry points launch on the NULL stream (like superroc_fp4_moe.hip) and
-// return SUPERROC_FP4_OK / an SUPERROC_FP4_ERR_* code, checking hipGetLastError.
+// All device entry points launch on the NULL stream (like superroc_fp4_moe.hip)
+// and return SUPERROC_FP4_OK / an SUPERROC_FP4_ERR_* code, checking
+// hipGetLastError.
 
 #include <stddef.h>
 
@@ -49,43 +52,45 @@ extern "C" {
 /// is written by exactly one block, so no atomics are needed).
 ///
 /// P3 step 1 (MoE-aware grid): with grp_zp (device [n_groups+1] prefix of
-/// ceil(cnt/SUPERROC_FP4_LS3_TC_GRP) 16-token tiles, grp_zp[0]=0) and total_tiles
+/// ceil(cnt/SUPERROC_FP4_LS3_TC_GRP) 16-token tiles, grp_zp[0]=0) and
+/// total_tiles
 /// == grp_zp[n_groups], the token-tile axis is flattened through that prefix so
 /// only the blocks the per-group counts imply are launched. Bit-identical to
 /// the legacy grid; grp_zp == nullptr keeps the old 3-D worst-case grid.
 int superroc_fp4_gemm_grp(int qtype, const void* W, size_t expert_stride,
-                      const int* grp_expert, const int* grp_off,
-                      const int* grp_cnt, int n_groups, const float* x,
-                      const int* x_rows, float* y, const int* y_rows,
-                      const float* y_scale, int accumulate, int k, int n, int m,
-                      const int* grp_zp, int total_tiles);
+                          const int* grp_expert, const int* grp_off,
+                          const int* grp_cnt, int n_groups, const float* x,
+                          const int* x_rows, float* y, const int* y_rows,
+                          const float* y_scale, int accumulate, int k, int n,
+                          int m, const int* grp_zp, int total_tiles);
 
 /// Dense convenience: y[t*n + r] = dot(W_row_r, x_t), t in [0, m). Same math
 /// and layout as LX's superroc_fp4_gemm, on the fast tiled kernel.
 int superroc_fp4_gemm_fast(int qtype, const void* W, const float* x, float* y,
-                       int k, int n, int m);
+                           int k, int n, int m);
 
 /// P2-C: token-major gather-sum of the slot-major routed-expert partials:
 /// y[t*K + r] = sum_{s < n_used} partials[slot[t*n_used + s]*K + r].
 /// Replaces the atomicAdd scatter (deterministic, slot order, like the CPU
 /// reference). partials and y are [slots]/[tokens] rows of K floats.
-int superroc_fp4_slot_gather_sum(const float* partials, const int* slot, float* y,
-                             int n_used, int k, int n_tokens);
+int superroc_fp4_slot_gather_sum(const float* partials, const int* slot,
+                                 float* y, int n_used, int k, int n_tokens);
 
 /// The bailingmoe3 router for T tokens in two launches + one logits pass.
 /// ids/weights are DEVICE [n_tokens * n_used], token-major (ids[t*n_used + s]),
 /// exactly what superroc_fp4_route writes per token. rc_out (device [n_tokens])
-/// gets SUPERROC_FP4_OK or the per-token error; the caller reads it back with the
-/// ids.
-int superroc_fp4_route_batch(const float* x, const float* gate, const float* bias,
-                         int k, int n_tokens, int n_expert, int n_used,
-                         int n_groups, int n_group_used, float w_scale,
-                         int norm_w, int* ids, float* weights, int* rc_out);
+/// gets SUPERROC_FP4_OK or the per-token error; the caller reads it back with
+/// the ids.
+int superroc_fp4_route_batch(const float* x, const float* gate,
+                             const float* bias, int k, int n_tokens,
+                             int n_expert, int n_used, int n_groups,
+                             int n_group_used, float w_scale, int norm_w,
+                             int* ids, float* weights, int* rc_out);
 
 // Test-only. Both buffers are device [n_tokens * n_expert]. n_tokens is 1..4.
 int superroc_fp4_route_logits_pair(const float* x, const float* gate, int k,
-                               int n_expert, int n_tokens, float* logits_ref,
-                               float* logits_fused);
+                                   int n_expert, int n_tokens,
+                                   float* logits_ref, float* logits_fused);
 
 const char* superroc_fp4_gemm_version(void);
 

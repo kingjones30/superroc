@@ -32,7 +32,8 @@ std::string_view Basename(std::string_view path) {
 
 void print_version() {
   // Super ROC: product identity; internal names stay superroc in M1.
-  std::cout << "Super ROC " << kSuperROCReleaseVersion << " (" << kSuperROCRevision
+  std::cout << "Super ROC " << kSuperROCReleaseVersion << " ("
+            << kSuperROCRevision
             << ") - engine lineage: upstream v0.19.0 (MIT)\n";
 }
 
@@ -68,7 +69,8 @@ int run(std::span<const char* const> args) {
     return 2;
   }
 
-  // Super ROC: basename so the binary and its previous-name link each name themselves.
+  // Super ROC: basename so the binary and its previous-name link each name
+  // themselves.
   const std::string_view program_name = Basename(args[0]);
   const auto options = args.subspan(1);
 

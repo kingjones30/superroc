@@ -54,9 +54,9 @@ void TestNormRoPEWithoutCache() {
           }
           superroc::hip::LaunchBatchedPerHeadRMSNorm(
               k_ref.data(), weight.data(), k_ref.data(), rows, kv_heads, dim);
-          superroc::hip::LaunchBatchedRoPE(q_ref.data(), k_ref.data(), rows, heads,
-                                       kv_heads, dim, 64, position,
-                                       10000000.0F);
+          superroc::hip::LaunchBatchedRoPE(q_ref.data(), k_ref.data(), rows,
+                                           heads, kv_heads, dim, 64, position,
+                                           10000000.0F);
           superroc::hip::LaunchBatchedFusedQKNormRoPEKvWrite(
               heads != 0 ? q_fused.data() : nullptr, k_fused.data(),
               k_fused.data(), weight.data(), weight.data(), q_fused.data(),
@@ -173,17 +173,17 @@ void TestFusedQKNormRoPEKvWriteEquivalence() {
   HIP_CHECK(hipMemset(d_vc16_fus, 0, f16_cache_elems * sizeof(std::uint16_t)));
 
   // Unfused reference chain
-  superroc::hip::LaunchPerHeadRMSNorm(d_q_ref, d_wq, d_q_ref, num_heads, head_dim,
-                                  eps);
+  superroc::hip::LaunchPerHeadRMSNorm(d_q_ref, d_wq, d_q_ref, num_heads,
+                                      head_dim, eps);
   superroc::hip::LaunchPerHeadRMSNorm(d_k_ref, d_wk, d_k_ref, num_kv_heads,
-                                  head_dim, eps);
+                                      head_dim, eps);
   superroc::hip::LaunchRoPE(d_q_ref, d_k_ref, num_heads, num_kv_heads, head_dim,
-                        rotary_dim, d_pos, rope_theta);
+                            rotary_dim, d_pos, rope_theta);
   superroc::hip::LaunchAttention(d_q_ref, d_k_ref, d_v_ref, d_gate, d_kc_ref,
-                             d_vc_ref, d_kc16_ref, d_vc16_ref, d_out_ref,
-                             layer_idx, d_pos, max_context, num_heads,
-                             num_kv_heads, head_dim, nullptr,
-                             /*skip_kv_write=*/false);
+                                 d_vc_ref, d_kc16_ref, d_vc16_ref, d_out_ref,
+                                 layer_idx, d_pos, max_context, num_heads,
+                                 num_kv_heads, head_dim, nullptr,
+                                 /*skip_kv_write=*/false);
 
   // Fused chain
   superroc::hip::LaunchFusedQKNormRoPEKvWrite(
@@ -191,10 +191,10 @@ void TestFusedQKNormRoPEKvWriteEquivalence() {
       d_vc_fus, d_kc16_fus, d_vc16_fus, layer_idx, d_pos, max_context,
       num_heads, num_kv_heads, head_dim, rotary_dim, rope_theta, eps);
   superroc::hip::LaunchAttention(d_q_fus, d_k_fus, d_v_fus, d_gate, d_kc_fus,
-                             d_vc_fus, d_kc16_fus, d_vc16_fus, d_out_fus,
-                             layer_idx, d_pos, max_context, num_heads,
-                             num_kv_heads, head_dim, nullptr,
-                             /*skip_kv_write=*/true);
+                                 d_vc_fus, d_kc16_fus, d_vc16_fus, d_out_fus,
+                                 layer_idx, d_pos, max_context, num_heads,
+                                 num_kv_heads, head_dim, nullptr,
+                                 /*skip_kv_write=*/true);
 
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -401,15 +401,15 @@ void TestBatchedFusedQKNormRoPEKvWriteEquivalence() {
   // Per-token unfused reference chain
   for (std::size_t t = 0; t < batch; ++t) {
     superroc::hip::LaunchPerHeadRMSNorm(d_q_ref + t * head_total, d_wq,
-                                    d_q_ref + t * head_total, num_heads,
-                                    head_dim, eps);
+                                        d_q_ref + t * head_total, num_heads,
+                                        head_dim, eps);
     superroc::hip::LaunchPerHeadRMSNorm(d_k_ref + t * kv_total, d_wk,
-                                    d_k_ref + t * kv_total, num_kv_heads,
-                                    head_dim, eps);
+                                        d_k_ref + t * kv_total, num_kv_heads,
+                                        head_dim, eps);
     superroc::hip::LaunchRoPE(d_q_ref + t * head_total, d_k_ref + t * kv_total,
-                          num_heads, num_kv_heads, head_dim, rotary_dim,
-                          static_cast<std::uint32_t>(start_pos + t),
-                          rope_theta);
+                              num_heads, num_kv_heads, head_dim, rotary_dim,
+                              static_cast<std::uint32_t>(start_pos + t),
+                              rope_theta);
     superroc::hip::LaunchAttention(
         d_q_ref + t * head_total, d_k_ref + t * kv_total,
         d_v_ref + t * kv_total, d_gate + t * head_total, d_kc_ref, d_vc_ref,
@@ -424,11 +424,11 @@ void TestBatchedFusedQKNormRoPEKvWriteEquivalence() {
       d_vc_fus, d_kc16_fus, d_vc16_fus, layer_idx, start_pos, batch,
       max_context, num_heads, num_kv_heads, head_dim, rotary_dim, rope_theta,
       eps);
-  superroc::hip::LaunchBatchedAttention(d_q_fus, d_k_fus, d_v_fus, d_gate, d_kc_fus,
-                                    d_vc_fus, d_kc16_fus, d_vc16_fus, d_out_fus,
-                                    layer_idx, start_pos, batch, max_context,
-                                    num_heads, num_kv_heads, head_dim, nullptr,
-                                    /*skip_kv_write=*/true);
+  superroc::hip::LaunchBatchedAttention(
+      d_q_fus, d_k_fus, d_v_fus, d_gate, d_kc_fus, d_vc_fus, d_kc16_fus,
+      d_vc16_fus, d_out_fus, layer_idx, start_pos, batch, max_context,
+      num_heads, num_kv_heads, head_dim, nullptr,
+      /*skip_kv_write=*/true);
 
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -540,9 +540,9 @@ void TestBatchedFusedQKNormRoPEKvWriteEquivalence() {
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen QK/RoPE/KV fusion ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen QK/RoPE/KV fusion ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

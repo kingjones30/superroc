@@ -6,8 +6,9 @@ void SsmForward(const CpuLayerContext& ctx, const SsmLayerView& view,
                 std::span<const float> x, QwenSsmCache& state,
                 std::span<float> out) noexcept {
   auto& scratch = ctx.Scratch();
-  ::superroc::models::ForwardSSM(x, view, state, ctx.LayerIndex(), scratch.ssm_qkv,
-                             scratch.ssm_gate, scratch.ssm_out_buf, out);
+  ::superroc::models::ForwardSSM(x, view, state, ctx.LayerIndex(),
+                                 scratch.ssm_qkv, scratch.ssm_gate,
+                                 scratch.ssm_out_buf, out);
 }
 
 }  // namespace superroc::models::qwen

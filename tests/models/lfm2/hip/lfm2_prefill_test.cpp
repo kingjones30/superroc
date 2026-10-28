@@ -55,27 +55,27 @@ int main(int argc, char** argv) {  // LFM2
     std::cerr << "SKIP lfm2_prefill_test: LFM2_A_GGUF is not set\n";  // LFM2
     return 77;                                                        // LFM2
   }  // LFM2
-  const std::string path = configured;                           // LFM2
-  try {                                                          // LFM2
-    std::string err;                                             // LFM2
+  const std::string path = configured;                               // LFM2
+  try {                                                              // LFM2
+    std::string err;                                                 // LFM2
     auto opened = superroc::core::GgufReader::OpenFile(path, &err);  // LFM2
-    if (opened == nullptr) {                                     // LFM2
+    if (opened == nullptr) {                                         // LFM2
       std::cerr << "SKIP lfm2_prefill_test: " << path
                 << " unreadable: " << err  // LFM2
                 << '\n';                   // LFM2
       return 77;                           // LFM2
     }  // LFM2
     std::shared_ptr<const superroc::core::GgufReader> reader(
-        std::move(opened));                 // LFM2
+        std::move(opened));                     // LFM2
     superroc::hip::QwenExecutionPolicy policy;  // LFM2 (lfm2_ppl policy)
     policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;  // LFM2
-    policy.fuse_qk_norm_rope_kv = false;                             // LFM2
-    constexpr std::uint32_t kContext = 8192;                         // LFM2
+    policy.fuse_qk_norm_rope_kv = false;                                 // LFM2
+    constexpr std::uint32_t kContext = 8192;                             // LFM2
     auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(      // LFM2
-        reader, &err, kContext, policy);                             // LFM2
-    if (executor == nullptr) {                                       // LFM2
-      std::cerr << "FAIL load " << err << '\n';                      // LFM2
-      return 1;                                                      // LFM2
+        reader, &err, kContext, policy);                                 // LFM2
+    if (executor == nullptr) {                                           // LFM2
+      std::cerr << "FAIL load " << err << '\n';                          // LFM2
+      return 1;                                                          // LFM2
     }  // LFM2
     const auto& config = executor->GetConfig();  // LFM2
     if (!config.lfm2) {                          // LFM2
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {  // LFM2
     for (int r = 0; r < 8; ++r)
       big += text;                                     // LFM2
     const auto& tokenizer = executor->GetTokenizer();  // LFM2
-    superroc::tokenization::TokenizerOptions options;      // LFM2
+    superroc::tokenization::TokenizerOptions options;  // LFM2
     options.add_bos = tokenizer.AddBosToken();         // LFM2
     auto all = tokenizer.Encode(big, options);         // LFM2
     std::cout << "readme_bytes=" << text.size()
@@ -104,15 +104,16 @@ int main(int argc, char** argv) {  // LFM2
       return 1;                                // LFM2
     }  // LFM2
 
-    const std::vector<std::size_t> lens = {2, 17, 512, 3000, 6000};      // LFM2
-    bool all_ok = true;                                                  // LFM2
-    for (const std::size_t L : lens) {                                   // LFM2
-      std::vector<superroc::tokenization::TokenId> prompt(all.begin(),       // LFM2
-                                                      all.begin() + L);  // LFM2
+    const std::vector<std::size_t> lens = {2, 17, 512, 3000, 6000};  // LFM2
+    bool all_ok = true;                                              // LFM2
+    for (const std::size_t L : lens) {                               // LFM2
+      std::vector<superroc::tokenization::TokenId> prompt(
+          all.begin(),       // LFM2
+          all.begin() + L);  // LFM2
       // LFM2 (i) batched path. // LFM2
       double tok_per_s = 0;                                           // LFM2
       executor->Reset();                                              // LFM2
-      superroc::tokenization::TokenId tok_a = 0;                          // LFM2
+      superroc::tokenization::TokenId tok_a = 0;                      // LFM2
       if (L == 3000 || L == 6000) {                                   // LFM2
         (void)hipDeviceSynchronize();                                 // LFM2
         const auto t0 = std::chrono::steady_clock::now();             // LFM2
@@ -128,9 +129,9 @@ int main(int argc, char** argv) {  // LFM2
       const std::vector<float> logits_a(
           executor->CopyLastLogits().begin(),                         // LFM2
           executor->CopyLastLogits().end());                          // LFM2
-      std::vector<superroc::tokenization::TokenId> cont_a;                // LFM2
+      std::vector<superroc::tokenization::TokenId> cont_a;            // LFM2
       cont_a.reserve(32);                                             // LFM2
-      superroc::tokenization::TokenId cur = tok_a;                        // LFM2
+      superroc::tokenization::TokenId cur = tok_a;                    // LFM2
       for (int s = 0; s < 32; ++s) {                                  // LFM2
         const std::uint32_t pos = static_cast<std::uint32_t>(L + s);  // LFM2
         cur = executor->ForwardToken(cur, pos, true);                 // LFM2
@@ -139,7 +140,7 @@ int main(int argc, char** argv) {  // LFM2
 
       // LFM2 (ii) reference token loop. // LFM2
       executor->Reset();                           // LFM2
-      superroc::tokenization::TokenId tok_b = 0;       // LFM2
+      superroc::tokenization::TokenId tok_b = 0;   // LFM2
       for (std::size_t i = 0; i < L; ++i) {        // LFM2
         const bool last = (i + 1 == L);            // LFM2
         tok_b = executor->ForwardToken(prompt[i],  // LFM2
@@ -149,7 +150,7 @@ int main(int argc, char** argv) {  // LFM2
       const std::vector<float> logits_b(
           executor->CopyLastLogits().begin(),                         // LFM2
           executor->CopyLastLogits().end());                          // LFM2
-      std::vector<superroc::tokenization::TokenId> cont_b;                // LFM2
+      std::vector<superroc::tokenization::TokenId> cont_b;            // LFM2
       cont_b.reserve(32);                                             // LFM2
       cur = tok_b;                                                    // LFM2
       for (int s = 0; s < 32; ++s) {                                  // LFM2

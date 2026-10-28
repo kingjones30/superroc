@@ -130,8 +130,8 @@ bool KatRouteSoftmaxTopK(std::span<const float> logits, int n_used,
   }
   // work arrays must cover `pad`, which equals n_expert when n_expert is a
   // power of two and is larger otherwise. 512 covers pad<=256.
-  if (superroc_fp4_bitonic_argsort_desc(probs, order, work_a, work_b, n_expert) !=
-      SUPERROC_FP4_OK) {
+  if (superroc_fp4_bitonic_argsort_desc(probs, order, work_a, work_b,
+                                        n_expert) != SUPERROC_FP4_OK) {
     return false;
   }
   // Fork norm_w (llama-graph): sum the picked probabilities in ascending

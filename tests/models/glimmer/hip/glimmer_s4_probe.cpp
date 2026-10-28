@@ -108,8 +108,8 @@ int RunProbe(const char* path, std::size_t max_new_tokens,
     superroc::hip::QwenExecutionPolicy policy;
     policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
-    auto executor =
-        superroc::hip::QwenGpuExecutor::CreateFromGguf(reader, &err, 32768, policy);
+    auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
+        reader, &err, 32768, policy);
     if (executor == nullptr) {
       std::cerr << "FAIL load " << err << '\n';
       return 1;
@@ -122,8 +122,8 @@ int RunProbe(const char* path, std::size_t max_new_tokens,
     const auto& tokenizer = executor->GetTokenizer();
 
     const std::vector<superroc::tokenization::ChatMessage> messages = {
-        superroc::tokenization::ChatMessage(superroc::tokenization::ChatRole::kUser,
-                                        prompt_text)};
+        superroc::tokenization::ChatMessage(
+            superroc::tokenization::ChatRole::kUser, prompt_text)};
     superroc::tokenization::ChatTemplateOptions options;
     options.reasoning_strength = "low";
     options.add_generation_prompt = true;
@@ -153,7 +153,8 @@ int RunProbe(const char* path, std::size_t max_new_tokens,
     std::cout << '\n';
 
     const std::size_t vocab_size = config.vocab_size;
-    auto emit_step = [&](std::size_t step, superroc::tokenization::TokenId token) {
+    auto emit_step = [&](std::size_t step,
+                         superroc::tokenization::TokenId token) {
       const auto logits_span = executor->CopyLastLogits();
       const std::vector<float> logits(logits_span.begin(), logits_span.end());
       float logsumexp = 0.0F;

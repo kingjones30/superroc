@@ -287,10 +287,11 @@ void RunCase(std::size_t batch, std::size_t m, std::size_t k, bool dual) {
 
   if (dual) {
     superroc::hip::LaunchBatchedDualQuantGEMMPreQuantized(
-        superroc::core::GgmlType::kQ8_0, d_w, d_w2, d_q8, d_y, d_y2, batch, m, k);
+        superroc::core::GgmlType::kQ8_0, d_w, d_w2, d_q8, d_y, d_y2, batch, m,
+        k);
   } else {
-    superroc::hip::LaunchBatchedQuantGEMMPreQuantized(superroc::core::GgmlType::kQ8_0,
-                                                  d_w, d_q8, d_y, batch, m, k);
+    superroc::hip::LaunchBatchedQuantGEMMPreQuantized(
+        superroc::core::GgmlType::kQ8_0, d_w, d_q8, d_y, batch, m, k);
   }
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -319,13 +320,14 @@ void RunCase(std::size_t batch, std::size_t m, std::size_t k, bool dual) {
 // LaunchBatchedFusedSwiGLUQuantizeQ8_1. Comparing whole Q8_1 buffers makes that
 // exact, including the per-block scales, the activation-sum sidecar, and the
 // tail-tile zeroing for a batch that is not a multiple of the 16-token tile.
-void RunFusedSwiGluEpilogueCase(superroc::core::GgmlType type, std::size_t batch,
-                                std::size_t m, std::size_t k) {
+void RunFusedSwiGluEpilogueCase(superroc::core::GgmlType type,
+                                std::size_t batch, std::size_t m,
+                                std::size_t k) {
   std::cout << "fused SwiGLU epilogue: type=" << superroc::core::ToString(type)
             << " batch=" << batch << " m=" << m << " k=" << k << "\n";
   const std::size_t out_bytes = batch * m * sizeof(float);
   if (!superroc::hip::IsFusedSwiGluGemmEpilogueSupported(type, batch, m,
-                                                     out_bytes)) {
+                                                         out_bytes)) {
     std::cout << "  unsupported shape, skipped\n";
     return;
   }
@@ -391,8 +393,8 @@ void RunFusedSwiGluEpilogueCase(superroc::core::GgmlType type, std::size_t batch
   // Reference: the two projections, then the separate SwiGLU + quantize pass.
   superroc::hip::LaunchBatchedDualQuantGEMMPreQuantized(
       type, d_gate_w, d_up_w, d_act, d_gate, d_up, batch, m, k);
-  superroc::hip::LaunchBatchedFusedSwiGLUQuantizeQ8_1(d_gate, d_up, d_ref, batch,
-                                                  m);
+  superroc::hip::LaunchBatchedFusedSwiGLUQuantizeQ8_1(d_gate, d_up, d_ref,
+                                                      batch, m);
   HIP_CHECK(hipDeviceSynchronize());
 
   // Under test. The gate buffer is rewritten by the fused route as well, so it
@@ -502,12 +504,13 @@ void RunFusedNormQuantizeCase(std::size_t batch, std::size_t dim,
 
   // Reference: the separate chain the fused kernel replaces.
   if (with_residual) {
-    superroc::hip::LaunchBatchedResidualAdd(d_hidden_ref, d_r, d_hidden_ref, batch,
-                                        dim);
+    superroc::hip::LaunchBatchedResidualAdd(d_hidden_ref, d_r, d_hidden_ref,
+                                            batch, dim);
   }
   superroc::hip::LaunchBatchedRMSNorm(with_residual ? d_hidden_ref : d_x, d_w,
-                                  d_normed, nullptr, batch, dim, 1e-6F);
-  superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_normed, d_ref, batch, dim);
+                                      d_normed, nullptr, batch, dim, 1e-6F);
+  superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_normed, d_ref, batch,
+                                                      dim);
   superroc::hip::LaunchBatchedFusedRMSNormQuantizeQ8_1(
       with_residual ? d_hidden_got : d_x, with_residual ? d_r : nullptr, d_w,
       with_residual ? d_hidden_got : nullptr, d_got, batch, dim, 1e-6F);
@@ -570,9 +573,9 @@ void RunFusedNormQuantizeCase(std::size_t batch, std::size_t dim,
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen prefill quant GEMM ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen prefill quant GEMM ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

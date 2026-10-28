@@ -24,8 +24,8 @@
 // blk[0..15] code bytes, byte i holding element i (low nibble) and element
 // i+16 (high nibble); scale at blk[16] (elements 0..15) and, for type 100,
 // blk[17] (elements 16..31). Decode (code x ue4m3_half, code 8 = +0,
-// e > 0x7e -> 0) matches src/core/rocm_fp4/superroc_fp4_quant.hpp, the CPU oracle
-// the exactness test compares against bit-exactly.
+// e > 0x7e -> 0) matches src/core/rocm_fp4/superroc_fp4_quant.hpp, the CPU
+// oracle the exactness test compares against bit-exactly.
 //
 // Exactness: |code| <= 10 (4 significant bits) and the ue4m3 scale (4
 // significant bits) multiply to at most 8 significant bits, exactly

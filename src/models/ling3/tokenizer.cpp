@@ -41,8 +41,8 @@ constexpr char kCptLetter = '\xD2';
 constexpr char kCptWhitespace = '\x0B';
 
 /// True for the Unicode classes the fork's table calls a letter / a number /
-/// whitespace -- the same predicates the other superroc tokenizers take from ICU
-/// (see models/qwen/tokenizer.cpp).
+/// whitespace -- the same predicates the other superroc tokenizers take from
+/// ICU (see models/qwen/tokenizer.cpp).
 [[nodiscard]] bool IsUnicodeLetter(std::uint32_t cpt) noexcept {
   return (U_GET_GC_MASK(static_cast<UChar32>(cpt)) & U_GC_L_MASK) != 0;
 }

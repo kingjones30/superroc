@@ -26,11 +26,12 @@
 //       refused with the pid, and the winner's file is untouched -- then a
 //       later run takes the claim over and removes it.
 //
-// Usage: superroc_quant_failure_test <superroc-quant> <superroc-quant-hooks> [workdir]
-// The hooks binary is the v0.9 tool built with -DSUPERROC_QUANT_TEST_HOOKS=1 (a
-// CMake test target); the shipped binary never defines that macro. If the
-// second argument is omitted, part (b) uses the first binary and is expected
-// to FAIL (that is the v0.8 regression demonstration).
+// Usage: superroc_quant_failure_test <superroc-quant> <superroc-quant-hooks>
+// [workdir] The hooks binary is the v0.9 tool built with
+// -DSUPERROC_QUANT_TEST_HOOKS=1 (a CMake test target); the shipped binary never
+// defines that macro. If the second argument is omitted, part (b) uses the
+// first binary and is expected to FAIL (that is the v0.8 regression
+// demonstration).
 
 #include <fcntl.h>
 #include <sys/file.h>
@@ -289,7 +290,8 @@ void Part0() {
   std::cout << "Part 0 pool error callback PASS\n";
 }
 
-void PartA(const std::string& superroc_quant, const std::filesystem::path& dir) {
+void PartA(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   const std::string src = MakeSmallBF16(dir, "a-src.gguf");
   const std::string out = (dir / "a-out.gguf").string();
   const std::string slog = (dir / "a-stdout.txt").string();
@@ -330,7 +332,8 @@ void PartB(const std::string& superroc_quant_hooks,
   std::cout << "Part (b) mid-encode worker failure PASS\n";
 }
 
-void PartC(const std::string& superroc_quant, const std::filesystem::path& dir) {
+void PartC(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   const std::string src = MakeSmallBF16(dir, "c-src.gguf");
   // Truncate mid-body with the header intact: data_base + 64 bytes.
   std::uint64_t cut = 0;
@@ -363,7 +366,8 @@ void PartC(const std::string& superroc_quant, const std::filesystem::path& dir) 
   std::cout << "Part (c) truncated input PASS\n";
 }
 
-void PartD(const std::string& superroc_quant, const std::filesystem::path& dir) {
+void PartD(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   const std::string src = MakeSmallBF16(dir, "d-src.gguf");
   const std::string d = (dir / "d-outdir").string();
   std::error_code ec;
@@ -380,18 +384,20 @@ void PartD(const std::string& superroc_quant, const std::filesystem::path& dir) 
   std::cout << "Part (d) directory output PASS\n";
 }
 
-void PartE(const std::string& superroc_quant, const std::filesystem::path& dir) {
+void PartE(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   const std::string src = MakeF16One(dir, "e-src.gguf");
   const std::string out = (dir / "e-out.gguf").string();
   const std::string dry_err = (dir / "e-dry-stderr.txt").string();
   const std::string real_err = (dir / "e-real-stderr.txt").string();
   const std::string devnull = "/dev/null";
-  ProcResult dry = RunChild({superroc_quant, "--tensor-type", "=bad.weight=BF16",
-                             "--dry-run", src, out, "STRIX", "2"},
-                            devnull, dry_err, /*timeout_s=*/60);
-  ProcResult real = RunChild(
-      {superroc_quant, "--tensor-type", "=bad.weight=BF16", src, out, "STRIX", "2"},
-      devnull, real_err, /*timeout_s=*/60);
+  ProcResult dry =
+      RunChild({superroc_quant, "--tensor-type", "=bad.weight=BF16",
+                "--dry-run", src, out, "STRIX", "2"},
+               devnull, dry_err, /*timeout_s=*/60);
+  ProcResult real = RunChild({superroc_quant, "--tensor-type",
+                              "=bad.weight=BF16", src, out, "STRIX", "2"},
+                             devnull, real_err, /*timeout_s=*/60);
   Expect(dry.code == 2, "(e): dry-run rc 2, got " + std::to_string(dry.code));
   Expect(real.code == 2, "(e): real rc 2, got " + std::to_string(real.code));
   const std::string de = ReadFile(dry_err), re = ReadFile(real_err);
@@ -403,7 +409,8 @@ void PartE(const std::string& superroc_quant, const std::filesystem::path& dir) 
   std::cout << "Part (e) dry-run == real rejection PASS\n";
 }
 
-void PartF(const std::string& superroc_quant, const std::filesystem::path& dir) {
+void PartF(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   const std::string src = MakeSmallBF16(dir, "f-src.gguf");
   const std::string out = (dir / "f-out.gguf").string();
   ProcResult r = RunChild({superroc_quant, src, out, "STRIX", "2"},
@@ -422,7 +429,8 @@ void PartF(const std::string& superroc_quant, const std::filesystem::path& dir) 
 // child takes the flock on the real lock file and is then SIGKILLed, so the
 // kernel drops the lock but the file stays. The tool must claim that file
 // (no live holder), run to success, and remove it at its own exit.
-void PartG(const std::string& superroc_quant, const std::filesystem::path& dir) {
+void PartG(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   const std::string src = MakeSmallBF16(dir, "g-src.gguf");
   const std::string out = (dir / "g-out.gguf").string();
   const std::string lock = out + ".gq-lock";
@@ -471,7 +479,8 @@ void PartG(const std::string& superroc_quant, const std::filesystem::path& dir) 
 // full run to the same output must be refused with exit 2 and the pid in the
 // message -- and must NOT remove the winner's file. After the winner releases,
 // a real run takes the claim over and removes it.
-void PartH(const std::string& superroc_quant, const std::filesystem::path& dir) {
+void PartH(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   const std::string src = MakeSmallBF16(dir, "h-src.gguf");
   const std::string out = (dir / "h-out.gguf").string();
   const std::string lock = out + ".gq-lock";

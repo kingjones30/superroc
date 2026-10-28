@@ -15,9 +15,10 @@ void TestEmbeddingLookup() {
   };
   std::vector<float> hidden(hidden_size, 0.0F);
 
-  const superroc::models::QwenTensorRef ref = {.data = table.data(),
-                                           .type = superroc::core::GgmlType::kF32,
-                                           .num_elements = table.size()};
+  const superroc::models::QwenTensorRef ref = {
+      .data = table.data(),
+      .type = superroc::core::GgmlType::kF32,
+      .num_elements = table.size()};
   superroc::models::ForwardEmbedding(1, ref, hidden_size, hidden);
   assert(hidden[0] == 5.0F);
   assert(hidden[1] == 6.0F);
@@ -55,8 +56,8 @@ void TestRoPEPreservation() {
   std::vector<float> k = {1.0F, 1.0F, 1.0F, 1.0F};
 
   const float norm_before = std::sqrt(q[0] * q[0] + q[2] * q[2]);
-  superroc::models::ForwardRoPE(q, k, num_heads, num_kv_heads, head_dim, head_dim,
-                            5, 10000.0F);
+  superroc::models::ForwardRoPE(q, k, num_heads, num_kv_heads, head_dim,
+                                head_dim, 5, 10000.0F);
   const float norm_after = std::sqrt(q[0] * q[0] + q[2] * q[2]);
 
   assert(std::abs(norm_before - norm_after) < 1e-5F);
@@ -89,7 +90,8 @@ void TestSwiGLUFFN() {
   std::vector<float> ffn_out(hidden_size);
 
   superroc::models::ForwardFFN(x, gate_ref, up_ref, down_ref, hidden_size,
-                           intermediate_size, gate_sc, up_sc, act_sc, ffn_out);
+                               intermediate_size, gate_sc, up_sc, act_sc,
+                               ffn_out);
 
   // gate = [1.0, 2.0], up = [1.0, 2.0]
   // silu(1.0) * 1.0 = (1 / (1 + exp(-1))) * 1.0 ~= 0.731058
@@ -115,7 +117,7 @@ void TestAttentionWithKvCache() {
   std::vector<float> out(8, 0.0F);
 
   superroc::models::ForwardAttention(q, k, v, {}, {}, kv_cache, 0, 0, num_heads,
-                                 num_kv_heads, head_dim, 8, scores, out);
+                                     num_kv_heads, head_dim, 8, scores, out);
 
   // Since pos=0, softmax weight is 1.0, out should equal value vectors
   assert(std::abs(out[0] - 2.0F) < 1e-5F);

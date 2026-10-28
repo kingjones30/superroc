@@ -106,10 +106,10 @@ TextRunnerDescriptor Ling3TextRunner::Descriptor() const {
   // override DecodeBatch, and advertising it would let the scheduler take a
   // path that has no implementation here.
   d.capabilities.multi_token_decode = models::ling3::mtp::SpeculativeEnabled();
-  // Jay 2026-10-01: no persistence -- superroc's ValidateRunner refuses persistence
-  // without snapshot+fork ("text runner persistence requires snapshot and fork
-  // support"), which is exactly what this runner declares false above. Leave it
-  // std::nullopt.
+  // Jay 2026-10-01: no persistence -- superroc's ValidateRunner refuses
+  // persistence without snapshot+fork ("text runner persistence requires
+  // snapshot and fork support"), which is exactly what this runner declares
+  // false above. Leave it std::nullopt.
   return d;
 }
 

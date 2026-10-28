@@ -286,7 +286,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
 
     {
       superroc::models::qwen::ResidualAdd(module_ctx, decode_scratch.hidden,
-                                      attention_scratch.output);
+                                          attention_scratch.output);
 
       {
         // FFN Pre-RMSNorm
@@ -357,7 +357,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
 
     // Residual Add
     superroc::models::qwen::ResidualAdd(module_ctx, decode_scratch.hidden,
-                                    ffn_scratch.out);
+                                        ffn_scratch.out);
     arena.SnapVerifyStage("hidden", l, decode_scratch.hidden.data(),
                           decode_scratch.hidden.size(), 1);
 

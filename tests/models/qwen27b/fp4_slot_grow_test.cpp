@@ -29,11 +29,11 @@
 #include <unistd.h>
 #endif
 
+#include "src/core/env_compat.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
 #include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 #include "src/models/qwen/hip/executor.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace {
 using Token = superroc::tokenization::TokenId;
@@ -107,7 +107,8 @@ std::shared_ptr<const Model> LoadModel(const char* model) {
   auto owner = superroc::core::GgufReader::OpenFile(model, &error);
   Expect(owner != nullptr, error);
   auto shared = Model::CreateFromGguf(
-      std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)), &error);
+      std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)),
+      &error);
   Expect(shared != nullptr, error);
   return shared;
 }
@@ -145,7 +146,8 @@ int RunUnconfigured(const char* model) {
     auto& session = *sessions[static_cast<std::size_t>(index - 2)];
     ExpectRowsEqual(RunPrompt(session, tokens), expected,
                     "executor " + std::to_string(index));
-    std::cout << "executor " << index << " sets=" << superroc_fp4_slot_sets_count()
+    std::cout << "executor " << index
+              << " sets=" << superroc_fp4_slot_sets_count()
               << " refusals=" << superroc_fp4_slot_refuse_count()
               << " prefill/decode exact=1\n";
   }

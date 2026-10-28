@@ -88,8 +88,8 @@ std::vector<std::uint8_t> Payload(qfn::Session& session) {
 
 void CheckPrefillCheckpoint(const std::shared_ptr<qfn::Model>& model,
                             std::span<const std::int32_t> prompt,
-                            superroc::core::SessionMode mode, std::size_t warm = 0,
-                            std::uint32_t suffix = 7) {
+                            superroc::core::SessionMode mode,
+                            std::size_t warm = 0, std::uint32_t suffix = 7) {
   std::string error;
   auto source = model->CreateSession(mode, 8192, &error);
   auto whole = model->CreateSession(mode, 8192, &error);
@@ -405,7 +405,8 @@ int main(int argc, char** argv) {
                              superroc::core::SessionMode::kSpeculative);
     CheckDeviceExhaustion(model, prompt,
                           superroc::core::SessionMode::kAutoregressive);
-    CheckDeviceExhaustion(model, prompt, superroc::core::SessionMode::kSpeculative);
+    CheckDeviceExhaustion(model, prompt,
+                          superroc::core::SessionMode::kSpeculative);
     const sampling::SamplingConfig config{
         .temperature = 0.8F, .top_k = 40, .top_p = 0.9F, .seed = 7};
     constexpr std::size_t kTokens = 48;

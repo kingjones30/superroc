@@ -40,14 +40,16 @@ public:
 
   void AddMetadataString(std::string_view key, std::string_view val) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
     AppendString(val);
     metadata_count_++;
   }
 
   void AddMetadataUint32(std::string_view key, std::uint32_t val) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kUint32));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kUint32));
     AppendPod(val);
     metadata_count_++;
   }
@@ -55,8 +57,10 @@ public:
   void AddMetadataStringArray(std::string_view key,
                               const std::vector<std::string>& arr) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kArray));
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kArray));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
     AppendPod(static_cast<std::uint64_t>(arr.size()));
     for (const auto& s : arr) {
       AppendString(s);
@@ -194,11 +198,12 @@ void TestGgufTokenizerLoading() {
   auto binary = builder.Build();
 
   std::string err;
-  auto reader =
-      superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &err);
+  auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                       binary.size(), &err);
   Expect(reader != nullptr, "Reader open succeeds: " + err);
 
-  auto tok = superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &err);
+  auto tok =
+      superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &err);
   Expect(tok != nullptr, "Tokenizer created from GGUF: " + err);
   Expect(tok->GetEosTokenId() == 151645U, "EOS token ID matches");
   Expect(tok->GetPadTokenId() == 151643U, "PAD token ID matches");
@@ -244,11 +249,11 @@ void TestStopTokensFollowVocabulary() {
   const std::vector<std::string> vocab{
       "text", std::string(kEndOfText), std::string(kImStart),
       std::string(kImEnd), std::string(kImagePad)};
-  const std::unordered_map<std::string, superroc::tokenization::TokenId> specials{
-      {std::string(kEndOfText), 1},
-      {std::string(kImStart), 2},
-      {std::string(kImEnd), 3},
-      {std::string(kImagePad), 4}};
+  const std::unordered_map<std::string, superroc::tokenization::TokenId>
+      specials{{std::string(kEndOfText), 1},
+               {std::string(kImStart), 2},
+               {std::string(kImEnd), 3},
+               {std::string(kImagePad), 4}};
   auto direct = superroc::tokenization::QwenTokenizer::CreateFromVocabulary(
       vocab, {}, specials);
   Expect(direct && direct->IsStopToken(1) && direct->IsStopToken(3),
@@ -264,7 +269,8 @@ void TestStopTokensFollowVocabulary() {
   builder.AddMetadataUint32("tokenizer.ggml.eos_token_id", 3);
   builder.AddMetadataUint32("tokenizer.ggml.padding_token_id", 4);
   auto bytes = builder.Build();
-  auto reader = superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size());
+  auto reader =
+      superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size());
   Expect(reader != nullptr, "stop-token GGUF opens");
   auto gguf = superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader);
   Expect(gguf && gguf->IsStopToken(1) && gguf->IsStopToken(3) &&
@@ -283,8 +289,8 @@ void TestUnicodeContractionBoundary() {
   builder.AddMetadataStringArray("tokenizer.ggml.merges", {"Å ¿", "Å¿ a"});
   auto binary = builder.Build();
   std::string error;
-  auto reader =
-      superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &error);
+  auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                       binary.size(), &error);
   Expect(reader != nullptr, error);
   auto tokenizer =
       superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);

@@ -12,8 +12,8 @@
 #include <string_view>
 #include <vector>
 
-#include "src/core/gguf_reader.hpp"
 #include "src/core/env_compat.hpp"
+#include "src/core/gguf_reader.hpp"
 
 namespace {
 
@@ -61,7 +61,8 @@ std::vector<float> MakeTargetHidden(std::size_t size) {
 }  // namespace
 
 int main() {
-  const char* model_path = ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MTP_MODEL");
+  const char* model_path =
+      ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MTP_MODEL");
   if (model_path == nullptr || std::string_view(model_path).empty()) {
     std::cout << "qwen_mtp_reference_test: skipped "
                  "(SUPERROC_QWEN27B_MTP_MODEL not set)\n";
@@ -76,8 +77,8 @@ int main() {
   }
   std::shared_ptr<const superroc::core::GgufReader> shared_reader{
       std::move(reader)};
-  auto reference =
-      superroc::speculative::QwenMtpReference::Create(shared_reader, 16, &error);
+  auto reference = superroc::speculative::QwenMtpReference::Create(
+      shared_reader, 16, &error);
   if (reference == nullptr) {
     std::cerr << "Failed to create MTP reference: " << error << '\n';
     return 1;

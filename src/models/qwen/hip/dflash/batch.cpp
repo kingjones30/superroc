@@ -12,13 +12,13 @@
 #include <utility>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 #include "src/models/qwen/hip/dflash/dspark_sampling.hpp"
 #include "src/models/qwen/hip/kernels/dflash_kernels.hpp"
 #include "src/models/qwen/hip/mtp/detail/allocation.hpp"
 #include "src/models/qwen/hip/ops.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace superroc::hip {
 namespace {

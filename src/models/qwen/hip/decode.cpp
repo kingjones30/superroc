@@ -107,9 +107,10 @@ tokenization::TokenId QwenGpuExecutor::ForwardToken(
     static bool warned = false;
     if (!warned) {
       warned = true;
-      std::fprintf(stderr,
-                   "SUPERROC_VERIFY_DEBUG=1: HIP graph capture disabled for this "
-                   "run (dense decode runs eager).\n");
+      std::fprintf(
+          stderr,
+          "SUPERROC_VERIFY_DEBUG=1: HIP graph capture disabled for this "
+          "run (dense decode runs eager).\n");
     }
   }
   if (graph_rejections == QwenGraphRejection::kNone && !config.is_moe &&

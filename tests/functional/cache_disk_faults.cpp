@@ -9,11 +9,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <string>
+
 #include "src/core/env_compat.hpp"
 
 namespace {
 bool MatchesManifest(int descriptor) {
-  if (::superroc::core::GetEnvCompat("SUPERROC_TEST_DISK_MANIFEST_ONLY") == nullptr)
+  if (::superroc::core::GetEnvCompat("SUPERROC_TEST_DISK_MANIFEST_ONLY") ==
+      nullptr)
     return true;
   char path[64]{};
   std::snprintf(path, sizeof(path), "/proc/self/fd/%d", descriptor);
@@ -27,8 +29,7 @@ bool MatchesManifest(int descriptor) {
   // engine-name magic (built from parts so its spelling never appears here).
   return count == 8 &&
          (std::memcmp(magic, "SROCMNF2", 8) == 0 ||
-          std::memcmp(magic, (std::string("G") + "UFOMNF2").c_str(), 8) ==
-              0);
+          std::memcmp(magic, (std::string("G") + "UFOMNF2").c_str(), 8) == 0);
 }
 }  // namespace
 
@@ -38,7 +39,8 @@ extern "C" int fsync(int descriptor) {
       reinterpret_cast<Function>(dlsym(RTLD_NEXT, "fsync"));
   static std::atomic<bool> held{false};
   const char* gate = ::superroc::core::GetEnvCompat("SUPERROC_TEST_DISK_GATE");
-  const char* directory = ::superroc::core::GetEnvCompat("SUPERROC_TEST_DISK_DIRECTORY");
+  const char* directory =
+      ::superroc::core::GetEnvCompat("SUPERROC_TEST_DISK_DIRECTORY");
   if (gate != nullptr && directory != nullptr && !held.load()) {
     struct stat status{};
     char descriptor_path[64]{};

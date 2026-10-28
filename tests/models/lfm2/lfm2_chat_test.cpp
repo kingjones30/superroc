@@ -143,7 +143,8 @@ int main() {
   }
 
   std::string error;
-  const auto reader = superroc::core::GgufReader::OpenFile(fs::path(gguf), &error);
+  const auto reader =
+      superroc::core::GgufReader::OpenFile(fs::path(gguf), &error);
   if (reader == nullptr) {
     std::cout << "FAIL lfm2_chat_test: cannot open GGUF: " << error << "\n";
     return 1;
@@ -155,7 +156,8 @@ int main() {
               << "\n";
     return 1;
   }
-  const auto* variant = superroc::tokenization::Lfm2TemplateVariantForGguf(*reader);
+  const auto* variant =
+      superroc::tokenization::Lfm2TemplateVariantForGguf(*reader);
   if (variant == nullptr) {
     std::cout << "FAIL lfm2_chat_test: unsupported template\n";
     return 1;

@@ -86,8 +86,9 @@ void CheckFlashIncrementalOracle(
   const std::vector<std::int32_t> tokens(prompt->tokens.begin(),
                                          prompt->tokens.end());
   std::string error;
-  auto incremental = model->CreateSession(
-      superroc::core::SessionMode::kAutoregressive, model->MaxContext(), &error);
+  auto incremental =
+      model->CreateSession(superroc::core::SessionMode::kAutoregressive,
+                           model->MaxContext(), &error);
   auto bulk = model->CreateSession(superroc::core::SessionMode::kAutoregressive,
                                    model->MaxContext(), &error);
   Require(incremental && bulk, error);

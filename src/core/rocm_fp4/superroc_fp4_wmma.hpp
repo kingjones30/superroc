@@ -1,12 +1,13 @@
 #pragma once
-// superroc_fp4_wmma.hpp — LS3 phase 3: W8A8 int8-WMMA GEMM for the ROCmFP4 prefill.
+// superroc_fp4_wmma.hpp — LS3 phase 3: W8A8 int8-WMMA GEMM for the ROCmFP4
+// prefill.
 //
 // The phase-1/2 tiled kernel (superroc_fp4_gemm.hip) dequantises FP4 weights to
 // float in LDS and does scalar float FMA: ~5-6 % of the box's fp32 peak, while
-// the same silicon demonstrates 55 TOPS on the int8 WMMA matrix core (superroc's
-// own Qwen W8A8 prefill, and the fork's ROCmFP4 prefill, which is W8A8 too: FP4
-// nibbles -> int8 in registers, Q8_1 activations, one int32 dot per
-// 16x16x16 tile, block scales applied in the epilogue).
+// the same silicon demonstrates 55 TOPS on the int8 WMMA matrix core
+// (superroc's own Qwen W8A8 prefill, and the fork's ROCmFP4 prefill, which is
+// W8A8 too: FP4 nibbles -> int8 in registers, Q8_1 activations, one int32 dot
+// per 16x16x16 tile, block scales applied in the epilogue).
 //
 // This file is the Ling instantiation of that design, built from superroc's
 // WKQuantA8BlockedWmmaGEMMKernel skeleton (src/models/qwen/hip/kernels/
@@ -15,11 +16,13 @@
 // no qwen file, no other lane's file is touched.
 //
 // Layouts
-//   * weights: ggml rows exactly as superroc_fp4_moe.hpp/superroc_fp4_gemm.hpp see them
+//   * weights: ggml rows exactly as superroc_fp4_moe.hpp/superroc_fp4_gemm.hpp
+//   see them
 //   --
-//     row r at r*superroc_fp4_row_bytes(qtype,k), an expert stack at expert_stride.
-//     Only SUPERROC_FP4_Q4_0_ROCMFP4 / _FAST (types 100/101) is implemented; every
-//     weight matrix Ling projects through in prefill is one of these.
+//     row r at r*superroc_fp4_row_bytes(qtype,k), an expert stack at
+//     expert_stride. Only SUPERROC_FP4_Q4_0_ROCMFP4 / _FAST (types 100/101) is
+//     implemented; every weight matrix Ling projects through in prefill is one
+//     of these.
 //   * activations: PRE-QUANTISED to the tiled Q8_1 layout of superroc's kernel
 //     (kQ8ActTileBytes = 576-byte tiles: [b0: 16 tokens x 16 bytes]
 //     [b1: same, k-half 1] [16 fp32 token scales]), by superroc_fp4_wmma_quant.
@@ -61,7 +64,7 @@ extern "C" {
 /// scale is max-abs/127 with roundf, superroc's QuantizeActivationToQ8_1Kernel
 /// verbatim.
 int superroc_fp4_wmma_quant(const float* x, const int* x_rows, const int* dest,
-                        void* q8, int n_rows, int k);
+                            void* q8, int n_rows, int k);
 
 /// Grouped W8A8 WMMA GEMM over the phase-2 grouping arrays (same contract as
 /// superroc_fp4_gemm_grp, y_rows = identity): for every group g, local token
@@ -74,20 +77,20 @@ int superroc_fp4_wmma_quant(const float* x, const int* x_rows, const int* dest,
 /// total_tiles must equal grp_zp[n_groups] (the host builds the prefix, so
 /// it already knows it). n must be <= the allocated rows; k a multiple of 32.
 int superroc_fp4_wmma_gemm_grp(int qtype, const void* W, size_t expert_stride,
-                           const int* grp_expert, const int* grp_off,
-                           const int* grp_cnt, const int* grp_zp, int n_groups,
-                           int total_tiles, const void* q8_x, float* y,
-                           const float* y_scale, int k, int n);
+                               const int* grp_expert, const int* grp_off,
+                               const int* grp_cnt, const int* grp_zp,
+                               int n_groups, int total_tiles, const void* q8_x,
+                               float* y, const float* y_scale, int k, int n);
 
-/// Same contract as superroc_fp4_wmma_gemm_grp, with the K-stage BK chosen by the
-/// caller (2, 4, or 8). Does not read SUPERROC_FP4_MOE_V2, so a KAT call at BK=4
-/// leaves Ling's process-wide default at BK=2.
-int superroc_fp4_wmma_gemm_grp_bk(int qtype, const void* W, size_t expert_stride,
-                              const int* grp_expert, const int* grp_off,
-                              const int* grp_cnt, const int* grp_zp,
-                              int n_groups, int total_tiles, const void* q8_x,
-                              float* y, const float* y_scale, int k, int n,
-                              int bk);
+/// Same contract as superroc_fp4_wmma_gemm_grp, with the K-stage BK chosen by
+/// the caller (2, 4, or 8). Does not read SUPERROC_FP4_MOE_V2, so a KAT call at
+/// BK=4 leaves Ling's process-wide default at BK=2.
+int superroc_fp4_wmma_gemm_grp_bk(int qtype, const void* W,
+                                  size_t expert_stride, const int* grp_expert,
+                                  const int* grp_off, const int* grp_cnt,
+                                  const int* grp_zp, int n_groups,
+                                  int total_tiles, const void* q8_x, float* y,
+                                  const float* y_scale, int k, int n, int bk);
 
 /// Dense W8A8 WMMA GEMM: y[t * n + r] = dot(W_row_r, x_t) for t in [0, m),
 /// x pre-quantised by superroc_fp4_wmma_quant(x, nullptr, nullptr, q8_x, m, k).
@@ -98,11 +101,12 @@ int superroc_fp4_wmma_gemm_grp_bk(int qtype, const void* W, size_t expert_stride
 /// block count; extra blocks exit in the kernel. Bit-identical to the
 /// 16-token path.
 int superroc_fp4_wmma_gemm_grp64(int qtype, const void* W, size_t expert_stride,
-                             const int* grp_expert, const int* grp_off,
-                             const int* grp_cnt, const int* grp_zp,
-                             int n_groups, int total_tiles, const void* q8_x,
-                             float* y, const float* y_scale, int k, int n,
-                             const int* grp_zb);
+                                 const int* grp_expert, const int* grp_off,
+                                 const int* grp_cnt, const int* grp_zp,
+                                 int n_groups, int total_tiles,
+                                 const void* q8_x, float* y,
+                                 const float* y_scale, int k, int n,
+                                 const int* grp_zb);
 
 /// KPF2: device-sized grouped W8A8 WMMA GEMM. Same contract as
 /// superroc_fp4_wmma_gemm_grp_bk, but n_groups/total_tiles are read from the
@@ -110,31 +114,29 @@ int superroc_fp4_wmma_gemm_grp64(int qtype, const void* W, size_t expert_stride,
 /// dim3(row_tiles, max_tiles) with max_tiles = GroupQ8Tiles(slots,
 /// n_expert), and a block with blockIdx.y >= hdr_dev[TILES] returns at
 /// once. A non-OK hdr_dev[STATUS] makes every block return at once.
-int superroc_fp4_wmma_gemm_grp_bk_dev(int qtype, const void* W,
-                                  size_t expert_stride, const int* grp_expert,
-                                  const int* grp_off, const int* grp_cnt,
-                                  const int* grp_zp, const int* hdr_dev,
-                                  int max_tiles, const void* q8_x, float* y,
-                                  const float* y_scale, int k, int n, int bk);
+int superroc_fp4_wmma_gemm_grp_bk_dev(
+    int qtype, const void* W, size_t expert_stride, const int* grp_expert,
+    const int* grp_off, const int* grp_cnt, const int* grp_zp,
+    const int* hdr_dev, int max_tiles, const void* q8_x, float* y,
+    const float* y_scale, int k, int n, int bk);
 
 /// KPF2: device-sized MG64 grouped GEMM. Same contract as
 /// superroc_fp4_wmma_gemm_grp64 with hdr_dev/max_tiles in place of
 /// n_groups/total_tiles (grp_zb still passed; built by
 /// superroc_fp4_moe_group_blocks_dev).
-int superroc_fp4_wmma_gemm_grp64_dev(int qtype, const void* W, size_t expert_stride,
-                                 const int* grp_expert, const int* grp_off,
-                                 const int* grp_cnt, const int* grp_zp,
-                                 const int* hdr_dev, int max_tiles,
-                                 const void* q8_x, float* y,
-                                 const float* y_scale, int k, int n,
-                                 const int* grp_zb);
+int superroc_fp4_wmma_gemm_grp64_dev(
+    int qtype, const void* W, size_t expert_stride, const int* grp_expert,
+    const int* grp_off, const int* grp_cnt, const int* grp_zp,
+    const int* hdr_dev, int max_tiles, const void* q8_x, float* y,
+    const float* y_scale, int k, int n, const int* grp_zb);
 
 int superroc_fp4_wmma_gemm_dense(int qtype, const void* W, const void* q8_x,
-                             float* y, int k, int n, int m);
+                                 float* y, int k, int n, int m);
 
 /// On-device exhaustive check of the FP4->int8 perm codebook and the ue4m3
-/// half scales against superroc_fp4_rocmfp4_code / superroc_fp4_ue4m3_half: returns 0
-/// when every nibble of every 32-bit word decodes exactly like the scalar path.
+/// half scales against superroc_fp4_rocmfp4_code / superroc_fp4_ue4m3_half:
+/// returns 0 when every nibble of every 32-bit word decodes exactly like the
+/// scalar path.
 int superroc_fp4_wmma_codebook_check(void);
 
 const char* superroc_fp4_wmma_version(void);

@@ -14,10 +14,10 @@
 #include <string_view>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/mtp_reference.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -75,9 +75,11 @@ Comparison Compare(std::span<const float> actual,
 int main(int argc, const char* const* argv) {
   try {
     const char* base_path =
-        argc > 1 ? argv[1] : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
+        argc > 1 ? argv[1]
+                 : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
     const char* draft_path =
-        argc > 2 ? argv[2] : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MTP_MODEL");
+        argc > 2 ? argv[2]
+                 : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MTP_MODEL");
     if (base_path == nullptr || draft_path == nullptr) {
       std::cout << "qwen_mtp_gpu_test: skipped "
                    "(pass base and MTP GGUF paths)\n";
@@ -94,18 +96,20 @@ int main(int argc, const char* const* argv) {
     std::shared_ptr<const superroc::core::GgufReader> mtp_reader(
         std::move(mtp_owner));
 
-    auto reference = superroc::speculative::QwenMtpReference::CreateWithTiedWeights(
-        mtp_reader, base_reader, 8, &error);
+    auto reference =
+        superroc::speculative::QwenMtpReference::CreateWithTiedWeights(
+            mtp_reader, base_reader, 8, &error);
     Expect(reference != nullptr, error);
     auto target_model =
         superroc::hip::QwenGpuModel::CreateFromGguf(base_reader, &error);
     Expect(target_model != nullptr, error);
 
     const auto pack_start = std::chrono::steady_clock::now();
-    auto mtp_model =
-        superroc::hip::QwenMtpGpuModel::Create(mtp_reader, target_model, &error);
+    auto mtp_model = superroc::hip::QwenMtpGpuModel::Create(
+        mtp_reader, target_model, &error);
     Expect(mtp_model != nullptr, error);
-    auto executor = superroc::hip::QwenMtpGpuExecutor::Create(mtp_model, 8, &error);
+    auto executor =
+        superroc::hip::QwenMtpGpuExecutor::Create(mtp_model, 8, &error);
     Expect(executor != nullptr, error);
     const double setup_seconds =
         std::chrono::duration<double>(std::chrono::steady_clock::now() -
@@ -173,8 +177,8 @@ int main(int argc, const char* const* argv) {
     Expect(draft_backend->PrimeTargetContext(draft_context),
            draft_backend->GetLastError());
 
-    std::vector<superroc::tokenization::TokenId> sequence{prompt_tokens[0],
-                                                      prompt_tokens[1], token};
+    std::vector<superroc::tokenization::TokenId> sequence{
+        prompt_tokens[0], prompt_tokens[1], token};
     const auto first_proposal = draft_backend->Propose(sequence, 2, 2);
     Expect(first_proposal.tokens.size() == 2, "first GPU MTP proposal size");
     // Verification publishes committed target rows before feedback. Rebuilding
@@ -187,9 +191,10 @@ int main(int argc, const char* const* argv) {
       value *= 0.5F;
     draft_backend->UpdateTargetHidden(anchor_hidden);
     draft_backend->UpdateTargetHidden(committed_hidden);
-    draft_backend->AcceptFeedback(std::span<const superroc::tokenization::TokenId>(
-                                      first_proposal.tokens.data(), 1),
-                                  42);
+    draft_backend->AcceptFeedback(
+        std::span<const superroc::tokenization::TokenId>(
+            first_proposal.tokens.data(), 1),
+        42);
     sequence.push_back(first_proposal.tokens.front());
     const auto committed_sequence = sequence;
     sequence.push_back(42);

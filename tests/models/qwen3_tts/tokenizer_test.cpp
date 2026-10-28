@@ -41,9 +41,9 @@ int main(int argc, char** argv) {
 
   superroc::models::qwen3_tts::Tokenizer tokenizer;
   std::string error;
-  Check(
-      superroc::models::qwen3_tts::Tokenizer::Load(model_root, &tokenizer, &error),
-      error);
+  Check(superroc::models::qwen3_tts::Tokenizer::Load(model_root, &tokenizer,
+                                                     &error),
+        error);
   std::vector<std::uint32_t> ids;
   Check(tokenizer.EncodeAssistantPrompt(kText, &ids, &error), error);
   const std::vector<std::uint32_t> expected = {

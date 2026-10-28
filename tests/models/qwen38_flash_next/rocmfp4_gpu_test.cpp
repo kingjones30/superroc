@@ -156,8 +156,9 @@ void CheckMatrix(const char* what, const qfn::TensorRef& t, std::uint64_t e) {
     const std::span<const float> xv(x.data() + tok * cols, cols);
     for (std::size_t i = 0; i < sample.size(); ++i) {
       const std::uint8_t* row = host + sample[i] * rb;
-      ref[tok][i] = fast ? superroc::quant::DotProductROCMFP4_Fast(row, xv, cols)
-                         : superroc::quant::DotProductROCMFP4_Dual(row, xv, cols);
+      ref[tok][i] =
+          fast ? superroc::quant::DotProductROCMFP4_Fast(row, xv, cols)
+               : superroc::quant::DotProductROCMFP4_Dual(row, xv, cols);
     }
   }
 
@@ -210,7 +211,7 @@ void CheckMatrix(const char* what, const qfn::TensorRef& t, std::uint64_t e) {
           y_dev + static_cast<std::size_t>(t0) * rows, static_cast<int>(cols),
           static_cast<int>(rows), chunk, nullptr);
       Check(rc == SUPERROC_FP4_OK, tag + " gemv_m rc=" + std::to_string(rc) +
-                                   " m=" + std::to_string(m));
+                                       " m=" + std::to_string(m));
     }
     HIP_CHECK(hipDeviceSynchronize(), tag + " gemv_m sync");
     HIP_CHECK(hipMemcpy(y.data(), y_dev, sizeof(float) * m * rows,
@@ -360,10 +361,12 @@ void CheckMoe(const char* what, const qfn::LayerWeights& l,
         static_cast<int>(ntok), static_cast<int>(used),
         static_cast<int>(c.num_experts), static_cast<int>(k),
         static_cast<int>(nff), 0.0F, y_dev, nullptr);
-    Check(rc == SUPERROC_FP4_OK, tag + " expert_ffn_m rc=" + std::to_string(rc) +
-                                 " m=" + std::to_string(ntok));
+    Check(rc == SUPERROC_FP4_OK, tag +
+                                     " expert_ffn_m rc=" + std::to_string(rc) +
+                                     " m=" + std::to_string(ntok));
     const int st = superroc_fp4_expert_ffn_m_check();
-    Check(st == SUPERROC_FP4_OK, tag + " expert_ffn_m_check=" + std::to_string(st));
+    Check(st == SUPERROC_FP4_OK,
+          tag + " expert_ffn_m_check=" + std::to_string(st));
     Check(hipDeviceSynchronize() == hipSuccess, tag + " moe sync");
     std::vector<float> y(static_cast<std::size_t>(ntok) * k, 0.0F);
     Check(hipMemcpy(y.data(), y_dev, y.size() * 4, hipMemcpyDeviceToHost) ==
@@ -390,8 +393,8 @@ void CheckMoe(const char* what, const qfn::LayerWeights& l,
         const std::uint8_t* d_e =
             down_h + static_cast<std::size_t>(id) * down_estride;
         for (std::size_t j2 = 0; j2 < nff; ++j2) {
-          const double gv =
-              superroc::quant::DotProductROCMFP4_Fast(g_e + j2 * gate_rb, xt, k);
+          const double gv = superroc::quant::DotProductROCMFP4_Fast(
+              g_e + j2 * gate_rb, xt, k);
           const double uv =
               superroc::quant::DotProductROCMFP4_Fast(u_e + j2 * up_rb, xt, k);
           hf[j2] = static_cast<float>(gv / (1.0 + std::exp(-gv)) * uv);
@@ -399,8 +402,8 @@ void CheckMoe(const char* what, const qfn::LayerWeights& l,
         const std::span<const float> hs(hf.data(), nff);
         for (std::size_t i = 0; i < k; ++i) {
           acc[i] +=
-              static_cast<double>(wj) *
-              superroc::quant::DotProductROCMFP4_Fast(d_e + i * down_rb, hs, nff);
+              static_cast<double>(wj) * superroc::quant::DotProductROCMFP4_Fast(
+                                            d_e + i * down_rb, hs, nff);
         }
       }
       for (std::size_t i = 0; i < k; ++i) {

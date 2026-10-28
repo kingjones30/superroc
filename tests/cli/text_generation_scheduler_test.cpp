@@ -401,7 +401,8 @@ public:
   }
 
   [[nodiscard]] TextDecodeSelection SelectNext(
-      TextRunnerState& state, superroc::sampling::SamplerState&) const override {
+      TextRunnerState& state,
+      superroc::sampling::SamplerState&) const override {
     const auto& fake = RequireFakeState(state);
     if (!fake.frontier.has_value()) {
       throw std::logic_error("scheduler fake has no frontier");
@@ -537,7 +538,8 @@ public:
   }
 
   [[nodiscard]] std::vector<TextDecodeStep> DecodeBatch(
-      std::span<const superroc::server::TextRunnerDecode> decodes) const override {
+      std::span<const superroc::server::TextRunnerDecode> decodes)
+      const override {
     auto steps = TextModelRunner::DecodeBatch(decodes);
     const auto width = std::min(control_->actual_batch_width, decodes.size());
     for (auto& step : steps) {
@@ -1861,7 +1863,8 @@ void TestMetricsDuringCacheAdmission() {
   }
   auto scheduler = MakeScheduler(std::make_shared<FakeControl>(), 1);
   TextRequestMetadata metadata;
-  metadata.prompt_context = std::make_shared<superroc::server::TextPromptContext>();
+  metadata.prompt_context =
+      std::make_shared<superroc::server::TextPromptContext>();
   bool failed = false;
   try {
     (void)scheduler->Submit({3}, 1, 0.0F, {}, false, metadata).Wait();
@@ -2215,7 +2218,8 @@ void TestDeviceLossIsStickyAndReported() {
       lost = error.code() == TextGenerationErrorCode::kDeviceLost &&
              error.http_status() == 503 &&
              std::string_view(error.stable_code()) == "device_lost" &&
-             std::string_view(error.what()) == superroc::server::kDeviceLostMessage;
+             std::string_view(error.what()) ==
+                 superroc::server::kDeviceLostMessage;
     }
     Expect(lost, message);
   };
@@ -2391,12 +2395,11 @@ void TestCancellationWithBufferedStopPrefix() {
       streamed += piece;
       return true;
     });
-    Expect(
-        result.cancelled &&
-            result.finish_reason ==
-                superroc::server::TextGenerationBackend::FinishReason::kCancelled &&
-            streamed.find("<ST") == std::string::npos,
-        "cancellation does not flush a buffered stop prefix");
+    Expect(result.cancelled &&
+               result.finish_reason == superroc::server::TextGenerationBackend::
+                                           FinishReason::kCancelled &&
+               streamed.find("<ST") == std::string::npos,
+           "cancellation does not flush a buffered stop prefix");
     const auto replacement = scheduler->Submit({2}, 3, 0.0F).Wait();
     Expect(!replacement.cancelled && replacement.text == "safe<STOP>tailend",
            "cancellation with a partial stop releases the runner");
@@ -3008,9 +3011,10 @@ int main() {
                "default/explicit limit respects remaining context");
         Expect(b.tokens.size() == (limit == 0 || limit > 253 ? 253 : limit),
                "concurrent requests have independent context budgets");
-        Expect(a.finish_reason ==
-                   superroc::server::TextGenerationBackend::FinishReason::kLength,
-               "exhausted context is reported as length");
+        Expect(
+            a.finish_reason ==
+                superroc::server::TextGenerationBackend::FinishReason::kLength,
+            "exhausted context is reported as length");
       };
       run(0, 254);
       run(1000, 254);
@@ -3018,10 +3022,11 @@ int main() {
         run(limit, limit);
       control->stop_after = 150;
       const auto stopped = scheduler->Submit({3}, 0, 0.0F).Wait();
-      Expect(stopped.tokens.size() == 150 &&
-                 stopped.finish_reason ==
-                     superroc::server::TextGenerationBackend::FinishReason::kStop,
-             "unlimited default passes 128 tokens and still respects EOS");
+      Expect(
+          stopped.tokens.size() == 150 &&
+              stopped.finish_reason ==
+                  superroc::server::TextGenerationBackend::FinishReason::kStop,
+          "unlimited default passes 128 tokens and still respects EOS");
       for (const auto size : {256, 257}) {
         bool rejected = false;
         try {

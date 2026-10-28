@@ -60,7 +60,8 @@ public:
 
   void AddMetadataString(std::string_view key, std::string_view val) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
     AppendString(val);
     metadata_count_++;
   }
@@ -103,8 +104,8 @@ void TestBasicChatRendering() {
   Expect(tpl != nullptr, "CreateDefault succeeds");
 
   std::vector<superroc::tokenization::ChatMessage> messages = {
-      {superroc::tokenization::ChatRole::kSystem, "You are a concise assistant.",
-       "", ""},
+      {superroc::tokenization::ChatRole::kSystem,
+       "You are a concise assistant.", "", ""},
       {superroc::tokenization::ChatRole::kUser, "What is 2+2?", "", ""},
   };
 
@@ -129,8 +130,8 @@ void TestThinkingFraming() {
 
   std::vector<superroc::tokenization::ChatMessage> messages = {
       {superroc::tokenization::ChatRole::kUser, "Solve this equation.", "", ""},
-      {superroc::tokenization::ChatRole::kAssistant, "The roots are 2 and 3.", "",
-       "First let's factor the polynomial."},
+      {superroc::tokenization::ChatRole::kAssistant, "The roots are 2 and 3.",
+       "", "First let's factor the polynomial."},
   };
 
   superroc::tokenization::ChatTemplateOptions opts;
@@ -178,7 +179,8 @@ void TestHistoricalThinkingDoesNotEnableNewThinking() {
 void TestReasoningEffortAndPreservation() {
   const std::vector<superroc::tokenization::ChatMessage> messages = {
       {superroc::tokenization::ChatRole::kSystem, "System rules.", "", ""},
-      {superroc::tokenization::ChatRole::kDeveloper, "Developer rules.", "", ""},
+      {superroc::tokenization::ChatRole::kDeveloper, "Developer rules.", "",
+       ""},
       {superroc::tokenization::ChatRole::kUser, "First question.", "", ""},
       {superroc::tokenization::ChatRole::kAssistant, "First answer.", "",
        "Old private reasoning."},
@@ -260,8 +262,8 @@ void TestGgufTemplateExtraction() {
   auto binary = builder.Build();
 
   std::string err;
-  auto reader =
-      superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &err);
+  auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                       binary.size(), &err);
   Expect(reader != nullptr, "Reader open succeeds");
 
   auto tpl =
@@ -270,9 +272,10 @@ void TestGgufTemplateExtraction() {
   Expect(tpl->GetTemplateString().find("preserve_thinking") !=
              std::string_view::npos,
          "Template string matches GGUF header");
-  Expect(tpl->GetProfile() ==
-             superroc::tokenization::QwenChatTemplate::Profile::kQwen38Reasoning,
-         "Recognized Qwen3.8 template profile is classified");
+  Expect(
+      tpl->GetProfile() ==
+          superroc::tokenization::QwenChatTemplate::Profile::kQwen38Reasoning,
+      "Recognized Qwen3.8 template profile is classified");
   Expect(tpl->GetTemplateId() == "qwen38-reasoning-compiled-v3",
          "Compiled template version is stable");
   Expect(tpl->GetTemplateSha256().size() == 64,
@@ -298,13 +301,15 @@ void TestGgufTemplateExtraction() {
       lookalike_binary.data(), lookalike_binary.size(), &err);
   Expect(lookalike_reader != nullptr, "Look-alike GGUF opens");
   std::string lookalike_err;
-  const auto lookalike = superroc::tokenization::QwenChatTemplate::CreateFromGguf(
-      *lookalike_reader, &lookalike_err);
+  const auto lookalike =
+      superroc::tokenization::QwenChatTemplate::CreateFromGguf(
+          *lookalike_reader, &lookalike_err);
   Expect(lookalike != nullptr,
          "Unpinned Qwen3.8 template loads with the generic ChatML fallback");
-  Expect(lookalike->GetProfile() !=
-             superroc::tokenization::QwenChatTemplate::Profile::kQwen38Reasoning,
-         "An unpinned template is not classified as the pinned reasoning one");
+  Expect(
+      lookalike->GetProfile() !=
+          superroc::tokenization::QwenChatTemplate::Profile::kQwen38Reasoning,
+      "An unpinned template is not classified as the pinned reasoning one");
   Expect(lookalike->GetTemplateSha256() !=
              superroc::tokenization::QwenChatTemplate::OfficialTemplateSha256(),
          "The fallback does not claim the pinned upstream template hash");
@@ -619,12 +624,14 @@ void TestToolReplayArgumentsAreContent() {
     Expect(argument_offset != std::string::npos &&
                result_offset != std::string::npos,
            "The argument and result retain their literal bytes");
-    const auto argument = superroc::tokenization::QwenChatTemplate::EncodeRendered(
-        *tokenizer, *rendered, argument_offset, argument_offset + value.size(),
-        spans, tok_options);
-    const auto result = superroc::tokenization::QwenChatTemplate::EncodeRendered(
-        *tokenizer, *rendered, result_offset, result_offset + value.size(),
-        spans, tok_options);
+    const auto argument =
+        superroc::tokenization::QwenChatTemplate::EncodeRendered(
+            *tokenizer, *rendered, argument_offset,
+            argument_offset + value.size(), spans, tok_options);
+    const auto result =
+        superroc::tokenization::QwenChatTemplate::EncodeRendered(
+            *tokenizer, *rendered, result_offset, result_offset + value.size(),
+            spans, tok_options);
     auto text_options = tok_options;
     text_options.parse_special_tokens = false;
     Expect(argument == result &&
@@ -632,8 +639,9 @@ void TestToolReplayArgumentsAreContent() {
            "Replayed argument token IDs match tool-result text, including "
            "literal EOS");
 
-    const auto direct = superroc::tokenization::QwenChatTemplate::RenderAndTokenize(
-        *tokenizer, messages, opts, &err);
+    const auto direct =
+        superroc::tokenization::QwenChatTemplate::RenderAndTokenize(
+            *tokenizer, messages, opts, &err);
     Expect(direct.has_value(), "Tool replay tokenizes: " + err);
     const auto prepared = superroc::models::qwen::vision::Prepare(
         *tokenizer, messages, {}, opts, {}, 1024);
@@ -826,9 +834,10 @@ void TestEncodeRenderedReadsImageContentAsText() {
   const auto whole = encode(0, rendered->size());
   const auto up_to_image = encode(0, offsets[0]);
   const auto after_image = encode(offsets[0] + 13, rendered->size());
-  const auto count = [&](const std::vector<superroc::tokenization::TokenId>& ids) {
-    return std::count(ids.begin(), ids.end(), *injected);
-  };
+  const auto count =
+      [&](const std::vector<superroc::tokenization::TokenId>& ids) {
+        return std::count(ids.begin(), ids.end(), *injected);
+      };
   std::cout << "  image-bearing prompt: " << rendered->size() << " bytes, "
             << whole.size() << " tokens whole, " << up_to_image.size()
             << " before the picture, " << after_image.size()
@@ -852,7 +861,8 @@ void TestChatCorpusConformance() {
   // Test Case 1: single turn user
   {
     std::vector<superroc::tokenization::ChatMessage> msgs = {
-        {superroc::tokenization::ChatRole::kUser, "Hello, Strix Halo!", "", ""}};
+        {superroc::tokenization::ChatRole::kUser, "Hello, Strix Halo!", "",
+         ""}};
     superroc::tokenization::ChatTemplateOptions opts;
     opts.add_generation_prompt = true;
     opts.enable_thinking = false;
@@ -1087,8 +1097,8 @@ void TestEmptyReasoningReplayChangesThinkingSuffixTokens() {
   };
   std::string error;
   const auto tokenizer =
-      superroc::tokenization::QwenTokenizer::CreateFromVocabulary(vocab, merges,
-                                                              specials, &error);
+      superroc::tokenization::QwenTokenizer::CreateFromVocabulary(
+          vocab, merges, specials, &error);
   Expect(tokenizer != nullptr, "Tokenizer with a newline merge: " + error);
 
   const auto tpl = superroc::tokenization::QwenChatTemplate::CreateDefault();

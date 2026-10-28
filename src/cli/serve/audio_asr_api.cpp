@@ -430,7 +430,8 @@ HttpResponse Transcribe(const HttpRequest& request, AsrService& service) {
   }
   response.headers.emplace_back("X-SuperROC-Schema",
                                 std::string(kAudioAsrApiSchema));
-  response.headers.emplace_back("X-SuperROC-ASR-Backend", service.backend_name());
+  response.headers.emplace_back("X-SuperROC-ASR-Backend",
+                                service.backend_name());
   response.headers.emplace_back("Server-Timing", ServerTiming(result.timings));
   response.log_details =
       "model=" + service.model_id() +

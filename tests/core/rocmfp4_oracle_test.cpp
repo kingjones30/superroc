@@ -73,8 +73,9 @@ void ExpectRow(superroc::core::GgmlType type, const std::uint8_t* raw,
     const std::uint8_t byte = blk[local & 15];
     const unsigned nib = local < 16 ? (byte & 0x0Fu) : (byte >> 4);
     const std::uint8_t eb =
-        (type == superroc::core::GgmlType::kQ4_0_ROCMFP4 && local >= 16) ? blk[17]
-                                                                     : blk[16];
+        (type == superroc::core::GgmlType::kQ4_0_ROCMFP4 && local >= 16)
+            ? blk[17]
+            : blk[16];
     const float expect = static_cast<float>(kTable[nib]) * TableScale(eb);
     if (got[i] != expect) {
       std::cerr << "FAIL " << label << " i=" << i << " got=" << got[i]
@@ -108,7 +109,8 @@ void Synthetic() {
   FillFast(fast.data() + 17, 0x7f);
   FillFast(fast.data() + 34, 0x7e);
   FillFast(fast.data() + 51, 0x3c);
-  ExpectRow(superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST, fast.data(), 128, "fast");
+  ExpectRow(superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST, fast.data(), 128,
+            "fast");
 
   using superroc::models::qwen::DescribeQwenGemmFormat;
   using superroc::models::qwen::QwenGemmMode;
@@ -179,7 +181,8 @@ void ScanGguf(const std::string& path) {
       std::exit(1);
     }
     const std::size_t k = static_cast<std::size_t>(dims[0]);
-    const std::size_t stride = superroc::quant::QuantizedRowBytes(tensor.type, k);
+    const std::size_t stride =
+        superroc::quant::QuantizedRowBytes(tensor.type, k);
     if (stride == 0 || tensor.data == nullptr) {
       std::cerr << "FAIL row bytes " << tensor.name << '\n';
       std::exit(1);

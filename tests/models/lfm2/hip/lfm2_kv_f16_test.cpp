@@ -365,13 +365,12 @@ int main() {
       return 1;
     }
     const superroc::hip::Lfm2LaunchStatus st =
-        w.single
-            ? superroc::hip::LaunchLfm2WriteKvDevF16(d_k, d_v, d_k16, d_v16,
-                                                 w.layer, d_pos, kMaxCtx,
-                                                 kKvHeads, kHeadDim, nullptr)
-            : superroc::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16,
-                                                     w.layer, w.start, w.batch,
-                                                     kMaxCtx, kKv, nullptr);
+        w.single ? superroc::hip::LaunchLfm2WriteKvDevF16(
+                       d_k, d_v, d_k16, d_v16, w.layer, d_pos, kMaxCtx,
+                       kKvHeads, kHeadDim, nullptr)
+                 : superroc::hip::LaunchLfm2BatchedWriteKvF16(
+                       d_k, d_v, d_k16, d_v16, w.layer, w.start, w.batch,
+                       kMaxCtx, kKv, nullptr);
     if (!CheckOk(st, "launch", cas) ||
         !HipOk(hipDeviceSynchronize(), "wsync") ||
         !Download(got_k, d_k16, "down wk") ||
@@ -413,13 +412,12 @@ int main() {
         return 1;
       }
       const superroc::hip::Lfm2LaunchStatus st =
-          single
-              ? superroc::hip::LaunchLfm2WriteKvDevF16(d_k, d_v, d_k16, d_v16,
-                                                   layer, d_pos, kMaxCtx,
-                                                   kKvHeads, kHeadDim, nullptr)
-              : superroc::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16,
-                                                       layer, start, 1, kMaxCtx,
-                                                       kKv, nullptr);
+          single ? superroc::hip::LaunchLfm2WriteKvDevF16(
+                       d_k, d_v, d_k16, d_v16, layer, d_pos, kMaxCtx, kKvHeads,
+                       kHeadDim, nullptr)
+                 : superroc::hip::LaunchLfm2BatchedWriteKvF16(
+                       d_k, d_v, d_k16, d_v16, layer, start, 1, kMaxCtx, kKv,
+                       nullptr);
       const char* cas =
           single ? "write f16 dev saturates" : "write f16 batched saturates";
       if (!CheckOk(st, "launch", cas) ||
@@ -450,8 +448,8 @@ int main() {
   // 4. Refusals: batched write past the context end.
   {
     const superroc::hip::Lfm2LaunchStatus st =
-        superroc::hip::LaunchLfm2BatchedWriteKvF16(d_k, d_v, d_k16, d_v16, 0, 4000,
-                                               300, kMaxCtx, kKv, nullptr);
+        superroc::hip::LaunchLfm2BatchedWriteKvF16(
+            d_k, d_v, d_k16, d_v16, 0, 4000, 300, kMaxCtx, kKv, nullptr);
     Report("write f16 batched refuses range", !st.ok,
            st.error != nullptr ? st.error : "(accepted)");
   }

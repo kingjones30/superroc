@@ -63,7 +63,7 @@ constexpr std::array<std::uint8_t, 8> kMagic{'S', 'R', 'O', 'C',
 /// Previous engine-name magic, kept in char form so the old spelling never
 /// appears here; readers still accept files written by previous releases.
 constexpr std::array<std::uint8_t, 8> kPreviousMagic{'G', 'U', 'F', 'O',
-                                                      'M', 'N', 'F', '2'};
+                                                     'M', 'N', 'F', '2'};
 constexpr std::size_t kMaxTokens = std::size_t{2} * 1024 * 1024;
 constexpr std::size_t kMaxComponents = 256, kMaxReferences = 65536;
 constexpr std::size_t kMaxInputBytes = 65536;

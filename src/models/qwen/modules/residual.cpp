@@ -18,8 +18,9 @@ void ResidualAdd(const CpuModuleContext&, std::span<float> dst,
 #if defined(ENGINE_ENABLE_HIP)
 void ResidualAdd(const HipModuleContext& ctx, std::span<float> dst,
                  std::span<const float> src) noexcept {
-  ::superroc::hip::LaunchResidualAdd(dst.data(), src.data(), dst.data(), dst.size(),
-                                 static_cast<hipStream_t>(ctx.Stream()));
+  ::superroc::hip::LaunchResidualAdd(dst.data(), src.data(), dst.data(),
+                                     dst.size(),
+                                     static_cast<hipStream_t>(ctx.Stream()));
 }
 #endif
 

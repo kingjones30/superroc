@@ -46,13 +46,14 @@ std::filesystem::path FindFixturesRoot() {
 void TestSizeParser() {
   std::vector<std::size_t> sizes;
   std::string error;
-  Expect(
-      superroc::diagnostics::ParseWorkingSetSizes("64,1024,52126", &sizes, &error),
-      error);
+  Expect(superroc::diagnostics::ParseWorkingSetSizes("64,1024,52126", &sizes,
+                                                     &error),
+         error);
   Expect(sizes.size() == 3, "three working-set sizes parsed");
   Expect(sizes[0] == 64ULL * 1024ULL * 1024ULL, "64 MiB parsed");
   Expect(sizes[1] == 1024ULL * 1024ULL * 1024ULL, "1 GiB parsed");
-  Expect(!superroc::diagnostics::ParseWorkingSetSizes("64,invalid", &sizes, &error),
+  Expect(!superroc::diagnostics::ParseWorkingSetSizes("64,invalid", &sizes,
+                                                      &error),
          "invalid size rejected");
   Expect(!superroc::diagnostics::ParseWorkingSetSizes("64,", &sizes, &error),
          "trailing separator rejected");

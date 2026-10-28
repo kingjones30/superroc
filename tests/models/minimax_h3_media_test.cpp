@@ -10,8 +10,8 @@
 #include <thread>
 #include <vector>
 
-#include "src/models/minimax_h3/media.hpp"
 #include "src/core/env_compat.hpp"
+#include "src/models/minimax_h3/media.hpp"
 
 namespace {
 
@@ -99,7 +99,8 @@ int main() {
       std::filesystem::temp_directory_path() /
       "superroc-h3-media-cancelled-test.mp4";
   const std::filesystem::path error_output =
-      std::filesystem::temp_directory_path() / "superroc-h3-media-error-test.mp4";
+      std::filesystem::temp_directory_path() /
+      "superroc-h3-media-error-test.mp4";
   const std::filesystem::path probe_error_output =
       std::filesystem::temp_directory_path() /
       "superroc-h3-media-probe-error-test.mp4";

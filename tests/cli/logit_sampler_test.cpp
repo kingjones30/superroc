@@ -67,8 +67,10 @@ void TestTemperatureSamplingIsDeterministicAndNonGreedy() {
   for (std::uint64_t seed = 1; seed <= 128; ++seed) {
     auto left_state = seed;
     auto right_state = seed;
-    const auto left = superroc::sampling::SampleLogits(logits, 1.0F, &left_state);
-    const auto right = superroc::sampling::SampleLogits(logits, 1.0F, &right_state);
+    const auto left =
+        superroc::sampling::SampleLogits(logits, 1.0F, &left_state);
+    const auto right =
+        superroc::sampling::SampleLogits(logits, 1.0F, &right_state);
     Expect(left == right && left_state == right_state,
            "temperature sampling is reproducible from the same RNG state");
     saw_first = saw_first || left == 0;
@@ -85,7 +87,8 @@ void TestTopKFiltersTheCandidateSet() {
   config.temperature = 1.0F;
   config.top_k = 2;
 
-  const auto distribution = superroc::sampling::BuildDistribution(logits, config);
+  const auto distribution =
+      superroc::sampling::BuildDistribution(logits, config);
 
   Expect(distribution.entries().size() == 2,
          "top-k retains exactly k candidates");
@@ -101,7 +104,8 @@ void TestTopPFiltersByCumulativeProbability() {
   config.temperature = 1.0F;
   config.top_p = 0.7F;
 
-  const auto distribution = superroc::sampling::BuildDistribution(logits, config);
+  const auto distribution =
+      superroc::sampling::BuildDistribution(logits, config);
 
   Expect(distribution.entries().size() == 2,
          "top-p retains the smallest cumulative-probability prefix");
@@ -123,7 +127,8 @@ void TestMinPFiltersRelativeToTheBestToken() {
   config.temperature = 1.0F;
   config.min_p = 0.5F;
 
-  const auto distribution = superroc::sampling::BuildDistribution(logits, config);
+  const auto distribution =
+      superroc::sampling::BuildDistribution(logits, config);
 
   Expect(distribution.entries().size() == 2,
          "min-p retains candidates above the relative threshold");
@@ -140,7 +145,8 @@ void TestMinKeepProvidesAFilterFloor() {
   config.min_p = 0.99F;
   config.min_keep = 3;
 
-  const auto distribution = superroc::sampling::BuildDistribution(logits, config);
+  const auto distribution =
+      superroc::sampling::BuildDistribution(logits, config);
 
   Expect(distribution.entries().size() == 3,
          "min-keep prevents enabled filters from shrinking below its floor");
@@ -155,7 +161,8 @@ void TestTemperatureBeforeProbabilityFilters() {
     logits[1] = -1.0F;
     logits[2] = -2.0F;
     for (const bool nucleus : {false, true}) {
-      superroc::sampling::SamplingConfig config{.temperature = 0.5F, .seed = 42};
+      superroc::sampling::SamplingConfig config{.temperature = 0.5F,
+                                                .seed = 42};
       if (nucleus)
         config.top_p = 0.8F;
       else
@@ -208,15 +215,15 @@ void TestFrequencyAndPresencePenaltiesUseCounts() {
 
   superroc::sampling::SamplingConfig frequency_config;
   frequency_config.frequency_penalty = 0.4F;
-  const auto frequency_distribution =
-      superroc::sampling::BuildDistribution(logits, frequency_config, {}, history);
+  const auto frequency_distribution = superroc::sampling::BuildDistribution(
+      logits, frequency_config, {}, history);
   Expect(frequency_distribution.best_token() == 1,
          "frequency penalty scales with occurrence count");
 
   superroc::sampling::SamplingConfig presence_config;
   presence_config.presence_penalty = 0.7F;
-  const auto presence_distribution =
-      superroc::sampling::BuildDistribution(logits, presence_config, {}, history);
+  const auto presence_distribution = superroc::sampling::BuildDistribution(
+      logits, presence_config, {}, history);
   Expect(presence_distribution.best_token() == 1,
          "presence penalty applies once when a token is present");
 }
@@ -245,7 +252,8 @@ void TestFastGreedyMatchesNormalizedPenaltyRoute() {
   superroc::sampling::SamplerState sampler(config, history);
 
   const auto expected =
-      superroc::sampling::BuildDistribution(logits, config, history).best_token();
+      superroc::sampling::BuildDistribution(logits, config, history)
+          .best_token();
   const auto actual = sampler.Sample(logits);
 
   Expect(actual == expected,
@@ -312,7 +320,8 @@ void TestDistributionIsNormalized() {
   const std::array<float, 4> logits = {2.0F, 1.0F, 0.0F, -1.0F};
   superroc::sampling::SamplingConfig config;
   config.temperature = 0.8F;
-  const auto distribution = superroc::sampling::BuildDistribution(logits, config);
+  const auto distribution =
+      superroc::sampling::BuildDistribution(logits, config);
   double sum = 0.0;
   for (const auto& entry : distribution.entries()) {
     sum += entry.value;
@@ -408,7 +417,8 @@ void TestZeroDrawAndNonFiniteCandidates() {
       std::numeric_limits<float>::infinity(), 0.0F,
       -std::numeric_limits<float>::infinity()};
   for (const auto seed : {0, 73, 808}) {
-    superroc::sampling::SamplerState masked({.temperature = 1.0F, .seed = seed});
+    superroc::sampling::SamplerState masked(
+        {.temperature = 1.0F, .seed = seed});
     auto rng = masked.rng_state();
     const auto expected =
         superroc::sampling::BuildDistribution(masked_logits, masked.config())
@@ -435,7 +445,8 @@ void TestStrategyReplayAgainstReference() {
             distribution.entries().begin(), distribution.entries().end());
         if (config.top_k == 0 && config.top_p == 1.0F &&
             !(config.min_p > 0.0F && config.min_keep > 1)) {
-          std::ranges::sort(ordered, {}, &superroc::sampling::Probability::token);
+          std::ranges::sort(ordered, {},
+                            &superroc::sampling::Probability::token);
         }
         auto rng = sampler.rng_state();
         double threshold = superroc::sampling::Uniform(&rng);
@@ -503,13 +514,13 @@ void TestBlockSkippedTopKAgainstFullSort() {
         superroc::sampling::SamplingConfig{.temperature = 1.0F, .top_k = 1},
         superroc::sampling::SamplingConfig{.temperature = 0.7F, .top_k = 300},
         superroc::sampling::SamplingConfig{.temperature = 1.0F,
-                                       .top_k = 64,
-                                       .repeat_penalty = 1.3F,
-                                       .presence_penalty = -9.0F},
+                                           .top_k = 64,
+                                           .repeat_penalty = 1.3F,
+                                           .presence_penalty = -9.0F},
         superroc::sampling::SamplingConfig{.temperature = 0.8F,
-                                       .top_k = 20,
-                                       .repeat_penalty = 0.5F,
-                                       .frequency_penalty = 2.0F}}) {
+                                           .top_k = 20,
+                                           .repeat_penalty = 0.5F,
+                                           .frequency_penalty = 2.0F}}) {
     superroc::sampling::SamplerState sampler(config, history);
     sampler.Accept(std::span(history).first(3));
     const auto expected = superroc::sampling::BuildDistribution(
@@ -597,8 +608,8 @@ void TestResponsePenaltyScope() {
   sampler.Accept(std::vector<TokenId>{0, 0});
   sampler.Accept(std::vector<TokenId>(80, 2));
   const std::array<float, 3> expected_logits{1.75F, 2, -39.25F};
-  const auto expected =
-      superroc::sampling::BuildDistribution(expected_logits, {.temperature = 1});
+  const auto expected = superroc::sampling::BuildDistribution(
+      expected_logits, {.temperature = 1});
   for (const auto token : {0U, 1U, 2U})
     Expect(std::abs(sampler.Distribution(logits).probability(token) -
                     expected.probability(token)) < 1e-12,

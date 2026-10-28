@@ -69,10 +69,10 @@ bool HostF32Rows(const TensorRef& t, std::vector<float>* rows) {
       for (std::size_t r = 0; r < static_cast<std::size_t>(t.rows); ++r) {
         if (t.type == core::GgmlType::kQ5_K) {
           superroc::quant::DequantizeQ5_K(base + r * row_bytes,
-                                      rows->data() + r * cols, cols);
+                                          rows->data() + r * cols, cols);
         } else {
           superroc::quant::DequantizeQ6_K(base + r * row_bytes,
-                                      rows->data() + r * cols, cols);
+                                          rows->data() + r * cols, cols);
         }
       }
       return true;

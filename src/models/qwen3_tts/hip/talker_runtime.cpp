@@ -583,7 +583,7 @@ struct TalkerHipRuntime::Impl {
       return;
     }
     superroc::hip::LaunchHipblasGEMMBF16(blas, weights, inputs_bfloat16, output,
-                                     batch, rows, columns, stream);
+                                         batch, rows, columns, stream);
   }
 
   /// Runs projections that share one input. The grouped GEMV produces the same
@@ -672,7 +672,7 @@ struct TalkerHipRuntime::Impl {
         text_embedding, core::GgmlType::kBF16, prompt_ids.get(), hidden.get(),
         token_ids.size(), config.text_hidden_size, stream);
     superroc::hip::LaunchFloatToBfloat16(hidden.get(), bfloat16_scratch.get(),
-                                     elements, stream);
+                                         elements, stream);
     Gemm(text_projection_fc1, bfloat16_scratch.get(), normalized.get(),
          token_ids.size(), config.text_hidden_size, config.text_hidden_size);
     LaunchBfloat16BiasSilu(normalized.get(), text_projection_fc1_bias,
@@ -729,7 +729,7 @@ struct TalkerHipRuntime::Impl {
       throw std::length_error("Qwen3-TTS predictor input shape is invalid");
     }
     superroc::hip::LaunchFloatToBfloat16(input, bfloat16_scratch.get(),
-                                     rows * talker.hidden_size, stream);
+                                         rows * talker.hidden_size, stream);
     Gemm(predictor_projection, bfloat16_scratch.get(), hidden.get(), rows,
          predictor.hidden_size, talker.hidden_size);
     LaunchBfloat16Bias(hidden.get(), predictor_projection_bias, hidden.get(),
@@ -827,7 +827,7 @@ struct TalkerHipRuntime::Impl {
                          predictor_temperature, sampling_rng);
     }
     superroc::hip::LaunchGPUArgmax(logits.get(), predictor_token.get(),
-                               config.vocab_size, stream);
+                                   config.vocab_size, stream);
     std::uint32_t token = 0;
     RequireHip(hipMemcpyAsync(&token, predictor_token.get(), sizeof(token),
                               hipMemcpyDeviceToHost, stream),

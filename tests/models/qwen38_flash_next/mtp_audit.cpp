@@ -130,10 +130,10 @@ void AuditMtp(q::rocm::Executor& exec, const q::rocm::DeviceModel& device,
   auto vision =
       superroc::models::qwen::vision::Encoder::Open(path, {}, c.hidden_size);
   for (unsigned sequence = 0; sequence < 2; ++sequence) {
-    sessions[sequence] =
-        exec.CreateSession(superroc::core::SessionMode::kSpeculative, 64, &error);
-    serial[sequence] =
-        exec.CreateSession(superroc::core::SessionMode::kSpeculative, 64, &error);
+    sessions[sequence] = exec.CreateSession(
+        superroc::core::SessionMode::kSpeculative, 64, &error);
+    serial[sequence] = exec.CreateSession(
+        superroc::core::SessionMode::kSpeculative, 64, &error);
     references[sequence] = std::make_unique<q::ReferenceModel>(
         weights, nullptr, 64, q::ReferenceModel::Storage::kDecode);
     Require(sessions[sequence] && serial[sequence], error);
@@ -153,8 +153,8 @@ void AuditMtp(q::rocm::Executor& exec, const q::rocm::DeviceModel& device,
       sessions[sequence]->ConfigureVision(prompt, vision, stream);
       serial[sequence]->ConfigureVision(prompt, vision, stream);
     }
-    auto origin =
-        exec.CreateSession(superroc::core::SessionMode::kSpeculative, 64, &error);
+    auto origin = exec.CreateSession(superroc::core::SessionMode::kSpeculative,
+                                     64, &error);
     Require(origin != nullptr, error);
     const auto encoded = tokenizer.Encode(
         sequence == 0
@@ -174,9 +174,10 @@ void AuditMtp(q::rocm::Executor& exec, const q::rocm::DeviceModel& device,
     Hip(hipMemcpyAsync(input, initial.data(), initial.size() * sizeof(float),
                        hipMemcpyHostToDevice, stream));
     for (unsigned step = 0; step < 4; ++step) {
-      const std::int32_t token = sequence == 1 && step < 3
-                                     ? superroc::models::qwen::vision::kImageToken
-                                     : 42 + step + sequence;
+      const std::int32_t token =
+          sequence == 1 && step < 3
+              ? superroc::models::qwen::vision::kImageToken
+              : 42 + step + sequence;
       Trace cpu(c), gpu(c), replay(c);
       q::MtpCandidateLogits candidates;
       Require(exec.MtpForward(*sessions[sequence], std::span(&token, 1),
@@ -285,8 +286,8 @@ void AuditMtp(q::rocm::Executor& exec, const q::rocm::DeviceModel& device,
   q::MtpCandidateLogits replay_reference;
   for (const bool kv_only : {false, true}) {
     for (const auto chunk : {1U, 8U, 9U, 32U, 33U}) {
-      auto replay_session =
-          exec.CreateSession(superroc::core::SessionMode::kSpeculative, 64, &error);
+      auto replay_session = exec.CreateSession(
+          superroc::core::SessionMode::kSpeculative, 64, &error);
       Require(replay_session != nullptr, error);
       for (unsigned offset = 0; offset < replay_rows; offset += chunk) {
         const auto count = std::min(chunk, replay_rows - offset);

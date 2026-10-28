@@ -44,35 +44,40 @@ public:
 
   void AddMetadataString(std::string_view key, std::string_view val) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
     AppendString(val);
     metadata_count_++;
   }
 
   void AddMetadataUint32(std::string_view key, std::uint32_t val) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kUint32));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kUint32));
     AppendPod(val);
     metadata_count_++;
   }
 
   void AddMetadataUint64(std::string_view key, std::uint64_t val) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kUint64));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kUint64));
     AppendPod(val);
     metadata_count_++;
   }
 
   void AddMetadataInt32(std::string_view key, std::int32_t val) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kInt32));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kInt32));
     AppendPod(val);
     metadata_count_++;
   }
 
   void AddMetadataFloat32(std::string_view key, float val) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kFloat32));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kFloat32));
     AppendPod(val);
     metadata_count_++;
   }
@@ -88,8 +93,10 @@ public:
   void AddMetadataInt32Array(std::string_view key,
                              const std::vector<std::int32_t>& values) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kArray));
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kInt32));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kArray));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kInt32));
     AppendPod(static_cast<std::uint64_t>(values.size()));
     for (const auto value : values) {
       AppendPod(value);
@@ -98,10 +105,12 @@ public:
   }
 
   template<class T>
-  void AddMetadataArray(std::string_view key, superroc::core::GgufValueType type,
+  void AddMetadataArray(std::string_view key,
+                        superroc::core::GgufValueType type,
                         const std::vector<T>& values) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kArray));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kArray));
     AppendPod(static_cast<std::uint32_t>(type));
     AppendPod(static_cast<std::uint64_t>(values.size()));
     for (const auto value : values)
@@ -145,10 +154,10 @@ public:
       std::size_t elements = 1;
       for (auto dimension : tensor.dims)
         elements *= dimension;
-      payload_bytes =
-          std::max(payload_bytes,
-                   static_cast<std::size_t>(tensor.offset) +
-                       superroc::quant::EncodedSizeBytes(tensor.type, elements));
+      payload_bytes = std::max(
+          payload_bytes,
+          static_cast<std::size_t>(tensor.offset) +
+              superroc::quant::EncodedSizeBytes(tensor.type, elements));
     }
     // Append payload dummy data
     buffer_.resize(buffer_.size() + payload_bytes, 0xAB);
@@ -202,18 +211,18 @@ void TestBasicGgufParsing() {
   builder.AddMetadataInt32Array("qwen35.rope.dimension_sections",
                                 {64, 0, 0, 0});
 
-  builder.AddTensor("token_embd.weight", {2560, 8}, superroc::core::GgmlType::kBF16,
-                    0);
+  builder.AddTensor("token_embd.weight", {2560, 8},
+                    superroc::core::GgmlType::kBF16, 0);
   builder.AddTensor("blk.0.attn_q.weight", {256, 8},
                     superroc::core::GgmlType::kQ4_K, 64);
-  builder.AddTensor("mtp.0.proj.weight", {256, 8}, superroc::core::GgmlType::kQ8_0,
-                    128);
+  builder.AddTensor("mtp.0.proj.weight", {256, 8},
+                    superroc::core::GgmlType::kQ8_0, 128);
 
   auto binary = builder.Build(512);
 
   std::string err;
-  auto reader =
-      superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &err);
+  auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                       binary.size(), &err);
   Expect(reader != nullptr, "Reader open succeeds: " + err);
   Expect(reader->GetVersion() == 3, "GGUF version 3");
   Expect(reader->GetTensorCount() == 3, "3 tensors parsed");
@@ -285,8 +294,8 @@ void TestQwen38_27BParsing() {
   builder.AddMetadataUint32("qwen35.rope.dimension_count", 64);
   builder.AddMetadataFloat32("qwen35.rope.freq_base", 10000000.0F);
 
-  builder.AddTensor("token_embd.weight", {5120, 8}, superroc::core::GgmlType::kBF16,
-                    0);
+  builder.AddTensor("token_embd.weight", {5120, 8},
+                    superroc::core::GgmlType::kBF16, 0);
   builder.AddTensor("blk.3.attn_q.weight", {256, 8},
                     superroc::core::GgmlType::kQ4_K, 64);
   builder.AddTensor("blk.63.ffn_gate.weight", {256, 8},
@@ -297,8 +306,8 @@ void TestQwen38_27BParsing() {
   auto binary = builder.Build(512);
 
   std::string err;
-  auto reader =
-      superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &err);
+  auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                       binary.size(), &err);
   Expect(reader != nullptr, "Reader open succeeds: " + err);
   Expect(reader->GetTensorCount() == 4, "4 tensors parsed for 27B");
 
@@ -345,13 +354,15 @@ void TestSplitGgufDiscovery() {
   first.AddMetadataUint32("split.no", 0);
   first.AddMetadataUint32("split.count", 2);
   first.AddMetadataInt32("split.tensors.count", 2);
-  first.AddTensor("token_embd.weight", {8, 4}, superroc::core::GgmlType::kBF16, 0);
+  first.AddTensor("token_embd.weight", {8, 4}, superroc::core::GgmlType::kBF16,
+                  0);
 
   GgufBuilder second;
   second.AddMetadataUint32("split.no", 1);
   second.AddMetadataUint32("split.count", 2);
   second.AddMetadataInt32("split.tensors.count", 2);
-  second.AddTensor("output_norm.weight", {4}, superroc::core::GgmlType::kF32, 0);
+  second.AddTensor("output_norm.weight", {4}, superroc::core::GgmlType::kF32,
+                   0);
 
   WriteBinaryFile(first_path, first.Build(128));
   WriteBinaryFile(second_path, second.Build(128));
@@ -389,8 +400,8 @@ void TestVisionExclusionValidation() {
   auto binary = builder.Build();
 
   std::string err;
-  auto reader =
-      superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &err);
+  auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                       binary.size(), &err);
   Expect(reader != nullptr, "Reader open succeeds");
   Expect(reader->HasVisionTensors(), "Vision tensors detected");
 
@@ -421,8 +432,8 @@ void TestQuantizationLabel() {
                       superroc::core::GgmlType::kF32, 192);
     auto binary = builder.Build(512);
     std::string err;
-    auto reader =
-        superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &err);
+    auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                         binary.size(), &err);
     Expect(reader != nullptr, "Q8_0 label reader opens: " + err);
     Expect(reader->GetQuantizationLabel() == "Q8_0",
            "dominant type beats a stale ftype and F32 norms outnumbering it");
@@ -440,8 +451,8 @@ void TestQuantizationLabel() {
                       superroc::core::GgmlType::kQ4_K, 128);
     auto binary = builder.Build(512);
     std::string err;
-    auto reader =
-        superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &err);
+    auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                         binary.size(), &err);
     Expect(reader != nullptr, "mixed label reader opens: " + err);
     Expect(reader->GetQuantizationLabel() == "Q5_K mixed",
            "a shard with no dominant format is reported as mixed");
@@ -453,8 +464,8 @@ void TestQuantizationLabel() {
                       superroc::core::GgmlType::kBF16, 0);
     auto binary = builder.Build(512);
     std::string err;
-    auto reader =
-        superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &err);
+    auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                         binary.size(), &err);
     Expect(reader != nullptr, "BF16 label reader opens: " + err);
     Expect(reader->GetQuantizationLabel() == "BF16",
            "a single-format artifact is named without a suffix");
@@ -465,23 +476,23 @@ void TestMalformedGgufRejection() {
   // Bad magic
   const std::uint8_t bad_magic[24] = {'N', 'O', 'P', 'E', 3, 0, 0, 0};
   std::string err;
-  auto r1 =
-      superroc::core::GgufReader::OpenMemory(bad_magic, sizeof(bad_magic), &err);
+  auto r1 = superroc::core::GgufReader::OpenMemory(bad_magic, sizeof(bad_magic),
+                                                   &err);
   Expect(r1 == nullptr, "Bad magic rejected");
 
   // Truncated buffer
   const std::uint8_t truncated[10] = {'G', 'G', 'U', 'F'};
-  auto r2 =
-      superroc::core::GgufReader::OpenMemory(truncated, sizeof(truncated), &err);
+  auto r2 = superroc::core::GgufReader::OpenMemory(truncated, sizeof(truncated),
+                                                   &err);
   Expect(r2 == nullptr, "Truncated buffer rejected");
 }
 
 void TestHostileHeaders() {
   const auto rejects = [](const std::vector<std::uint8_t>& bytes) {
     std::string error;
-    Expect(
-        !superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size(), &error),
-        "malformed GGUF must fail closed");
+    Expect(!superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size(),
+                                                   &error),
+           "malformed GGUF must fail closed");
     Expect(!error.empty(), "failed parse explains rejection");
   };
   const auto patch = [](auto& bytes, std::size_t offset, auto value) {
@@ -510,10 +521,10 @@ void TestHostileHeaders() {
     patch(bytes, 33, std::uint32_t{0x108});  // Must not truncate to STRING.
     rejects(bytes);
   }
-  for (const auto type :
-       {superroc::core::GgufValueType::kString, superroc::core::GgufValueType::kUint64,
-        superroc::core::GgufValueType::kInt32,
-        superroc::core::GgufValueType::kFloat32}) {
+  for (const auto type : {superroc::core::GgufValueType::kString,
+                          superroc::core::GgufValueType::kUint64,
+                          superroc::core::GgufValueType::kInt32,
+                          superroc::core::GgufValueType::kFloat32}) {
     GgufBuilder builder;
     builder.AddMetadataArray<std::uint64_t>("x", type, {});
     auto bytes = builder.Build();
@@ -559,7 +570,8 @@ void TestVisionMetadataArrays() {
                                          superroc::core::GgufValueType::kBool,
                                          {0, 1, 0});
   auto bytes = builder.Build();
-  auto reader = superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size());
+  auto reader =
+      superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size());
   Expect(reader != nullptr, "vision metadata parses");
   Expect(std::get<std::vector<double>>(
              reader->FindMetadata("clip.vision.image_mean")->value) ==
@@ -588,7 +600,8 @@ void TestNarrowIntegerArrays() {
   builder.AddMetadataArray<std::int16_t>("i16", GgufValueType::kInt16,
                                          {-32768, 32767});
   auto bytes = builder.Build();
-  auto reader = superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size());
+  auto reader =
+      superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size());
   Expect(reader != nullptr, "narrow integer arrays parse");
   Expect(
       std::get<std::vector<std::uint64_t>>(reader->FindMetadata("u8")->value) ==
@@ -618,17 +631,17 @@ void TestIntegerRoutingTensor() {
                     superroc::core::GgmlType::kI32, 0);
   auto bytes = builder.Build(6 * 64 * sizeof(std::int32_t));
   std::string error;
-  auto reader =
-      superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size(), &error);
+  auto reader = superroc::core::GgufReader::OpenMemory(bytes.data(),
+                                                       bytes.size(), &error);
   Expect(reader != nullptr, "integer expert routing table loads: " + error);
   const auto* table = reader->FindTensor("blk.0.ffn_gate_tid2eid.weight");
   Expect(table && table->type == superroc::core::GgmlType::kI32 &&
              table->size_bytes == 6 * 64 * sizeof(std::int32_t),
          "integer routing payload retains its storage type and exact extent");
   bytes.pop_back();
-  Expect(
-      !superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size(), &error),
-      "truncated integer routing table is rejected");
+  Expect(!superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size(),
+                                                 &error),
+         "truncated integer routing table is rejected");
   Expect(superroc::quant::EncodedSizeBytes(
              superroc::core::GgmlType::kI32,
              std::numeric_limits<std::size_t>::max() / 4 + 1) == 0,

@@ -95,8 +95,8 @@ void TestQ5KBlockGEMVEquivalence() {
   HIP_CHECK(
       hipMemcpy(d_x, h_x.data(), K * sizeof(float), hipMemcpyHostToDevice));
 
-  superroc::hip::LaunchQ8KBlockGEMV(d_A, superroc::core::GgmlType::kQ5_K, d_x, d_y, M,
-                                K, nullptr);
+  superroc::hip::LaunchQ8KBlockGEMV(d_A, superroc::core::GgmlType::kQ5_K, d_x,
+                                    d_y, M, K, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
 
   std::vector<float> y_gpu(M);
@@ -194,8 +194,8 @@ void TestQ6KBlockGEMVEquivalence() {
   HIP_CHECK(
       hipMemcpy(d_x, h_x.data(), K * sizeof(float), hipMemcpyHostToDevice));
 
-  superroc::hip::LaunchQ8KBlockGEMV(d_A, superroc::core::GgmlType::kQ6_K, d_x, d_y, M,
-                                K, nullptr);
+  superroc::hip::LaunchQ8KBlockGEMV(d_A, superroc::core::GgmlType::kQ6_K, d_x,
+                                    d_y, M, K, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
 
   std::vector<float> y_gpu(M);
@@ -253,7 +253,8 @@ void TestFusedSSMInputProjectionMatchesGemv(superroc::core::GgmlType type,
   constexpr std::size_t kInnerSize = 6144;
   constexpr std::size_t kTimeStepRank = 48;
 
-  const std::size_t row_bytes = superroc::quant::QuantizedRowBytes(type, kHidden);
+  const std::size_t row_bytes =
+      superroc::quant::QuantizedRowBytes(type, kHidden);
   superroc::test::Expect(row_bytes != 0, "row bytes for the tested format");
 
   std::uint32_t seed = 991U;
@@ -315,14 +316,14 @@ void TestFusedSSMInputProjectionMatchesGemv(superroc::core::GgmlType type,
   float* const split_alpha = split_gate + kInnerSize;
   float* const split_beta = split_alpha + kTimeStepRank;
   const auto mode = superroc::models::qwen::QwenGemmMode::kHipDecode;
-  superroc::hip::LaunchGEMV(d_qkv, type, d_x, split_qkv, kQkvSize, kHidden, nullptr,
-                        mode);
+  superroc::hip::LaunchGEMV(d_qkv, type, d_x, split_qkv, kQkvSize, kHidden,
+                            nullptr, mode);
   superroc::hip::LaunchGEMV(d_gate, type, d_x, split_gate, kInnerSize, kHidden,
-                        nullptr, mode);
-  superroc::hip::LaunchGEMV(d_alpha, type, d_x, split_alpha, kTimeStepRank, kHidden,
-                        nullptr, mode);
-  superroc::hip::LaunchGEMV(d_beta, type, d_x, split_beta, kTimeStepRank, kHidden,
-                        nullptr, mode);
+                            nullptr, mode);
+  superroc::hip::LaunchGEMV(d_alpha, type, d_x, split_alpha, kTimeStepRank,
+                            kHidden, nullptr, mode);
+  superroc::hip::LaunchGEMV(d_beta, type, d_x, split_beta, kTimeStepRank,
+                            kHidden, nullptr, mode);
   HIP_CHECK(hipDeviceSynchronize());
 
   std::vector<float> fused(total);
@@ -345,7 +346,7 @@ void TestFusedSSMInputProjectionMatchesGemv(superroc::core::GgmlType type,
   HIP_CHECK(hipMemcpy(d_x2 + kHidden, x.data(), x.size() * sizeof(float),
                       hipMemcpyHostToDevice));
   superroc::hip::LaunchBatchedQuantGEMMFp32(type, d_qkv, d_x2, d_batched, 2,
-                                        kQkvSize, kHidden, nullptr);
+                                            kQkvSize, kHidden, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
   std::vector<float> batched(kQkvSize);
   HIP_CHECK(hipMemcpy(batched.data(), d_batched, kQkvSize * sizeof(float),
@@ -378,10 +379,12 @@ void TestFusedSSMInputProjectionMatchesGemv(superroc::core::GgmlType type,
             << " ] fused SSM input projections vs decode GEMV " << label << ": "
             << mismatches << " of " << total << " rows differ, max abs "
             << worst << std::endl;
-  superroc::test::Expect(finite, "fused and split SSM projections must be finite");
-  superroc::test::Expect(mismatches == 0,
-                     "fused SSM input projections must reproduce the decode "
-                     "GEMV bit for bit");
+  superroc::test::Expect(finite,
+                         "fused and split SSM projections must be finite");
+  superroc::test::Expect(
+      mismatches == 0,
+      "fused SSM input projections must reproduce the decode "
+      "GEMV bit for bit");
 
   HIP_CHECK(hipFree(d_qkv));
   HIP_CHECK(hipFree(d_gate));
@@ -448,10 +451,11 @@ void FillQ6_K(std::vector<std::uint8_t>& bytes, std::size_t rows,
 /// Unsloth Q8 shard carries `ffn_down` as Q6_K on some layers, and that tensor
 /// is 5120x17408 -- a K far longer than any other projection in the model, and
 /// the one shape where the two routes were never compared.
-void TestBatchedFfnDownMatchesGemv(superroc::core::GgmlType type, const char* label,
-                                   std::size_t rows, std::size_t columns,
-                                   auto&& fill) {
-  const std::size_t row_bytes = superroc::quant::QuantizedRowBytes(type, columns);
+void TestBatchedFfnDownMatchesGemv(superroc::core::GgmlType type,
+                                   const char* label, std::size_t rows,
+                                   std::size_t columns, auto&& fill) {
+  const std::size_t row_bytes =
+      superroc::quant::QuantizedRowBytes(type, columns);
   superroc::test::Expect(row_bytes != 0, "row bytes for the tested format");
 
   std::uint32_t seed = 4242U;
@@ -487,7 +491,7 @@ void TestBatchedFfnDownMatchesGemv(superroc::core::GgmlType type, const char* la
       hipMemcpy(d_x, x.data(), columns * sizeof(float), hipMemcpyHostToDevice));
 
   superroc::hip::LaunchGEMV(d_w, type, d_x, d_reference, rows, columns, nullptr,
-                        superroc::models::qwen::QwenGemmMode::kHipDecode);
+                            superroc::models::qwen::QwenGemmMode::kHipDecode);
   HIP_CHECK(hipDeviceSynchronize());
   std::vector<float> reference(rows);
   HIP_CHECK(hipMemcpy(reference.data(), d_reference, rows * sizeof(float),
@@ -513,8 +517,9 @@ void TestBatchedFfnDownMatchesGemv(superroc::core::GgmlType type, const char* la
                         columns * sizeof(float), hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(d_x, batch_x[row].data(), columns * sizeof(float),
                         hipMemcpyHostToDevice));
-    superroc::hip::LaunchGEMV(d_w, type, d_x, d_reference, rows, columns, nullptr,
-                          superroc::models::qwen::QwenGemmMode::kHipDecode);
+    superroc::hip::LaunchGEMV(d_w, type, d_x, d_reference, rows, columns,
+                              nullptr,
+                              superroc::models::qwen::QwenGemmMode::kHipDecode);
     HIP_CHECK(hipDeviceSynchronize());
     batch_reference[row].resize(rows);
     HIP_CHECK(hipMemcpy(batch_reference[row].data(), d_reference,
@@ -524,7 +529,7 @@ void TestBatchedFfnDownMatchesGemv(superroc::core::GgmlType type, const char* la
   for (std::size_t batch = 2; batch <= 8; ++batch) {
     HIP_CHECK(hipMemset(d_batched, 0, 8 * rows * sizeof(float)));
     superroc::hip::LaunchBatchedQuantGEMMFp32(type, d_w, d_batched_x, d_batched,
-                                          batch, rows, columns, nullptr);
+                                              batch, rows, columns, nullptr);
     HIP_CHECK(hipDeviceSynchronize());
     std::vector<float> batched(batch * rows);
     HIP_CHECK(hipMemcpy(batched.data(), d_batched,
@@ -542,7 +547,7 @@ void TestBatchedFfnDownMatchesGemv(superroc::core::GgmlType type, const char* la
               << mismatches << " of " << (batch * rows) << " differ"
               << std::endl;
     superroc::test::Expect(mismatches == 0,
-                       "batched projection must reproduce the decode GEMV");
+                           "batched projection must reproduce the decode GEMV");
   }
 
   HIP_CHECK(hipFree(d_w));
@@ -556,9 +561,9 @@ void TestBatchedFfnDownMatchesGemv(superroc::core::GgmlType type, const char* la
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen K-quant GEMV ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen K-quant GEMV ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

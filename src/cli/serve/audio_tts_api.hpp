@@ -8,7 +8,8 @@
 
 namespace superroc::server {
 
-inline constexpr std::string_view kAudioTtsApiSchema = "superroc.audio-tts-api.v1";
+inline constexpr std::string_view kAudioTtsApiSchema =
+    "superroc.audio-tts-api.v1";
 
 [[nodiscard]] bool IsAudioTtsApiPath(std::string_view path) noexcept;
 [[nodiscard]] HttpResponse HandleAudioTtsApiRequest(const HttpRequest& request,

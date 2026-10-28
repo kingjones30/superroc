@@ -98,12 +98,12 @@ void TestCausalDecodeRows(unsigned kv_heads) {
           float* const cache32 = fp16 ? nullptr : kv.data();
           void* const cache16 = fp16 ? kv_half.data() : nullptr;
           for (unsigned row = 0; row < batch; ++row) {
-            superroc::hip::LaunchAttention(q.data() + row * width, nullptr, nullptr,
-                                       gated ? g.data() + row * width : nullptr,
-                                       cache32, cache32, cache16, cache16,
-                                       expected.data() + row * width, layer,
-                                       start + row, context, heads, kv_heads,
-                                       dim, nullptr, scratch.data(), true);
+            superroc::hip::LaunchAttention(
+                q.data() + row * width, nullptr, nullptr,
+                gated ? g.data() + row * width : nullptr, cache32, cache32,
+                cache16, cache16, expected.data() + row * width, layer,
+                start + row, context, heads, kv_heads, dim, nullptr,
+                scratch.data(), true);
           }
           const auto reference = expected.CopyToHost();
           for (auto capacity : {row_scratch, scratch.size()}) {
@@ -502,12 +502,12 @@ void TestOnlineAndGraphDecodeFp16Equivalence() {
                       hipMemcpyHostToDevice));
   const std::size_t graph_attention_offset = positions * attention_width;
   const std::size_t graph_kv_offset = positions * kv_width;
-  superroc::hip::LaunchAttention(d_query + graph_attention_offset,
-                             d_key + graph_kv_offset, d_value + graph_kv_offset,
-                             d_gate + graph_attention_offset, d_fp32_cache,
-                             d_fp32_cache + cache_elements, nullptr, nullptr,
-                             d_fp32_out + graph_attention_offset, 0, d_position,
-                             max_context, num_heads, num_kv_heads, head_dim);
+  superroc::hip::LaunchAttention(
+      d_query + graph_attention_offset, d_key + graph_kv_offset,
+      d_value + graph_kv_offset, d_gate + graph_attention_offset, d_fp32_cache,
+      d_fp32_cache + cache_elements, nullptr, nullptr,
+      d_fp32_out + graph_attention_offset, 0, d_position, max_context,
+      num_heads, num_kv_heads, head_dim);
   superroc::hip::LaunchAttention(
       d_query + graph_attention_offset, d_key + graph_kv_offset,
       d_value + graph_kv_offset, d_gate + graph_attention_offset, nullptr,
@@ -584,7 +584,8 @@ void TestSplitKDecodeFp16Equivalence() {
   HIP_CHECK(hipMalloc(&d_fp32_out, attention_width * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_fp16_out, attention_width * sizeof(float)));
   const std::size_t scratch_elements =
-      superroc::hip::detail::DecodeAttentionScratchElements(num_heads, head_dim);
+      superroc::hip::detail::DecodeAttentionScratchElements(num_heads,
+                                                            head_dim);
   HIP_CHECK(hipMalloc(&d_fp32_scratch, scratch_elements * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_fp16_scratch, scratch_elements * sizeof(float)));
   HIP_CHECK(hipMemcpy(d_query, query.data(), query.size() * sizeof(float),
@@ -660,9 +661,9 @@ void TestSplitKDecodeFp16Equivalence() {
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen FP16 KV storage ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen FP16 KV storage ops test");
   if (device_status != 0) {
     return device_status;
   }

@@ -31,8 +31,8 @@ void Expect(bool ok, const std::string& msg) {
   }
 }
 
-const superroc::core::GgufTensorInfo* Require(const superroc::core::GgufReader& reader,
-                                          const std::string& name) {
+const superroc::core::GgufTensorInfo* Require(
+    const superroc::core::GgufReader& reader, const std::string& name) {
   const auto* t = reader.FindTensor(name);
   if (t == nullptr) {
     Fail("missing tensor " + name);
@@ -63,7 +63,8 @@ void ExpectDims(const superroc::core::GgufTensorInfo& t,
   }
 }
 
-void ExpectType(const superroc::core::GgufTensorInfo& t, superroc::core::GgmlType ty) {
+void ExpectType(const superroc::core::GgufTensorInfo& t,
+                superroc::core::GgmlType ty) {
   if (t.type != ty) {
     Fail(std::string(t.name) + " type " +
          std::string(superroc::core::ToString(t.type)) + " expected " +

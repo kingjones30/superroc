@@ -135,8 +135,8 @@ void CheckFailureRecovery(const std::shared_ptr<qfn::Model>& model) {
   Require(snapshot->SizeBytes() < 200ULL * 1024 * 1024,
           "short prompt snapshot retains a full prefill hidden buffer");
 
-  auto peer = model->CreateSession(superroc::core::SessionMode::kAutoregressive, 64,
-                                   &error);
+  auto peer = model->CreateSession(superroc::core::SessionMode::kAutoregressive,
+                                   64, &error);
   Require(peer && peer->Sync(pattern, &error), error);
   const std::vector<float> peer_expected(peer->Logits().begin(),
                                          peer->Logits().end());
@@ -192,10 +192,11 @@ void CheckRollbackReuse(const std::shared_ptr<qfn::Model>& model) {
   qfn::Session::DecodeResult step;
   Require(session->DecodeStep(2, sampler, &step, &error, false), error);
   const auto warm_bytes = session->AllocatedBytes();
-  Require(warm_bytes > empty_bytes &&
-              warm_bytes <= model->SessionBytes(
-                                superroc::core::SessionMode::kSpeculative, context),
-          "rollback allocation exceeded its configured bound");
+  Require(
+      warm_bytes > empty_bytes &&
+          warm_bytes <= model->SessionBytes(
+                            superroc::core::SessionMode::kSpeculative, context),
+      "rollback allocation exceeded its configured bound");
   session->ResetDraftPolicy();
   const auto warm = session->SaveSnapshot(&error);
   Require(warm && session->RestoreSnapshot(*warm, &error), error);
@@ -245,7 +246,8 @@ void CheckImageSnapshotAttachment(const std::shared_ptr<qfn::Model>& model) {
     for (std::size_t i = blue ? 2 : 0; i < pixels.pixels.size(); i += 3)
       pixels.pixels[i] = 255;
     prompt->images.push_back(
-        {std::make_shared<const superroc::core::Image>(std::move(pixels)), grid});
+        {std::make_shared<const superroc::core::Image>(std::move(pixels)),
+         grid});
     prompt->images.back().prefix_identity.fill(blue ? 2 : 1);
     prompt->cache_identity.assign(32, blue ? 2 : 1);
     return prompt;
@@ -379,8 +381,9 @@ void CheckPrefetchHints(const std::shared_ptr<qfn::Model>& model) {
     other[i] = pattern[(i + 1025) % pattern.size()];
   }
   Require(other[0] != tokens[1024], "diverging hint shares its first token");
-  const auto mode = model->HasMtp() ? superroc::core::SessionMode::kSpeculative
-                                    : superroc::core::SessionMode::kAutoregressive;
+  const auto mode = model->HasMtp()
+                        ? superroc::core::SessionMode::kSpeculative
+                        : superroc::core::SessionMode::kAutoregressive;
   auto bulk = model->CreateSession(mode, 6145, &error);
   Require(bulk && bulk->Sync(tokens, &error), error);
   const std::span all(tokens);
@@ -444,8 +447,8 @@ void CheckMtpCacheReplay(const std::shared_ptr<qfn::Model>& model) {
     // suffix. Rebuilding the same prompt must not depend on whether a
     // previous turn already supplied its first 320 tokens.
     for (const auto boundary : {320U, 348U}) {
-      auto session = model->CreateSession(superroc::core::SessionMode::kSpeculative,
-                                          6145, &error);
+      auto session = model->CreateSession(
+          superroc::core::SessionMode::kSpeculative, 6145, &error);
       Require(session &&
                   session->Sync(std::span(prompt).first(boundary), &error) &&
                   session->Sync(prompt, &error),
@@ -527,8 +530,8 @@ void CheckDraftPolicySnapshots(const std::shared_ptr<qfn::Model>& model) {
           &error);
       Require(encoded.has_value(), error);
       const std::vector<std::int32_t> prompt(encoded->begin(), encoded->end());
-      auto live = model->CreateSession(superroc::core::SessionMode::kSpeculative,
-                                       4096, &error);
+      auto live = model->CreateSession(
+          superroc::core::SessionMode::kSpeculative, 4096, &error);
       Require(live && live->Sync(prompt, &error), error);
       sampling::SamplerState sampler(
           test.config,
@@ -553,8 +556,8 @@ void CheckDraftPolicySnapshots(const std::shared_ptr<qfn::Model>& model) {
                            : restored->RestoreSnapshot(*snapshot, &error),
                 error);
         auto replay_sampler = saved_sampler;
-        Require(superroc::test::DecodeMtpReplay(*restored, replay_sampler, 64) ==
-                    expected,
+        Require(superroc::test::DecodeMtpReplay(*restored, replay_sampler,
+                                                64) == expected,
                 "restored MTP policy differs from uninterrupted generation");
         RequireExact(expected_logits, restored->Logits(),
                      "restored MTP policy changed final target logits");
@@ -862,8 +865,8 @@ void CheckLookupBatch(const std::shared_ptr<qfn::Model>& model) {
         model->tokenizer(), messages, {.enable_thinking = false}, &error);
     Require(encoded.has_value(), error);
     const std::vector<std::int32_t> prompt(encoded->begin(), encoded->end());
-    serial.push_back(model->CreateSession(superroc::core::SessionMode::kSpeculative,
-                                          2048, &error));
+    serial.push_back(model->CreateSession(
+        superroc::core::SessionMode::kSpeculative, 2048, &error));
     batched.push_back(model->CreateSession(
         superroc::core::SessionMode::kSpeculative, 2048, &error));
     Require(
@@ -1017,8 +1020,8 @@ void CheckDraftVocabLifecycle(const std::shared_ptr<qfn::Model>& model) {
           "the draft-vocabulary lifecycle needs a one-session model");
   std::string error;
   const auto create = [&] {
-    auto session = model->CreateSession(superroc::core::SessionMode::kSpeculative,
-                                        6145, &error);
+    auto session = model->CreateSession(
+        superroc::core::SessionMode::kSpeculative, 6145, &error);
     Require(session != nullptr, error);
     return session;
   };
@@ -1264,8 +1267,8 @@ void CheckSampledDraftHead(const std::shared_ptr<qfn::Model>& model) {
           "the sampled draft-head check needs a two-session model");
   std::string error;
   const auto create = [&] {
-    auto session = model->CreateSession(superroc::core::SessionMode::kSpeculative,
-                                        6145, &error);
+    auto session = model->CreateSession(
+        superroc::core::SessionMode::kSpeculative, 6145, &error);
     Require(session != nullptr, error);
     return session;
   };
@@ -1279,8 +1282,8 @@ void CheckSampledDraftHead(const std::shared_ptr<qfn::Model>& model) {
   auto json = std::make_shared<sampling::TokenConstraint>();
   json->grammar = sampling::JsonConstraint::Compile(
       superroc::json::parse(R"({"type":"object","properties":{"summary":)"
-                        R"({"type":"string"}},"required":["summary"],)"
-                        R"("additionalProperties":false})"),
+                            R"({"type":"string"}},"required":["summary"],)"
+                            R"("additionalProperties":false})"),
       true);
   json->vocabulary = std::make_shared<sampling::ConstraintVocabulary>(
       model->tokenizer().GetVocabSize(), [&](std::uint32_t id) {
@@ -1586,7 +1589,8 @@ void CheckExecutionModes(const std::shared_ptr<qfn::Model>& model,
     for (std::size_t i = 0; i < pixels.pixels.size(); ++i)
       pixels.pixels[i] = static_cast<std::uint8_t>((i * 37 + i / 64) % 256);
     image->images.push_back(
-        {std::make_shared<const superroc::core::Image>(std::move(pixels)), grid});
+        {std::make_shared<const superroc::core::Image>(std::move(pixels)),
+         grid});
     image->images.back().prefix_identity.fill(3);
     image->cache_identity.assign(32, 3);
     ar->ConfigureVision(image);
@@ -2021,8 +2025,8 @@ int main(int argc, char** argv) {
                                                    prefix.end());
       for (std::size_t c = 0; c < configs.size(); ++c) {
         const bool sampled = configs[c].uses_random_sampling();
-        auto ar = model->CreateSession(superroc::core::SessionMode::kAutoregressive,
-                                       6145, &error);
+        auto ar = model->CreateSession(
+            superroc::core::SessionMode::kAutoregressive, 6145, &error);
         auto mtp = model->CreateSession(
             model->HasMtp() ? superroc::core::SessionMode::kSpeculative
                             : superroc::core::SessionMode::kAutoregressive,

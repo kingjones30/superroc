@@ -61,12 +61,12 @@ int main() {
 
   const auto expected = MakeDatabase();
   std::string error;
-  Expect(superroc::hip::detail::SaveHipblasLtPlanDatabase(database_path, expected,
-                                                      &error),
+  Expect(superroc::hip::detail::SaveHipblasLtPlanDatabase(database_path,
+                                                          expected, &error),
          "save database: " + error);
 
-  const auto loaded =
-      superroc::hip::detail::LoadHipblasLtPlanDatabase(database_path, expected.key);
+  const auto loaded = superroc::hip::detail::LoadHipblasLtPlanDatabase(
+      database_path, expected.key);
   Expect(loaded.status == HipblasLtPlanDatabaseLoadStatus::kLoaded,
          "load compatible database");
   Expect(loaded.database.key == expected.key, "round-trip database key");
@@ -113,8 +113,8 @@ int main() {
       auto update = MakeDatabase();
       update.records[0].batch_size = i;
       std::string failure;
-      if (!superroc::hip::detail::SaveHipblasLtPlanDatabase(concurrent_path, update,
-                                                        &failure))
+      if (!superroc::hip::detail::SaveHipblasLtPlanDatabase(concurrent_path,
+                                                            update, &failure))
         writers_ok = false;
     });
   for (auto& writer : writers)

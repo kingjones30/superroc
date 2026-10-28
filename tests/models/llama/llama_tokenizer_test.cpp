@@ -258,7 +258,8 @@ int main() {
   if (reader == nullptr) {
     Fail("open GGUF: " + error);
   }
-  auto tokenizer = superroc::models::llama::SpmTokenizer::FromGguf(*reader, &error);
+  auto tokenizer =
+      superroc::models::llama::SpmTokenizer::FromGguf(*reader, &error);
   if (!tokenizer.has_value()) {
     Fail("FromGguf: " + error);
   }

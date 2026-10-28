@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+
 #include "src/core/env_compat.hpp"
 
 namespace superroc::hip {

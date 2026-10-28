@@ -249,7 +249,8 @@ public:
   }
 
   [[nodiscard]] TextDecodeSelection SelectNext(
-      TextRunnerState& state, superroc::sampling::SamplerState&) const override {
+      TextRunnerState& state,
+      superroc::sampling::SamplerState&) const override {
     auto& fake = RequireFakeState(state);
     if (!fake.frontier.has_value()) {
       throw std::logic_error("fake state has no decode frontier");
@@ -1537,8 +1538,8 @@ void TestNewImageGetsAStableCheckpoint() {
     using SnapshotRunner::SnapshotRunner;
     void SetPromptContext(
         TextRunnerState&,
-        std::shared_ptr<const superroc::server::TextPromptContext>) const override {
-    }
+        std::shared_ptr<const superroc::server::TextPromptContext>)
+        const override {}
   };
   auto stats = std::make_shared<FakeStats>();
   auto runner = std::make_shared<ContextRunner>(stats, 64, 256, 1024);
@@ -1976,7 +1977,8 @@ void TestSnapshotCacheCapacityIsReportedAtStartup() {
               std::make_shared<SnapshotRunner>(stats, 64, 256, budget);
           runner->retained_snapshot_ceiling_bytes = ceiling;
           const auto host_budget = superroc::server::HostSnapshotBudgetBytes();
-          const auto host_ceiling = superroc::server::HostSnapshotCeilingBytes();
+          const auto host_ceiling =
+              superroc::server::HostSnapshotCeilingBytes();
           std::ostringstream startup_log;
           auto* previous = std::clog.rdbuf(startup_log.rdbuf());
           {
@@ -2318,9 +2320,10 @@ void TestUnconstrainedNativeToolsSkipTheGrammar() {
         std::optional<superroc::sampling::JsonConstraint::ToolFormat> format;
         const auto constrained = superroc::server::ConstrainChatRequest(
             request, ling, &sampling, &format);
-        Expect(!constrained && !sampling.constraint &&
-                   format == superroc::sampling::JsonConstraint::ToolFormat::kJson,
-               "Ling3 tools reach the model's template with no grammar");
+        Expect(
+            !constrained && !sampling.constraint &&
+                format == superroc::sampling::JsonConstraint::ToolFormat::kJson,
+            "Ling3 tools reach the model's template with no grammar");
         Expect(refusal(request, plain) ==
                    "model does not support structured output",
                "without the hook a runner with no vocabulary refuses tools");
@@ -2368,8 +2371,8 @@ void TestFlintToolGrammarStartsInTheAutoPhase() {
            R"("required":["cmd"],"additionalProperties":false})"}};
   superroc::sampling::SamplingConfig sampling;
   std::optional<superroc::sampling::JsonConstraint::ToolFormat> format;
-  const auto constrained =
-      superroc::server::ConstrainChatRequest(request, runner, &sampling, &format);
+  const auto constrained = superroc::server::ConstrainChatRequest(
+      request, runner, &sampling, &format);
   Expect(constrained && sampling.constraint &&
              format == superroc::sampling::JsonConstraint::ToolFormat::kFlint,
          "Flint tool requests are constrained in the auto phase");
@@ -2399,7 +2402,8 @@ void TestServerInstructionsAreFraming() {
   using namespace superroc::tokenization;
   class ConstraintRunner final : public FakeRunner {
   public:
-    explicit ConstraintRunner(superroc::sampling::JsonConstraint::ToolFormat format)
+    explicit ConstraintRunner(
+        superroc::sampling::JsonConstraint::ToolFormat format)
         : FakeRunner(std::make_shared<FakeStats>()), format_(format) {}
     superroc::sampling::JsonConstraint::ToolFormat ToolFormat() const override {
       return format_;
@@ -2479,11 +2483,11 @@ void TestServerInstructionsAreFraming() {
         std::optional<superroc::sampling::JsonConstraint::ToolFormat> format;
         const auto constrained = superroc::server::ConstrainChatRequest(
             request, runner, &sampling, &format);
-        Expect(
-            constrained &&
-                format == superroc::sampling::JsonConstraint::ToolFormat::kJson &&
-                sampling.constraint,
-            "the actual request path selects and binds the JSON fallback");
+        Expect(constrained &&
+                   format ==
+                       superroc::sampling::JsonConstraint::ToolFormat::kJson &&
+                   sampling.constraint,
+               "the actual request path selects and binds the JSON fallback");
         Expect(constrained->messages.front().content ==
                    (role == ChatRole::kUser ? "" : client),
                "server instructions do not mutate client system/developer "
@@ -2614,18 +2618,18 @@ void TestServerInstructionsAreFraming() {
         std::optional<superroc::sampling::JsonConstraint::ToolFormat> format;
         std::optional<ChatRequest> result;
         try {
-          result = superroc::server::ConstrainChatRequest(request, native_runner,
-                                                      &sampled, &format);
+          result = superroc::server::ConstrainChatRequest(
+              request, native_runner, &sampled, &format);
         } catch (const std::invalid_argument&) {
           // An impossible strict schema is rejected before generation.
           Expect(strict, "only strict schemas may be rejected");
           continue;
         }
-        Expect(
-            result &&
-                format == superroc::sampling::JsonConstraint::ToolFormat::kQwen &&
-                sampled.constraint,
-            "a native runner keeps native calls for every schema");
+        Expect(result &&
+                   format ==
+                       superroc::sampling::JsonConstraint::ToolFormat::kQwen &&
+                   sampled.constraint,
+               "a native runner keeps native calls for every schema");
         Expect(result->messages.front().framing_suffix.empty() &&
                    result->messages.front().content == "Be concise.",
                "a native runner adds no tool instruction to the prompt");

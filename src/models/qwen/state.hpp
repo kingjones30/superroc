@@ -62,7 +62,8 @@ struct QwenTensorRef {
       const std::size_t block_idx = index / kBlockSize;
       const std::size_t pos = index % kBlockSize;
       const auto* block =
-          reinterpret_cast<const superroc::quant::block_q8_K*>(data) + block_idx;
+          reinterpret_cast<const superroc::quant::block_q8_K*>(data) +
+          block_idx;
       return block->d * static_cast<float>(block->qs[pos]);
     }
     if (type == core::GgmlType::kQ8_0) {
@@ -71,7 +72,8 @@ struct QwenTensorRef {
       const std::size_t block_idx = index / kBlockSize;
       const std::size_t pos = index % kBlockSize;
       const auto* block =
-          reinterpret_cast<const superroc::quant::block_q8_0*>(data) + block_idx;
+          reinterpret_cast<const superroc::quant::block_q8_0*>(data) +
+          block_idx;
       return superroc::quant::Fp16ToFloat(block->d) *
              static_cast<float>(block->qs[pos]);
     }

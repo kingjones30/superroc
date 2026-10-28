@@ -126,7 +126,8 @@ int main(int argc, char** argv) {
         R"({"prompt":"a red cube","size":"256x256junk"})",
         R"({"prompt":"a red cube","unknown":true})"}) {
     http.body = body;
-    assert(superroc::server::HandleImageApiRequest(http, service).status == 400);
+    assert(superroc::server::HandleImageApiRequest(http, service).status ==
+           400);
   }
   http.body = R"({"prompt":"a red cube","model":"unknown"})";
   assert(superroc::server::HandleImageApiRequest(http, service).status == 404);

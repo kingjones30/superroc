@@ -1,6 +1,7 @@
 // ling3_kda.hpp — KDA (Kimi Delta Attention) block of a Ling-3.0 `bailingmoe3`
-// layer. Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with
-// LG's drafts. Standalone deliverable of lane LK for the Ling-on-superroc build.
+// layer. Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse
+// with LG's drafts. Standalone deliverable of lane LK for the Ling-on-superroc
+// build.
 //
 // The fork's code is the spec:
 //   src/models/bailingmoe3.cpp          (layer wiring, safe gate, L2 norm,
@@ -250,9 +251,9 @@ void kda_forward_decode(const KdaShape& sh, const KdaScalars& sc,
 
 // Scratch bytes kda_forward needs for its intermediate buffers (g1, beta, and
 // the three conv outputs). `kda_forward` allocates this from the current device
-// if you pass nullptr; superroc can pass its own arena instead. LKF (wave 3). 0 =
-// LING3_KDA_DECODE_FUSED (default on, read once). 1 = force off. 2 = force on.
-// Serve does not call this.
+// if you pass nullptr; superroc can pass its own arena instead. LKF (wave 3). 0
+// = LING3_KDA_DECODE_FUSED (default on, read once). 1 = force off. 2 = force
+// on. Serve does not call this.
 void kda_decode_fused_test_pick(int pick);
 int kda_decode_fused_k1_launches();
 int kda_decode_fused_k2_launches();

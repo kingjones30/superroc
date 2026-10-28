@@ -1,7 +1,7 @@
 // superroc_quant_stream_test — SPEC7 item 2(a): the streaming GGUF writer.
 //
-// `tools/superroc-quant/gguf.hpp` WriteGguf used to build the whole output file in
-// one std::vector and write it in a single call; v0.4 (gq6) streams tensor
+// `tools/superroc-quant/gguf.hpp` WriteGguf used to build the whole output file
+// in one std::vector and write it in a single call; v0.4 (gq6) streams tensor
 // payloads straight to disk, keeping only the header in memory. The byte layout
 // written is unchanged. This test pins that writer:
 //
@@ -250,8 +250,10 @@ void PartA(const std::filesystem::path& dir) {
                                    sha + " want " + kPinnedSha256);
 }
 
-// ---- Part B: tree's superroc-quant binary on a deterministic synth source ------
-void PartB(const std::string& superroc_quant, const std::filesystem::path& dir) {
+// ---- Part B: tree's superroc-quant binary on a deterministic synth source
+// ------
+void PartB(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   gqt::GgufFile src;
   src.alignment = 32;
   src.kv.emplace_back("general.architecture", KvStr("qwen35"));
@@ -365,8 +367,8 @@ void PartC() {
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::cerr
-        << "usage: superroc_quant_stream_test <path-to-superroc-quant> [workdir]\n";
+    std::cerr << "usage: superroc_quant_stream_test <path-to-superroc-quant> "
+                 "[workdir]\n";
     return 2;
   }
   const std::string superroc_quant = argv[1];

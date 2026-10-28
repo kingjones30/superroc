@@ -78,8 +78,8 @@ std::vector<std::uint8_t> BuildImage(std::string_view name_value,
 
 std::size_t PayloadBase(const std::vector<std::uint8_t>& image) {
   std::string error;
-  const auto reader =
-      superroc::core::GgufReader::OpenMemory(image.data(), image.size(), &error);
+  const auto reader = superroc::core::GgufReader::OpenMemory(
+      image.data(), image.size(), &error);
   Expect(reader != nullptr, "open image: " + error);
   return static_cast<std::size_t>(
       static_cast<const std::uint8_t*>(reader->GetTensors()[0].data) -
@@ -88,8 +88,8 @@ std::size_t PayloadBase(const std::vector<std::uint8_t>& image) {
 
 std::string Identity(const std::vector<std::uint8_t>& image) {
   std::string error;
-  const auto reader =
-      superroc::core::GgufReader::OpenMemory(image.data(), image.size(), &error);
+  const auto reader = superroc::core::GgufReader::OpenMemory(
+      image.data(), image.size(), &error);
   Expect(reader != nullptr, "open image: " + error);
   return superroc::core::GgufIdentityHex(*reader);
 }
@@ -201,7 +201,8 @@ void TestPipelinedFileHash() {
     out.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
   }
   std::string error;
-  const auto reader = superroc::core::GgufReader::OpenFile(path.string(), &error);
+  const auto reader =
+      superroc::core::GgufReader::OpenFile(path.string(), &error);
   Expect(reader != nullptr, "pipelined fixture opens");
   Expect(superroc::core::GgufIdentityHex(*reader) == Identity(bytes),
          "parallel disk reads hash all chunks and the unaligned tail in order");

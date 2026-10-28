@@ -54,11 +54,11 @@ void TestGpuRMSNorm() {
                                            (weighted ? host_weight[i] : 1.0F));
         }
         superroc::hip::LaunchRMSNorm(input.data(),
-                                 weighted ? weight.data() : nullptr,
-                                 output.data(), dim, 1e-6F);
+                                     weighted ? weight.data() : nullptr,
+                                     output.data(), dim, 1e-6F);
         const auto actual = output.CopyToHost();
         superroc::test::ExpectSpanNear(expected, actual, 1e-4F,
-                                   "GPU RMSNorm output");
+                                       "GPU RMSNorm output");
       }
     }
   }
@@ -101,15 +101,15 @@ void TestGpuBatchedRMSNorm() {
           }
           const auto* norm_weight = weighted ? weight.data() : nullptr;
           superroc::hip::LaunchBatchedRMSNorm(input.data(), norm_weight,
-                                          output.data(), bf16.data(), rows, dim,
-                                          1e-6F);
+                                              output.data(), bf16.data(), rows,
+                                              dim, 1e-6F);
           const auto actual = output.CopyToHost();
           const auto actual_bf16 = bf16.CopyToHost();
           superroc::test::ExpectSpanNear(expected, actual, 1e-5F,
-                                     "batched RMSNorm FP64 formula");
+                                         "batched RMSNorm FP64 formula");
           for (std::size_t row = 0; row < rows; ++row)
             superroc::hip::LaunchRMSNorm(input.data() + row * dim, norm_weight,
-                                     output.data() + row * dim, dim, 1e-6F);
+                                         output.data() + row * dim, dim, 1e-6F);
           const auto scalar = output.CopyToHost();
           superroc::test::Expect(
               std::memcmp(actual.data(), scalar.data(),
@@ -120,10 +120,11 @@ void TestGpuBatchedRMSNorm() {
             const auto rounded = static_cast<std::uint16_t>(
                 (bits + 0x7FFFU + ((bits >> 16U) & 1U)) >> 16U);
             superroc::test::Expect(actual_bf16[i] == rounded,
-                               "batched RMSNorm BF16 rounding");
+                                   "batched RMSNorm BF16 rounding");
           }
-          superroc::hip::LaunchBatchedRMSNorm(input.data(), norm_weight, nullptr,
-                                          bf16.data(), rows, dim, 1e-6F);
+          superroc::hip::LaunchBatchedRMSNorm(input.data(), norm_weight,
+                                              nullptr, bf16.data(), rows, dim,
+                                              1e-6F);
           const auto bf16_only = bf16.CopyToHost();
           superroc::test::Expect(
               std::memcmp(actual_bf16.data(), bf16_only.data(),
@@ -149,16 +150,16 @@ void TestGpuResidualAdd() {
 
   const auto actual = output.CopyToHost();
   superroc::test::ExpectSpanNear(expected, actual, 1e-5F,
-                             "GPU residual-add output");
+                                 "GPU residual-add output");
 }
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen elementwise GPU ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen elementwise GPU ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

@@ -186,7 +186,8 @@ void RefExpert(const superroc::models::QwenTensorRef& gate,
                std::vector<float>& hidden_out) {
   const std::size_t up_bytes =
       superroc::quant::QuantizedRowBytes(gate.type, hidden);
-  const std::size_t down_bytes = superroc::quant::QuantizedRowBytes(down.type, ff);
+  const std::size_t down_bytes =
+      superroc::quant::QuantizedRowBytes(down.type, ff);
   const auto* gate_base = static_cast<const std::uint8_t*>(gate.data);
   const auto* up_base = static_cast<const std::uint8_t*>(up.data);
   const auto* down_base = static_cast<const std::uint8_t*>(down.data);
@@ -201,8 +202,8 @@ void RefExpert(const superroc::models::QwenTensorRef& gate,
   for (std::size_t r = 0; r < ff; ++r) {
     const float g = superroc::quant::Dot(
         gate.type, gate_base + up_off + r * up_bytes, x, hidden);
-    const float u =
-        superroc::quant::Dot(up.type, up_base + up_off + r * up_bytes, x, hidden);
+    const float u = superroc::quant::Dot(
+        up.type, up_base + up_off + r * up_bytes, x, hidden);
     act[r] = (g / (1.0F + std::exp(-g))) * u;
   }
   hidden_out.assign(hidden, 0.0F);
@@ -239,7 +240,8 @@ int main() {
   std::string error;
   auto reader = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(reader != nullptr, "open: " + error);
-  auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+  auto weights =
+      superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   Expect(weights.has_value(), "bind: " + error);
   const auto& cfg = weights->config;
   const std::size_t hidden = cfg.hidden_size;
@@ -272,7 +274,7 @@ int main() {
   const auto& layer0 = weights->layers[0];
   std::vector<float> logits(cfg.expert_count);
   superroc::models::TensorGEMV(layer0.ffn_gate_inp, x, cfg.expert_count, hidden,
-                           logits);
+                               logits);
   Expect(
       std::fabs(logits[0] - RowDot(layer0.ffn_gate_inp, 0, hidden, x)) == 0.0F,
       "router row0");
@@ -304,8 +306,8 @@ int main() {
   std::vector<float> gscratch(512), uscratch(512), ascratch(512);
   for (int expert : {0, 8, 255}) {
     superroc::models::KatExpertSwiglu(layer0.ffn_gate_exps, layer0.ffn_up_exps,
-                                  layer0.ffn_down_exps, expert, x, hidden, 512,
-                                  gscratch, uscratch, ascratch, prod);
+                                      layer0.ffn_down_exps, expert, x, hidden,
+                                      512, gscratch, uscratch, ascratch, prod);
     RefExpert(layer0.ffn_gate_exps, layer0.ffn_up_exps, layer0.ffn_down_exps,
               expert, x, hidden, 512, ref);
     const double cosine = Cosine(prod, ref);
@@ -314,8 +316,8 @@ int main() {
     Expect(cosine >= 0.999999, "expert cosine");
   }
   superroc::models::KatExpertSwiglu(layer0.ffn_gate_shexp, layer0.ffn_up_shexp,
-                                layer0.ffn_down_shexp, -1, x, hidden, 512,
-                                gscratch, uscratch, ascratch, prod);
+                                    layer0.ffn_down_shexp, -1, x, hidden, 512,
+                                    gscratch, uscratch, ascratch, prod);
   RefExpert(layer0.ffn_gate_shexp, layer0.ffn_up_shexp, layer0.ffn_down_shexp,
             -1, x, hidden, 512, ref);
   const double shexp_cos = Cosine(prod, ref);
@@ -326,8 +328,8 @@ int main() {
   Expect(arena.moe_logits.size() == cfg.expert_count, "moe logit scratch");
   std::vector<float> probs(cfg.expert_count);
   superroc::models::ForwardMoe(x, layer0, cfg, logits, probs, arena.mlp_gate,
-                           arena.mlp_up, arena.mlp_act, arena.attn_out,
-                           arena.mlp_out);
+                               arena.mlp_up, arena.mlp_act, arena.attn_out,
+                               arena.mlp_out);
   float moe_sum = 0.0F;
   for (std::size_t i = 0; i < 8; ++i) {
     moe_sum += 1.0F;
@@ -341,16 +343,16 @@ int main() {
   std::cout << "KAT_ORACLE forward_moe energy=" << moe_energy << "\n";
 
   superroc::models::QwenKvCache kv(cfg.num_layers, cfg.num_key_value_heads, 8,
-                               cfg.head_dim);
-  superroc::models::QwenSsmCache ssm(cfg.num_layers, cfg.SsmQkvSize(),
-                                 cfg.ssm_conv_kernel, cfg.ssm_time_step_rank,
-                                 cfg.ssm_state_size, cfg.SsmValueSize());
+                                   cfg.head_dim);
+  superroc::models::QwenSsmCache ssm(
+      cfg.num_layers, cfg.SsmQkvSize(), cfg.ssm_conv_kernel,
+      cfg.ssm_time_step_rank, cfg.ssm_state_size, cfg.SsmValueSize());
   auto run_layer = [&](std::uint32_t layer_index, std::vector<float>& out) {
     kv.Reset();
     ssm.Reset();
     std::copy(x.begin(), x.end(), arena.hidden.begin());
-    superroc::models::ForwardLayer(arena.hidden, weights->layers[layer_index], cfg,
-                               kv, ssm, layer_index, 0, arena);
+    superroc::models::ForwardLayer(arena.hidden, weights->layers[layer_index],
+                                   cfg, kv, ssm, layer_index, 0, arena);
     out.assign(arena.hidden.begin(), arena.hidden.end());
   };
   std::vector<float> a, b;

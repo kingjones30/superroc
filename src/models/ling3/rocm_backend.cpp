@@ -1,8 +1,8 @@
 // Compiled in EVERY configuration, but the body only exists when the HIP
 // backend is on: a CPU build must not need hip/hip_runtime.h. The stub below
 // refuses, which is what `superroc serve` reports on a CPU-only build.
-// Unconditional: the header itself pulls only superroc's GGUF reader and the weight
-// structs, no HIP.
+// Unconditional: the header itself pulls only superroc's GGUF reader and the
+// weight structs, no HIP.
 #include "src/models/ling3/rocm_backend.hpp"
 
 #include <sys/mman.h>
@@ -152,12 +152,12 @@ void DevPoison(void* p, std::size_t bytes) {
 bool DevCopy(const void* d, const void* s, std::size_t n) {
   // Jay 2026-10-01 (hotfix, for LG to adopt): a plain hipMemcpy straight out of
   // the GGUF mmap stalled the 65 GB Ling load at ~45 GB of GTT on amdaimax2 --
-  // main thread spinning inside libhsa, GPU 0 % busy, no new page faults, `superroc
-  // serve` never answered /health in 10 min. HIP pins pageable sources for the
-  // DMA; pinning tens of GB of file-backed pages on a 128 GB unified-memory box
-  // while the device copy grows is what wedged it. Copy through ONE pinned 64
-  // MiB bounce buffer instead, so HIP never pins the mmap: the 65 GB load then
-  // completes in ~30 s.
+  // main thread spinning inside libhsa, GPU 0 % busy, no new page faults,
+  // `superroc serve` never answered /health in 10 min. HIP pins pageable
+  // sources for the DMA; pinning tens of GB of file-backed pages on a 128 GB
+  // unified-memory box while the device copy grows is what wedged it. Copy
+  // through ONE pinned 64 MiB bounce buffer instead, so HIP never pins the
+  // mmap: the 65 GB load then completes in ~30 s.
   if (n == 0) {
     return true;
   }
@@ -1495,7 +1495,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
   GpuTrace(st, static_cast<std::uint32_t>(-1), "inp_embd", st->x, H);
 
   superroc::models::ling3::vision::OnHidden(st->x, static_cast<int>(st->pos), 1,
-                                        static_cast<int>(H), stream);
+                                            static_cast<int>(H), stream);
 
   const ::ling3::KdaShape ks = MakeKdaShape();
   const ::ling3::KdaScalars ksc;
@@ -2078,7 +2078,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
   eend();
 
   superroc::models::ling3::vision::OnHidden(B->x, pos0, n, static_cast<int>(H),
-                                        stream);
+                                            stream);
 
   // LING3_GPU_TRACE hook: same tensor names as Step, taken at the traced
   // position's row, so trace.sh diffs against the CPU oracle unchanged.
@@ -3206,7 +3206,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
   GpuTrace(st, static_cast<std::uint32_t>(-1), "inp_embd", S.x, H);
 
   superroc::models::ling3::vision::OnHidden(S.x, pos0, mm, static_cast<int>(H),
-                                        stream);
+                                            stream);
 
   // g_dev.experts holds MoE layers only, so index it with its own counter
   // rather than the block number -- the same rule Step follows.

@@ -66,15 +66,15 @@ void TestBatchedRoPEEquivalence() {
   // Sequential
   for (std::size_t t = 0; t < batch; ++t) {
     superroc::hip::LaunchRoPE(d_q_seq + t * (num_heads * head_dim),
-                          d_k_seq + t * (num_kv_heads * head_dim), num_heads,
-                          num_kv_heads, head_dim, rotary_dim,
-                          static_cast<std::uint32_t>(t), rope_theta);
+                              d_k_seq + t * (num_kv_heads * head_dim),
+                              num_heads, num_kv_heads, head_dim, rotary_dim,
+                              static_cast<std::uint32_t>(t), rope_theta);
   }
 
   // Batched
   superroc::hip::LaunchBatchedRoPE(d_q_batch, d_k_batch, batch, num_heads,
-                               num_kv_heads, head_dim, rotary_dim, 0,
-                               rope_theta);
+                                   num_kv_heads, head_dim, rotary_dim, 0,
+                                   rope_theta);
 
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -137,13 +137,13 @@ void TestBatchedPerHeadRMSNormEquivalence() {
                       hipMemcpyHostToDevice));
 
   for (std::size_t t = 0; t < batch; ++t) {
-    superroc::hip::LaunchPerHeadRMSNorm(d_x_seq + t * (num_heads * head_dim), d_w,
-                                    d_x_seq + t * (num_heads * head_dim),
-                                    num_heads, head_dim, eps);
+    superroc::hip::LaunchPerHeadRMSNorm(
+        d_x_seq + t * (num_heads * head_dim), d_w,
+        d_x_seq + t * (num_heads * head_dim), num_heads, head_dim, eps);
   }
 
   superroc::hip::LaunchBatchedPerHeadRMSNorm(d_x_batch, d_w, d_x_batch, batch,
-                                         num_heads, head_dim, eps);
+                                             num_heads, head_dim, eps);
 
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -161,7 +161,7 @@ void TestBatchedPerHeadRMSNormEquivalence() {
   }
   std::cout << "PerHeadRMSNorm Seq vs Batch max diff: " << max_diff << "\n";
   superroc::test::Expect(max_diff < 1e-4F,
-                     "batched per-head RMSNorm result mismatch");
+                         "batched per-head RMSNorm result mismatch");
 
   HIP_CHECK(hipFree(d_x_seq));
   HIP_CHECK(hipFree(d_x_batch));
@@ -172,9 +172,9 @@ void TestBatchedPerHeadRMSNormEquivalence() {
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen attention component ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen attention component ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

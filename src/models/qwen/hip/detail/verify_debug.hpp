@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <string>
 #include <vector>
+
 #include "src/core/env_compat.hpp"
 
 namespace superroc::hip::detail {
@@ -39,7 +40,8 @@ struct VerifyDebugStage {
 [[nodiscard]] inline std::size_t VerifyDebugMaxBytes() {
   static const std::size_t cap = [] {
     constexpr std::size_t kDefault = 512ULL << 20;
-    const char* env = ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_DEBUG_MAX_BYTES");
+    const char* env =
+        ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_DEBUG_MAX_BYTES");
     if (env == nullptr || env[0] == '\0') {
       return kDefault;
     }

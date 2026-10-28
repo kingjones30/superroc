@@ -65,9 +65,10 @@ void AppendTensor(std::vector<std::uint8_t>& header,
   }
   AppendPod(header, static_cast<std::uint32_t>(type));
   AppendPod(header, offset);
-  const std::size_t bytes = type == superroc::core::GgmlType::kF32
-                                ? elements * 4
-                                : superroc::quant::EncodedSizeBytes(type, elements);
+  const std::size_t bytes =
+      type == superroc::core::GgmlType::kF32
+          ? elements * 4
+          : superroc::quant::EncodedSizeBytes(type, elements);
   Expect(bytes > 0, "tensor payload size must be positive");
   payload.resize(payload.size() + bytes, 0);
   offset += bytes;
@@ -77,7 +78,8 @@ void AppendF32Tensor(std::vector<std::uint8_t>& header,
                      std::vector<std::uint8_t>& payload, std::string_view name,
                      std::initializer_list<std::uint64_t> dims,
                      std::uint64_t& offset) {
-  AppendTensor(header, payload, name, superroc::core::GgmlType::kF32, dims, offset);
+  AppendTensor(header, payload, name, superroc::core::GgmlType::kF32, dims,
+               offset);
 }
 
 // F6: an F32 projection (output.weight) must be refused at bind time: the
@@ -122,7 +124,8 @@ void TestF32ProjectionRefused() {
   config.rotary_dim = 16;
   config.context_length = 128;
   config.vocab_size = static_cast<std::uint32_t>(kVocab);
-  const auto weights = superroc::models::BindLlamaWeights(*reader, config, &error);
+  const auto weights =
+      superroc::models::BindLlamaWeights(*reader, config, &error);
   Expect(!weights.has_value(), "F32 output.weight must not bind");
   Expect(error.find("Unsupported llama tensor type") != std::string::npos,
          "F32 projection refused for its type, got: " + error);
@@ -189,7 +192,8 @@ void TestQuantFileBindsQuietly() {
   config.vocab_size = static_cast<std::uint32_t>(kVocab);
   std::stringstream captured;
   auto* const old_cout = std::cout.rdbuf(captured.rdbuf());
-  const auto weights = superroc::models::BindLlamaWeights(*reader, config, &error);
+  const auto weights =
+      superroc::models::BindLlamaWeights(*reader, config, &error);
   std::cout.rdbuf(old_cout);
   Expect(weights.has_value(), "quant llama file must bind: " + error);
   Expect(captured.str().empty(), "bind must not print on stdout");

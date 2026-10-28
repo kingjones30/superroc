@@ -39,8 +39,8 @@ float OldQuantizedDot(superroc::core::GgmlType type, const void* row,
       return 0.0F;  // silent fallback the new dispatch removes
   }
 }
-void OldDequantizeRow(superroc::core::GgmlType type, const void* row, float* out,
-                      std::size_t k) {
+void OldDequantizeRow(superroc::core::GgmlType type, const void* row,
+                      float* out, std::size_t k) {
   switch (type) {
     case superroc::core::GgmlType::kQ3_K:
       superroc::quant::DequantizeQ3_K(row, out, k);
@@ -187,7 +187,7 @@ int main() {
     const std::vector<std::uint8_t>* block =
         (c.type == superroc::core::GgmlType::kQ5_K)   ? &q5
         : (c.type == superroc::core::GgmlType::kQ8_0) ? &q80
-                                                  : &q8k;
+                                                      : &q8k;
     const auto x = RandomFloats(rng, c.k);
     std::vector<float> dst_new(c.k), dst_ref(c.k), dst_sentinel(c.k, 7.0F);
 
@@ -244,8 +244,8 @@ int main() {
     const auto x = RandomFloats(rng, k);
     std::vector<float> f32 = RandomFloats(rng, k);
     std::vector<float> dst(k);
-    superroc::quant::Dequantize(superroc::core::GgmlType::kF32, f32.data(), dst.data(),
-                            k);
+    superroc::quant::Dequantize(superroc::core::GgmlType::kF32, f32.data(),
+                                dst.data(), k);
     bool f32_deq = true;
     for (std::size_t i = 0; i < k; ++i)
       if (!SameBits(dst[i], f32[i])) {
@@ -255,7 +255,8 @@ int main() {
     float f32_dot = 0.0F, f32_ref = 0.0F;
     for (std::size_t i = 0; i < k; ++i)
       f32_ref += f32[i] * x[i];
-    f32_dot = superroc::quant::Dot(superroc::core::GgmlType::kF32, f32.data(), x, k);
+    f32_dot =
+        superroc::quant::Dot(superroc::core::GgmlType::kF32, f32.data(), x, k);
     if (!f32_deq || !SameBits(f32_dot, f32_ref)) {
       std::printf("F32: FAIL (deq=%d dot=%d) dot=%.6f ref=%.6f\n", f32_deq,
                   SameBits(f32_dot, f32_ref), f32_dot, f32_ref);
@@ -271,10 +272,10 @@ int main() {
       bf16[i] = static_cast<std::uint16_t>(u32 >> 16U);
     }
     superroc::quant::Dequantize(superroc::core::GgmlType::kBF16, bf16.data(),
-                            dst.data(), k);
+                                dst.data(), k);
     bool bf16_finite = AllFinite(dst.data(), k);
-    float bf16_dot =
-        superroc::quant::Dot(superroc::core::GgmlType::kBF16, bf16.data(), x, k);
+    float bf16_dot = superroc::quant::Dot(superroc::core::GgmlType::kBF16,
+                                          bf16.data(), x, k);
     if (!bf16_finite || !std::isfinite(bf16_dot)) {
       std::printf("BF16: FAIL (finite=%d dotfinite=%d)\n", bf16_finite,
                   std::isfinite(bf16_dot));
@@ -288,8 +289,8 @@ int main() {
       // encode a few known fp16 values (e.g. 1.0, 0.5, -2.0) by scanning.
       f16[i] = 0x3C00;  // 1.0
     }
-    superroc::quant::Dequantize(superroc::core::GgmlType::kF16, f16.data(), dst.data(),
-                            k);
+    superroc::quant::Dequantize(superroc::core::GgmlType::kF16, f16.data(),
+                                dst.data(), k);
     bool f16_ok = true;
     for (std::size_t i = 0; i < k; ++i)
       if (dst[i] != 1.0F) {
@@ -307,7 +308,8 @@ int main() {
   if (!superroc::quant::IsSupported(superroc::core::GgmlType::kF32) ||
       !superroc::quant::IsSupported(superroc::core::GgmlType::kQ8_K) ||
       superroc::quant::IsSupported(superroc::core::GgmlType::kQ4_0) ||
-      superroc::quant::IsSupported(static_cast<superroc::core::GgmlType>(65535))) {
+      superroc::quant::IsSupported(
+          static_cast<superroc::core::GgmlType>(65535))) {
     std::printf("IsSupported: FAIL\n");
     return 1;
   }
