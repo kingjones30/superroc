@@ -53,6 +53,9 @@ EXEMPT_PATH_GLOBS = [
     "**/artifacts/**",           # other recorded benchmark/result payloads
     "tools/gufo/**",             # N5: generated import-compat shims only;
                                  # the real modules live at tools/superroc/
+    "tools/dev/superroc_rename.py",  # this script: its rule tables must keep the
+                                     # previous spellings or it could not convert
+                                     # an unrenamed tree; not product text.
 ]
 
 # Lines anywhere that name the upstream project stay (case-insensitive
