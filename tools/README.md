@@ -24,6 +24,9 @@ benchmark/tuning executables; Python tools run from this source tree.
 Qwen reference tests. `superroc/safetensors.py` validates source snapshots used by
 MiniMax's manifest and quality tooling. Both support model verification.
 
+`gufo/` remains as an import-compatibility shim: the package moved to `superroc/`,
+and importing the previous name still works with a deprecation warning.
+
 See [performance commands](../docs/PERFORMANCE.md),
 [benchmark methodology](../docs/BENCHMARKS.md), and
 [MiniMax validation](../docs/models/minimax-h3/QUALITY.md).
