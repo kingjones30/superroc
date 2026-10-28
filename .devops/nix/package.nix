@@ -126,7 +126,7 @@ stdenv.mkDerivation {
 
   meta = with lib; {
     description = "SuperROC Engine — local inference runtime for AMD Strix Halo (gfx1151 GPU)";
-    homepage = "https://github.com/gufo-org/gufo";
+    homepage = "https://github.com/kingjones30/superroc";
     license = licenses.mit;
     platforms = [ "x86_64-linux" ];
     mainProgram = "superroc";
