@@ -147,13 +147,14 @@ void TestSharedOptionParsing() {
       &error);
   Expect(help_value && help_value->request.model_root == "--help",
          "help used as an option value does not trigger help");
-  Expect(
-      !superroc::cli::ParseVideoOptions(std::array{"--selected-frames="}, &error) &&
-          !error.empty(),
-      "explicit empty frame selection is rejected");
-  Expect(!superroc::cli::ParseVideoOptions(std::array{"--steps=7junk"}, &error) &&
+  Expect(!superroc::cli::ParseVideoOptions(std::array{"--selected-frames="},
+                                           &error) &&
              !error.empty(),
-         "partial integers are rejected");
+         "explicit empty frame selection is rejected");
+  Expect(
+      !superroc::cli::ParseVideoOptions(std::array{"--steps=7junk"}, &error) &&
+          !error.empty(),
+      "partial integers are rejected");
   Expect(!superroc::cli::ParseVideoOptions(std::array{"--help"}, &error) &&
              error.empty(),
          "actual help request succeeds without requiring a model");

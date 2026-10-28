@@ -375,7 +375,8 @@ void TestPinnedManifestRequiredByDefault() {
   Expect(!inventory.has_value(), "look-alike source manifest rejected");
   Expect(error.find("SHA-256") != std::string::npos,
          "pinned-manifest rejection identifies SHA-256");
-  Expect(superroc::minimax_h3::DefaultResidencyMode() == ResidencyMode::kDeviceCopy,
+  Expect(superroc::minimax_h3::DefaultResidencyMode() ==
+             ResidencyMode::kDeviceCopy,
          "measured initial default is explicit device copy");
 }
 

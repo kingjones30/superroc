@@ -19,8 +19,9 @@
 #include "src/models/minimax_h3/sha256.hpp"
 
 #ifndef SUPERROC_H3_SOURCE_MANIFEST
-#define SUPERROC_H3_SOURCE_MANIFEST \
-  "share/superroc/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
+#define SUPERROC_H3_SOURCE_MANIFEST   \
+  "share/superroc/models/minimax_h3/" \
+  "MINIMAX_H3_FL2VA_BF16.source-manifest.json"
 #endif
 #ifndef SUPERROC_H3_INSTALLED_SOURCE_MANIFEST
 #define SUPERROC_H3_INSTALLED_SOURCE_MANIFEST SUPERROC_H3_SOURCE_MANIFEST

@@ -234,9 +234,9 @@ void TestStreaming() {
     pcm.append(bytes);
     return true;
   });
-  Check(
-      pcm == superroc::server::EncodePcm16(std::vector<float>{-1, -.5F, 0, .5F, 1}),
-      "PCM chunks retain buffered sample encoding");
+  Check(pcm == superroc::server::EncodePcm16(
+                   std::vector<float>{-1, -.5F, 0, .5F, 1}),
+        "PCM chunks retain buffered sample encoding");
   auto sse = Send(
       service, "POST", "/v1/audio/speech",
       R"({"model":"qwen3-tts","input":"x","voice":"vivian","stream_format":"sse"})");
@@ -266,8 +266,8 @@ void TestStreaming() {
         "unsupported stream formats fail closed");
   }
   std::string decoded;
-  Check(superroc::server::DecodeAudioBase64(superroc::server::EncodeAudioBase64(pcm),
-                                        pcm.size(), &decoded) &&
+  Check(superroc::server::DecodeAudioBase64(
+            superroc::server::EncodeAudioBase64(pcm), pcm.size(), &decoded) &&
             decoded == pcm,
         "audio base64 round trip");
   Check(!superroc::server::DecodeAudioBase64("AB==", 16, &decoded) &&

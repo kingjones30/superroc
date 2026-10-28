@@ -7,6 +7,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/kernels/q4_0_gemv.hpp"
 #include "src/models/qwen/hip/mtp.hpp"
@@ -16,7 +17,6 @@
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
 #include "src/models/qwen/hip/ops/swiglu.hpp"
 #include "src/models/qwen/hip/ops/token.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace superroc::hip {
 
@@ -56,7 +56,8 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
   // GEMM and fault the GPU with King's seats resident. Refuse before any
   // device work. The caller (PrimeTargetContext) catches this and falls back
   // to the serial prime, which runs the real MoE FFN.
-  if (layer.is_moe && ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_FULL") != nullptr) {
+  if (layer.is_moe &&
+      ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_FULL") != nullptr) {
     static bool announced_full_moe = false;
     if (!announced_full_moe) {
       announced_full_moe = true;
@@ -119,7 +120,8 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
   // this fused hidden, taken before attention, so Q, attention, the output
   // projection, and the FFN do not change the cache. Decode runs the full
   // block itself. SUPERROC_MTP_PRIME_FULL=1 keeps the old full block.
-  const bool full_block = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_FULL") != nullptr;
+  const bool full_block =
+      ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_FULL") != nullptr;
   static bool announced = false;
   if (!announced) {
     announced = true;

@@ -76,7 +76,7 @@ void TestHipGraphDecodeStep() {
   };
   superroc::test::Expect(executor.IsEnabled(), "HIP graph executor disabled");
   superroc::test::Expect(!executor.IsCaptured(),
-                     "new HIP graph executor is already captured");
+                         "new HIP graph executor is already captured");
 
   bool threw = false;
   try {
@@ -89,7 +89,7 @@ void TestHipGraphDecodeStep() {
   hipStreamCaptureStatus capture = hipStreamCaptureStatusActive;
   HIP_CHECK(hipStreamIsCapturing(stream, &capture));
   superroc::test::Expect(capture == hipStreamCaptureStatusNone,
-                     "failed capture must release the stream");
+                         "failed capture must release the stream");
 
   // Test across 5 consecutive tokens with graph replay
   for (std::uint32_t step = 0; step < 5; ++step) {
@@ -100,11 +100,11 @@ void TestHipGraphDecodeStep() {
                              hipMemcpyHostToDevice, stream));
 
     auto StepOps = [&]() {
-      superroc::hip::LaunchEmbeddingLookup(d_embd, superroc::core::GgmlType::kF32,
-                                       d_params + 0, d_hidden, hidden_size,
-                                       stream);
-      superroc::hip::LaunchRMSNorm(d_hidden, d_weight, d_normed, hidden_size, 1e-6F,
-                               stream);
+      superroc::hip::LaunchEmbeddingLookup(
+          d_embd, superroc::core::GgmlType::kF32, d_params + 0, d_hidden,
+          hidden_size, stream);
+      superroc::hip::LaunchRMSNorm(d_hidden, d_weight, d_normed, hidden_size,
+                                   1e-6F, stream);
     };
 
     if (!executor.IsCaptured()) {
@@ -124,8 +124,8 @@ void TestHipGraphDecodeStep() {
             transfer.Copy2D(restored.data(), 64 * sizeof(float), independent,
                             64 * sizeof(float), 64 * sizeof(float),
                             hidden_size / 64);
-            superroc::test::Expect(restored == h_w,
-                               "snapshot copy during capture changed values");
+            superroc::test::Expect(
+                restored == h_w, "snapshot copy during capture changed values");
           } catch (...) {
             (void)hipFree(independent);
             throw;
@@ -135,11 +135,11 @@ void TestHipGraphDecodeStep() {
       });
       superroc::test::Expect(ok, "HIP graph capture failed");
       superroc::test::Expect(executor.IsCapturedFor(graph_key),
-                         "HIP graph capture key was not retained");
+                             "HIP graph capture key was not retained");
       superroc::test::Expect(!executor.IsCapturedFor(mismatched_key),
-                         "mismatched HIP graph key was accepted");
+                             "mismatched HIP graph key was accepted");
       superroc::test::Expect(!executor.Launch(stream, mismatched_key),
-                         "HIP graph replay accepted a mismatched key");
+                             "HIP graph replay accepted a mismatched key");
       const bool launch_ok = executor.Launch(stream, graph_key);
       superroc::test::Expect(launch_ok, "HIP graph launch failed");
     } else {
@@ -164,15 +164,15 @@ void TestHipGraphDecodeStep() {
     for (std::size_t i = 0; i < hidden_size; ++i) {
       const float expected = (h_embd[token_id * hidden_size + i] / rms) * 1.5F;
       superroc::test::ExpectNear(expected, h_out[i], 1e-4F,
-                             "captured RMSNorm result mismatch");
+                                 "captured RMSNorm result mismatch");
     }
   }
 
   executor.Reset();
   superroc::test::Expect(!executor.IsCaptured(),
-                     "HIP graph reset retained capture state");
+                         "HIP graph reset retained capture state");
   superroc::test::Expect(!executor.IsCapturedFor(graph_key),
-                     "HIP graph reset retained capture identity");
+                         "HIP graph reset retained capture identity");
 
   HIP_CHECK(hipFree(d_embd));
   HIP_CHECK(hipFree(d_hidden));

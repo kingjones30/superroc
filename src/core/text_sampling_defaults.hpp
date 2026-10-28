@@ -37,10 +37,10 @@ struct SamplingOverrides {
 
 inline TextModelPreset TextPreset(const core::ModelConfig& config) {
   if (superroc::core::IsModelFamily(config.architecture,
-                                superroc::core::ModelFamilyId::kDeepSeek4))
+                                    superroc::core::ModelFamilyId::kDeepSeek4))
     return TextModelPreset::kDeepSeekV4Flash;
   if (superroc::core::IsModelFamily(config.architecture,
-                                superroc::core::ModelFamilyId::kQwen4Exp) ||
+                                    superroc::core::ModelFamilyId::kQwen4Exp) ||
       (config.num_layers == 64 && config.hidden_size == 5120 &&
        config.vocab_size == 248320))
     return TextModelPreset::kQwen38;

@@ -113,7 +113,8 @@ int main() {
         "llama speculative text");
 
   // Compile-time use (package constants are initialised from the table).
-  static_assert(superroc::core::IsModelFamily("lfm2moe", ModelFamilyId::kLfm2Moe));
+  static_assert(
+      superroc::core::IsModelFamily("lfm2moe", ModelFamilyId::kLfm2Moe));
   static_assert(ModelFamilyArch(ModelFamilyId::kBailingMoe3) == "bailingmoe3");
 
   if (g_failures != 0) {

@@ -47,8 +47,9 @@ int main() {
   constexpr std::size_t second_m = 64;
   const auto test_id =
       std::chrono::steady_clock::now().time_since_epoch().count();
-  const auto directory = std::filesystem::temp_directory_path() /
-                         ("superroc-hipblaslt-runtime-" + std::to_string(test_id));
+  const auto directory =
+      std::filesystem::temp_directory_path() /
+      ("superroc-hipblaslt-runtime-" + std::to_string(test_id));
   std::filesystem::create_directories(directory);
   const auto database_path = directory / "plans.bin";
   const auto changed_path = directory / "changed.bin";
@@ -141,10 +142,11 @@ int main() {
 
   auto changed_database =
       superroc::hip::detail::InspectHipblasLtPlanDatabase(database_path);
-  Expect(changed_database.status ==
-                 superroc::hip::detail::HipblasLtPlanDatabaseLoadStatus::kLoaded &&
-             changed_database.database.records.size() == 2,
-         "inspect saved runtime database");
+  Expect(
+      changed_database.status ==
+              superroc::hip::detail::HipblasLtPlanDatabaseLoadStatus::kLoaded &&
+          changed_database.database.records.size() == 2,
+      "inspect saved runtime database");
   const auto changed_record = std::ranges::find_if(
       changed_database.database.records, [](const auto& record) {
         return record.batch_size == batch_size && record.m == m &&

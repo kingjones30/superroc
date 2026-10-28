@@ -48,7 +48,8 @@ void TestGpuGEMV() {
     HIP_CHECK(
         hipMemcpy(d_x, h_x.data(), K * sizeof(float), hipMemcpyHostToDevice));
 
-    superroc::hip::LaunchGEMV(d_A, superroc::core::GgmlType::kF32, d_x, d_y, M, K);
+    superroc::hip::LaunchGEMV(d_A, superroc::core::GgmlType::kF32, d_x, d_y, M,
+                              K);
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(
@@ -56,7 +57,8 @@ void TestGpuGEMV() {
 
     // Each row has K=8 ones * 2.0 = 16.0
     for (std::size_t m = 0; m < M; ++m) {
-      superroc::test::ExpectNear(16.0F, h_y[m], 1e-4F, "FP32 GEMV result mismatch");
+      superroc::test::ExpectNear(16.0F, h_y[m], 1e-4F,
+                                 "FP32 GEMV result mismatch");
     }
 
     HIP_CHECK(hipFree(d_A));
@@ -112,7 +114,8 @@ void TestGpuGEMV() {
     HIP_CHECK(
         hipMemcpy(d_x, h_x.data(), K * sizeof(float), hipMemcpyHostToDevice));
 
-    superroc::hip::LaunchGEMV(d_A, superroc::core::GgmlType::kBF16, d_x, d_y, M, K);
+    superroc::hip::LaunchGEMV(d_A, superroc::core::GgmlType::kBF16, d_x, d_y, M,
+                              K);
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(
@@ -213,11 +216,12 @@ void TestExactBf16SmallBatchGEMM(std::size_t batch, std::size_t M = 65,
   HIP_CHECK(hipMemcpy(d_X, h_X.data(), h_X.size() * sizeof(float),
                       hipMemcpyHostToDevice));
 
-  superroc::hip::LaunchExactBf16GEMMFp32SmallBatch(d_A, d_X, d_batched, batch, M,
-                                               K);
+  superroc::hip::LaunchExactBf16GEMMFp32SmallBatch(d_A, d_X, d_batched, batch,
+                                                   M, K);
   for (std::size_t token = 0; token < batch; ++token) {
-    superroc::hip::LaunchGEMV(d_A, superroc::core::GgmlType::kBF16, d_X + (token * K),
-                          d_sequential + (token * M), M, K);
+    superroc::hip::LaunchGEMV(d_A, superroc::core::GgmlType::kBF16,
+                              d_X + (token * K), d_sequential + (token * M), M,
+                              K);
   }
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -269,7 +273,7 @@ void TestHipblasGEMM() {
                         hipMemcpyHostToDevice));
 
     superroc::hip::LaunchHipblasGEMM(handle, d_A, false, d_X, d_Y, batch, M, K,
-                                 nullptr);
+                                     nullptr);
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipMemcpy(h_Y.data(), d_Y, batch * M * sizeof(float),
@@ -321,7 +325,7 @@ void TestHipblasGEMM() {
                         hipMemcpyHostToDevice));
 
     superroc::hip::LaunchHipblasGEMM(handle, d_A, true, d_X, d_Y, batch, M, K,
-                                 d_x_bf16);
+                                     d_x_bf16);
     HIP_CHECK(hipDeviceSynchronize());
 
     HIP_CHECK(hipMemcpy(h_Y.data(), d_Y, batch * M * sizeof(float),
@@ -358,7 +362,8 @@ void TestHipblasLtGEMM() {
   std::vector<std::uint16_t> h_a(m * k, superroc::test::FloatToBf16Bits(1.5F));
   std::vector<std::uint16_t> h_x(batch * k);
   for (std::size_t b = 0; b < batch; ++b) {
-    const auto value = superroc::test::FloatToBf16Bits(static_cast<float>(b + 1));
+    const auto value =
+        superroc::test::FloatToBf16Bits(static_cast<float>(b + 1));
     std::fill_n(h_x.begin() + static_cast<std::ptrdiff_t>(b * k), k, value);
   }
   std::vector<float> h_y(batch * m, 0.0F);
@@ -405,9 +410,9 @@ void TestHipblasLtGEMM() {
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen dense GEMM and BLAS ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen dense GEMM and BLAS ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

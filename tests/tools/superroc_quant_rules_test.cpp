@@ -1,5 +1,5 @@
-// superroc_quant_rules_test — LQP SPEC1 item 6: superroc-quant v0.5 rules, protect
-// files, fork head flags, census, and manifest.
+// superroc_quant_rules_test — LQP SPEC1 item 6: superroc-quant v0.5 rules,
+// protect files, fork head flags, census, and manifest.
 //
 //   Part 1  in-process rule matching: exact/anchor/glob/substring + kinds.
 //   Part 2  in-process protect-file parsing: comments, `RULE TYPE # why`,
@@ -335,7 +335,8 @@ std::string MakeQ4KSynth(const std::filesystem::path& dir,
   return p;
 }
 
-void Part4(const std::string& superroc_quant, const std::filesystem::path& dir) {
+void Part4(const std::string& superroc_quant,
+           const std::filesystem::path& dir) {
   const std::string Q = "\"" + superroc_quant + "\"";
   const std::string src = MakeSynth(dir, "synth-bf16.gguf", true);
   const std::string log = (dir / "q.log").string();
@@ -564,7 +565,8 @@ void Part4(const std::string& superroc_quant, const std::filesystem::path& dir) 
     Expect(c2.find("output.weight") != std::string::npos &&
                c2.find("Q6_K x1") != std::string::npos,
            "P4: census head row");
-    Expect(c2.find("superroc.quant.tool = superroc-quant 0.9.1") != std::string::npos,
+    Expect(c2.find("superroc.quant.tool = superroc-quant 0.9.1") !=
+               std::string::npos,
            "P4: census provenance");
     Expect(c2.find("BPW=") != std::string::npos, "P4: census BPW");
     Expect(Run(Q + " census \"" + (dir / "head.gguf").string() +
@@ -648,8 +650,8 @@ void Part4(const std::string& superroc_quant, const std::filesystem::path& dir) 
 
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::cerr
-        << "usage: superroc_quant_rules_test <path-to-superroc-quant> [workdir]\n";
+    std::cerr << "usage: superroc_quant_rules_test <path-to-superroc-quant> "
+                 "[workdir]\n";
     return 2;
   }
   const std::string superroc_quant = argv[1];

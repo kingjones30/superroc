@@ -139,7 +139,8 @@ private:
   bool hidden_capture_enabled_{false};
 };
 
-class HiddenAwareDraftBackend final : public superroc::speculative::IDraftBackend {
+class HiddenAwareDraftBackend final
+    : public superroc::speculative::IDraftBackend {
 public:
   [[nodiscard]] std::string_view Name() const noexcept override {
     return "HiddenAwareDraftBackend";
@@ -310,9 +311,9 @@ public:
     return "BinarySampledDraftBackend";
   }
 
-  superroc::speculative::DraftProposal Propose(std::span<const TokenId>,
-                                           std::uint32_t current_pos,
-                                           std::uint32_t max_tokens) override {
+  superroc::speculative::DraftProposal Propose(
+      std::span<const TokenId>, std::uint32_t current_pos,
+      std::uint32_t max_tokens) override {
     superroc::speculative::DraftProposal proposal;
     proposal.start_pos = current_pos;
     if (max_tokens > 0) {
@@ -344,22 +345,24 @@ private:
   std::array<float, 2> probabilities_;
 };
 
-class FixedSampledDraftBackend final : public superroc::speculative::IDraftBackend {
+class FixedSampledDraftBackend final
+    : public superroc::speculative::IDraftBackend {
 public:
-  explicit FixedSampledDraftBackend(superroc::speculative::DraftProposal proposal)
+  explicit FixedSampledDraftBackend(
+      superroc::speculative::DraftProposal proposal)
       : proposal_(std::move(proposal)) {}
   std::string_view Name() const noexcept override {
     return "FixedSampledDraft";
   }
   superroc::speculative::DraftProposal Propose(std::span<const TokenId>,
-                                           std::uint32_t,
-                                           std::uint32_t) override {
+                                               std::uint32_t,
+                                               std::uint32_t) override {
     return proposal_;
   }
   superroc::speculative::DraftProposal ProposeSampled(std::span<const TokenId>,
-                                                  std::uint32_t, std::uint32_t,
-                                                  float,
-                                                  std::uint64_t*) override {
+                                                      std::uint32_t,
+                                                      std::uint32_t, float,
+                                                      std::uint64_t*) override {
     return proposal_;
   }
   bool SupportsSampledProposals() const noexcept override { return true; }
@@ -408,7 +411,8 @@ private:
   std::uint32_t marker_;
 };
 
-class PersistentDraftBackend final : public superroc::speculative::IDraftBackend {
+class PersistentDraftBackend final
+    : public superroc::speculative::IDraftBackend {
 public:
   PersistentDraftBackend(std::vector<TokenId> target_tokens,
                          std::size_t prompt_size)
@@ -622,8 +626,8 @@ void TestStopTokensFollowTargetVocabulary() {
         std::vector<TokenId>{151643, 248044, 248046, 11, 37, 12});
     superroc::speculative::SpeculativeOptions policy;
     policy.use_batched_verification = batched;
-    superroc::speculative::SpeculativeVerifier verifier(target, std::move(draft),
-                                                    policy);
+    superroc::speculative::SpeculativeVerifier verifier(
+        target, std::move(draft), policy);
     const auto output = verifier.Generate(std::array<TokenId, 3>{1, 2, 3},
                                           GenerationOptions(16));
     Expect(output == std::vector<TokenId>({10, 151643, 248044, 248046, 11}),
@@ -637,7 +641,8 @@ void TestFullAcceptanceProducesTargetBonusToken() {
   ScriptedTargetExecutor target({10, 11, 12, 13}, eos_id);
   auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{11, 12});
-  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target,
+                                                      std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   const auto output = verifier.Generate(prompt, GenerationOptions(4));
@@ -658,7 +663,8 @@ void TestHiddenAwareBackendReceivesCommittedTargetState() {
   ScriptedTargetExecutor target({10, 11, 12}, eos_id);
   auto backend = std::make_unique<HiddenAwareDraftBackend>();
   auto* backend_view = backend.get();
-  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target,
+                                                      std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   const auto output = verifier.Generate(prompt, GenerationOptions(3));
@@ -689,7 +695,8 @@ void TestRetainedPrefixAdvanceUpdatesTargetAndDraftState() {
   ScriptedTargetExecutor target({10, 11}, eos_id);
   auto backend = std::make_unique<HiddenAwareDraftBackend>();
   auto* backend_view = backend.get();
-  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target,
+                                                      std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   Expect(verifier.Prime(prompt) == 10,
@@ -708,7 +715,8 @@ void TestPartialRejectionRestoresAndReplaysState() {
   ScriptedTargetExecutor target({10, 11, 12}, eos_id);
   auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{11, 99});
-  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target,
+                                                      std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   const auto current = verifier.Prime(prompt);
@@ -728,7 +736,8 @@ void TestImmediateRejectionRestoresGreedyState() {
   ScriptedTargetExecutor target({10, 11}, eos_id);
   auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{99, 98});
-  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target,
+                                                      std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
 
   const auto current = verifier.Prime(prompt);
@@ -748,7 +757,8 @@ void TestFirstPrefillTokenHonorsBudgetAndCallback() {
   ScriptedTargetExecutor target({10, 11}, eos_id);
   auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{11});
-  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target,
+                                                      std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
   std::vector<TokenId> callback_tokens;
 
@@ -770,7 +780,8 @@ void TestFirstPrefillEosIsNotEmitted() {
   ScriptedTargetExecutor target({eos_id}, eos_id);
   auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
       std::vector<TokenId>{1});
-  superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+  superroc::speculative::SpeculativeVerifier verifier(target,
+                                                      std::move(backend));
   const std::vector<TokenId> prompt = {1, 2, 3};
   std::size_t callback_count = 0;
 
@@ -811,8 +822,8 @@ void TestSampledSpeculationMatchesTargetDistribution() {
     options.min_draft_tokens = 1;
     options.initial_draft_tokens = 1;
     options.enable_adaptive_draft_length = false;
-    superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend),
-                                                    options);
+    superroc::speculative::SpeculativeVerifier verifier(
+        target, std::move(backend), options);
     const std::vector<TokenId> prompt = {0};
     const TokenId current = verifier.Prime(prompt);
     std::vector<TokenId> sequence = {prompt.front(), current};
@@ -855,7 +866,8 @@ void TestFilteredSampledSpeculationMatchesTargetDistribution(
 
   const std::vector<TokenId> initial_sequence = {1, 0};
   const double expected_second_probability =
-      superroc::sampling::BuildDistribution(target_logits, config, initial_sequence)
+      superroc::sampling::BuildDistribution(target_logits, config,
+                                            initial_sequence)
           .probability(2);
   std::size_t second_token_count = 0;
   std::size_t drafted_count = 0;
@@ -868,8 +880,8 @@ void TestFilteredSampledSpeculationMatchesTargetDistribution(
     options.min_draft_tokens = 1;
     options.initial_draft_tokens = 1;
     options.enable_adaptive_draft_length = false;
-    superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend),
-                                                    options);
+    superroc::speculative::SpeculativeVerifier verifier(
+        target, std::move(backend), options);
     const std::vector<TokenId> prompt = {1};
     const TokenId current = verifier.Prime(prompt);
     std::vector<TokenId> sequence = {prompt.front(), current};
@@ -1057,8 +1069,8 @@ void TestStopAndBudgetKeepExactFrontier() {
         std::vector<TokenId>{11, 900, 12});
     superroc::speculative::SpeculativeOptions options;
     options.use_batched_verification = batched;
-    superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend),
-                                                    options);
+    superroc::speculative::SpeculativeVerifier verifier(
+        target, std::move(backend), options);
     const std::vector<TokenId> prompt{1, 2, 3};
     const auto current = verifier.Prime(prompt);
     std::vector<TokenId> sequence{1, 2, 3, current};
@@ -1097,7 +1109,8 @@ void TestStopAndBudgetKeepExactFrontier() {
     ScriptedTargetExecutor target({10, 11, 12, 13, 14}, 900);
     auto backend = std::make_unique<superroc::speculative::MockDraftBackend>(
         std::vector<TokenId>{11, 12, 13});
-    superroc::speculative::SpeculativeVerifier verifier(target, std::move(backend));
+    superroc::speculative::SpeculativeVerifier verifier(target,
+                                                        std::move(backend));
     const std::vector<TokenId> prompt{1, 2, 3};
     const auto output = verifier.Generate(prompt, GenerationOptions(2));
     Expect(output == std::vector<TokenId>({10, 11}) &&

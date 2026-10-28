@@ -6,9 +6,10 @@
 #include <stdexcept>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
-#include "src/core/rocm_fp4/fp4_f16_prefill.hpp"   // SQ1: ported FP4->F16 GEMMs
+#include "src/core/rocm_fp4/fp4_f16_prefill.hpp"  // SQ1: ported FP4->F16 GEMMs
 #include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // KAT:
 #include "src/core/rocm_fp4/superroc_fp4_quant.hpp"    // KAT:
 #include "src/models/qwen/gemm_route.hpp"
@@ -20,7 +21,6 @@
 #include "src/models/qwen/moe/qwen_moe_prefill.hpp"  // KAT:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"    // KAT:
 #include "src/models/qwen/qwen_fp4_f16_gate.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace superroc::hip {
 // SQ1: the promoted FP4->F16 prefill launchers (Flash-Next namespace kept
@@ -279,11 +279,12 @@ bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
     // One line per process, on the first refusing chunk.
     static std::atomic<bool> frza_refusal_logged{false};
     if (!frza_refusal_logged.exchange(true)) {
-      std::fprintf(stderr,
-                   "frza: SUPERROC_QWEN_FP4_F16_PREFILL=1 refuses the F16 prefill "
-                   "route: type-100 on %s at layer %d; using the pre-f85008b "
-                   "dispatch\n",
-                   fp4_gate.family, fp4_gate.layer);
+      std::fprintf(
+          stderr,
+          "frza: SUPERROC_QWEN_FP4_F16_PREFILL=1 refuses the F16 prefill "
+          "route: type-100 on %s at layer %d; using the pre-f85008b "
+          "dispatch\n",
+          fp4_gate.family, fp4_gate.layer);
     }
     return false;
   }

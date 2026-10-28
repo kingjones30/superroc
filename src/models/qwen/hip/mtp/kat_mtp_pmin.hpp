@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <span>
+
 #include "src/core/env_compat.hpp"
 
 namespace superroc::hip {

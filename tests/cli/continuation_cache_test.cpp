@@ -36,16 +36,16 @@ struct FakeState final : superroc::server::ContinuationState {
 };
 
 struct FakeSnapshot final : superroc::server::ContinuationSnapshot {
-  explicit FakeSnapshot(std::size_t value,
-                        std::size_t payload_bytes = sizeof(std::size_t),
-                        const superroc::server::ContinuationState* owner = nullptr)
+  explicit FakeSnapshot(
+      std::size_t value, std::size_t payload_bytes = sizeof(std::size_t),
+      const superroc::server::ContinuationState* owner = nullptr)
       : value(value), payload_bytes(payload_bytes), owner(owner) {}
 
   [[nodiscard]] std::size_t PayloadBytes() const noexcept override {
     return payload_bytes;
   }
-  [[nodiscard]] bool PrefersState(
-      const superroc::server::ContinuationState& state) const noexcept override {
+  [[nodiscard]] bool PrefersState(const superroc::server::ContinuationState&
+                                      state) const noexcept override {
     return owner == &state;
   }
 
@@ -176,7 +176,7 @@ void TestColdMissThenExactExtensionHit() {
   }
 
   const std::vector<superroc::server::ContinuationToken> extension{1, 2, 3,
-                                                               4, 5, 6};
+                                                                   4, 5, 6};
   {
     auto lease = cache.Acquire(extension);
     Expect(lease.cache_hit(), "exact extension reuses the slot");
@@ -220,7 +220,8 @@ void TestUncommittedLeaseIsInvalidated() {
       1, [&] { return std::make_unique<FakeState>(0, &invalidations); });
 
   {
-    auto lease = cache.Acquire(std::vector<superroc::server::ContinuationToken>{7});
+    auto lease =
+        cache.Acquire(std::vector<superroc::server::ContinuationToken>{7});
     Expect(static_cast<bool>(lease), "request acquires the slot");
   }
   Expect(invalidations[0] == 1,
@@ -240,7 +241,8 @@ void TestLongestAvailablePrefixWins() {
   });
 
   {
-    auto first = cache.Acquire(std::vector<superroc::server::ContinuationToken>{1});
+    auto first =
+        cache.Acquire(std::vector<superroc::server::ContinuationToken>{1});
     first.Commit({1, 2});
   }
   {
@@ -249,8 +251,8 @@ void TestLongestAvailablePrefixWins() {
     second.Commit({9, 8, 7});
   }
 
-  auto lease =
-      cache.Acquire(std::vector<superroc::server::ContinuationToken>{9, 8, 7, 6});
+  auto lease = cache.Acquire(
+      std::vector<superroc::server::ContinuationToken>{9, 8, 7, 6});
   Expect(lease.cache_hit(), "one available entry matches");
   Expect(lease.cached_tokens() == 3, "longest exact prefix is selected");
   Expect(dynamic_cast<FakeState&>(lease.state()).id == 1,
@@ -266,9 +268,9 @@ void TestWaitingAcquireCanBeCancelled() {
       cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3});
   std::atomic<bool> cancelled{true};
 
-  auto cancelled_lease =
-      cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3, 4},
-                    [&] { return cancelled.load(); });
+  auto cancelled_lease = cache.Acquire(
+      std::vector<superroc::server::ContinuationToken>{1, 2, 3, 4},
+      [&] { return cancelled.load(); });
   Expect(!cancelled_lease, "cancelled waiter does not acquire a state");
   held.Commit({1, 2, 3});
 }
@@ -511,18 +513,18 @@ void TestSnapshotCanBranchIntoTwoIndependentStateSlots() {
       });
 
   {
-    auto root =
-        cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3});
+    auto root = cache.Acquire(
+        std::vector<superroc::server::ContinuationToken>{1, 2, 3});
     dynamic_cast<FakeState&>(root.state()).value = 7;
     Expect(root.TryReserveSnapshot(sizeof(std::size_t), 3),
            "root snapshot reserves aggregate capacity before allocation");
     root.Commit({1, 2, 3}, std::make_unique<FakeSnapshot>(7));
   }
 
-  auto first =
-      cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3, 4});
-  auto second =
-      cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3, 5});
+  auto first = cache.Acquire(
+      std::vector<superroc::server::ContinuationToken>{1, 2, 3, 4});
+  auto second = cache.Acquire(
+      std::vector<superroc::server::ContinuationToken>{1, 2, 3, 5});
   Expect(first.cache_hit() && second.cache_hit(),
          "one snapshot can satisfy two simultaneous leases");
   auto& first_state = dynamic_cast<FakeState&>(first.state());
@@ -541,8 +543,8 @@ void TestSnapshotCanBranchIntoTwoIndependentStateSlots() {
   first.Commit({1, 2, 3, 4}, std::make_unique<FakeSnapshot>(8));
   second.Commit({1, 2, 3, 5}, std::make_unique<FakeSnapshot>(9));
 
-  auto root_again =
-      cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3, 6});
+  auto root_again = cache.Acquire(
+      std::vector<superroc::server::ContinuationToken>{1, 2, 3, 6});
   Expect(root_again.cache_hit() && root_again.cached_tokens() == 3,
          "branch commits preserve the shared root snapshot");
   Expect(dynamic_cast<FakeState&>(root_again.state()).value == 7,
@@ -574,8 +576,8 @@ void TestByteCapacityEvictsBeforeSnapshotAllocation() {
       });
 
   {
-    auto root =
-        cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3});
+    auto root = cache.Acquire(
+        std::vector<superroc::server::ContinuationToken>{1, 2, 3});
     Expect(root.TryReserveSnapshot(8, 3),
            "initial snapshot fits the byte budget");
     Expect(root.Commit({1, 2, 3}, std::make_unique<FakeSnapshot>(7, 8)) == 8,
@@ -624,8 +626,10 @@ void TestConcurrentReservationsCannotOvercommitBudget() {
               },
       });
 
-  auto first = cache.Acquire(std::vector<superroc::server::ContinuationToken>{1});
-  auto second = cache.Acquire(std::vector<superroc::server::ContinuationToken>{2});
+  auto first =
+      cache.Acquire(std::vector<superroc::server::ContinuationToken>{1});
+  auto second =
+      cache.Acquire(std::vector<superroc::server::ContinuationToken>{2});
   Expect(first.TryReserveSnapshot(8, 1),
          "first in-flight snapshot reserves bytes");
   Expect(!second.TryReserveSnapshot(8, 1),
@@ -717,7 +721,8 @@ void TestAbandonedReservationIsReleased() {
   Expect(cache.reserved_snapshot_bytes() == 0,
          "lease destruction releases its in-flight reservation");
 
-  auto retry = cache.Acquire(std::vector<superroc::server::ContinuationToken>{2});
+  auto retry =
+      cache.Acquire(std::vector<superroc::server::ContinuationToken>{2});
   Expect(retry.TryReserveSnapshot(8, 1),
          "released bytes are immediately available to another request");
   retry.Commit({2}, std::make_unique<FakeSnapshot>(2, 8));
@@ -788,8 +793,8 @@ void TestEntryReplacementLogsRemovedSnapshot() {
     first.Commit({1, 2}, std::make_unique<FakeSnapshot>(1, 8));
   }
   {
-    auto second =
-        cache.Acquire(std::vector<superroc::server::ContinuationToken>{9, 8, 7});
+    auto second = cache.Acquire(
+        std::vector<superroc::server::ContinuationToken>{9, 8, 7});
     Expect(second.TryReserveSnapshot(8, 3), "replacement reserves bytes");
     second.Commit({9, 8, 7}, std::make_unique<FakeSnapshot>(2, 8));
   }
@@ -1033,15 +1038,17 @@ void TestEditedTailReplacementPreservesSharedCheckpoints() {
       },
       3);
   for (const std::vector<superroc::server::ContinuationToken>& prompt :
-       {std::vector<superroc::server::ContinuationToken>{1}, {1, 2}, {1, 2, 3}}) {
+       {std::vector<superroc::server::ContinuationToken>{1},
+        {1, 2},
+        {1, 2, 3}}) {
     auto lease = cache.Acquire(prompt);
     Expect(lease.TryReserveSnapshot(8, prompt.size()),
            "shared prefix and original tail fit the byte budget");
     lease.Commit(prompt, std::make_unique<FakeSnapshot>(prompt.size(), 8));
   }
   {
-    auto edited =
-        cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 9});
+    auto edited = cache.Acquire(
+        std::vector<superroc::server::ContinuationToken>{1, 2, 9});
     Expect(edited.cached_tokens() == 2, "edited tail reuses the shared prefix");
     Expect(edited.TryReserveSnapshot(8, 3), "new tail fits the byte budget");
     edited.Commit({1, 2, 9}, std::make_unique<FakeSnapshot>(3, 8));
@@ -1067,12 +1074,13 @@ void TestReplacedSourceDoesNotEvictAnotherBranchTail() {
           .on_event = {},
       },
       3);
-  const auto save = [&](std::vector<superroc::server::ContinuationToken> prompt) {
-    auto lease = cache.Acquire(prompt);
-    Expect(lease.TryReserveSnapshot(8, prompt.size()),
-           "snapshot fits byte budget");
-    lease.Commit(prompt, std::make_unique<FakeSnapshot>(prompt.size(), 8));
-  };
+  const auto save =
+      [&](std::vector<superroc::server::ContinuationToken> prompt) {
+        auto lease = cache.Acquire(prompt);
+        Expect(lease.TryReserveSnapshot(8, prompt.size()),
+               "snapshot fits byte budget");
+        lease.Commit(prompt, std::make_unique<FakeSnapshot>(prompt.size(), 8));
+      };
   save({1});
   save({8});
   save({8, 2});
@@ -1151,12 +1159,12 @@ void TestWaitingAcquireReportsCandidateSkips() {
   superroc::server::ContinuationCache cache(
       1, [&] { return std::make_unique<FakeState>(0, &invalidations); });
   {
-    auto seed =
-        cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3});
+    auto seed = cache.Acquire(
+        std::vector<superroc::server::ContinuationToken>{1, 2, 3});
     seed.Commit({1, 2, 3});
   }
-  auto busy =
-      cache.Acquire(std::vector<superroc::server::ContinuationToken>{1, 2, 3, 4});
+  auto busy = cache.Acquire(
+      std::vector<superroc::server::ContinuationToken>{1, 2, 3, 4});
   Expect(busy.cache_hit(), "the sole slot is leased to a matching prompt");
   // The lease clears the saved tokens in the live (non-snapshot) mode, so the
   // waiter records the busy slot with zero checkpoint tokens.
@@ -1381,7 +1389,9 @@ void TestHostFloorShrinksBelowZero() {
                      const superroc::server::ContinuationSnapshot&) {},
        .capacity_bytes = [] { return 1024; },
        .on_event =
-           [&](const superroc::server::SnapshotEvent& e) { events.push_back(e); },
+           [&](const superroc::server::SnapshotEvent& e) {
+             events.push_back(e);
+           },
        .room_bytes = [&]() -> std::optional<std::int64_t> { return room; }},
       8);
   const auto retain = [&](Tokens tokens, std::size_t bytes) {
@@ -1495,7 +1505,9 @@ void TestRoomReservationsCannotBothAdmit() {
                      const superroc::server::ContinuationSnapshot&) {},
        .capacity_bytes = [] { return 1024; },
        .on_event =
-           [&](const superroc::server::SnapshotEvent& e) { events.push_back(e); },
+           [&](const superroc::server::SnapshotEvent& e) {
+             events.push_back(e);
+           },
        .room_bytes = [&]() -> std::optional<std::int64_t> { return room; }});
   auto first = cache.Acquire(Tokens{1});
   auto second = cache.Acquire(Tokens{2});
@@ -1528,7 +1540,8 @@ void TestUnreadableRoomKeepsMainBehaviour() {
   using superroc::server::SnapshotEventReason;
   using Tokens = std::vector<superroc::server::ContinuationToken>;
   const auto scenario = [](bool with_reader,
-                           std::vector<superroc::server::SnapshotEvent>* events) {
+                           std::vector<superroc::server::SnapshotEvent>*
+                               events) {
     std::vector<std::size_t> invalidations(1);
     std::size_t next_id = 0;
     superroc::server::ContinuationCache cache(
@@ -1601,7 +1614,9 @@ void TestFloorDeficitChargedOnce() {
                        const superroc::server::ContinuationSnapshot&) {},
          .capacity_bytes = [] { return std::size_t{32} << 30; },
          .on_event =
-             [&](const superroc::server::SnapshotEvent& e) { events.push_back(e); },
+             [&](const superroc::server::SnapshotEvent& e) {
+               events.push_back(e);
+             },
          .room_bytes = [&]() -> std::optional<std::int64_t> { return room; }},
         8);
     for (int copy = 0; copy < retained_copies; ++copy) {
@@ -1665,7 +1680,9 @@ void TestAcquireShrinkKeepsRequestOwnCopy() {
                      const superroc::server::ContinuationSnapshot&) {},
        .capacity_bytes = [] { return std::size_t{32} << 30; },
        .on_event =
-           [&](const superroc::server::SnapshotEvent& e) { events.push_back(e); },
+           [&](const superroc::server::SnapshotEvent& e) {
+             events.push_back(e);
+           },
        .room_bytes = [&]() -> std::optional<std::int64_t> { return room; }},
       8);
   const auto retain = [&](Tokens tokens) {
@@ -1728,7 +1745,9 @@ void TestAcquireShrinkProtectsBoundaryRestoreSource() {
                        const superroc::server::ContinuationSnapshot&) {},
          .capacity_bytes = [] { return std::size_t{32} << 30; },
          .on_event =
-             [&](const superroc::server::SnapshotEvent& e) { events.push_back(e); },
+             [&](const superroc::server::SnapshotEvent& e) {
+               events.push_back(e);
+             },
          .room_bytes = [&]() -> std::optional<std::int64_t> { return room; }},
         8);
     const auto retain = [&](Tokens tokens, const Bytes& identity,
@@ -1781,7 +1800,9 @@ void TestAcquireShrinkProtectsBoundaryRestoreSource() {
                        const superroc::server::ContinuationSnapshot&) {},
          .capacity_bytes = [] { return std::size_t{32} << 30; },
          .on_event =
-             [&](const superroc::server::SnapshotEvent& e) { events.push_back(e); },
+             [&](const superroc::server::SnapshotEvent& e) {
+               events.push_back(e);
+             },
          .room_bytes = [&]() -> std::optional<std::int64_t> { return room; }},
         8);
     {

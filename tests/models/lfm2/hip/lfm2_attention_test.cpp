@@ -273,9 +273,9 @@ int main() {
                  "copy pos")) {
         return 1;
       }
-      if (!CheckOk(superroc::hip::LaunchLfm2WriteKvDev(d_k, d_v, d_kc, d_vc, layer,
-                                                   d_pos, kMaxCtx, kKvHeads,
-                                                   kHeadDim, nullptr),
+      if (!CheckOk(superroc::hip::LaunchLfm2WriteKvDev(
+                       d_k, d_v, d_kc, d_vc, layer, d_pos, kMaxCtx, kKvHeads,
+                       kHeadDim, nullptr),
                    "launch", cas)) {
         continue;
       }

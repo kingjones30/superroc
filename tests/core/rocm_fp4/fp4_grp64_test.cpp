@@ -1,8 +1,8 @@
 // MG64 SPEC1 step 5: 64-token grouped FP4 GEMM must be bit-identical to the
 // 16-token path. Random ROCmFP4 weights (n = 1792, k = 2048, 8 experts) and
 // int8 activations via superroc_fp4_wmma_quant; group arrays built exactly like
-// superroc_fp4_moe_group_batch makes them (counting-sort slot order, grp_zp from
-// the (cnt+15)/16 prefix). For each layout: gemm_grp_bk(..., 4) vs
+// superroc_fp4_moe_group_batch makes them (counting-sort slot order, grp_zp
+// from the (cnt+15)/16 prefix). For each layout: gemm_grp_bk(..., 4) vs
 // gemm_grp64 on the same inputs, memcmp the outputs.
 #include <hip/hip_runtime.h>
 
@@ -31,7 +31,7 @@ int g_failures = 0;
 
 #define MG64_CHECK_RC(rc, what)                 \
   do {                                          \
-    if ((rc) != SUPERROC_FP4_OK) {                  \
+    if ((rc) != SUPERROC_FP4_OK) {              \
       std::printf("FAIL %s rc=%d\n", what, rc); \
       return 1;                                 \
     }                                           \
@@ -165,19 +165,20 @@ int RunLayout(const std::vector<int>& counts, std::uint32_t seed) {
     return 1;
   }
 
-  MG64_CHECK_RC(superroc_fp4_wmma_quant(d_x, nullptr, d_slot_dest, d_q8, slots, kK),
-                "quant");
+  MG64_CHECK_RC(
+      superroc_fp4_wmma_quant(d_x, nullptr, d_slot_dest, d_q8, slots, kK),
+      "quant");
   MG64_CHECK_HIP(hipMemset(d_y_ref, 0, y_bytes));
   MG64_CHECK_HIP(hipMemset(d_y_tst, 0, y_bytes));
   MG64_CHECK_RC(
       superroc_fp4_wmma_gemm_grp_bk(kQtype, d_w, stride, d_grp_e, d_grp_off,
-                                d_grp_cnt, d_grp_zp, n_groups, total_tiles,
-                                d_q8, d_y_ref, nullptr, kK, kN, /*bk=*/4),
+                                    d_grp_cnt, d_grp_zp, n_groups, total_tiles,
+                                    d_q8, d_y_ref, nullptr, kK, kN, /*bk=*/4),
       "gemm_grp_bk");
   MG64_CHECK_RC(
       superroc_fp4_wmma_gemm_grp64(kQtype, d_w, stride, d_grp_e, d_grp_off,
-                               d_grp_cnt, d_grp_zp, n_groups, total_tiles, d_q8,
-                               d_y_tst, nullptr, kK, kN, d_grp_zb),
+                                   d_grp_cnt, d_grp_zp, n_groups, total_tiles,
+                                   d_q8, d_y_tst, nullptr, kK, kN, d_grp_zb),
       "gemm_grp64");
 
   std::vector<float> y_ref(slots * kN), y_tst(slots * kN);

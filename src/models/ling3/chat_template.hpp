@@ -8,9 +8,9 @@
 /// C++ rendering of Ling-3.0's Bailing-V3 chat template.
 ///
 /// Transcribed from the model's own `tokenizer.chat_template` (and the matching
-/// `Ling-3.0-flash-*.jinja`), because superroc does not embed a Jinja engine. Only
-/// the paths this package needs are implemented; anything else is an explicit
-/// error rather than a silent approximation.
+/// `Ling-3.0-flash-*.jinja`), because superroc does not embed a Jinja engine.
+/// Only the paths this package needs are implemented; anything else is an
+/// explicit error rather than a silent approximation.
 ///
 /// Two details that are easy to get wrong and are byte-significant here:
 ///   * the tool-call open/close markers contain a **zero-width space** (U+200B)

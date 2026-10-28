@@ -177,8 +177,8 @@ void TestDequantizeToBf16Equivalence() {
                       Q80_ELEMS * sizeof(hip_bfloat16)));
   HIP_CHECK(hipMemcpy(d_w, h_q80.data(), Q80_BLOCKS * sizeof(Q8_0BlockTest),
                       hipMemcpyHostToDevice));
-  superroc::hip::LaunchDequantizeToBf16(superroc::core::GgmlType::kQ8_0, d_w, d_out,
-                                    Q80_ELEMS, nullptr);
+  superroc::hip::LaunchDequantizeToBf16(superroc::core::GgmlType::kQ8_0, d_w,
+                                        d_out, Q80_ELEMS, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
   std::vector<hip_bfloat16> h_gpu_q80(Q80_ELEMS);
   HIP_CHECK(hipMemcpy(h_gpu_q80.data(), d_out, Q80_ELEMS * sizeof(hip_bfloat16),
@@ -211,8 +211,8 @@ void TestDequantizeToBf16Equivalence() {
   HIP_CHECK(
       hipMalloc(reinterpret_cast<void**>(&d_out), QK * sizeof(hip_bfloat16)));
   HIP_CHECK(hipMemcpy(d_w, &q5k, sizeof(Q5KBlockTest), hipMemcpyHostToDevice));
-  superroc::hip::LaunchDequantizeToBf16(superroc::core::GgmlType::kQ5_K, d_w, d_out, QK,
-                                    nullptr);
+  superroc::hip::LaunchDequantizeToBf16(superroc::core::GgmlType::kQ5_K, d_w,
+                                        d_out, QK, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
   std::vector<hip_bfloat16> h_gpu_q5k(QK);
   HIP_CHECK(hipMemcpy(h_gpu_q5k.data(), d_out, QK * sizeof(hip_bfloat16),
@@ -241,8 +241,8 @@ void TestDequantizeToBf16Equivalence() {
   HIP_CHECK(
       hipMalloc(reinterpret_cast<void**>(&d_out), QK * sizeof(hip_bfloat16)));
   HIP_CHECK(hipMemcpy(d_w, &q6k, sizeof(Q6KBlockTest), hipMemcpyHostToDevice));
-  superroc::hip::LaunchDequantizeToBf16(superroc::core::GgmlType::kQ6_K, d_w, d_out, QK,
-                                    nullptr);
+  superroc::hip::LaunchDequantizeToBf16(superroc::core::GgmlType::kQ6_K, d_w,
+                                        d_out, QK, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
   std::vector<hip_bfloat16> h_gpu_q6k(QK);
   HIP_CHECK(hipMemcpy(h_gpu_q6k.data(), d_out, QK * sizeof(hip_bfloat16),
@@ -276,8 +276,8 @@ void TestDequantizeToBf16Equivalence() {
                       Q8K_ELEMS * sizeof(hip_bfloat16)));
   HIP_CHECK(hipMemcpy(d_w, h_q8k.data(), Q8K_BLOCKS * sizeof(Q8KBlockTest),
                       hipMemcpyHostToDevice));
-  superroc::hip::LaunchDequantizeToBf16(superroc::core::GgmlType::kQ8_K, d_w, d_out,
-                                    Q8K_ELEMS, nullptr);
+  superroc::hip::LaunchDequantizeToBf16(superroc::core::GgmlType::kQ8_K, d_w,
+                                        d_out, Q8K_ELEMS, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
   std::vector<hip_bfloat16> h_gpu_q8k(Q8K_ELEMS);
   HIP_CHECK(hipMemcpy(h_gpu_q8k.data(), d_out, Q8K_ELEMS * sizeof(hip_bfloat16),

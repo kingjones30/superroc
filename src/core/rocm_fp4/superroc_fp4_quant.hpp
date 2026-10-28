@@ -112,9 +112,10 @@ SUPERROC_FP4_HD inline float superroc_fp4_fp16_to_fp32(uint16_t h) {
   const float denormalized_value =
       superroc_fp4_u32_as_f32((two_w >> 17) | magic_mask) - magic_bias;
   const uint32_t denormalized_cutoff = 1u << 27;
-  const uint32_t result = sign | (two_w < denormalized_cutoff
-                                      ? superroc_fp4_f32_as_u32(denormalized_value)
-                                      : superroc_fp4_f32_as_u32(normalized_value));
+  const uint32_t result =
+      sign |
+      (two_w < denormalized_cutoff ? superroc_fp4_f32_as_u32(denormalized_value)
+                                   : superroc_fp4_f32_as_u32(normalized_value));
   return superroc_fp4_u32_as_f32(result);
 }
 
@@ -199,9 +200,8 @@ struct superroc_fp4_term {
 };
 
 // blk points at one quant block. local is the index within the block.
-SUPERROC_FP4_HD inline struct superroc_fp4_term superroc_fp4_term_block(int qtype,
-                                                            const uint8_t* blk,
-                                                            int local) {
+SUPERROC_FP4_HD inline struct superroc_fp4_term superroc_fp4_term_block(
+    int qtype, const uint8_t* blk, int local) {
   struct superroc_fp4_term t;
   t.c0 = 0;
   t.c1 = 1;
@@ -217,7 +217,8 @@ SUPERROC_FP4_HD inline struct superroc_fp4_term superroc_fp4_term_block(int qtyp
     t.c0 = (int)(int8_t)superroc_fp4_ld8(blk + 2 + local);
     return t;
   }
-  if (qtype == SUPERROC_FP4_Q4_0_ROCMFP4 || qtype == SUPERROC_FP4_Q4_0_ROCMFP4_FAST) {
+  if (qtype == SUPERROC_FP4_Q4_0_ROCMFP4 ||
+      qtype == SUPERROC_FP4_Q4_0_ROCMFP4_FAST) {
     int qs_i = local & 15;
     uint8_t b = superroc_fp4_ld8(blk + qs_i);
     int nib = (local < 16) ? (int)(b & 0x0f) : (int)(b >> 4);
@@ -260,7 +261,8 @@ SUPERROC_FP4_HD inline float superroc_fp4_term_f32(struct superroc_fp4_term t) {
   return (t.f * (float)t.c1) * (float)t.c0;
 }
 
-SUPERROC_FP4_HD inline float superroc_fp4_elem(int qtype, const void* row, int i) {
+SUPERROC_FP4_HD inline float superroc_fp4_elem(int qtype, const void* row,
+                                               int i) {
   int bsz = superroc_fp4_blck_size(qtype);
   int tsz = superroc_fp4_type_size(qtype);
   if (bsz <= 0) {
@@ -271,14 +273,14 @@ SUPERROC_FP4_HD inline float superroc_fp4_elem(int qtype, const void* row, int i
 }
 
 SUPERROC_FP4_HD inline void superroc_fp4_dequant_row(int qtype, const void* row,
-                                             float* y, int k) {
+                                                     float* y, int k) {
   for (int i = 0; i < k; ++i) {
     y[i] = superroc_fp4_elem(qtype, row, i);
   }
 }
 
 SUPERROC_FP4_HD inline float superroc_fp4_dot_row(int qtype, const void* row,
-                                          const float* x, int k) {
+                                                  const float* x, int k) {
 #if defined(__clang__)
 #pragma clang fp contract(off)
 #endif
@@ -295,7 +297,7 @@ SUPERROC_FP4_HD inline float superroc_fp4_dot_row(int qtype, const void* row,
 //   else:             silu(gate) * up
 // Gate clamp is upper-only (ggml_clamp -inf..limit). Up is two-sided.
 SUPERROC_FP4_HD inline float superroc_fp4_swiglu_elem(float gate, float up,
-                                              float limit) {
+                                                      float limit) {
   float s = gate / (1.0f + expf(-gate));
   if (limit > SUPERROC_FP4_CLAMP_EPS) {
     float gs = s <= limit ? s : limit;

@@ -13,10 +13,10 @@
 #include <vector>
 
 #include "src/core/crypto/sha256.hpp"
+#include "src/core/env_compat.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/testing/compare/logit_comparator.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace {
 using Token = superroc::tokenization::TokenId;
@@ -345,7 +345,8 @@ void CheckConcurrencyWidths(const Executor& owner) {
       if ((cohort_rows > 16 && width != count) ||
           (cohort_rows > 0 && cohort_rows <= 16 && width != 2))
         continue;
-      std::array<superroc::hip::QwenGpuVerificationItem, count> verification_items;
+      std::array<superroc::hip::QwenGpuVerificationItem, count>
+          verification_items;
       for (std::size_t row = 0; row < width; ++row) {
         const auto position = items[row].position;
         const std::size_t length =
@@ -513,8 +514,8 @@ std::vector<Case> Capture(const char* path, bool check_replay,
   auto owner = superroc::core::GgufReader::OpenFile(path, &error);
   Expect(owner != nullptr, error);
   auto executor = Executor::CreateFromGguf(
-      std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)), &error,
-      128);
+      std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)),
+      &error, 128);
   Expect(executor != nullptr, error);
   Expect(executor->GetConfig().hidden_size == 5120 &&
              executor->GetConfig().vocab_size == 248320,
@@ -626,8 +627,8 @@ std::vector<Case> Capture(const char* path, bool check_replay,
         (void)executor->ForwardToken(row.tokens[pos], pos,
                                      pos + 1 == prompt_size);
       }
-      const auto comparison =
-          superroc::testing::CompareLogits(Logits(*executor), row.logits.front());
+      const auto comparison = superroc::testing::CompareLogits(
+          Logits(*executor), row.logits.front());
       std::cout << "prefill case=" << cases.size()
                 << " top1_match=" << comparison.top1_match
                 << " rmse=" << comparison.root_mean_square_error
@@ -700,7 +701,9 @@ void CompareReference(const std::vector<Case>& candidate,
 
 int main(int argc, const char* const* argv) {
   try {
-    const char* model = argc > 1 ? argv[1] : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
+    const char* model =
+        argc > 1 ? argv[1]
+                 : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
     if (model == nullptr) {
       std::cout << "Set SUPERROC_QWEN27B_MODEL for the Qwen27B target check.\n";
       return 77;

@@ -46,7 +46,8 @@ public:
 
   void AddString(std::string_view key, std::string_view value) {
     AppendString(key);
-    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
+    AppendPod(
+        static_cast<std::uint32_t>(superroc::core::GgufValueType::kString));
     AppendString(value);
     ++metadata_count_;
   }
@@ -257,7 +258,8 @@ void TestParallelToolOrder() {
       {.role = "user", .content = "Compare them."},
       {.role = "tool", .content = "Result A", .tool_call_id = "call_A"},
   };
-  const auto reverse = superroc::models::deepseek_v4_flash::RenderChat(messages);
+  const auto reverse =
+      superroc::models::deepseek_v4_flash::RenderChat(messages);
   std::ifstream input(SUPERROC_CHAT_TEMPLATE_HF_GOLDENS);
   Expect(input.good(), "Template fixture opens");
   const auto fixture = superroc::json::parse(std::string{
@@ -328,7 +330,8 @@ void TestHuggingFaceRenderedGoldens() {
 }
 
 void TestPinnedArtifactTemplateValidation() {
-  std::ifstream input(SUPERROC_DEEPSEEK_CHAT_TEMPLATE_REFERENCE, std::ios::binary);
+  std::ifstream input(SUPERROC_DEEPSEEK_CHAT_TEMPLATE_REFERENCE,
+                      std::ios::binary);
   const std::string reference{std::istreambuf_iterator<char>(input),
                               std::istreambuf_iterator<char>()};
   Expect(!reference.empty(), "Pinned DeepSeek artifact template is readable");
@@ -342,10 +345,11 @@ void TestPinnedArtifactTemplateValidation() {
   builder.AddString("tokenizer.chat_template", reference);
   auto binary = builder.Build();
   std::string error;
-  auto reader =
-      superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &error);
+  auto reader = superroc::core::GgufReader::OpenMemory(binary.data(),
+                                                       binary.size(), &error);
   Expect(reader != nullptr, "DeepSeek template GGUF opens");
-  Expect(superroc::models::deepseek_v4_flash::ValidateGgufTemplate(*reader, &error),
+  Expect(superroc::models::deepseek_v4_flash::ValidateGgufTemplate(*reader,
+                                                                   &error),
          "Pinned DeepSeek artifact template is accepted");
 
   GgufTemplateBuilder lookalike;
@@ -353,12 +357,12 @@ void TestPinnedArtifactTemplateValidation() {
   lookalike.AddString("general.name", "DeepSeek V4 Flash");
   lookalike.AddString("tokenizer.chat_template", reference + " ");
   binary = lookalike.Build();
-  reader =
-      superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(), &error);
+  reader = superroc::core::GgufReader::OpenMemory(binary.data(), binary.size(),
+                                                  &error);
   Expect(reader != nullptr, "DeepSeek look-alike GGUF opens");
-  Expect(
-      !superroc::models::deepseek_v4_flash::ValidateGgufTemplate(*reader, &error),
-      "DeepSeek look-alike template is rejected by hash");
+  Expect(!superroc::models::deepseek_v4_flash::ValidateGgufTemplate(*reader,
+                                                                    &error),
+         "DeepSeek look-alike template is rejected by hash");
 }
 
 }  // namespace

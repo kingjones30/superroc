@@ -27,8 +27,8 @@
 
 #include "src/cli/serve/logging.hpp"
 #include "src/core/json.hpp"
-#include "src/models/minimax_h3/sha256.hpp"
 #include "src/core/previous_name_compat.hpp"
+#include "src/models/minimax_h3/sha256.hpp"
 
 namespace superroc::server {
 namespace {
@@ -404,8 +404,7 @@ struct VideoJobService::Impl {
         // Compatibility: previous releases wrote the previous
         // engine-name suffix (built from parts so the old spelling never
         // appears here); the scanner still removes it.
-        if (const std::string partial_name =
-                child.path().filename().string();
+        if (const std::string partial_name = child.path().filename().string();
             partial_name.find(".superroc-partial-") != std::string::npos ||
             partial_name.find(std::string("g") + "ufo-partial-") !=
                 std::string::npos) {

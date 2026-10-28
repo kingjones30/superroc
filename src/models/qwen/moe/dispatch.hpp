@@ -39,7 +39,8 @@ inline bool DflashSidecarIsMarkovKind(bool has_markov_w1,
 inline KatDispatch ClassifyKatDispatch(
     std::string_view arch, KatSpecKind spec, bool draft_path_empty,
     bool has_vision, bool dflash_markov_sidecar = false) noexcept {
-  if (!superroc::core::IsModelFamily(arch, superroc::core::ModelFamilyId::kQwen35Moe)) {
+  if (!superroc::core::IsModelFamily(
+          arch, superroc::core::ModelFamilyId::kQwen35Moe)) {
     return KatDispatch::kNotKat;
   }
   if (has_vision) {

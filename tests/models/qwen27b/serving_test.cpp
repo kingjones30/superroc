@@ -16,13 +16,13 @@
 #include <vector>
 
 #include "src/cli/serve/inference_backend.hpp"
+#include "src/core/env_compat.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/models/qwen/chat_template.hpp"
 #include "src/models/qwen/generator.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "tests/models/qwen27b/sampling_cases.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -93,7 +93,8 @@ void CheckSamplingStrategies(
   const auto check_concurrent = [&](superroc::server::InferenceBackend& current,
                                     bool speculative, std::size_t width,
                                     std::size_t offset) {
-    std::vector<std::future<superroc::server::InferenceBackend::Result>> pending;
+    std::vector<std::future<superroc::server::InferenceBackend::Result>>
+        pending;
     pending.reserve(width);
     for (std::size_t row = 0; row < width; ++row) {
       const auto* reference = &references[(offset + row) % references.size()];
@@ -140,9 +141,9 @@ void CheckSamplingStrategies(
 class TemporaryDirectory {
 public:
   TemporaryDirectory() {
-    std::string pattern =
-        (std::filesystem::temp_directory_path() / "superroc-qwen-disk-cache-XXXXXX")
-            .string();
+    std::string pattern = (std::filesystem::temp_directory_path() /
+                           "superroc-qwen-disk-cache-XXXXXX")
+                              .string();
     const char* created = ::mkdtemp(pattern.data());
     if (created == nullptr) {
       throw std::runtime_error("failed to create Qwen cache directory");
@@ -179,12 +180,13 @@ void RunPromptReuseSmoke(
     return request;
   };
   const std::vector<superroc::tokenization::ChatMessage> messages = {
-      {superroc::tokenization::ChatRole::kSystem, "Answer with one short sentence.",
-       "", ""},
-      {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "", ""},
+      {superroc::tokenization::ChatRole::kSystem,
+       "Answer with one short sentence.", "", ""},
+      {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "",
+       ""},
   };
-  const auto rendered_chat =
-      superroc::tokenization::QwenChatTemplate::Render(messages, cache_template);
+  const auto rendered_chat = superroc::tokenization::QwenChatTemplate::Render(
+      messages, cache_template);
   Expect(rendered_chat.has_value() && !rendered_chat->empty(),
          "prefix-reuse chat prompt rendering");
   const auto prompt = model->GetTokenizer().Encode(*rendered_chat);
@@ -210,7 +212,7 @@ void RunPromptReuseSmoke(
                                   "Name a different primary color.");
   const auto rendered_continuation =
       superroc::tokenization::QwenChatTemplate::Render(continued_messages,
-                                                   cache_template);
+                                                       cache_template);
   Expect(rendered_continuation.has_value(),
          "prefix-reuse continuation prompt rendering");
   const auto continuation_prompt =
@@ -410,14 +412,16 @@ void CheckGeneratedFrontierReuse(
 int main(int argc, const char* const* argv) {
   try {
     const char* model_path =
-        argc > 1 ? argv[1] : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
+        argc > 1 ? argv[1]
+                 : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
     if (model_path == nullptr) {
       std::cout << "SKIP: pass a Qwen GGUF path for the gfx1151 server test; "
                    "append --full for the exhaustive suite\n";
       return 77;
     }
 
-    const char* draft_model_path = ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_DFLASH_MODEL");
+    const char* draft_model_path =
+        ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_DFLASH_MODEL");
     bool run_full_suite = draft_model_path != nullptr;
     bool sampling_only = false;
     bool cache_only = false;
@@ -446,7 +450,8 @@ int main(int argc, const char* const* argv) {
     }
 
     std::string error;
-    auto reader_owner = superroc::core::GgufReader::OpenFile(model_path, &error);
+    auto reader_owner =
+        superroc::core::GgufReader::OpenFile(model_path, &error);
     Expect(reader_owner != nullptr, error);
     const std::shared_ptr<const superroc::core::GgufReader> reader(
         std::move(reader_owner));
@@ -471,12 +476,12 @@ int main(int argc, const char* const* argv) {
                {.backend = superroc::server::TextSpeculativeBackend::kMtp}) &&
                error.find("Flash-Next") != std::string::npos,
            "Qwen27B must reject MTP instead of silently running AR");
-    Expect(
-        !backend.load(model, &error, context, state_count, {}, {},
-                      {.backend = superroc::server::TextSpeculativeBackend::kDFlash,
-                       .min_draft_tokens = 2}) &&
-            error.find("min-draft-tokens") != std::string::npos,
-        "DFlash must reject an unused adaptive draft floor");
+    Expect(!backend.load(
+               model, &error, context, state_count, {}, {},
+               {.backend = superroc::server::TextSpeculativeBackend::kDFlash,
+                .min_draft_tokens = 2}) &&
+               error.find("min-draft-tokens") != std::string::npos,
+           "DFlash must reject an unused adaptive draft floor");
     Expect(backend.load(model, &error, context, state_count, {},
                         {.max_pending_requests_per_client = 8}),
            error);
@@ -488,16 +493,17 @@ int main(int argc, const char* const* argv) {
         CheckSamplingStrategies(backend);
       } else {
         superroc::server::InferenceBackend speculative_backend;
-        Expect(speculative_backend.load(
-                   model, &error, context, state_count,
-                   {.decode_active_tokens = 8},
-                   {.max_pending_requests_per_client = 8},
-                   {.backend = superroc::server::TextSpeculativeBackend::kDFlash,
-                    .draft_model_path = draft_model_path,
-                    .max_draft_tokens = 7,
-                    .min_draft_tokens = 1,
-                    .dflash_policy = sampling_policy}),
-               error);
+        Expect(
+            speculative_backend.load(
+                model, &error, context, state_count,
+                {.decode_active_tokens = 8},
+                {.max_pending_requests_per_client = 8},
+                {.backend = superroc::server::TextSpeculativeBackend::kDFlash,
+                 .draft_model_path = draft_model_path,
+                 .max_draft_tokens = 7,
+                 .min_draft_tokens = 1,
+                 .dflash_policy = sampling_policy}),
+            error);
         CheckSamplingStrategies(backend, &speculative_backend);
       }
       std::cout << "All Qwen sampling strategy replays passed.\n";
@@ -510,7 +516,8 @@ int main(int argc, const char* const* argv) {
       return 0;
     }
 
-    auto direct = superroc::hip::QwenGpuExecutor::Create(model, &error, context);
+    auto direct =
+        superroc::hip::QwenGpuExecutor::Create(model, &error, context);
     Expect(direct != nullptr, error);
 
     const std::string raw_prompt = "The capital of France is";
@@ -530,7 +537,8 @@ int main(int argc, const char* const* argv) {
           frontier, static_cast<std::uint32_t>(raw_prompt_tokens.size()));
 
       for (int fork_index = 0; fork_index < 2; ++fork_index) {
-        auto fork = superroc::hip::QwenGpuExecutor::Create(model, &error, context);
+        auto fork =
+            superroc::hip::QwenGpuExecutor::Create(model, &error, context);
         Expect(fork != nullptr, error);
         fork->RestoreSnapshot(*snapshot);
         const auto forked = fork->ForwardToken(
@@ -649,15 +657,16 @@ int main(int argc, const char* const* argv) {
       const std::vector<superroc::tokenization::ChatMessage> spec_messages = {
           {superroc::tokenization::ChatRole::kSystem,
            "Answer with one short sentence.", "", ""},
-          {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "",
-           ""},
+          {superroc::tokenization::ChatRole::kUser, "Name one primary color.",
+           "", ""},
       };
       // This fixture must actually reach EOS, rather than truncate the
       // now-default thinking trace at its 32-token budget.
       superroc::server::ChatRequest spec_request(spec_messages);
       spec_request.reasoning.enabled = false;
       const auto template_options =
-          superroc::tokenization::ResolveQwenChatOptions(spec_request.reasoning);
+          superroc::tokenization::ResolveQwenChatOptions(
+              spec_request.reasoning);
       const auto first_spec_chat =
           speculative_backend.chat(spec_request, 32, {});
       const auto stop_prompt = superroc::tokenization::QwenChatTemplate::Render(
@@ -666,7 +675,8 @@ int main(int argc, const char* const* argv) {
       const auto first_ar_tokens = GenerateDirect(
           *direct, model->GetTokenizer().Encode(*stop_prompt), 32);
       Expect(first_spec_chat.finish_reason ==
-                     superroc::server::TextGenerationBackend::FinishReason::kStop &&
+                     superroc::server::TextGenerationBackend::FinishReason::
+                         kStop &&
                  first_spec_chat.tokens == first_ar_tokens,
              "DFlash must reach EOS with the same published tokens as AR");
       Expect(!first_spec_chat.cache_hit,
@@ -677,21 +687,22 @@ int main(int argc, const char* const* argv) {
       auto continued_spec_messages = spec_messages;
       continued_spec_messages.emplace_back(
           superroc::tokenization::ChatRole::kAssistant, first_spec_chat.text);
-      continued_spec_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
-                                           "Name a different primary color.");
+      continued_spec_messages.emplace_back(
+          superroc::tokenization::ChatRole::kUser,
+          "Name a different primary color.");
       auto forked_spec_messages = spec_messages;
       forked_spec_messages.emplace_back(
           superroc::tokenization::ChatRole::kAssistant, first_spec_chat.text);
       forked_spec_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                         "Name one warm primary color.");
       const auto rendered_spec_continuation =
-          superroc::tokenization::QwenChatTemplate::Render(continued_spec_messages,
-                                                       template_options);
+          superroc::tokenization::QwenChatTemplate::Render(
+              continued_spec_messages, template_options);
       Expect(rendered_spec_continuation.has_value(),
              "DFlash continuation prompt rendering");
       const auto rendered_spec_fork =
           superroc::tokenization::QwenChatTemplate::Render(forked_spec_messages,
-                                                       template_options);
+                                                           template_options);
       Expect(rendered_spec_fork.has_value(), "DFlash fork prompt rendering");
       const auto direct_spec_continuation = GenerateDirect(
           *direct, model->GetTokenizer().Encode(*rendered_spec_continuation),
@@ -699,7 +710,8 @@ int main(int argc, const char* const* argv) {
       const auto direct_spec_fork = GenerateDirect(
           *direct, model->GetTokenizer().Encode(*rendered_spec_fork), 2);
 
-      superroc::server::ChatRequest continued_spec_request(continued_spec_messages);
+      superroc::server::ChatRequest continued_spec_request(
+          continued_spec_messages);
       continued_spec_request.reasoning = spec_request.reasoning;
       continued_spec_request.client_id = "dflash-snapshot-branch-a";
       superroc::server::ChatRequest forked_spec_request(forked_spec_messages);
@@ -755,8 +767,8 @@ int main(int argc, const char* const* argv) {
         {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "",
          ""},
     };
-    const auto rendered_chat =
-        superroc::tokenization::QwenChatTemplate::Render(messages, cache_template);
+    const auto rendered_chat = superroc::tokenization::QwenChatTemplate::Render(
+        messages, cache_template);
     Expect(rendered_chat.has_value() && !rendered_chat->empty(),
            "CLI chat prompt rendering");
     const auto chat_prompt = model->GetTokenizer().Encode(*rendered_chat);
@@ -776,8 +788,8 @@ int main(int argc, const char* const* argv) {
            "exact Qwen reuse avoids another full snapshot copy");
 
     auto continued_messages = messages;
-    continued_messages.emplace_back(superroc::tokenization::ChatRole::kAssistant,
-                                    http_chat.text);
+    continued_messages.emplace_back(
+        superroc::tokenization::ChatRole::kAssistant, http_chat.text);
     continued_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                     "Name a different primary color.");
     auto forked_messages = messages;
@@ -787,7 +799,7 @@ int main(int argc, const char* const* argv) {
                                  "Name one warm primary color.");
     const auto rendered_continuation =
         superroc::tokenization::QwenChatTemplate::Render(continued_messages,
-                                                     cache_template);
+                                                         cache_template);
     const auto rendered_fork = superroc::tokenization::QwenChatTemplate::Render(
         forked_messages, cache_template);
     Expect(rendered_continuation.has_value(),

@@ -84,8 +84,9 @@ void TestBatchedFusedProjectionsEquivalence() {
   for (std::size_t t = 0; t < batch; ++t) {
     superroc::hip::LaunchFusedSSMInputProjections(
         d_qkv_w, superroc::core::GgmlType::kF32, d_gate_w,
-        superroc::core::GgmlType::kF32, d_alpha_w, superroc::core::GgmlType::kF32,
-        d_beta_w, superroc::core::GgmlType::kF32, d_x + t * hidden_size,
+        superroc::core::GgmlType::kF32, d_alpha_w,
+        superroc::core::GgmlType::kF32, d_beta_w,
+        superroc::core::GgmlType::kF32, d_x + t * hidden_size,
         d_qkv_seq + t * qkv_size, d_gate_seq + t * inner_size,
         d_alpha_seq + t * time_step_rank, d_beta_seq + t * time_step_rank,
         hidden_size, qkv_size, inner_size, time_step_rank);
@@ -128,13 +129,13 @@ void TestBatchedFusedProjectionsEquivalence() {
                       hipMemcpyDeviceToHost));
 
   superroc::test::ExpectSpanNear(qkv_seq, qkv_batch, 1e-4F,
-                             "batched SSM QKV projection mismatch");
+                                 "batched SSM QKV projection mismatch");
   superroc::test::ExpectSpanNear(gate_seq, gate_batch, 1e-4F,
-                             "batched SSM gate projection mismatch");
+                                 "batched SSM gate projection mismatch");
   superroc::test::ExpectSpanNear(alpha_seq, alpha_batch, 1e-4F,
-                             "batched SSM alpha projection mismatch");
+                                 "batched SSM alpha projection mismatch");
   superroc::test::ExpectSpanNear(beta_seq, beta_batch, 1e-4F,
-                             "batched SSM beta projection mismatch");
+                                 "batched SSM beta projection mismatch");
 
   HIP_CHECK(hipFree(d_x));
   HIP_CHECK(hipFree(d_qkv_w));
@@ -155,9 +156,9 @@ void TestBatchedFusedProjectionsEquivalence() {
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen attention projection ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen attention projection ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

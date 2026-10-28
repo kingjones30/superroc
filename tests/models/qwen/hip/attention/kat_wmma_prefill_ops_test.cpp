@@ -748,11 +748,12 @@ constexpr superroc::hip::detail::AttentionSupportParams kKatDispatchParams{
     .head_dim = 256,
     .has_k_cache_f16 = true,
     .has_v_cache_f16 = true};
-static_assert(!superroc::hip::detail::IsTiledAttentionSupported(kKatDispatchParams),
-              "the shared tiled gate must keep rejecting KAT");
 static_assert(
-    superroc::hip::detail::IsWmmaAttentionSupportedFor<16, 2>(kKatDispatchParams),
-    "the WMMA gate must accept KAT");
+    !superroc::hip::detail::IsTiledAttentionSupported(kKatDispatchParams),
+    "the shared tiled gate must keep rejecting KAT");
+static_assert(superroc::hip::detail::IsWmmaAttentionSupportedFor<16, 2>(
+                  kKatDispatchParams),
+              "the WMMA gate must accept KAT");
 
 // SQ17: MiMo (16,4) dispatch contract at compile time.
 constexpr superroc::hip::detail::AttentionSupportParams kMimoDispatchParams{
@@ -767,17 +768,17 @@ constexpr superroc::hip::detail::AttentionSupportParams kMimoDispatchParams{
 static_assert(
     !superroc::hip::detail::IsTiledAttentionSupported(kMimoDispatchParams),
     "the shared tiled gate must keep rejecting MiMo");
-static_assert(
-    superroc::hip::detail::IsWmmaAttentionSupportedFor<16, 4>(kMimoDispatchParams),
-    "the WMMA gate must accept MiMo");
+static_assert(superroc::hip::detail::IsWmmaAttentionSupportedFor<16, 4>(
+                  kMimoDispatchParams),
+              "the WMMA gate must accept MiMo");
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "KAT WMMA prefill attention ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "KAT WMMA prefill attention ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

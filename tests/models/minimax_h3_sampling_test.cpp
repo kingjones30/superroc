@@ -330,20 +330,20 @@ void TestPacking() {
   std::vector<float> rows(elements);
   std::vector<float> round_trip(elements);
   std::string error;
-  CHECK(superroc::minimax_h3::PatchifyVideo(latent, channels, time, height, width,
-                                        rows, &error));
+  CHECK(superroc::minimax_h3::PatchifyVideo(latent, channels, time, height,
+                                            width, rows, &error));
   constexpr float first[] = {0, 1, 6, 7, 48, 49, 54, 55, 96, 97, 102, 103};
   CHECK(std::memcmp(rows.data(), first, sizeof(first)) == 0);
-  CHECK(superroc::minimax_h3::UnpatchifyVideo(rows, channels, time, height, width,
-                                          round_trip, &error));
+  CHECK(superroc::minimax_h3::UnpatchifyVideo(rows, channels, time, height,
+                                              width, round_trip, &error));
   CHECK(std::memcmp(latent.data(), round_trip.data(),
                     latent.size() * sizeof(float)) == 0);
   CHECK(!superroc::minimax_h3::PatchifyVideo(
       latent, channels, time, height, width,
       std::span<float>(rows.data(), rows.size() - 1), &error));
-  CHECK(!superroc::minimax_h3::PatchifyVideo({}, std::numeric_limits<int>::max(),
-                                         std::numeric_limits<int>::max(), 4, 4,
-                                         {}, &error));
+  CHECK(!superroc::minimax_h3::PatchifyVideo(
+      {}, std::numeric_limits<int>::max(), std::numeric_limits<int>::max(), 4,
+      4, {}, &error));
 
   constexpr int audio_channels = 4;
   constexpr int audio_time = 3;
@@ -354,13 +354,13 @@ void TestPacking() {
   }
   std::vector<float> packed(audio_elements);
   std::vector<float> unpacked(audio_elements);
-  CHECK(superroc::minimax_h3::PackAudio(audio, audio_channels, audio_time, packed,
-                                    &error));
+  CHECK(superroc::minimax_h3::PackAudio(audio, audio_channels, audio_time,
+                                        packed, &error));
   constexpr float expected[] = {0, 6, 12, 18, 1, 7,  13, 19, 2, 8,  14, 20,
                                 3, 9, 15, 21, 4, 10, 16, 22, 5, 11, 17, 23};
   CHECK(std::memcmp(packed.data(), expected, sizeof(expected)) == 0);
   CHECK(superroc::minimax_h3::UnpackAudio(packed, audio_channels, audio_time,
-                                      unpacked, &error));
+                                          unpacked, &error));
   CHECK(std::memcmp(audio.data(), unpacked.data(),
                     audio.size() * sizeof(float)) == 0);
 }
@@ -396,8 +396,8 @@ void TestNoise() {
   CHECK(first->video == second->video);
   CHECK(first->audio == second->audio);
   std::vector<float> packed_audio(audio_elements);
-  CHECK(superroc::minimax_h3::PackAudio(first->audio, audio_channels, audio_time,
-                                    packed_audio, &error));
+  CHECK(superroc::minimax_h3::PackAudio(first->audio, audio_channels,
+                                        audio_time, packed_audio, &error));
   CHECK(std::memcmp(first->video.data(), packed_audio.data(),
                     audio_elements * sizeof(float)) != 0);
   superroc::minimax_h3::NormalRng sequential(42);
@@ -518,8 +518,8 @@ void TestReuseAndEulerPlan() {
   }
 
 #if !defined(ENGINE_ENABLE_HIP)
-  CHECK(!superroc::minimax_h3::HipEulerUpdate(nullptr, 0, 0, nullptr, nullptr, 0,
-                                          0.25F, 0.5F, 0.0F, nullptr, &error));
+  CHECK(!superroc::minimax_h3::HipEulerUpdate(
+      nullptr, 0, 0, nullptr, nullptr, 0, 0.25F, 0.5F, 0.0F, nullptr, &error));
   CHECK(error.find("ENGINE_ENABLE_HIP") != std::string::npos);
 #endif
 }

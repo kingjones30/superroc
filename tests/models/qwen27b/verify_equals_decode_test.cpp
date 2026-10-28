@@ -30,13 +30,13 @@
 #include <utility>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
 #include "src/models/qwen/hip/detail/verify_debug.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/fp4_launch.hpp"
 #include "src/testing/compare/logit_comparator.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace {
 using Token = superroc::tokenization::TokenId;
@@ -260,7 +260,9 @@ bool CheckRow(std::size_t width, std::size_t row, std::span<const float> dd,
 
 int main(int argc, const char* const* argv) {
   try {
-    const char* model = argc > 1 ? argv[1] : ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_MODEL");
+    const char* model =
+        argc > 1 ? argv[1]
+                 : ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_MODEL");
     if (model == nullptr) {
       std::cout << "Set SUPERROC_VERIFY_MODEL for verify_equals_decode.\n";
       return kSkipped;
@@ -487,7 +489,7 @@ int main(int argc, const char* const* argv) {
           if (!ByteEqual(chunked_logits[i], perrow_logits[i])) {
             forms_ok = false;
             const auto cmp = superroc::testing::CompareLogits(chunked_logits[i],
-                                                          perrow_logits[i]);
+                                                              perrow_logits[i]);
             max_abs = cmp.max_abs_diff;
             std::cout << "forms width=" << width << " row=" << i
                       << " max_abs=" << max_abs << "\n";

@@ -187,7 +187,8 @@ void TestPresetsAndReports() {
   const std::string report = h3::GenerationParametersJson(
       *fast, 42,
       "df0ff96bcdb3a350f115cc39daaf0d7523814258890aa90c06fa784e3ad06169");
-  Check(report.find("superroc.minimax-h3-text-generation.v1") != std::string::npos,
+  Check(report.find("superroc.minimax-h3-text-generation.v1") !=
+            std::string::npos,
         "parameter schema is versioned");
   Check(report.find("\"token_reduction\": false") != std::string::npos,
         "token reduction is frozen off");
@@ -347,7 +348,8 @@ void TestAtomicLatents() {
   const std::string manifest((std::istreambuf_iterator<char>(manifest_stream)),
                              std::istreambuf_iterator<char>());
   Check(h3::json::Parse(manifest).IsObject(), "latent manifest is valid JSON");
-  Check(manifest.find("superroc.minimax-h3-final-latents.v1") != std::string::npos,
+  Check(manifest.find("superroc.minimax-h3-final-latents.v1") !=
+            std::string::npos,
         "latent manifest is versioned");
   Check(!h3::WriteDiagnosticLatents(target, *geometry, video, audio, nullptr,
                                     &error),

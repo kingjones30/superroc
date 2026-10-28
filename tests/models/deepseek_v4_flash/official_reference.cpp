@@ -16,8 +16,8 @@
 
 #include "src/core/crypto/sha256.hpp"
 #include "src/core/json.hpp"
-#include "src/models/deepseek_v4_flash/engine.hpp"
 #include "src/core/previous_name_compat.hpp"
+#include "src/models/deepseek_v4_flash/engine.hpp"
 
 namespace superroc::testing::ds4 {
 namespace {

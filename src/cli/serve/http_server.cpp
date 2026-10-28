@@ -852,8 +852,8 @@ std::optional<HttpResponse> ReadCompatibilityOptions(
           (field == "text" || field == "reasoning" || field == "tools" ||
            field == "tool_choice" || field == "parallel_tool_calls" ||
            // include is a standard Responses field (for example encrypted
-           // reasoning); superroc keeps no server-side conversation, so its value
-           // is accepted and ignored.
+           // reasoning); superroc keeps no server-side conversation, so its
+           // value is accepted and ignored.
            field == "include"))) {
       return InvalidCompatibilityRequest("request field '" + field +
                                          "' is not supported on this endpoint");
@@ -1673,7 +1673,8 @@ HttpResponse LlamaMetrics(const HttpRequest&, TextGenerationBackend& b) {
       << "# TYPE superroc_spec_lookup_tokens_total counter\n"
       << "superroc_spec_lookup_tokens_total "
       << detail::TotalLookupTokens().load(std::memory_order_relaxed) << "\n"
-      << "# HELP superroc_spec_lookup_accepted_tokens_total Total prompt-lookup "
+      << "# HELP superroc_spec_lookup_accepted_tokens_total Total "
+         "prompt-lookup "
          "copies accepted\n"
       << "# TYPE superroc_spec_lookup_accepted_tokens_total counter\n"
       << "superroc_spec_lookup_accepted_tokens_total "

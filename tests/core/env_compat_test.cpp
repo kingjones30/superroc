@@ -5,11 +5,12 @@
 // parts so their spelling never appears in this file.
 #include "src/core/env_compat.hpp"
 
+#include <unistd.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <string>
-#include <unistd.h>
 
 namespace {
 

@@ -392,9 +392,9 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen WMMA prefill attention ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen WMMA prefill attention ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

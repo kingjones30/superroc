@@ -387,9 +387,10 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
 
   if (options.add_generation_prompt) {
     if (options.require_tool_call) {
-      // LFM2: superroc extension, the pinned template has no "required"; prefill
-      // past thinking into a tool call so a required call cannot be skipped.
-      // Super ROC: stop at <|tool_call_start|>. The vocabulary merges "[" and
+      // LFM2: superroc extension, the pinned template has no "required";
+      // prefill past thinking into a tool call so a required call cannot be
+      // skipped. Super ROC: stop at <|tool_call_start|>. The vocabulary merges
+      // "[" and
       // "(" with the following letters ("[get", "[search", "(x"), so a
       // prefilled "[" or "name(" left the model on a token boundary it never
       // saw and it picked the wrong tool; the tool grammar writes them now.

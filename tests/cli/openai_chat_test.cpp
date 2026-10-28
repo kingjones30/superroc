@@ -88,7 +88,8 @@ public:
 private:
   std::shared_ptr<GenerationRequest> inner_;
   std::vector<Backend::PromptProgress> progress_;
-  const std::optional<superroc::sampling::JsonConstraint::ToolFormat> tool_format_;
+  const std::optional<superroc::sampling::JsonConstraint::ToolFormat>
+      tool_format_;
 };
 
 class FakeBackend final : public superroc::server::TextGenerationBackend {
@@ -118,7 +119,8 @@ public:
     return {};
   }
 
-  Result chat(const superroc::server::ChatRequest& request, std::size_t max_tokens,
+  Result chat(const superroc::server::ChatRequest& request,
+              std::size_t max_tokens,
               const superroc::sampling::SamplingConfig& sampling,
               const CancellationCheck& is_cancelled,
               const TokenCallback& on_token) override {
@@ -186,8 +188,8 @@ public:
       const superroc::sampling::SamplingConfig& sampling,
       const CancellationCheck& is_cancelled, bool stream_output) override {
     if (reject_on_start.has_value()) {
-      throw superroc::server::TextGenerationError(*reject_on_start,
-                                              "injected admission rejection");
+      throw superroc::server::TextGenerationError(
+          *reject_on_start, "injected admission rejection");
     }
     return std::make_shared<ProgressRequest>(
         TextGenerationBackend::start_chat(request, max_tokens, sampling,
@@ -295,7 +297,7 @@ void TestStreamingIsLive() {
         "stream":true,
         "stream_options":{"include_usage":true}
       })"),
-                                                 backend);
+                                                     backend);
   Expect(response.status == 200, "Streaming request is accepted");
   Expect(static_cast<bool>(response.streaming_body),
          "Streaming request returns a streaming body");
@@ -372,7 +374,7 @@ void TestLessThanProseStreamsBeforeCompletion() {
     "tools":[{"type":"function","function":{"name":"f","parameters":{"type":"object"}}}],
     "stream":true,"reasoning_effort":"none"
   })"),
-                                                 backend);
+                                                     backend);
   std::mutex mutex;
   std::condition_variable ready;
   std::string content;
@@ -609,7 +611,7 @@ void TestToolCallsAreStructured() {
         "tool_choice":"required",
         "stream":false
       })"),
-                                                       backend);
+                                                           backend);
 
   Expect(response.status == 200, "Tool request is accepted");
   Expect(response.body.find(R"("finish_reason":"tool_calls")") !=
@@ -753,7 +755,8 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
   {
     FakeBackend backend;
     backend.pieces = ling_output;
-    (void)superroc::server::HandleOpenAiChat(Request(body("auto", false)), backend);
+    (void)superroc::server::HandleOpenAiChat(Request(body("auto", false)),
+                                             backend);
     Expect(backend.last_request.constrained_tools,
            "other backends keep constrained tool requests");
   }
@@ -762,8 +765,8 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
     FakeBackend backend;
     backend.native_tools = true;
     backend.pieces = {"Hello! How can I help you today?"};
-    const auto response =
-        superroc::server::HandleOpenAiChat(Request(body(choice, false)), backend);
+    const auto response = superroc::server::HandleOpenAiChat(
+        Request(body(choice, false)), backend);
     if (std::string_view(choice) == "required") {
       Expect(response.status == 502 &&
                  response.body.find("tool_choice_unsatisfied") !=
@@ -1020,14 +1023,15 @@ void TestResponsesToolStrictness() {
     }
   }
   superroc::server::ChatRequest invalid;
-  Expect(superroc::server::ParseOpenAiResponseControls(
-             superroc::json::parse(R"({"tools":[{"type":"function","name":"todo",
+  Expect(
+      superroc::server::ParseOpenAiResponseControls(
+          superroc::json::parse(R"({"tools":[{"type":"function","name":"todo",
                "strict":true,"parameters":{"type":"object","properties":{
                  "id":{"type":"integer"}},"required":[],
                "additionalProperties":false}}]})"),
-             &invalid)
-             .has_value(),
-         "Explicit strict true still rejects optional fields");
+          &invalid)
+          .has_value(),
+      "Explicit strict true still rejects optional fields");
 }
 
 void TestResponsesClientCompatTolerances() {
@@ -1054,16 +1058,17 @@ void TestResponsesClientCompatTolerances() {
     // A namespace is a client-side grouping, not a hosted tool: its functions
     // must reach the model with their schema and strictness intact.
     superroc::server::ChatRequest chat;
-    Expect(!superroc::server::ParseOpenAiResponseControls(
-               superroc::json::parse(R"({"tools":[{"type":"namespace","name":"crm",
+    Expect(
+        !superroc::server::ParseOpenAiResponseControls(
+            superroc::json::parse(R"({"tools":[{"type":"namespace","name":"crm",
                  "description":"Local customer tools","tools":[{"type":"function",
                  "name":"lookup","parameters":{"type":"object","properties":{},
                  "required":[],"additionalProperties":false},"strict":true}]}]})"),
-               &chat) &&
-               chat.tools.size() == 1 && chat.tools[0].name == "lookup" &&
-               chat.tools[0].definition_json.find("\"strict\":true") !=
-                   std::string::npos,
-           "Namespace function tools are flattened with their definitions");
+            &chat) &&
+            chat.tools.size() == 1 && chat.tools[0].name == "lookup" &&
+            chat.tools[0].definition_json.find("\"strict\":true") !=
+                std::string::npos,
+        "Namespace function tools are flattened with their definitions");
     // Rejected parses leave the request untouched, so every case parses into
     // fresh state instead of inheriting tools from a previous parse.
     superroc::server::ChatRequest ambiguous;
@@ -1096,7 +1101,8 @@ void TestResponsesClientCompatTolerances() {
     const std::string outside = R"({"type":"function","name":"outside"})";
     superroc::server::ChatRequest accepted;
     Expect(!superroc::server::ParseOpenAiResponseControls(
-               superroc::json::parse(R"({"tools":[)" + nested + "]}"), &accepted) &&
+               superroc::json::parse(R"({"tools":[)" + nested + "]}"),
+               &accepted) &&
                accepted.tools.size() == 128,
            "Exactly 128 functions flattened from a namespace are accepted");
     for (const bool outside_first : {false, true}) {
@@ -1104,8 +1110,8 @@ void TestResponsesClientCompatTolerances() {
                             ? R"({"tools":[)" + outside + "," + nested + "]}"
                             : R"({"tools":[)" + nested + "," + outside + "]}";
       superroc::server::ChatRequest overflow;
-      Expect(superroc::server::ParseOpenAiResponseControls(superroc::json::parse(body),
-                                                       &overflow)
+      Expect(superroc::server::ParseOpenAiResponseControls(
+                 superroc::json::parse(body), &overflow)
                  .has_value(),
              "Both boundary orderings reject the 129th flattened function");
     }
@@ -1133,7 +1139,8 @@ void TestResponsesClientCompatTolerances() {
                chat.reasoning.effort == superroc::ReasoningEffort::kLow,
            "reasoning.summary is accepted while effort still applies");
     Expect(superroc::server::ParseOpenAiResponseControls(
-               superroc::json::parse(R"({"reasoning":{"effort":"low","bogus":1}})"),
+               superroc::json::parse(
+                   R"({"reasoning":{"effort":"low","bogus":1}})"),
                &chat)
                .has_value(),
            "Unknown reasoning members are still rejected");
@@ -1143,17 +1150,19 @@ void TestResponsesClientCompatTolerances() {
   // text.format still applies beside it; an unknown text member still fails.
   {
     superroc::server::ChatRequest chat;
-    Expect(!superroc::server::ParseOpenAiResponseControls(
-               superroc::json::parse(R"({"text":{"verbosity":"low"}})"), &chat) &&
-               !chat.response_format,
-           "text.verbosity is accepted without forcing a response format");
+    Expect(
+        !superroc::server::ParseOpenAiResponseControls(
+            superroc::json::parse(R"({"text":{"verbosity":"low"}})"), &chat) &&
+            !chat.response_format,
+        "text.verbosity is accepted without forcing a response format");
     superroc::server::ChatRequest formatted;
-    Expect(!superroc::server::ParseOpenAiResponseControls(
-               superroc::json::parse(R"({"text":{"format":{"type":"json_object"},
+    Expect(
+        !superroc::server::ParseOpenAiResponseControls(
+            superroc::json::parse(R"({"text":{"format":{"type":"json_object"},
                  "verbosity":"low"}})"),
-               &formatted) &&
-               formatted.response_format,
-           "text.format still applies alongside verbosity");
+            &formatted) &&
+            formatted.response_format,
+        "text.format still applies alongside verbosity");
     superroc::server::ChatRequest rejected;
     Expect(superroc::server::ParseOpenAiResponseControls(
                superroc::json::parse(R"({"text":{"bogus":1}})"), &rejected)
@@ -1323,7 +1332,7 @@ void TestToolNameCharacters() {
     superroc::core::ImageReadBudget budget;
     std::string error;
     Expect(superroc::server::ParseOpenAiResponseMessage(item, &message, budget,
-                                                    &error) &&
+                                                        &error) &&
                message.tool_calls.size() == 1 &&
                message.tool_calls[0].name == name &&
                message.tool_calls[0].id == "call_1" &&
@@ -1343,7 +1352,7 @@ void TestHistoricalTypedArgumentsUseTojson() {
   superroc::core::ImageReadBudget budget;
   std::string error;
   Expect(superroc::server::ParseOpenAiResponseMessage(item, &message, budget,
-                                                  &error) &&
+                                                      &error) &&
              message.tool_calls.size() == 1 &&
              message.tool_calls[0].arguments.size() == 3 &&
              message.tool_calls[0].arguments[0].value == "a.txt" &&
@@ -1359,7 +1368,7 @@ void TestHistoricalTypedArgumentsUseTojson() {
           "arguments":"{\"limit\":100000,\"offsets\":[1000000]}"})");
   superroc::tokenization::ChatMessage replayed;
   Expect(superroc::server::ParseOpenAiResponseMessage(large, &replayed, budget,
-                                                  &error) &&
+                                                      &error) &&
              replayed.tool_calls.size() == 1 &&
              replayed.tool_calls[0].arguments.size() == 2 &&
              replayed.tool_calls[0].arguments[0].value == "100000" &&
@@ -1400,7 +1409,7 @@ void TestMalformedHistoricalFunctions() {
     superroc::core::ImageReadBudget budget;
     std::string error;
     Expect(!superroc::server::ParseOpenAiResponseMessage(item, &message, budget,
-                                                     &error) &&
+                                                         &error) &&
                !error.empty(),
            "Responses rejects malformed history with an explanation");
   }
@@ -1629,8 +1638,8 @@ void TestToolChoiceEnforcement() {
   backend.pieces = {"ordinary text"};
   auto body = superroc::json::parse(
       R"({"model":"test-model","messages":[{"role":"user","content":"call f"}],"tool_choice":"required","tools":[{"type":"function","function":{"name":"f","parameters":{}}}]})");
-  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-             502,
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                 .status == 502,
          "ordinary text cannot fulfill required tool choice");
 }
 
@@ -1662,7 +1671,7 @@ void TestDeepSeekToolCallsAreStructured() {
         }],
         "stream":false
       })"),
-                                                       backend);
+                                                           backend);
 
   Expect(response.status == 200, "DeepSeek tool request is accepted");
   Expect(response.body.find(R"("finish_reason":"tool_calls")") !=
@@ -1785,7 +1794,8 @@ void TestFlintStructuredToolCalls() {
     })";
   for (const bool stream : {false, true}) {
     FakeBackend backend;
-    backend.tool_format = superroc::sampling::JsonConstraint::ToolFormat::kFlint;
+    backend.tool_format =
+        superroc::sampling::JsonConstraint::ToolFormat::kFlint;
     backend.native_tools = false;
     backend.initial_output_state_override =
         FakeBackend::InitialOutputState::kAuto;
@@ -1845,7 +1855,8 @@ void TestFlintStructuredToolCalls() {
     if (calls.size() != 1)
       continue;
     const auto& function = *calls[0].find("function");
-    const auto arguments = superroc::json::parse(function.member_str("arguments"));
+    const auto arguments =
+        superroc::json::parse(function.member_str("arguments"));
     Expect(function.member_str("name") == "shell",
            "the Flint tool name is preserved");
     Expect(arguments.member_str("cmd") == "echo \"hi",
@@ -1864,7 +1875,7 @@ void TestBackendSamplingDefaults() {
         "model":"test-model",
         "messages":[{"role":"user","content":"hello"}]
       })"),
-                                                               backend);
+                                                                   backend);
   Expect(default_response.status == 200, "Defaulted request is accepted");
   Expect(backend.last_max_tokens == 37,
          "Backend max-token default reaches generation");
@@ -1877,7 +1888,7 @@ void TestBackendSamplingDefaults() {
         "max_tokens":11,
         "temperature":0
       })"),
-                                                                backend);
+                                                                    backend);
   Expect(override_response.status == 200, "Sampling override is accepted");
   Expect(backend.last_max_tokens == 11,
          "Explicit max tokens override the backend default");
@@ -1966,7 +1977,7 @@ void TestCompleteToolDefinitionsReachTemplate() {
       "description":"","name":"emit"},
       "vendor":{"version":2}}]
   })"),
-                                                       backend);
+                                                           backend);
   Expect(response.status == 200 && backend.last_request.tools.size() == 1,
          "complete function definition reaches the backend");
   const auto& tool = backend.last_request.tools.front();
@@ -2006,7 +2017,8 @@ void TestFlatToolFieldsReachTemplate() {
     Expect(response.status == 200 && backend.last_request.tools.size() == 1,
            "Flat function with additional fields is accepted");
     const auto flat_tools = backend.last_request.tools;
-    const auto definition = superroc::json::parse(flat_tools[0].definition_json);
+    const auto definition =
+        superroc::json::parse(flat_tools[0].definition_json);
     const auto* nested = definition.find("function");
     Expect(nested && nested->dump() == function.dump() &&
                !definition.contains("strict") && !definition.contains("vendor"),
@@ -2078,8 +2090,8 @@ void TestToolCallRenderParseRoundTrip() {
             {superroc::tokenization::ChatRole::kUser, "go"}, call};
         superroc::tokenization::ChatTemplateOptions options;
         options.enable_thinking = false;
-        const auto rendered =
-            superroc::tokenization::QwenChatTemplate::Render(history, {}, options);
+        const auto rendered = superroc::tokenization::QwenChatTemplate::Render(
+            history, {}, options);
         Expect(rendered.has_value(), "Qwen renders a historical call");
         const auto begin = rendered->find("<tool_call>");
         const auto end_tag = std::string_view("</tool_call>");
@@ -2099,7 +2111,7 @@ void TestToolCallRenderParseRoundTrip() {
             "text":{"type":"string"},"other":{"type":"string"}}}}}],
         "stream":false
       })"),
-                                                           backend);
+                                                               backend);
       const std::string label = std::string(deepseek ? "DeepSeek" : "Qwen") +
                                 " case " + std::to_string(index);
       Expect(response.status == 200, label + ": request is accepted");
@@ -2143,7 +2155,7 @@ void TestAllSamplingControlsReachBackend() {
         "frequency_penalty":0.25,
         "presence_penalty":0.5
       })"),
-                                                       backend);
+                                                           backend);
 
   Expect(response.status == 200, "Complete sampling request is accepted");
   const auto& sampling = backend.last_sampling;
@@ -2178,7 +2190,8 @@ void TestUnsupportedSamplingControlsAreRejected() {
       body[field] = value;
       body["stream"] = stream;
       request.body = body.dump();
-      const auto response = superroc::server::HandleOpenAiChat(request, backend);
+      const auto response =
+          superroc::server::HandleOpenAiChat(request, backend);
       Expect(response.status == 400 &&
                  response.body.find(std::string("invalid_") + field) !=
                      std::string::npos,
@@ -2234,7 +2247,8 @@ void TestSamplingRanges() {
       auto body = superroc::json::parse(request.body);
       body[field] = value;
       request.body = body.dump();
-      const auto response = superroc::server::HandleOpenAiChat(request, backend);
+      const auto response =
+          superroc::server::HandleOpenAiChat(request, backend);
       Expect(
           response.status == (value < minimum || value > maximum ? 400 : 200),
           "sampling range is inclusive and checked before float rounding");
@@ -2258,7 +2272,7 @@ void TestAssistantReasoningContentReachesBackend() {
         ],
         "max_tokens":1
       })"),
-                                                       backend);
+                                                           backend);
 
   Expect(response.status == 200, "Assistant reasoning history is accepted");
   Expect(backend.last_request.messages.size() == 3,
@@ -2283,13 +2297,14 @@ void TestPiReasoningControlsAndOutputFraming() {
           "preserve_thinking":false
         }
       })"),
-                                                       backend);
+                                                           backend);
 
   Expect(response.status == 200, "Pi reasoning request is accepted");
   Expect(backend.last_request.reasoning.enabled == true,
          "Pi enable_thinking reaches the backend");
-  Expect(backend.last_request.reasoning.effort == superroc::ReasoningEffort::kHigh,
-         "Pi reasoning effort reaches the backend");
+  Expect(
+      backend.last_request.reasoning.effort == superroc::ReasoningEffort::kHigh,
+      "Pi reasoning effort reaches the backend");
   Expect(backend.last_request.reasoning.preserve_thinking == false,
          "Pi preservation control reaches the backend");
   Expect(response.body.find(R"("reasoning_content":"I should verify this.")") !=
@@ -2344,20 +2359,21 @@ void TestPiNativeDeepSeekThinkingObject() {
         "thinking":{"type":"enabled"},
         "reasoning_effort":"high"
       })"),
-                                                       backend);
+                                                           backend);
   Expect(response.status == 200,
          "Pi native DeepSeek thinking object is accepted");
   Expect(backend.last_request.reasoning.enabled == true,
          "Pi DeepSeek thinking.type enables reasoning");
-  Expect(backend.last_request.reasoning.effort == superroc::ReasoningEffort::kHigh,
-         "Pi DeepSeek reasoning effort reaches the backend");
+  Expect(
+      backend.last_request.reasoning.effort == superroc::ReasoningEffort::kHigh,
+      "Pi DeepSeek reasoning effort reaches the backend");
 
   const auto disabled = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"Answer directly."}],
         "thinking":{"type":"disabled"}
       })"),
-                                                       backend);
+                                                           backend);
   Expect(disabled.status == 200,
          "Pi native DeepSeek disabled thinking object is accepted");
   Expect(backend.last_request.reasoning.enabled == false,
@@ -2373,7 +2389,7 @@ void TestStreamingPromptOpenedReasoning() {
         "reasoning_effort":"xhigh",
         "stream":true
       })"),
-                                                 backend);
+                                                     backend);
   Expect(response.status == 200, "Streaming reasoning request is accepted");
   std::string output;
   response.streaming_body([&](std::string_view chunk) {
@@ -2495,8 +2511,8 @@ void TestReasoningAnswerSeparator() {
               "text":{"type":"string"}},
               "required":["answer","text"],"additionalProperties":false}}})");
               }
-              const auto response =
-                  superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+              const auto response = superroc::server::HandleOpenAiChat(
+                  Request(body.dump()), backend);
               Expect(response.status == 200,
                      "reasoning separator request succeeds");
               std::string content;
@@ -2538,7 +2554,7 @@ void TestConflictingReasoningControlsAreRejected() {
         "reasoning_effort":"high",
         "chat_template_kwargs":{"enable_thinking":false}
       })"),
-                                                       backend);
+                                                           backend);
   Expect(response.status == 400, "Conflicting reasoning controls are rejected");
   Expect(response.body.find("invalid_reasoning") != std::string::npos,
          "Reasoning conflict has a stable error code");
@@ -2552,7 +2568,7 @@ void TestWrongModelIsRejected() {
         "model":"wrong-model",
         "messages":[{"role":"user","content":"hello"}]
       })"),
-                                                       backend);
+                                                           backend);
 
   Expect(response.status == 404, "Unknown model is rejected");
   Expect(response.body.find("model_not_found") != std::string::npos,
@@ -2578,13 +2594,14 @@ void TestClientIdentityReachesBackend() {
 
 void TestStreamingOverloadIsRejectedBeforeHeaders() {
   FakeBackend backend;
-  backend.reject_on_start = superroc::server::TextGenerationErrorCode::kQueueFull;
+  backend.reject_on_start =
+      superroc::server::TextGenerationErrorCode::kQueueFull;
   const auto response = superroc::server::HandleOpenAiChat(Request(R"({
         "model":"test-model",
         "messages":[{"role":"user","content":"hello"}],
         "stream":true
       })"),
-                                                       backend);
+                                                           backend);
 
   Expect(response.status == 429,
          "streaming overload is rejected synchronously");
@@ -2612,7 +2629,7 @@ void TestImagePartsRetainOrderAndIdentity() {
       {"type":"image_url","image_url":{"url":"data:image/jpeg;base64,BAUG"}}
     ]}]
   })"),
-                                                       backend);
+                                                           backend);
   Expect(response.status == 200, "image content parts reach the backend");
   Expect(backend.last_request.stop_sequences == std::vector<std::string>{"END"},
          "image requests preserve explicit stop sequences");
@@ -2629,7 +2646,8 @@ void TestImagePartsRetainOrderAndIdentity() {
       {R"({"messages":[{"role":"assistant","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AQID"}}]}]})",
        R"({"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AQID","detail":"low"}}]}]})",
        R"({"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"file:///tmp/image.png"}}]}]})"}) {
-    Expect(superroc::server::HandleOpenAiChat(Request(body), backend).status == 400,
+    Expect(superroc::server::HandleOpenAiChat(Request(body), backend).status ==
+               400,
            "unsupported image role, policy and URL are rejected");
   }
 }
@@ -2689,14 +2707,14 @@ void TestImageCountAndByteBudget() {
   std::string error;
   for (unsigned i = 0; i < 17; ++i) {
     superroc::tokenization::ChatMessage parsed;
-    Expect(superroc::server::ParseOpenAiResponseMessage(response_message, &parsed,
-                                                    budget, &error) &&
+    Expect(superroc::server::ParseOpenAiResponseMessage(
+               response_message, &parsed, budget, &error) &&
                parsed.images.size() == 1,
            "Responses accepts more than sixteen images across messages");
   }
   superroc::tokenization::ChatMessage parsed;
-  Expect(!superroc::server::ParseOpenAiResponseMessage(response_message, &parsed,
-                                                   budget, &error) &&
+  Expect(!superroc::server::ParseOpenAiResponseMessage(
+             response_message, &parsed, budget, &error) &&
              error.find("byte") != std::string::npos,
          "aggregate byte protection still covers every message");
 }
@@ -2715,7 +2733,7 @@ void TestToolImagesRetainOrderAndIdentity() {
       {"type":"image_url","image_url":{"url":"data:image/png;base64,BAUG"}}
     ]}]
   })"),
-                                                       backend);
+                                                           backend);
   Expect(response.status == 200, "Chat tool images reach the backend");
   const auto& chat = backend.last_request.messages.front();
   Expect(chat.role == ChatRole::kTool && chat.tool_call_id == "call_picture" &&
@@ -2739,8 +2757,8 @@ void TestToolImagesRetainOrderAndIdentity() {
       budget.remaining_bytes = 3;
       superroc::tokenization::ChatMessage message;
       std::string error;
-      Expect(superroc::server::ParseOpenAiResponseMessage(item, &message, budget,
-                                                      &error),
+      Expect(superroc::server::ParseOpenAiResponseMessage(item, &message,
+                                                          budget, &error),
              "Responses accepts image-bearing tool outputs: " + error);
       Expect(
           message.role == ChatRole::kTool &&
@@ -2751,8 +2769,8 @@ void TestToolImagesRetainOrderAndIdentity() {
               *message.images[0].bytes == std::vector<std::uint8_t>({1, 2, 3}),
           "Responses retains call association, image bytes and order");
       superroc::tokenization::ChatMessage overflow;
-      Expect(!superroc::server::ParseOpenAiResponseMessage(item, &overflow, budget,
-                                                       &error),
+      Expect(!superroc::server::ParseOpenAiResponseMessage(item, &overflow,
+                                                           budget, &error),
              "tool output images consume the shared request byte budget");
     }
     auto literal = parse(R"({"call_id":"literal",
@@ -2762,8 +2780,8 @@ void TestToolImagesRetainOrderAndIdentity() {
     budget.remaining_bytes = 0;
     superroc::tokenization::ChatMessage message;
     std::string error;
-    Expect(superroc::server::ParseOpenAiResponseMessage(literal, &message, budget,
-                                                    &error) &&
+    Expect(superroc::server::ParseOpenAiResponseMessage(literal, &message,
+                                                        budget, &error) &&
                message.images.empty() &&
                message.content == "data:image/png;base64,AQID",
            "string tool output stays literal text even when it spells an image "
@@ -2778,10 +2796,9 @@ void TestToolImagesRetainOrderAndIdentity() {
     body["model"] = "test-model";
     body["messages"] = superroc::json::Value::array();
     body["messages"].push_back(std::move(message));
-    Expect(
-        superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-            400,
-        "images remain rejected on non-observation roles");
+    Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                   .status == 400,
+           "images remain rejected on non-observation roles");
   }
   for (const auto* image :
        {R"({"url":17})",
@@ -2795,10 +2812,9 @@ void TestToolImagesRetainOrderAndIdentity() {
     auto body = parse(R"({"messages":[]})");
     body["model"] = "test-model";
     body["messages"].push_back(std::move(message));
-    Expect(
-        superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-            400,
-        "tool images preserve URL, encoding and resolution validation");
+    Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                   .status == 400,
+           "tool images preserve URL, encoding and resolution validation");
   }
 }
 
@@ -2855,8 +2871,8 @@ void TestStopSequencesAndDefaultFields() {
   auto body = base;
   body["stop"] = std::string(4097, 's');
   FakeBackend backend;
-  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-             400,
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                 .status == 400,
          "oversized stop sequences are bounded");
   backend.defaults.max_tokens = 37;
   backend.defaults.sampling.temperature = 0.7F;
@@ -2871,8 +2887,8 @@ void TestStopSequencesAndDefaultFields() {
         "modalities", "audio", "temperature", "top_p", "seed", "logit_bias",
         "frequency_penalty", "presence_penalty", "reasoning_effort"})
     body[field] = Value();
-  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-             200,
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                 .status == 200,
          "nullable API defaults do not enable unsupported features");
   Expect(backend.last_max_tokens == backend.defaults.max_tokens,
          "null token limits retain the configured default");
@@ -2900,8 +2916,8 @@ void TestStopSequencesAndDefaultFields() {
   body["logit_bias"] = Value::object();
   body["response_format"] = superroc::json::parse(R"({"type":"text"})");
   body["modalities"] = superroc::json::parse(R"(["text"])");
-  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-             200,
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                 .status == 200,
          "explicit text-only and disabled logprobs defaults work");
   for (const auto* request :
        {R"({"logprobs":true})", R"({"top_logprobs":3})",
@@ -2950,8 +2966,8 @@ void TestStructuredResponseFormat() {
   }
   body["response_format"]["json_schema"]["description"] =
       "Use the requested labels.";
-  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-                 200 &&
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                     .status == 200 &&
              backend.last_request.response_format_description ==
                  "Use the requested labels.",
          "format description reaches the model request");
@@ -3073,8 +3089,8 @@ void TestStructuredResponseFormat() {
            "Responses text.format admits typed additional properties");
   }
   body["stop"] = "END";
-  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-             200,
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                 .status == 200,
          "structured requests accept explicit stops");
   body = superroc::json::parse(
       R"({"model":"test-model","messages":[{"role":"user","content":"value"}]})");
@@ -3339,11 +3355,10 @@ void TestStrictToolSchema() {
   body["parallel_tool_calls"] = false;
   FakeBackend non_strict;
   non_strict.pieces = no_arguments.pieces;
-  Expect(
-      superroc::server::HandleOpenAiChat(Request(body.dump()), non_strict).status ==
-              200 &&
-          non_strict.last_request.constrained_tools,
-      "parallel_tool_calls false also constrains non-strict tools");
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), non_strict)
+                     .status == 200 &&
+             non_strict.last_request.constrained_tools,
+         "parallel_tool_calls false also constrains non-strict tools");
 }
 
 void TestStopInsideToolArguments() {
@@ -3454,13 +3469,14 @@ void TestNativeToolImplicitReasoningEnd() {
               body["tools"].push_back(std::move(flat));
               superroc::server::ChatRequest chat;
               chat.reasoning.enabled = true;
-              Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
-                     "implicit tool fixture has valid Responses controls");
+              Expect(
+                  !superroc::server::ParseOpenAiResponseControls(body, &chat),
+                  "implicit tool fixture has valid Responses controls");
               response = superroc::server::CreateOpenAiResponse(
                   Request(body.dump()), backend, chat, 512, {}, stream);
             } else {
-              response =
-                  superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+              response = superroc::server::HandleOpenAiChat(
+                  Request(body.dump()), backend);
             }
             Expect(response.status == 200,
                    "implicit native tool request succeeds");
@@ -3473,8 +3489,8 @@ void TestNativeToolImplicitReasoningEnd() {
               response.streaming_body([&](std::string_view piece) {
                 if (piece == "data: [DONE]\n\n")
                   return true;
-                const auto event =
-                    superroc::json::parse(piece.substr(piece.find("data: ") + 6));
+                const auto event = superroc::json::parse(
+                    piece.substr(piece.find("data: ") + 6));
                 if (responses) {
                   if (event.member_str("type") ==
                       "response.reasoning_summary_text.delta")
@@ -3614,13 +3630,14 @@ void TestToolMarkersInsideConstrainedReasoning() {
               body["tools"].push_back(std::move(flat));
               superroc::server::ChatRequest chat;
               chat.reasoning.enabled = true;
-              Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
-                     "reasoning marker fixture has valid Responses controls");
+              Expect(
+                  !superroc::server::ParseOpenAiResponseControls(body, &chat),
+                  "reasoning marker fixture has valid Responses controls");
               response = superroc::server::CreateOpenAiResponse(
                   Request(body.dump()), backend, chat, 4096, {}, stream);
             } else {
-              response =
-                  superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+              response = superroc::server::HandleOpenAiChat(
+                  Request(body.dump()), backend);
             }
             Expect(response.status == 200, "reasoning marker fixture succeeds");
             std::vector<Value> events;
@@ -3629,7 +3646,8 @@ void TestToolMarkersInsideConstrainedReasoning() {
                 const auto pos = chunk.find("data: ");
                 if (pos != std::string_view::npos &&
                     !chunk.substr(pos + 6).starts_with("[DONE]"))
-                  events.push_back(superroc::json::parse(chunk.substr(pos + 6)));
+                  events.push_back(
+                      superroc::json::parse(chunk.substr(pos + 6)));
                 return true;
               });
             else
@@ -3732,9 +3750,10 @@ void TestToolMarkersWhenToolsDisabled() {
                            expected_answer;
           FakeBackend backend;
           backend.finish_reason =
-              incomplete
-                  ? superroc::server::TextGenerationBackend::FinishReason::kLength
-                  : superroc::server::TextGenerationBackend::FinishReason::kStop;
+              incomplete ? superroc::server::TextGenerationBackend::
+                               FinishReason::kLength
+                         : superroc::server::TextGenerationBackend::
+                               FinishReason::kStop;
           for (char byte : raw)
             backend.pieces.emplace_back(1, byte);
           superroc::server::HttpResponse response;
@@ -3752,8 +3771,8 @@ void TestToolMarkersWhenToolsDisabled() {
             response = superroc::server::CreateOpenAiResponse(
                 Request(body.dump()), backend, chat, 4096, {}, stream);
           } else
-            response =
-                superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+            response = superroc::server::HandleOpenAiChat(Request(body.dump()),
+                                                          backend);
           std::string text, reasoning;
           const auto inspect = [&](const Value& event) {
             if (responses) {
@@ -3844,7 +3863,8 @@ void TestNativeToolTransports() {
               if (constrained)
                 backend.tool_format =
                     call.starts_with("<｜DSML｜tool_calls>")
-                        ? superroc::sampling::JsonConstraint::ToolFormat::kDeepSeek
+                        ? superroc::sampling::JsonConstraint::ToolFormat::
+                              kDeepSeek
                         : superroc::sampling::JsonConstraint::ToolFormat::kQwen;
               const auto raw =
                   (thinking ? "Reasoning.</think>" : "") + call + " \n";
@@ -3859,13 +3879,14 @@ void TestNativeToolTransports() {
                 body["tools"].push_back(std::move(flat));
                 superroc::server::ChatRequest chat;
                 chat.reasoning.enabled = thinking;
-                Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
-                       "Responses shares tool controls");
+                Expect(
+                    !superroc::server::ParseOpenAiResponseControls(body, &chat),
+                    "Responses shares tool controls");
                 response = superroc::server::CreateOpenAiResponse(
                     Request(body.dump()), backend, chat, 256, {}, stream);
               } else {
-                response = superroc::server::HandleOpenAiChat(Request(body.dump()),
-                                                          backend);
+                response = superroc::server::HandleOpenAiChat(
+                    Request(body.dump()), backend);
               }
               Expect(response.status == 200, "native tool request succeeds");
               std::vector<Value> output;
@@ -3874,7 +3895,8 @@ void TestNativeToolTransports() {
                   auto pos = chunk.find("data: ");
                   if (pos != std::string_view::npos &&
                       !chunk.substr(pos + 6).starts_with("[DONE]"))
-                    output.push_back(superroc::json::parse(chunk.substr(pos + 6)));
+                    output.push_back(
+                        superroc::json::parse(chunk.substr(pos + 6)));
                   return true;
                 });
               } else {
@@ -4198,8 +4220,8 @@ void TestNativeToolDialectSelection() {
             response = superroc::server::CreateOpenAiResponse(
                 Request(body.dump()), backend, chat, 256, {}, stream);
           } else {
-            response =
-                superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+            response = superroc::server::HandleOpenAiChat(Request(body.dump()),
+                                                          backend);
           }
           Expect(response.status == 200, "native file tool request succeeds");
           // A later backend configuration must not change an admitted stream's
@@ -4531,8 +4553,8 @@ void TestNativeToolTextOutsideEnvelopes() {
             response = superroc::server::CreateOpenAiResponse(
                 Request(body.dump()), backend, chat, 512, {}, stream);
           } else {
-            response =
-                superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+            response = superroc::server::HandleOpenAiChat(Request(body.dump()),
+                                                          backend);
           }
           Expect(response.status == 200, "native tool request succeeds");
           backend.tool_format.reset();
@@ -4737,7 +4759,8 @@ void TestNativeArgumentTypingMatrix() {
         body["tools"].push_back(std::move(tool));
         body["stream"] = stream;
         FakeBackend backend;
-        backend.tool_format = superroc::sampling::JsonConstraint::ToolFormat::kQwen;
+        backend.tool_format =
+            superroc::sampling::JsonConstraint::ToolFormat::kQwen;
         const auto raw = std::string(
                              "<tool_call>\n<function=record>\n"
                              "<parameter=v>\n") +
@@ -4899,12 +4922,12 @@ void TestNativeUnionToolTypes() {
   Expect(response.status == 200, "native union call succeeds");
   const auto output = superroc::json::parse(response.body);
   const auto arguments = superroc::json::parse(output.find("choices")
-                                               ->items()[0]
-                                               .find("message")
-                                               ->find("tool_calls")
-                                               ->items()[0]
-                                               .find("function")
-                                               ->member_str("arguments"));
+                                                   ->items()[0]
+                                                   .find("message")
+                                                   ->find("tool_calls")
+                                                   ->items()[0]
+                                                   .find("function")
+                                                   ->member_str("arguments"));
   Expect(arguments.dump() ==
              superroc::json::parse(R"({"content":"#include \"a.h\"\n42",
                "provider":"exa","args":{"key":1},"label":null,
@@ -5054,14 +5077,15 @@ void TestToolMetadataAndFraming() {
              chat.parallel_tool_calls && chat.forced_tool_name.empty(),
          "null Responses parallel control retains default");
   chat.forced_tool_name = "f";
-  Expect(!superroc::server::ParseOpenAiResponseControls(
-             superroc::json::parse(R"({"tool_choice":"none"})"), &chat) &&
-             chat.forced_tool_name.empty() &&
-             chat.tool_choice == superroc::server::ChatRequest::ToolChoice::kNone,
-         "an explicit choice clears inherited named-tool metadata");
+  Expect(
+      !superroc::server::ParseOpenAiResponseControls(
+          superroc::json::parse(R"({"tool_choice":"none"})"), &chat) &&
+          chat.forced_tool_name.empty() &&
+          chat.tool_choice == superroc::server::ChatRequest::ToolChoice::kNone,
+      "an explicit choice clears inherited named-tool metadata");
   FakeBackend backend;
-  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend).status ==
-             400,
+  Expect(superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+                 .status == 400,
          "Chat Completions parallel control still requires a boolean");
 }
 
@@ -5157,8 +5181,8 @@ void TestResponsesLiveAndCancellation() {
   FakeBackend backend;
   backend.pieces = {"<tool_call>first", "second"};
   backend.block_after_first_piece = true;
-  auto response = superroc::server::CreateOpenAiResponse(Request("{}"), backend, {},
-                                                     0, {}, true);
+  auto response = superroc::server::CreateOpenAiResponse(Request("{}"), backend,
+                                                         {}, 0, {}, true);
   std::atomic<bool> first{false};
   std::jthread writer([&] {
     response.streaming_body([&](std::string_view chunk) {
@@ -5174,8 +5198,8 @@ void TestResponsesLiveAndCancellation() {
 
   backend.block_after_first_piece = false;
   backend.completed = false;
-  auto cancelled = superroc::server::CreateOpenAiResponse(Request("{}"), backend,
-                                                      {}, 0, {}, true);
+  auto cancelled = superroc::server::CreateOpenAiResponse(
+      Request("{}"), backend, {}, 0, {}, true);
   bool terminal = false;
   cancelled.streaming_body([&](std::string_view chunk) {
     terminal |= chunk.find("event: response.completed") != std::string::npos;
@@ -5244,8 +5268,8 @@ void TestResponsesPromptProgress() {
                       {.total = 7, .cache = 5, .processed = 7, .time_ms = 3}};
   for (const auto* setting : {"true", "false", "null"}) {
     superroc::server::ChatRequest chat;
-    const auto body = superroc::json::parse(std::string(R"({"return_progress":)") +
-                                        setting + "}");
+    const auto body = superroc::json::parse(
+        std::string(R"({"return_progress":)") + setting + "}");
     Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
            "Responses accepts boolean and null progress settings");
     const auto response = superroc::server::CreateOpenAiResponse(
@@ -5529,7 +5553,8 @@ void TestUnconstrainedQuoteFallbackChecksSchema() {
           else
             response.streaming_body([&](std::string_view chunk) {
               const auto offset = chunk.find("data: ");
-              const auto event = superroc::json::parse(chunk.substr(offset + 6));
+              const auto event =
+                  superroc::json::parse(chunk.substr(offset + 6));
               if (event.member_str("type") == "response.output_text.delta")
                 streamed += event.member_str("delta");
               if (event.member_str("type") == "response.completed")
@@ -5606,7 +5631,8 @@ void TestUnfinishedInlineReasoningFallback() {
         // reasoning deliberately requires the explicit phase delimiter.
         chat.constrained_tools = false;
         FakeBackend backend;
-        backend.tool_format = superroc::sampling::JsonConstraint::ToolFormat::kQwen;
+        backend.tool_format =
+            superroc::sampling::JsonConstraint::ToolFormat::kQwen;
         const auto& raw = item.text;
         if (bytewise)
           for (const char byte : raw)
@@ -5693,7 +5719,8 @@ void TestProseAboutTheDialectIsNotACall() {
       "into the structured tool_calls field of the OpenAI API, and makes sure "
       "the *rest* of the markup never appears as text.\n"
       "\n"
-      "1. **Closing tags escaped into content.** When the call parsed, superroc "
+      "1. **Closing tags escaped into content.** When the call parsed, "
+      "superroc "
       "removed the opening envelope but let the tail — `</parameter>`, "
       "`</invoke>`, `</function>` — escape into content.\n"
       "\n"
@@ -5867,7 +5894,8 @@ ToolBoundaryOutput ToolBoundaryRequest(
       initial == FakeBackend::InitialOutputState::kContent ? "none" : "low";
   superroc::server::HttpResponse response;
   if (api == 0)
-    response = superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+    response =
+        superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
   else {
     superroc::server::ChatRequest chat;
     Expect(!superroc::server::ParseOpenAiResponseControls(body, &chat),
@@ -6493,13 +6521,13 @@ void TestIncrementalToolArguments() {
         backend.completed = false;
         backend.block_after_first_piece = false;
         superroc::server::ChatRequest cancelled_chat;
-        Expect(
-            !superroc::server::ParseOpenAiResponseControls(body, &cancelled_chat),
-            "cancelled tool controls parse");
+        Expect(!superroc::server::ParseOpenAiResponseControls(body,
+                                                              &cancelled_chat),
+               "cancelled tool controls parse");
         cancelled_chat.reasoning.enabled = reasoning;
         auto cancelled_response =
-            api == 0
-                ? superroc::server::HandleOpenAiChat(Request(body.dump()), backend)
+            api == 0 ? superroc::server::HandleOpenAiChat(Request(body.dump()),
+                                                          backend)
             : api == 1
                 ? superroc::server::CreateOpenAiResponse(
                       Request("{}"), backend, cancelled_chat, 512, {}, true)

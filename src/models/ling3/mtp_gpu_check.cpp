@@ -124,8 +124,8 @@ int main(int argc, char** argv) {
               context);
 
   std::string err;
-  auto reader =
-      superroc::core::GgufReader::OpenFile(std::filesystem::path(model_path), &err);
+  auto reader = superroc::core::GgufReader::OpenFile(
+      std::filesystem::path(model_path), &err);
   if (reader == nullptr)
     Die("cannot open the GGUF: " + err);
   auto weights = superroc::models::ling3::ModelWeights::Bind(*reader, &err);
@@ -140,18 +140,19 @@ int main(int argc, char** argv) {
   superroc::models::ling3::rocm::ExpertPlacement placement{};
   placement.stream = false;
   std::size_t resident = 0;
-  if (!superroc::models::ling3::rocm::Init(*weights, *reader, placement, &resident,
-                                       &err)) {
+  if (!superroc::models::ling3::rocm::Init(*weights, *reader, placement,
+                                           &resident, &err)) {
     Die("rocm::Init: " + err);
   }
   std::printf("# trunk resident=%.2f GiB\n",
               static_cast<double>(resident) / 1073741824.0);
 
-  const auto head_norm = layer_out_norm
-                             ? superroc::models::ling3::mtp::HeadNorm::kLayerOutNorm
-                             : superroc::models::ling3::mtp::HeadNorm::kOutputNorm;
+  const auto head_norm =
+      layer_out_norm ? superroc::models::ling3::mtp::HeadNorm::kLayerOutNorm
+                     : superroc::models::ling3::mtp::HeadNorm::kOutputNorm;
   std::size_t head_bytes = 0;
-  if (!superroc::models::ling3::mtp::Init(*weights, head_norm, &head_bytes, &err)) {
+  if (!superroc::models::ling3::mtp::Init(*weights, head_norm, &head_bytes,
+                                          &err)) {
     Die("mtp::Init: " + err);
   }
   std::printf("# head resident=%.2f GiB\n",

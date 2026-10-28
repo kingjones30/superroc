@@ -16,8 +16,8 @@
 #include <vector>
 
 #include "src/core/crypto/sha256.hpp"
-#include "src/models/deepseek_v4_flash/engine.hpp"
 #include "src/core/env_compat.hpp"
+#include "src/models/deepseek_v4_flash/engine.hpp"
 
 namespace superroc::testing::ds4 {
 void CheckTokenGoldens(const models::deepseek_v4_flash::Model& model);
@@ -55,14 +55,14 @@ void CheckIndexerBoundary(
   std::string error;
   auto ar = model->CreateSession(superroc::core::SessionMode::kAutoregressive,
                                  133760, &error);
-  auto spec =
-      model->CreateSession(batched ? superroc::core::SessionMode::kAutoregressive
-                                   : superroc::core::SessionMode::kSpeculative,
-                           133760, &error);
-  auto peer =
-      batched ? model->CreateSession(superroc::core::SessionMode::kAutoregressive,
-                                     133760, &error)
-              : nullptr;
+  auto spec = model->CreateSession(
+      batched ? superroc::core::SessionMode::kAutoregressive
+              : superroc::core::SessionMode::kSpeculative,
+      133760, &error);
+  auto peer = batched ? model->CreateSession(
+                            superroc::core::SessionMode::kAutoregressive,
+                            133760, &error)
+                      : nullptr;
   Expect(ar && spec, error);
   // Match HTTP's stable prompt checkpoint followed by its final three tokens.
   std::vector<int> prefix(prompt.begin(), prompt.end() - 3);
@@ -738,7 +738,8 @@ void CheckDsparkPromptSeed(
     std::vector<std::unique_ptr<superroc::models::deepseek_v4_flash::Session>>
         sessions;
     std::vector<std::vector<int>> output(concurrency);
-    std::vector<superroc::models::deepseek_v4_flash::SessionDsparkBatchItem> items;
+    std::vector<superroc::models::deepseek_v4_flash::SessionDsparkBatchItem>
+        items;
     for (std::size_t i = 0; i < concurrency; ++i) {
       auto member = model->CreateSession(
           model->HasDspark() ? superroc::core::SessionMode::kSpeculative
@@ -1398,7 +1399,8 @@ void CheckDsparkReproducibility(
 
 int main(int argc, char** argv) try {
   std::cout << std::unitbuf;
-  const char* model_path = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
+  const char* model_path =
+      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
   if (model_path == nullptr || model_path[0] == '\0') {
     std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_MODEL is not set\n";
     return 77;
@@ -1432,7 +1434,9 @@ int main(int argc, char** argv) try {
     return 2;
   }
   const char* dspark_model_path =
-      dspark ? ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL") : nullptr;
+      dspark ? ::superroc::core::GetEnvCompat(
+                   "SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL")
+             : nullptr;
   if (dspark && (dspark_model_path == nullptr || *dspark_model_path == '\0')) {
     std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
     return 77;
@@ -1455,7 +1459,8 @@ int main(int argc, char** argv) try {
     return 0;
   }
   if (frontiers) {
-    superroc::testing::ds4::DumpReferenceFrontiers(model, argv[2], prefill_only);
+    superroc::testing::ds4::DumpReferenceFrontiers(model, argv[2],
+                                                   prefill_only);
     return 0;
   }
   if (wide_prefill) {

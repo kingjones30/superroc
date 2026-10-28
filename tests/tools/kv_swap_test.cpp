@@ -1,8 +1,9 @@
 // kv_swap_test — SPEC7 item 2(b): tests for the kv_swap tool.
 //
-// kv_swap (tools/superroc-quant/kv_swap.cpp) writes a GGUF whose KV/metadata block
-// comes verbatim from a template file and whose tensor payloads come verbatim
-// from a data file. It is what produced both v0.4 `-servedkv` drop-ins.
+// kv_swap (tools/superroc-quant/kv_swap.cpp) writes a GGUF whose KV/metadata
+// block comes verbatim from a template file and whose tensor payloads come
+// verbatim from a data file. It is what produced both v0.4 `-servedkv`
+// drop-ins.
 //
 // This test covers:
 //   * one success case: output KV == template, output data == data file,
@@ -209,8 +210,8 @@ int main(int argc, char** argv) {
       Expect(ho.kv[i].first == ht.kv[i].first,
              "success: template KV order at " + std::to_string(i));
     const std::vector<std::string> prov = {
-        "superroc.quant.tool", "superroc.quant.kv_template", "superroc.quant.tensor_source",
-        "superroc.quant.format_version"};
+        "superroc.quant.tool", "superroc.quant.kv_template",
+        "superroc.quant.tensor_source", "superroc.quant.format_version"};
     for (std::size_t i = 0; i < prov.size(); ++i)
       Expect(ho.kv[ht.kv.size() + i].first == prov[i],
              "success: provenance key at +" + std::to_string(i));

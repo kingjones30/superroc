@@ -3,8 +3,8 @@
 //
 // The phase-1/2 tiled kernel (ling3_gemm.hip) dequantises FP4 weights to float
 // in LDS and does scalar float FMA: ~5-6 % of the box's fp32 peak, while the
-// same silicon demonstrates 55 TOPS on the int8 WMMA matrix core (superroc's own
-// Qwen W8A8 prefill, and the fork's ROCmFP4 prefill, which is W8A8 too: FP4
+// same silicon demonstrates 55 TOPS on the int8 WMMA matrix core (superroc's
+// own Qwen W8A8 prefill, and the fork's ROCmFP4 prefill, which is W8A8 too: FP4
 // nibbles -> int8 in registers, Q8_1 activations, one int32 dot per
 // 16x16x16 tile, block scales applied in the epilogue).
 //

@@ -80,8 +80,8 @@ void CensusCountsComputeQueuesAcrossProcesses() {
 }
 
 void CensusIsEmptyWithoutKfd() {
-  const auto census =
-      QueryQueueCensus(std::filesystem::temp_directory_path() / "superroc-absent");
+  const auto census = QueryQueueCensus(std::filesystem::temp_directory_path() /
+                                       "superroc-absent");
   Expect(census.compute_queues == 0, "absent KFD reports no queues");
   Expect(census.processes == 0, "absent KFD reports no processes");
 }

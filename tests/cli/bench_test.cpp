@@ -117,7 +117,8 @@ void TestInvalidDepth() {
 
   const std::array<const char*, 4> unsupported_floor = {
       "--speculative", "dflash2", "--min-draft-tokens", "2"};
-  Expect(!superroc::cli::ParseBenchOptions(unsupported_floor, &error).has_value() &&
+  Expect(!superroc::cli::ParseBenchOptions(unsupported_floor, &error)
+                 .has_value() &&
              error.find("min-draft-tokens") != std::string::npos,
          "DFlash2 rejects an unsupported minimum draft length");
   for (const char* policy : {"fixed", "adaptive", "unknown"}) {
@@ -148,7 +149,8 @@ void TestInvalidWorkload() {
   Expect(!superroc::cli::ParseBenchOptions(no_runs),
          "zero repetitions are rejected");
   const char* empty[] = {"-p", "0", "-n", "0"};
-  Expect(!superroc::cli::ParseBenchOptions(empty), "empty benchmark is rejected");
+  Expect(!superroc::cli::ParseBenchOptions(empty),
+         "empty benchmark is rejected");
   const char* decode[] = {"-p", "0", "-n", "64"};
   const auto options = superroc::cli::ParseBenchOptions(decode);
   Expect(options && options->n_prompts.empty() && options->n_gens.size() == 1,

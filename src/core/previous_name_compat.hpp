@@ -19,8 +19,7 @@ namespace superroc::core {
 // counterparts. Names without the `superroc` prefix are returned unchanged.
 inline std::string PreviousEngineName(std::string_view current) {
   constexpr std::string_view kNew = "superroc";
-  if (current.size() >= kNew.size() &&
-      current.substr(0, kNew.size()) == kNew) {
+  if (current.size() >= kNew.size() && current.substr(0, kNew.size()) == kNew) {
     return std::string("g") + "ufo" + std::string(current.substr(kNew.size()));
   }
   return std::string(current);

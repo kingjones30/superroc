@@ -20,7 +20,8 @@ using TokenId = std::uint32_t;
 /// reasoning text already in the prompt. Once the budget is spent, and the
 /// last token completed its UTF-8 character, `forced` is emitted token by
 /// token. Any token in `ends` closes reasoning early. Later tokens are answer
-/// content, including literal reasoning tags, as in SuperROC's response framing.
+/// content, including literal reasoning tags, as in SuperROC's response
+/// framing.
 struct ReasoningBudget {
   std::size_t tokens{0};
   std::vector<TokenId> forced;

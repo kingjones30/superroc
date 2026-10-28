@@ -44,8 +44,8 @@
 #include "src/cli/serve/tts_service.hpp"
 #include "src/cli/serve/video_jobs.hpp"
 #include "src/cli/video/video.hpp"
-#include "src/models/qwen3_tts/audio.hpp"
 #include "src/core/env_compat.hpp"
+#include "src/models/qwen3_tts/audio.hpp"
 
 namespace superroc::cli {
 namespace {
@@ -221,9 +221,9 @@ std::optional<ReasoningEffort> ParseReasoningEffort(std::string_view value) {
 }
 
 // Server-level options are accepted on either side of the modality
-// subcommand. Registering them from one place keeps `superroc serve --help`, every
-// `superroc serve <modality> --help`, and the parser that actually consumes them
-// from drifting apart.
+// subcommand. Registering them from one place keeps `superroc serve --help`,
+// every `superroc serve <modality> --help`, and the parser that actually
+// consumes them from drifting apart.
 
 /// `--log-level` and its `-v/--verbose` shorthand share one sink. `level`
 /// holds the canonical spelling when given and stays empty otherwise; the two
@@ -233,9 +233,9 @@ struct ServerLogOptions {
   std::optional<server::LogLevel> level;
 };
 
-// Verbosity help text. `superroc serve --help` lists these options by hand while
-// every modality help registers them through the parser, so both readings share
-// one source for the wording.
+// Verbosity help text. `superroc serve --help` lists these options by hand
+// while every modality help registers them through the parser, so both readings
+// share one source for the wording.
 constexpr std::string_view kLogLevelHelp =
     "Log verbosity: error, warn, info or debug (default: info)";
 constexpr std::string_view kVerboseHelp = "Shorthand for --log-level=debug";
@@ -877,7 +877,8 @@ int RunServe(std::span<const char* const> args) {
   if (const char* env_host = std::getenv("HOST");
       env_host != nullptr && *env_host != '\0') {
     host = env_host;
-  } else if (const char* env_strix_host = ::superroc::core::GetEnvCompat("SUPERROC_HOST");
+  } else if (const char* env_strix_host =
+                 ::superroc::core::GetEnvCompat("SUPERROC_HOST");
              env_strix_host != nullptr && *env_strix_host != '\0') {
     host = env_strix_host;
   }
@@ -892,7 +893,8 @@ int RunServe(std::span<const char* const> args) {
     if (ec == std::errc{} && ptr == sv.data() + sv.size()) {
       port = parsed_port;
     }
-  } else if (const char* env_strix_port = ::superroc::core::GetEnvCompat("SUPERROC_PORT");
+  } else if (const char* env_strix_port =
+                 ::superroc::core::GetEnvCompat("SUPERROC_PORT");
              env_strix_port != nullptr && *env_strix_port != '\0') {
     const std::string_view sv(env_strix_port);
     int parsed_port = 0;
@@ -1618,8 +1620,8 @@ int RunServe(std::span<const char* const> args) {
     }
     backend->set_model_id(served_model_name);
     // As `superroc --version` prints it; CMake defines both for this target.
-    backend->set_served_artifact(model,
-                                 SUPERROC_RELEASE_VERSION " (" SUPERROC_REVISION ")");
+    backend->set_served_artifact(
+        model, SUPERROC_RELEASE_VERSION " (" SUPERROC_REVISION ")");
     backend->set_sampling_defaults(
         max_tokens < 0 ? 0 : static_cast<std::size_t>(max_tokens),
         sampling_config, SamplingOptionsSupplied(llm_parser));

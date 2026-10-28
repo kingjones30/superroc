@@ -15,9 +15,9 @@
 // LaunchKatMoeSharedDense is one dense W8A8 GEMM over the chunk for the
 // sigmoid-gated shared expert. y[t] is multiplied by sig[t] afterwards.
 //
-// Both reuse superroc_fp4's Ling3 grouped WMMA (SUPERROC_FP4_MOE_V2 selects BK).
-// FP4 types 100/101 only. Returns SUPERROC_FP4_OK (0) or a SUPERROC_FP4_ERR_* code.
-// A rejected launch does not write a silent zero.
+// Both reuse superroc_fp4's Ling3 grouped WMMA (SUPERROC_FP4_MOE_V2 selects
+// BK). FP4 types 100/101 only. Returns SUPERROC_FP4_OK (0) or a
+// SUPERROC_FP4_ERR_* code. A rejected launch does not write a silent zero.
 //
 // Scratch is process-global and sized for a 1024-token sub-batch (8192
 // slots at top-8, the parallel grouper's cap). Calls are sequential on

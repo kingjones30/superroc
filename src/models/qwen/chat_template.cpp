@@ -635,10 +635,11 @@ bool QwenChatTemplate::ValidateGgufTemplate(const core::GgufReader& reader,
   // LFM2: same pin for lfm2moe.
   const auto arch =
       reader.GetMetadataString("general.architecture").value_or("");
-  if (superroc::core::IsModelFamily(arch,
-                                superroc::core::ModelFamilyId::kMuseGlimmer) ||
+  if (superroc::core::IsModelFamily(
+          arch, superroc::core::ModelFamilyId::kMuseGlimmer) ||
       superroc::core::IsLfm2Family(arch) ||
-      superroc::core::IsModelFamily(arch, superroc::core::ModelFamilyId::kFlint)) {
+      superroc::core::IsModelFamily(arch,
+                                    superroc::core::ModelFamilyId::kFlint)) {
     return CreateFromGguf(reader, error_msg) != nullptr;
   }
   if (!IsQwen38Artifact(reader)) {

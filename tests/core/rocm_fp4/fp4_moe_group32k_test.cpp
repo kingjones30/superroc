@@ -32,7 +32,7 @@ int g_failures = 0;
 
 #define KPF2_CHECK_RC(rc, what)                 \
   do {                                          \
-    if ((rc) != SUPERROC_FP4_OK) {                  \
+    if ((rc) != SUPERROC_FP4_OK) {              \
       std::printf("FAIL %s rc=%d\n", what, rc); \
       return 1;                                 \
     }                                           \
@@ -120,12 +120,12 @@ int RunSlots(int slots, std::uint32_t seed_in) {
 
   // Oracle: the serial body via the env knob (read fresh on every call).
   setenv("SUPERROC_FP4_MOE_GROUP_SERIAL", "1", 1);
-  KPF2_CHECK_RC(superroc_fp4_moe_group_batch(d_ids, d_wts, nullptr, n, kUsed, kUsed,
-                                         kExperts, kCap, d_slot_tok, d_slot_w,
-                                         d_token_slots, d_grp_e, d_grp_off,
-                                         d_grp_cnt, d_grp_zp, d_slot_dest,
-                                         grp_capacity, slots, ref_hdr.data()),
-                "oracle batch");
+  KPF2_CHECK_RC(
+      superroc_fp4_moe_group_batch(
+          d_ids, d_wts, nullptr, n, kUsed, kUsed, kExperts, kCap, d_slot_tok,
+          d_slot_w, d_token_slots, d_grp_e, d_grp_off, d_grp_cnt, d_grp_zp,
+          d_slot_dest, grp_capacity, slots, ref_hdr.data()),
+      "oracle batch");
   unsetenv("SUPERROC_FP4_MOE_GROUP_SERIAL");
   KPF2_CHECK_HIP(hipMemcpy(ref_slot_tok.data(), d_slot_tok,
                            (std::size_t)slots * sizeof(int),

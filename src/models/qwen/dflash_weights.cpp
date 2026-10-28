@@ -9,6 +9,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+
 #include "src/core/env_compat.hpp"
 
 namespace superroc::speculative {
@@ -337,7 +338,8 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
     if (df_cfg.sliding_window < df_cfg.block_size) {
       df_cfg.sliding_window = config.context_length;
     }
-    if (const char* window = ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_WINDOW")) {
+    if (const char* window =
+            ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_WINDOW")) {
       char* end = nullptr;
       const unsigned long parsed = std::strtoul(window, &end, 10);
       if (end != window && parsed >= df_cfg.block_size &&
@@ -353,7 +355,8 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
   // GGUF target_layers are layer-input indices (llama.cpp converter writes
   // HF id + 1). SuperROC captures layer OUTPUT of the stored id. The selector
   // (27B) path always rewrites N → N−1. DSpark pdk-1 stored GGUF as-is;
-  // SUPERROC_DSPARK_TAP_MINUS1=1 applies the same N−1 rewrite (HF 3,11,19,27,35).
+  // SUPERROC_DSPARK_TAP_MINUS1=1 applies the same N−1 rewrite (HF
+  // 3,11,19,27,35).
   const auto encoded_target_layers =
       GetNonnegativeIntegerArray(reader, prefix + "target_layers");
   if (!encoded_target_layers.has_value()) {

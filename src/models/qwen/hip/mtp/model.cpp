@@ -11,11 +11,11 @@
 #include <utility>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/quant/ggml_dequant.hpp"
 #include "src/models/qwen/hip/mtp.hpp"
 #include "src/models/qwen/hip/mtp/detail/allocation.hpp"
 #include "src/models/qwen/hip/mtp/kat_mtp_types.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace superroc::hip {
 namespace {
@@ -319,7 +319,8 @@ std::shared_ptr<const QwenMtpGpuModel> QwenMtpGpuModel::Create(
   // (the BF16 expansion was a bandwidth tax and did not move acceptance).
   // A sidecar without either tensor still borrows the target's.
   const bool borrow_head = [] {
-    const char* borrow = ::superroc::core::GetEnvCompat("SUPERROC_MTP_BORROW_HEAD");
+    const char* borrow =
+        ::superroc::core::GetEnvCompat("SUPERROC_MTP_BORROW_HEAD");
     return borrow != nullptr && *borrow != '\0' && std::atoi(borrow) != 0;
   }();
   if (borrow_head) {

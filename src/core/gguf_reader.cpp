@@ -1056,8 +1056,8 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
   // decode index `l / interval` equal the layer index. SSM scalars stay at
   // their defaults so SsmValueSize() does not divide by zero; SsmLayerCount()
   // is 0 because every layer is attention.
-  if (superroc::core::IsModelFamily(config.architecture,
-                                superroc::core::ModelFamilyId::kMuseGlimmer)) {
+  if (superroc::core::IsModelFamily(
+          config.architecture, superroc::core::ModelFamilyId::kMuseGlimmer)) {
     if (HasMtpTensors() || embedded_mtp_layers.value_or(0U) != 0U) {
       if (error_msg != nullptr) {
         *error_msg = "muse-glimmer does not support MTP";
@@ -1248,7 +1248,7 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
   }  // LFM2
 
   if (superroc::core::IsModelFamily(config.architecture,
-                                superroc::core::ModelFamilyId::kFlint)) {
+                                    superroc::core::ModelFamilyId::kFlint)) {
     if (HasMtpTensors() || embedded_mtp_layers.value_or(0U) != 0U) {
       if (error_msg != nullptr) {
         *error_msg = "flint does not support MTP";
@@ -1327,7 +1327,7 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
   }
 
   if (superroc::core::IsModelFamily(config.architecture,
-                                superroc::core::ModelFamilyId::kLlama)) {
+                                    superroc::core::ModelFamilyId::kLlama)) {
     // LLAMA: a plain dense transformer. Every architectural key is required:
     // the struct defaults are Qwen's, so a missing key must never be inherited.
     if (HasMtpTensors() || embedded_mtp_layers.value_or(0U) != 0U) {

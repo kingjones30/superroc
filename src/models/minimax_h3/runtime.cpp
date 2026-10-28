@@ -15,9 +15,9 @@
 #include <sstream>
 #include <utility>
 
+#include "src/core/previous_name_compat.hpp"
 #include "src/models/minimax_h3/json.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
-#include "src/core/previous_name_compat.hpp"
 
 namespace superroc::minimax_h3 {
 

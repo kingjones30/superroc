@@ -203,14 +203,15 @@ void TestDecodeGemv(const FormatCase& format) {
                       hipMemcpyHostToDevice));
 
   superroc::hip::LaunchQ8KBlockGEMV(d_w, format.type, static_cast<float*>(d_x),
-                                static_cast<float*>(d_y), kM, kK, nullptr);
+                                    static_cast<float*>(d_y), kM, kK, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
 
   std::vector<float> gpu(kM);
   HIP_CHECK(
       hipMemcpy(gpu.data(), d_y, kM * sizeof(float), hipMemcpyDeviceToHost));
 
-  const std::size_t row_bytes = superroc::quant::QuantizedRowBytes(format.type, kK);
+  const std::size_t row_bytes =
+      superroc::quant::QuantizedRowBytes(format.type, kK);
   std::vector<float> row_values(kK);
   double worst = 0.0;
   for (std::size_t row = 0; row < kM; ++row) {
@@ -280,7 +281,8 @@ void TestPrefillGemm(const FormatCase& format, std::size_t batch,
   void* d_x = nullptr;
   void* d_q8 = nullptr;
   void* d_y = nullptr;
-  const std::size_t act_bytes = superroc::hip::QuantizedActivationBytes(batch, kK);
+  const std::size_t act_bytes =
+      superroc::hip::QuantizedActivationBytes(batch, kK);
   HIP_CHECK(hipMalloc(&d_w, weights.size()));
   HIP_CHECK(hipMalloc(&d_x, x.size() * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_q8, act_bytes));
@@ -301,7 +303,8 @@ void TestPrefillGemm(const FormatCase& format, std::size_t batch,
   HIP_CHECK(hipMemcpy(gpu.data(), d_y, gpu.size() * sizeof(float),
                       hipMemcpyDeviceToHost));
 
-  const std::size_t row_bytes = superroc::quant::QuantizedRowBytes(format.type, kK);
+  const std::size_t row_bytes =
+      superroc::quant::QuantizedRowBytes(format.type, kK);
   std::vector<float> row_values(kK);
   double worst = 0.0;
   for (std::size_t row = 0; row < kM; ++row) {
@@ -438,20 +441,20 @@ void TestFusedSwiGLU(superroc::core::GgmlType gate_type,
   HIP_CHECK(hipMemset(fused.data(), 0xFF, batch * rows * sizeof(float)));
   HIP_CHECK(hipMemset(split.data(), 0xFF, batch * rows * sizeof(float)));
   for (std::size_t token = 0; token < batch; ++token) {
-    superroc::hip::LaunchFusedSwiGLUGEMV(gate.data(), gate_type, up.data(), up_type,
-                                     input.data() + token * columns,
-                                     fused.data() + token * rows, rows, columns,
-                                     nullptr);
+    superroc::hip::LaunchFusedSwiGLUGEMV(
+        gate.data(), gate_type, up.data(), up_type,
+        input.data() + token * columns, fused.data() + token * rows, rows,
+        columns, nullptr);
   }
-  superroc::hip::LaunchBatchedQuantGEMMFp32(gate_type, gate.data(), input.data(),
-                                        gate_out.data(), batch, rows, columns,
-                                        nullptr);
+  superroc::hip::LaunchBatchedQuantGEMMFp32(gate_type, gate.data(),
+                                            input.data(), gate_out.data(),
+                                            batch, rows, columns, nullptr);
   superroc::hip::LaunchBatchedQuantGEMMFp32(up_type, up.data(), input.data(),
-                                        up_out.data(), batch, rows, columns,
-                                        nullptr);
+                                            up_out.data(), batch, rows, columns,
+                                            nullptr);
   superroc::hip::LaunchBatchedSwiGLUActivation(gate_out.data(), up_out.data(),
-                                           split.data(), nullptr, batch * rows,
-                                           nullptr);
+                                               split.data(), nullptr,
+                                               batch * rows, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
   const auto actual = fused.CopyToHost();
   const auto expected = split.CopyToHost();
@@ -486,8 +489,9 @@ void TestFusedSwiGLU(superroc::core::GgmlType gate_type,
   std::cout << (mismatches == 0 ? "[ OK ] " : "[FAIL] ")
             << "fused/packed SwiGLU vs verification "
             << superroc::core::ToString(gate_type) << "/"
-            << superroc::core::ToString(up_type) << " " << rows << "x" << columns
-            << ": " << mismatches << " of " << actual.size() << " differ\n";
+            << superroc::core::ToString(up_type) << " " << rows << "x"
+            << columns << ": " << mismatches << " of " << actual.size()
+            << " differ\n";
   g_failed |= mismatches != 0;
 }
 
@@ -562,22 +566,24 @@ void TestFp16Prefill(const FormatCase& format, std::size_t rows,
   DeviceBuffer<std::uint16_t> d_half_x(batch * kK);
   DeviceBuffer<std::uint8_t> d_q8(
       superroc::hip::QuantizedActivationBytes(batch, kK));
-  superroc::hip::LaunchFloatToFp16(d_x.data(), d_half_x.data(), x.size(), nullptr);
+  superroc::hip::LaunchFloatToFp16(d_x.data(), d_half_x.data(), x.size(),
+                                   nullptr);
   superroc::hip::LaunchBatchedQuantGEMMFp16(format.type, d_weights.data(),
-                                        d_half_x.data(), d_half_y.data(), batch,
-                                        rows, kK, nullptr);
+                                            d_half_x.data(), d_half_y.data(),
+                                            batch, rows, kK, nullptr);
   superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_x.data(), d_q8.data(),
-                                                  batch, kK, nullptr);
-  superroc::hip::LaunchBatchedQuantGEMMPreQuantized(format.type, d_weights.data(),
-                                                d_q8.data(), d_a8_y.data(),
-                                                batch, rows, kK, nullptr);
+                                                      batch, kK, nullptr);
+  superroc::hip::LaunchBatchedQuantGEMMPreQuantized(
+      format.type, d_weights.data(), d_q8.data(), d_a8_y.data(), batch, rows,
+      kK, nullptr);
   const auto actual = d_half_y.CopyToHost();
   const auto a8 = d_a8_y.CopyToHost();
   bool passed = std::ranges::all_of(
       actual, [](float item) { return std::isfinite(item); });
   double half_error = 0.0, a8_error = 0.0, half_max = 0.0, a8_max = 0.0;
   std::vector<float> decoded(kK);
-  const std::size_t row_bytes = superroc::quant::QuantizedRowBytes(format.type, kK);
+  const std::size_t row_bytes =
+      superroc::quant::QuantizedRowBytes(format.type, kK);
   for (std::size_t sample = 0; sample < 256; ++sample) {
     const std::size_t row = (sample * 137 + 17) % rows;
     const std::size_t token = (sample * 61 + 7) % batch;
@@ -599,8 +605,8 @@ void TestFp16Prefill(const FormatCase& format, std::size_t rows,
   // when the output reuses the live residual buffer.
   DeviceBuffer<float> d_residual(gate), d_residual_expected(batch * rows);
   superroc::hip::LaunchBatchedResidualAdd(d_gate.data(), d_half_y.data(),
-                                      d_residual_expected.data(), batch, rows,
-                                      nullptr);
+                                          d_residual_expected.data(), batch,
+                                          rows, nullptr);
   superroc::hip::LaunchBatchedQuantGEMMResidualFp16(
       format.type, d_weights.data(), d_half_x.data(), d_residual.data(), batch,
       rows, kK, nullptr);
@@ -615,10 +621,10 @@ void TestFp16Prefill(const FormatCase& format, std::size_t rows,
     DeviceBuffer<float> d_activation(batch * rows), d_up_storage(batch * rows);
     DeviceBuffer<std::uint16_t> d_expected(batch * rows);
     superroc::hip::LaunchBatchedSwiGLUActivation(d_gate.data(), d_half_y.data(),
-                                             d_activation.data(), nullptr,
-                                             batch * rows, nullptr);
+                                                 d_activation.data(), nullptr,
+                                                 batch * rows, nullptr);
     superroc::hip::LaunchFloatToFp16(d_activation.data(), d_expected.data(),
-                                 batch * rows, nullptr);
+                                     batch * rows, nullptr);
     superroc::hip::LaunchBatchedQuantGEMMSwiGLUFp16(
         format.type, d_weights.data(), d_half_x.data(), d_gate.data(),
         d_up_storage.data(), batch, rows, kK, nullptr);
@@ -639,20 +645,20 @@ void TestFp16Prefill(const FormatCase& format, std::size_t rows,
       item *= 0.03125F;
     d_x.CopyFrom(paired_input);
     superroc::hip::LaunchFloatToFp16(d_x.data(), d_half_x.data(), x.size(),
-                                 nullptr);
+                                     nullptr);
     superroc::hip::LaunchBatchedQuantGEMMFp16(format.type, d_weights.data(),
-                                          d_half_x.data(), d_half_y.data(),
-                                          batch, rows, kK, nullptr);
+                                              d_half_x.data(), d_half_y.data(),
+                                              batch, rows, kK, nullptr);
     DeviceBuffer<std::uint8_t> d_gate_weights(
         MakeWeights(format.type, rows, kK, 0x173841U));
-    superroc::hip::LaunchBatchedQuantGEMMFp16(format.type, d_gate_weights.data(),
-                                          d_half_x.data(), d_gate.data(), batch,
-                                          rows, kK, nullptr);
+    superroc::hip::LaunchBatchedQuantGEMMFp16(
+        format.type, d_gate_weights.data(), d_half_x.data(), d_gate.data(),
+        batch, rows, kK, nullptr);
     superroc::hip::LaunchBatchedSwiGLUActivation(d_gate.data(), d_half_y.data(),
-                                             d_activation.data(), nullptr,
-                                             batch * rows, nullptr);
+                                                 d_activation.data(), nullptr,
+                                                 batch * rows, nullptr);
     superroc::hip::LaunchFloatToFp16(d_activation.data(), d_expected.data(),
-                                 batch * rows, nullptr);
+                                     batch * rows, nullptr);
     const bool paired = superroc::hip::TryLaunchBatchedDualQuantGEMMSwiGLUFp16(
         format.type, format.type, d_gate_weights.data(), d_weights.data(),
         d_half_x.data(), d_up_storage.data(), batch, rows, kK, nullptr);
@@ -697,18 +703,19 @@ void TestFp16MixedPair(superroc::core::GgmlType gate_type,
   DeviceBuffer<float> x(input), gate(batch * rows), up(batch * rows),
       activation(batch * rows), output(batch * rows);
   DeviceBuffer<std::uint16_t> half_x(input.size()), expected(batch * rows);
-  superroc::hip::LaunchFloatToFp16(x.data(), half_x.data(), input.size(), nullptr);
+  superroc::hip::LaunchFloatToFp16(x.data(), half_x.data(), input.size(),
+                                   nullptr);
   superroc::hip::LaunchBatchedQuantGEMMFp16(gate_type, gate_weights.data(),
-                                        half_x.data(), gate.data(), batch, rows,
-                                        kK, nullptr);
+                                            half_x.data(), gate.data(), batch,
+                                            rows, kK, nullptr);
   superroc::hip::LaunchBatchedQuantGEMMFp16(up_type, up_weights.data(),
-                                        half_x.data(), up.data(), batch, rows,
-                                        kK, nullptr);
+                                            half_x.data(), up.data(), batch,
+                                            rows, kK, nullptr);
   superroc::hip::LaunchBatchedSwiGLUActivation(gate.data(), up.data(),
-                                           activation.data(), nullptr,
-                                           batch * rows, nullptr);
-  superroc::hip::LaunchFloatToFp16(activation.data(), expected.data(), batch * rows,
-                               nullptr);
+                                               activation.data(), nullptr,
+                                               batch * rows, nullptr);
+  superroc::hip::LaunchFloatToFp16(activation.data(), expected.data(),
+                                   batch * rows, nullptr);
   bool passed = superroc::hip::TryLaunchBatchedDualQuantGEMMSwiGLUFp16(
       gate_type, up_type, gate_weights.data(), up_weights.data(), half_x.data(),
       output.data(), batch, rows, kK, nullptr);
@@ -755,15 +762,15 @@ void TestFp16Norm() {
   for (bool add_residual : {false, true}) {
     d_input.CopyFrom(input);
     if (add_residual)
-      superroc::hip::LaunchBatchedResidualAdd(d_input.data(), d_residual.data(),
-                                          d_sum.data(), batch, dim, nullptr);
+      superroc::hip::LaunchBatchedResidualAdd(
+          d_input.data(), d_residual.data(), d_sum.data(), batch, dim, nullptr);
     else
       d_sum.CopyFrom(input);
     superroc::hip::LaunchBatchedRMSNorm(d_sum.data(), d_weight.data(),
-                                    d_norm.data(), nullptr, batch, dim, 1e-6F,
-                                    nullptr);
+                                        d_norm.data(), nullptr, batch, dim,
+                                        1e-6F, nullptr);
     superroc::hip::LaunchFloatToFp16(d_norm.data(), d_expected.data(), elements,
-                                 nullptr);
+                                     nullptr);
     superroc::hip::LaunchBatchedRMSNormFp16(
         d_input.data(), add_residual ? d_residual.data() : nullptr,
         d_weight.data(), add_residual ? d_input.data() : nullptr,
@@ -799,10 +806,11 @@ int main() {
   TestFp16Prefill({superroc::core::GgmlType::kIQ4_XS, "IQ4_XS"}, 1057, 129);
   // Attention K/V projections use the larger tile at long prefill widths.
   // An incomplete final token tile must preserve the same FP32 dot order.
-  for (const auto& format : {FormatCase{superroc::core::GgmlType::kQ4_K, "Q4_K"},
-                             FormatCase{superroc::core::GgmlType::kQ5_K, "Q5_K"},
-                             FormatCase{superroc::core::GgmlType::kQ6_K, "Q6_K"},
-                             FormatCase{superroc::core::GgmlType::kQ8_0, "Q8_0"}}) {
+  for (const auto& format :
+       {FormatCase{superroc::core::GgmlType::kQ4_K, "Q4_K"},
+        FormatCase{superroc::core::GgmlType::kQ5_K, "Q5_K"},
+        FormatCase{superroc::core::GgmlType::kQ6_K, "Q6_K"},
+        FormatCase{superroc::core::GgmlType::kQ8_0, "Q8_0"}}) {
     TestFp16Prefill(format, 1024, 1025);
   }
   for (const auto& format : kFormats) {
@@ -836,7 +844,8 @@ int main() {
       TestSmallBatchExactness(format, batch);
     }
   }
-  TestSmallBatchExactness({superroc::core::GgmlType::kQ4_K, "Q4_K"}, 8, 1280, 5120);
+  TestSmallBatchExactness({superroc::core::GgmlType::kQ4_K, "Q4_K"}, 8, 1280,
+                          5120);
   const FormatCase q8{superroc::core::GgmlType::kQ8_0, "Q8_0"};
   TestSmallBatchExactness(q8, 16, 34816, 5120);
   TestSmallBatchExactness(q8, 32, 10240, 5120);

@@ -56,7 +56,7 @@
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/hip/host_allocations.hpp"
 #include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10: slot sets.
-#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"    // SQ10 SPEC2 (R4): codes.
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"  // SQ10 SPEC2 (R4): codes.
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/deepseek_v4_flash/dspark_sampler.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
@@ -412,50 +412,52 @@ std::vector<std::uint8_t> QwenCompatibilityIdentity(
              : QwenStateAbi(speculative, execution_policy.UsesFp16AttentionKv(),
                             execution_policy.UsesBf16RecurrentState());
   std::ostringstream identity;
-  identity
-      << "schema=superroc-text-continuation-v2\n"
-      << "model_kind="
-      << (flint ? std::string_view("flint")
-          : lfm2
-              ? superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kLfm2Moe)
-              : std::string_view("qwen3.8"))  // LFM2
-      << "\n"
-      << "artifact_id=" << core::kGgufIdentityScheme << ':'
-      << artifact_fingerprint << '\n'
-      << "tokenizer=embedded-in-artifact\n"
-      << "chat_template="
-      << (flint  ? "flint-roles-v1"
-          : lfm2 ? "lfm2-chatml-think-v1"
-                 : "qwen38-reasoning-compiled-v3")
-      << "\n"
-      << "chat_template_reference_sha256="
-      << (flint  ? tokenization::kFlintChatTemplateSha256
-          : lfm2 ? tokenization::QwenChatTemplate::Lfm2TemplateSha256()
-                 : tokenization::QwenChatTemplate::OfficialTemplateSha256())
-      << '\n'
-      << "state_abi=" << state_abi << '\n'
-      << "payload_layout="  // LFM2
-      << (lfm2 ? "lfm2-gfx1151-live-prefix-v1" : "qwen-gfx1151-live-prefix-v3")
-      << "\n"
-      // Older learned boundaries could keep logits from an earlier
-      // prefix. Their payload has no readiness tag to distinguish them.
-      << "checkpoint_frontier=complete-prefix-v1\n"
-      << "numerics="  // LFM2
-      << (lfm2 ? "lfm2-fp32-v1" : "qwen-bf16-fp32-prefill-v1") << "\n"
-      << "rmsnorm=fused-square-sum-v1\n"
-      << "prefill_attention=visible-causal-tail-v1\n"
-      << "attention_split_min_context="
-      << hip::detail::kSplitKDecodeAttentionMinContext << '\n'
-      << "attention_split_count="
-      << hip::detail::kSplitKDecodeAttentionMaxSplits << '\n'
-      << "kv_storage="
-      << (execution_policy.UsesFp16AttentionKv() ? "fp16" : "fp32") << '\n'
-      << "recurrent_storage="
-      << (execution_policy.UsesBf16RecurrentState() ? "bf16" : "fp32") << '\n'
-      << "context_tokens=" << max_context << '\n'
-      << "position_policy=absolute-v1\n"
-      << "rope_window_policy=qwen-gguf-config-v1\n"
-      << "adapters=none\n";
+  identity << "schema=superroc-text-continuation-v2\n"
+           << "model_kind="
+           << (flint  ? std::string_view("flint")
+               : lfm2 ? superroc::core::ModelFamilyArch(
+                            superroc::core::ModelFamilyId::kLfm2Moe)
+                      : std::string_view("qwen3.8"))  // LFM2
+           << "\n"
+           << "artifact_id=" << core::kGgufIdentityScheme << ':'
+           << artifact_fingerprint << '\n'
+           << "tokenizer=embedded-in-artifact\n"
+           << "chat_template="
+           << (flint  ? "flint-roles-v1"
+               : lfm2 ? "lfm2-chatml-think-v1"
+                      : "qwen38-reasoning-compiled-v3")
+           << "\n"
+           << "chat_template_reference_sha256="
+           << (flint ? tokenization::kFlintChatTemplateSha256
+               : lfm2
+                   ? tokenization::QwenChatTemplate::Lfm2TemplateSha256()
+                   : tokenization::QwenChatTemplate::OfficialTemplateSha256())
+           << '\n'
+           << "state_abi=" << state_abi << '\n'
+           << "payload_layout="  // LFM2
+           << (lfm2 ? "lfm2-gfx1151-live-prefix-v1"
+                    : "qwen-gfx1151-live-prefix-v3")
+           << "\n"
+           // Older learned boundaries could keep logits from an earlier
+           // prefix. Their payload has no readiness tag to distinguish them.
+           << "checkpoint_frontier=complete-prefix-v1\n"
+           << "numerics="  // LFM2
+           << (lfm2 ? "lfm2-fp32-v1" : "qwen-bf16-fp32-prefill-v1") << "\n"
+           << "rmsnorm=fused-square-sum-v1\n"
+           << "prefill_attention=visible-causal-tail-v1\n"
+           << "attention_split_min_context="
+           << hip::detail::kSplitKDecodeAttentionMinContext << '\n'
+           << "attention_split_count="
+           << hip::detail::kSplitKDecodeAttentionMaxSplits << '\n'
+           << "kv_storage="
+           << (execution_policy.UsesFp16AttentionKv() ? "fp16" : "fp32") << '\n'
+           << "recurrent_storage="
+           << (execution_policy.UsesBf16RecurrentState() ? "bf16" : "fp32")
+           << '\n'
+           << "context_tokens=" << max_context << '\n'
+           << "position_policy=absolute-v1\n"
+           << "rope_window_policy=qwen-gguf-config-v1\n"
+           << "adapters=none\n";
   if (speculative && mtp) {
     identity << "draft_backend=mtp-gfx1151-v1\n"
              << "draft_artifact_id=" << core::kGgufIdentityScheme << ':'
@@ -590,7 +592,7 @@ public:
       // set (the host alternates the two streams, so they never collide).
       // The MTP dtor removes the alias (R3).
       if (superroc_fp4_slot_stream_alias(draft_backend->DraftStream(),
-                                     executor_->ArenaStream()) < 0) {
+                                         executor_->ArenaStream()) < 0) {
         throw std::runtime_error("Failed to alias MTP draft stream");
       }
       mtp_backend_ = draft_backend.get();
@@ -4206,7 +4208,8 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
   {
     const auto arch =
         reader->GetMetadataString("general.architecture").value_or("");
-    const superroc::core::ModelFamily* family = superroc::core::FindModelFamily(arch);
+    const superroc::core::ModelFamily* family =
+        superroc::core::FindModelFamily(arch);
     if (family == nullptr) {
       SetError(error, "unsupported architecture: " + std::string(arch));
       return false;
@@ -4233,7 +4236,8 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
     }
     // NBFAST T1: plain Llama accepts only DFlash2 drafting, for the same
     // reason as LFM2 (no MTP head in the target file).
-    if (superroc::core::IsModelFamily(arch, superroc::core::ModelFamilyId::kLlama) &&
+    if (superroc::core::IsModelFamily(arch,
+                                      superroc::core::ModelFamilyId::kLlama) &&
         speculative_config.backend != TextSpeculativeBackend::kDisabled &&
         speculative_config.backend != TextSpeculativeBackend::kDFlash) {
       SetError(error, std::string(arch) +
@@ -4280,7 +4284,8 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
       }
     }
     const auto decision = models::qwen::ClassifyKatDispatch(
-        superroc::core::ModelFamilyArch(superroc::core::ModelFamilyId::kQwen35Moe),
+        superroc::core::ModelFamilyArch(
+            superroc::core::ModelFamilyId::kQwen35Moe),
         kat_spec, speculative_config.draft_model_path.empty(),
         reader->HasVisionTensors(), dflash_markov_sidecar);
     if (decision == models::qwen::KatDispatch::kRefuseVision) {
@@ -4526,8 +4531,8 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
       speculative_options.use_batched_verification = true;
       speculative_options.retain_frontier_logits = true;
       // MTP drafts a chain, so the adaptive length controller is meaningful
-      // here (this is what superroc prompt already selects for --speculative mtp).
-      // DFlash2 diffuses a fixed block, so it pins the length instead.
+      // here (this is what superroc prompt already selects for --speculative
+      // mtp). DFlash2 diffuses a fixed block, so it pins the length instead.
       speculative_options.enable_adaptive_draft_length = true;
     }
     speculative_options.plain_decode_rates =

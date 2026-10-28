@@ -132,8 +132,8 @@ void TestTable() {
     }
   }
   std::string error;
-  auto table =
-      OpenTable(path, offset, rows, dim, superroc::core::GgmlType::kBF16, &error);
+  auto table = OpenTable(path, offset, rows, dim,
+                         superroc::core::GgmlType::kBF16, &error);
   Check(table != nullptr, error.c_str());
   if (table) {
     table->ReserveGather(32769);
@@ -279,8 +279,8 @@ void TestQuantizedRows() {
     Check(file.good(), "IQ4_NL fixture written");
   }
   std::string error;
-  auto table =
-      OpenTable(path, offset, rows, dim, superroc::core::GgmlType::kIQ4_NL, &error);
+  auto table = OpenTable(path, offset, rows, dim,
+                         superroc::core::GgmlType::kIQ4_NL, &error);
   Check(table != nullptr, error.c_str());
   if (table) {
     const auto gather = [&](std::span<const std::uint32_t> ids) {
@@ -351,8 +351,8 @@ void TestQ5_1Rows() {
     Check(file.good(), "Q5_1 fixture written");
   }
   std::string error;
-  auto table =
-      OpenTable(path, offset, rows, dim, superroc::core::GgmlType::kQ5_1, &error);
+  auto table = OpenTable(path, offset, rows, dim,
+                         superroc::core::GgmlType::kQ5_1, &error);
   Check(table != nullptr, error.c_str());
   if (table) {
     const auto gather = [&](std::span<const std::uint32_t> ids) {

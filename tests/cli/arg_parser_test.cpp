@@ -62,7 +62,8 @@ void TestPositionals() {
 }
 
 void TestHelpFormatting() {
-  superroc::cli::ArgParser parser("superroc run", "Run inference on Strix Halo");
+  superroc::cli::ArgParser parser("superroc run",
+                                  "Run inference on Strix Halo");
   std::string model;
   bool interactive = false;
   parser.AddOption("-m", "--model", "PATH", "Model file", "Model", &model);

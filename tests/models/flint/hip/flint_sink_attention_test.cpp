@@ -109,7 +109,8 @@ void Report(const std::string& cas, float gap) {
 
 int main() {
   const int gate = superroc::test::GateHipDevice(
-      superroc::test::HipDeviceRequirement::kOptional, "flint_sink_attention_test");
+      superroc::test::HipDeviceRequirement::kOptional,
+      "flint_sink_attention_test");
   if (gate != 0) {
     return gate;
   }

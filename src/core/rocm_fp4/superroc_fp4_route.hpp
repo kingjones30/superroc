@@ -21,13 +21,12 @@ SUPERROC_FP4_HD inline int superroc_fp4_pow2_ge(int n) {
   return p;
 }
 
-// work_a and work_b each have length superroc_fp4_pow2_ge(ncols). dst has length
-// ncols. Copied from k_argsort_f32_i32<GGML_SORT_ORDER_DESC>, including the
-// padding rule (indices >= ncols sort to the end) and strict < / > (ties do not
-// swap).
-SUPERROC_FP4_HD inline int superroc_fp4_bitonic_argsort_desc(const float* x, int* dst,
-                                                     int* work_a, int* work_b,
-                                                     int ncols) {
+// work_a and work_b each have length superroc_fp4_pow2_ge(ncols). dst has
+// length ncols. Copied from k_argsort_f32_i32<GGML_SORT_ORDER_DESC>, including
+// the padding rule (indices >= ncols sort to the end) and strict < / > (ties do
+// not swap).
+SUPERROC_FP4_HD inline int superroc_fp4_bitonic_argsort_desc(
+    const float* x, int* dst, int* work_a, int* work_b, int ncols) {
   int pad = superroc_fp4_pow2_ge(ncols);
   if (pad < 0 || !x || !dst || !work_a || !work_b) {
     return SUPERROC_FP4_ERR_ARG;
@@ -72,7 +71,8 @@ SUPERROC_FP4_HD inline int superroc_fp4_bitonic_argsort_desc(const float* x, int
   return SUPERROC_FP4_OK;
 }
 
-SUPERROC_FP4_HD inline int superroc_fp4_route_nfloat(int n_expert, int n_groups) {
+SUPERROC_FP4_HD inline int superroc_fp4_route_nfloat(int n_expert,
+                                                     int n_groups) {
   if (n_expert <= 0 || n_groups <= 0) {
     return -1;
   }
@@ -89,9 +89,9 @@ SUPERROC_FP4_HD inline int superroc_fp4_route_nint(int n_expert, int n_groups) {
   return 2 * pad_e + n_expert + 2 * pad_g + g;
 }
 
-// scratch_f: superroc_fp4_route_nfloat floats. scratch_i: superroc_fp4_route_nint ints.
-// gate is F32, n_expert rows of k (ggml {k, n_expert}). bias may be null.
-// ids and weights each have length n_used.
+// scratch_f: superroc_fp4_route_nfloat floats. scratch_i:
+// superroc_fp4_route_nint ints. gate is F32, n_expert rows of k (ggml {k,
+// n_expert}). bias may be null. ids and weights each have length n_used.
 SUPERROC_FP4_HD inline int superroc_fp4_route_core(
     const float* x, const float* gate, const float* bias, int k, int n_expert,
     int n_used, int n_groups, int n_group_used, float w_scale, int norm_w,
@@ -147,13 +147,15 @@ SUPERROC_FP4_HD inline int superroc_fp4_route_core(
 
   if (n_groups > 1) {
     for (int g = 0; g < n_groups; ++g) {
-      int rc = superroc_fp4_bitonic_argsort_desc(sel + g * npg, order, ba, bb, npg);
+      int rc =
+          superroc_fp4_bitonic_argsort_desc(sel + g * npg, order, ba, bb, npg);
       if (rc != SUPERROC_FP4_OK) {
         return rc;
       }
       gscore[g] = sel[g * npg + order[0]] + sel[g * npg + order[1]];
     }
-    int rc = superroc_fp4_bitonic_argsort_desc(gscore, gorder, ga, gb, n_groups);
+    int rc =
+        superroc_fp4_bitonic_argsort_desc(gscore, gorder, ga, gb, n_groups);
     if (rc != SUPERROC_FP4_OK) {
       return rc;
     }
@@ -184,7 +186,8 @@ SUPERROC_FP4_HD inline int superroc_fp4_route_core(
     sum += weights[i];
   }
   if (norm_w) {
-    float den = sum < SUPERROC_FP4_WEIGHT_SUM_MIN ? SUPERROC_FP4_WEIGHT_SUM_MIN : sum;
+    float den =
+        sum < SUPERROC_FP4_WEIGHT_SUM_MIN ? SUPERROC_FP4_WEIGHT_SUM_MIN : sum;
     for (int i = 0; i < n_used; ++i) {
       weights[i] = weights[i] / den;
     }

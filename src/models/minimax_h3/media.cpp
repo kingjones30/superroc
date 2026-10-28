@@ -22,6 +22,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
 #include "src/core/env_compat.hpp"
 
 #ifndef SUPERROC_FFMPEG_EXECUTABLE

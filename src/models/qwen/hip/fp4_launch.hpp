@@ -18,6 +18,7 @@
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
+
 #include "src/core/env_compat.hpp"
 
 namespace superroc::hip {
@@ -58,7 +59,8 @@ void DiscardRocmFp4Warmup() noexcept;
 // once, inside this lambda; the hot path still pays one cached-bool branch).
 [[nodiscard]] inline bool SuperROCFp4ForceRefuse() {
   static const bool on = [] {
-    const char* env = ::superroc::core::GetEnvCompat("SUPERROC_FP4_FORCE_REFUSE");
+    const char* env =
+        ::superroc::core::GetEnvCompat("SUPERROC_FP4_FORCE_REFUSE");
     const bool refuse = env != nullptr && env[0] == '1';
     if (refuse) {
       std::fprintf(stderr,
@@ -82,8 +84,8 @@ inline bool TryLaunchRocmFp4Gemv(core::GgmlType type, const void* weights,
     return false;
   }
   return superroc_fp4_gemv_fp4(RocmFp4Qtype(type), weights, x, y,
-                           static_cast<int>(k), static_cast<int>(n),
-                           stream) == SUPERROC_FP4_OK;
+                               static_cast<int>(k), static_cast<int>(n),
+                               stream) == SUPERROC_FP4_OK;
 }
 
 // Several matrices against one activation, quantised once into `slot`.
@@ -98,8 +100,8 @@ inline bool TryLaunchRocmFp4GemvSlot(core::GgmlType type, const void* weights,
     return false;
   }
   return superroc_fp4_gemv_fp4_q8(RocmFp4Qtype(type), weights, slot, y,
-                              static_cast<int>(k), static_cast<int>(n),
-                              stream) == SUPERROC_FP4_OK;
+                                  static_cast<int>(k), static_cast<int>(n),
+                                  stream) == SUPERROC_FP4_OK;
 }
 
 inline bool PrepareRocmFp4Act(const float* x, std::size_t k, int slot,
@@ -117,9 +119,9 @@ inline bool PrepareRocmFp4Act(const float* x, std::size_t k, int slot,
 
 // SQ10: gate and up scratch for the fused SwiGLU intercept, one pair per slot
 // set. Streams attach 1:1 under the same rule as the Q8 slots (see
-// superroc_fp4_gemv_q8.hpp); the intercept names its stream, so two decode streams
-// can never share a pair. Pairs are never freed (process lifetime, one box
-// job). lqw:capture-warmup: pre-grow every pair at model load
+// superroc_fp4_gemv_q8.hpp); the intercept names its stream, so two decode
+// streams can never share a pair. Pairs are never freed (process lifetime, one
+// box job). lqw:capture-warmup: pre-grow every pair at model load
 // (RocmFp4SwigluScratchWarm, beside WarmupRocmFp4Slots) so the first captured
 // decode step cannot allocate.
 struct RocmFp4SwigluSets {
@@ -150,8 +152,8 @@ inline void RocmFp4SwigluSetsEnsure(int n) {
 inline bool RocmFp4SwigluScratchReady(std::size_t n, hipStream_t stream) {
   const int count = superroc_fp4_slot_sets_count();
   RocmFp4SwigluSetsEnsure(count);
-  const int set =
-      superroc_fp4_slot_stream_attach_at(stream, __func__, static_cast<long>(n));
+  const int set = superroc_fp4_slot_stream_attach_at(stream, __func__,
+                                                     static_cast<long>(n));
   if (set < 0)
     return false;
   RocmFp4SwigluSets& sets = RocmFp4SwigluSetsOf();
@@ -164,8 +166,8 @@ inline bool RocmFp4SwigluScratch(std::size_t n, float*& gate, float*& up,
                                  hipStream_t stream) {
   const int count = superroc_fp4_slot_sets_count();
   RocmFp4SwigluSetsEnsure(count);
-  const int set =
-      superroc_fp4_slot_stream_attach_at(stream, __func__, static_cast<long>(n));
+  const int set = superroc_fp4_slot_stream_attach_at(stream, __func__,
+                                                     static_cast<long>(n));
   if (set < 0)
     return false;
   RocmFp4SwigluSets& sets = RocmFp4SwigluSetsOf();

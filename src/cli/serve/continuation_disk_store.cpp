@@ -82,8 +82,8 @@ constexpr std::array<std::uint8_t, 8> kMagic = {'S', 'R', 'O', 'C',
                                                 'K', 'V', 'C', '1'};
 /// Previous engine-name magic, kept in char form so the old spelling never
 /// appears here; readers still accept files written by previous releases.
-constexpr std::array<std::uint8_t, 8> kPreviousMagic = {
-    'G', 'U', 'F', 'O', 'K', 'V', 'C', '1'};
+constexpr std::array<std::uint8_t, 8> kPreviousMagic = {'G', 'U', 'F', 'O',
+                                                        'K', 'V', 'C', '1'};
 // Format version 2. Version 1 hashed the whole image with one serial SHA-256
 // stream and stored the digest where version 2 keeps the table digest. A
 // version-1 file is a clean miss for this reader: it is never parsed as
@@ -117,10 +117,11 @@ constexpr std::string_view kTemporaryPrefix = ".tmp-";
   return ChunkCount(payload_bytes) * kChecksumBytes;
 }
 
-/// Chunk verification threads: SUPERROC_KVC_VERIFY_THREADS wins, else the machine's
-/// parallelism capped at 8. Tests pin it to 1, 2, 8 and 16.
+/// Chunk verification threads: SUPERROC_KVC_VERIFY_THREADS wins, else the
+/// machine's parallelism capped at 8. Tests pin it to 1, 2, 8 and 16.
 [[nodiscard]] std::size_t VerifyThreads() noexcept {
-  if (const char* text = ::superroc::core::GetEnvCompat("SUPERROC_KVC_VERIFY_THREADS")) {
+  if (const char* text =
+          ::superroc::core::GetEnvCompat("SUPERROC_KVC_VERIFY_THREADS")) {
     char* end = nullptr;
     const unsigned long parsed = std::strtoul(text, &end, 10);
     if (end != text && parsed >= 1 && parsed <= kMaxVerifyThreads)
@@ -141,7 +142,8 @@ constexpr std::string_view kTemporaryPrefix = ".tmp-";
 /// verification and runner calls unchanged, so the mmap change can be measured
 /// from one binary. Unset in production.
 [[nodiscard]] bool LegacyStagingEnabled() noexcept {
-  const char* text = ::superroc::core::GetEnvCompat("SUPERROC_KVC_LEGACY_STAGING");
+  const char* text =
+      ::superroc::core::GetEnvCompat("SUPERROC_KVC_LEGACY_STAGING");
   return text != nullptr && text[0] != '\0' && text[0] != '0';
 }
 
@@ -1090,10 +1092,10 @@ struct ContinuationDiskStore::Impl {
   }
 
   /// Stage breakdown for the disk-restore critical path, off unless
-  /// SUPERROC_KVC_TIMING is set. Every field is wall-clock milliseconds measured
-  /// inside this store; the one field that covers work done by the runner is
-  /// called out by name (runner_ms) because the host-to-device copies and
-  /// their stream synchronisation happen behind RestorePersistentSnapshot.
+  /// SUPERROC_KVC_TIMING is set. Every field is wall-clock milliseconds
+  /// measured inside this store; the one field that covers work done by the
+  /// runner is called out by name (runner_ms) because the host-to-device copies
+  /// and their stream synchronisation happen behind RestorePersistentSnapshot.
   static void EmitTiming(std::string_view line) noexcept {
     if (!TimingEnabled()) {
       return;

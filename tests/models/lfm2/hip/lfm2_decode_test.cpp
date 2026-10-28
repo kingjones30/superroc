@@ -23,8 +23,8 @@
 namespace {
 
 // LFM2: one line is a JSON list like [1, 2, 3].
-std::vector<superroc::tokenization::TokenId> ParseIdList(const std::string& line,
-                                                     const char* what) {
+std::vector<superroc::tokenization::TokenId> ParseIdList(
+    const std::string& line, const char* what) {
   const auto open = line.find('[');
   const auto close = line.find(']');
   if (open == std::string::npos || close == std::string::npos ||
@@ -103,8 +103,8 @@ int main(int argc, char** argv) {
     std::shared_ptr<const superroc::core::GgufReader> reader(std::move(opened));
     superroc::hip::QwenExecutionPolicy policy;  // LFM2 (lfm2_ppl policy)
     policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;  // LFM2
-    policy.fuse_qk_norm_rope_kv = false;                             // LFM2
-    constexpr std::uint32_t kContext = 4096;                         // LFM2
+    policy.fuse_qk_norm_rope_kv = false;                                 // LFM2
+    constexpr std::uint32_t kContext = 4096;                             // LFM2
     auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
         reader, &err, kContext, policy);
     if (executor == nullptr) {
@@ -160,7 +160,7 @@ int main(int argc, char** argv) {
       }
       // LFM2 checks: token-at-a-time gives the same first token as the chunk.
       executor->Reset();                                 // LFM2
-      superroc::tokenization::TokenId streamed = 0;          // LFM2
+      superroc::tokenization::TokenId streamed = 0;      // LFM2
       for (std::size_t i = 0; i < prompt.size(); ++i) {  // LFM2
         streamed = executor->ForwardToken(               // LFM2
             prompt[i], static_cast<std::uint32_t>(i),    // LFM2
@@ -186,14 +186,15 @@ int main(int argc, char** argv) {
       for (const auto id : ids) {                           // LFM2
         std::cout << ' ' << id;                             // LFM2
       }
-      std::cout << '\n';                                              // LFM2
-      std::cout << "text: "                                           // LFM2
-                << executor->GetTokenizer().Decode(                   // LFM2
-                       std::span<const superroc::tokenization::TokenId>(  // LFM2
-                           ids.data(), ids.size()))                   // LFM2
-                << '\n';                                              // LFM2
-      std::cout << "prompt" << p << " leading_equal=" << leading      // LFM2
-                << "/48\n";                                           // LFM2
+      std::cout << '\n';  // LFM2
+      std::cout
+          << "text: "                                               // LFM2
+          << executor->GetTokenizer().Decode(                       // LFM2
+                 std::span<const superroc::tokenization::TokenId>(  // LFM2
+                     ids.data(), ids.size()))                       // LFM2
+          << '\n';                                                  // LFM2
+      std::cout << "prompt" << p << " leading_equal=" << leading    // LFM2
+                << "/48\n";                                         // LFM2
     }
     std::cout << "prompts_ge8=" << prompts_ge8 << " want>=3\n";  // LFM2
     if (prompts_ge8 < 3) {                                       // LFM2

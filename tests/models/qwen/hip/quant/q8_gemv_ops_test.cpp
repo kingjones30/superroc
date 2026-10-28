@@ -75,8 +75,8 @@ void TestQ8KBlockGEMVEquivalence() {
   HIP_CHECK(
       hipMemcpy(d_x, h_x.data(), K * sizeof(float), hipMemcpyHostToDevice));
 
-  superroc::hip::LaunchQ8KBlockGEMV(d_A, superroc::core::GgmlType::kQ8_K, d_x, d_y, M,
-                                K, nullptr);
+  superroc::hip::LaunchQ8KBlockGEMV(d_A, superroc::core::GgmlType::kQ8_K, d_x,
+                                    d_y, M, K, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
 
   std::vector<float> y_gpu(M);
@@ -171,10 +171,10 @@ void TestQ8KSmallBatchFp32GEMMEquivalence() {
        {std::size_t{2}, std::size_t{3}, std::size_t{4}, std::size_t{5},
         std::size_t{6}, std::size_t{7}, std::size_t{8}}) {
     for (std::size_t token = 0; token < batch; ++token) {
-      superroc::hip::LaunchQ8KBlockGEMV(device_weights, superroc::core::GgmlType::kQ8_K,
-                                    device_inputs + (token * kColumns),
-                                    device_reference + (token * kRows), kRows,
-                                    kColumns, nullptr);
+      superroc::hip::LaunchQ8KBlockGEMV(
+          device_weights, superroc::core::GgmlType::kQ8_K,
+          device_inputs + (token * kColumns),
+          device_reference + (token * kRows), kRows, kColumns, nullptr);
     }
     superroc::hip::LaunchBatchedQuantGEMMFp32(
         superroc::core::GgmlType::kQ8_K, device_weights, device_inputs,
@@ -282,10 +282,10 @@ void TestQ8_0SmallBatchFp32GEMMEquivalence(std::size_t kRows,
        {std::size_t{1}, std::size_t{2}, std::size_t{3}, std::size_t{4},
         std::size_t{5}, std::size_t{6}, std::size_t{7}, std::size_t{8}}) {
     for (std::size_t token = 0; token < batch; ++token) {
-      superroc::hip::LaunchQ8KBlockGEMV(device_weights, superroc::core::GgmlType::kQ8_0,
-                                    device_inputs + (token * kColumns),
-                                    device_reference + (token * kRows), kRows,
-                                    kColumns, nullptr);
+      superroc::hip::LaunchQ8KBlockGEMV(
+          device_weights, superroc::core::GgmlType::kQ8_0,
+          device_inputs + (token * kColumns),
+          device_reference + (token * kRows), kRows, kColumns, nullptr);
     }
     superroc::hip::LaunchBatchedQuantGEMMFp32(
         superroc::core::GgmlType::kQ8_0, device_weights, device_inputs,
@@ -380,8 +380,8 @@ void TestQ8_0BlockGEMVEquivalence() {
   HIP_CHECK(
       hipMemcpy(d_x, h_x.data(), K * sizeof(float), hipMemcpyHostToDevice));
 
-  superroc::hip::LaunchQ8KBlockGEMV(d_A, superroc::core::GgmlType::kQ8_0, d_x, d_y, M,
-                                K, nullptr);
+  superroc::hip::LaunchQ8KBlockGEMV(d_A, superroc::core::GgmlType::kQ8_0, d_x,
+                                    d_y, M, K, nullptr);
   HIP_CHECK(hipDeviceSynchronize());
 
   std::vector<float> y_gpu(M);

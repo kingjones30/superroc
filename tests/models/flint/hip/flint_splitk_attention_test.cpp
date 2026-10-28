@@ -61,9 +61,9 @@ void Report(const std::string& cas, float gap) {
 }  // namespace
 
 int main() {
-  const int gate =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "flint_splitk_attention_test");
+  const int gate = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "flint_splitk_attention_test");
   if (gate != 0) {
     return gate;
   }

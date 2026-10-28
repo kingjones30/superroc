@@ -20,11 +20,11 @@
 #include <vector>
 
 #include "src/cli/arg_parser.hpp"
+#include "src/core/env_compat.hpp"
 #include "src/core/json.hpp"
 #include "src/eval/dataset.hpp"
 #include "src/eval/extract.hpp"
 #include "src/eval/http_client.hpp"
-#include "src/core/env_compat.hpp"
 
 #ifndef SUPERROC_REVISION
 #define SUPERROC_REVISION "unknown"
@@ -438,7 +438,8 @@ int Execute(const EvalOptions& options) {
     return 1;
   }
   ModelInfo model = *discovered;
-  const std::string model_revision = Environment("SUPERROC_EVAL_MODEL_REVISION");
+  const std::string model_revision =
+      Environment("SUPERROC_EVAL_MODEL_REVISION");
   const std::string artifact_id = Environment("SUPERROC_EVAL_ARTIFACT_ID");
   if (!model_revision.empty()) {
     model.revision = model_revision;
@@ -475,10 +476,12 @@ int Execute(const EvalOptions& options) {
   Value server = Value::object();
   server["label"] = OptionalIdentity(Environment("SUPERROC_EVAL_SERVER_LABEL"),
                                      options.base_url, bearer_token);
-  server["commit"] = OptionalIdentity(Environment("SUPERROC_EVAL_SERVER_COMMIT"),
-                                      options.base_url, bearer_token);
-  server["configuration"] = OptionalIdentity(
-      Environment("SUPERROC_EVAL_SERVER_CONFIG"), options.base_url, bearer_token);
+  server["commit"] =
+      OptionalIdentity(Environment("SUPERROC_EVAL_SERVER_COMMIT"),
+                       options.base_url, bearer_token);
+  server["configuration"] =
+      OptionalIdentity(Environment("SUPERROC_EVAL_SERVER_CONFIG"),
+                       options.base_url, bearer_token);
   run["server"] = std::move(server);
   Value model_json = Value::object();
   model_json["id"] = SafeIdentity(model.id, options.base_url, bearer_token);

@@ -1,7 +1,8 @@
 // Super ROC QVO: superroc_fp4_gemv_verify_m_xq reuses the Q8 copy of x that the
-// stream's slot set holds. It must be bit-identical to superroc_fp4_gemv_verify_m
-// for the same x, m and k, and refuse (SUPERROC_FP4_ERR_ARG) when the copy is of
-// a different x, m or k. Runs on a live ROCm device (label gpu).
+// stream's slot set holds. It must be bit-identical to
+// superroc_fp4_gemv_verify_m for the same x, m and k, and refuse
+// (SUPERROC_FP4_ERR_ARG) when the copy is of a different x, m or k. Runs on a
+// live ROCm device (label gpu).
 #include <hip/hip_runtime.h>
 
 #include <cstdint>
@@ -88,9 +89,9 @@ int main() {
              SUPERROC_FP4_OK,
          "verify_m W2 (reference)");
   // Group: the first member quantises x, the second reuses it.
-  Expect(
-      superroc_fp4_gemv_verify_m(qtype, dw1, dx, dy1, k, n1, m, s) == SUPERROC_FP4_OK,
-      "verify_m W1 (group first member)");
+  Expect(superroc_fp4_gemv_verify_m(qtype, dw1, dx, dy1, k, n1, m, s) ==
+             SUPERROC_FP4_OK,
+         "verify_m W1 (group first member)");
   Expect(superroc_fp4_gemv_verify_m_xq(qtype, dw2, dx, dy_xq, k, n2, m, s) ==
              SUPERROC_FP4_OK,
          "verify_m_xq W2 (reuse)");
@@ -114,9 +115,9 @@ int main() {
              SUPERROC_FP4_ERR_ARG,
          "refuses another k");
   // After quantising x2, x is no longer held.
-  Expect(
-      superroc_fp4_gemv_verify_m(qtype, dw1, dx2, dy1, k, n1, m, s) == SUPERROC_FP4_OK,
-      "verify_m W1 on x2");
+  Expect(superroc_fp4_gemv_verify_m(qtype, dw1, dx2, dy1, k, n1, m, s) ==
+             SUPERROC_FP4_OK,
+         "verify_m W1 on x2");
   Expect(superroc_fp4_gemv_verify_m_xq(qtype, dw2, dx, dy_xq, k, n2, m, s) ==
              SUPERROC_FP4_ERR_ARG,
          "refuses the old x after a new quantisation");

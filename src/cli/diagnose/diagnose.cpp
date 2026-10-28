@@ -20,6 +20,7 @@
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
+
 #include "src/core/env_compat.hpp"
 #endif
 
@@ -213,8 +214,7 @@ int RunDiagnose(std::span<const char* const> args) {
     // its spelling never appears here; both spellings skip argv[0].
     static const std::string previous_bin = std::string("g") + "ufo";
     if (first == "superroc" || first == previous_bin ||
-        first.ends_with("/superroc") ||
-        first.ends_with("/" + previous_bin)) {
+        first.ends_with("/superroc") || first.ends_with("/" + previous_bin)) {
       start_idx++;
     }
   }

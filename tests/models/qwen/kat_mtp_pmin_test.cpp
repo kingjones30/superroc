@@ -63,7 +63,8 @@ int main() {
   setenv("SUPERROC_MTP_PMIN", "-2", 1);
   Expect(Near(superroc::hip::MtpPMinFromEnv(), 0.0F, 1e-6F), "-2 clamps to 0");
   setenv("SUPERROC_MTP_PMIN", "nan", 1);
-  Expect(Near(superroc::hip::MtpPMinFromEnv(), 0.0F, 0.0F), "nan falls back to 0");
+  Expect(Near(superroc::hip::MtpPMinFromEnv(), 0.0F, 0.0F),
+         "nan falls back to 0");
   unsetenv("SUPERROC_MTP_PMIN");
 
   if (fails != 0) {

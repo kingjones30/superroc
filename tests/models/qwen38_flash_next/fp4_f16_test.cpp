@@ -340,7 +340,8 @@ void Int8Exactness() {
     for (int lane = 0; lane < 4; ++lane) {
       const int nib = (nibs[i] >> (lane * 8)) & 0xF;
       const auto got = static_cast<std::int8_t>((out[i] >> (lane * 8)) & 0xFF);
-      const int want = superroc_fp4_rocmfp4_code(static_cast<std::uint32_t>(nib));
+      const int want =
+          superroc_fp4_rocmfp4_code(static_cast<std::uint32_t>(nib));
       if (got != want) {
         ++bad;
       }

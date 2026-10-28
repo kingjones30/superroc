@@ -14,6 +14,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/sampling.hpp"
 #include "src/models/qwen/hip/kernels/dflash_kernels.hpp"
@@ -21,7 +22,6 @@
 #include "tests/models/qwen/hip/support/comparisons.hpp"
 #include "tests/models/qwen/hip/support/device.hpp"
 #include "tests/models/qwen/hip/support/device_buffer.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -109,7 +109,8 @@ void TestProposalVerification(std::span<const std::uint32_t> ids,
     config.min_p = filtered ? 0.05F : 0.0F;
     config.repeat_penalty = filtered ? 1.2F : 1.0F;
     const std::vector<std::uint32_t> history = {ids[0], ids[0]};
-    const auto p = superroc::sampling::BuildDistribution(logits, config, history);
+    const auto p =
+        superroc::sampling::BuildDistribution(logits, config, history);
     std::vector<superroc::sampling::Probability> residual;
     double rejection_mass = 0;
     for (const auto& entry : p.entries()) {
@@ -258,9 +259,10 @@ void TestSelector(std::uint32_t vocab) {
                       << " actual=" << probabilities[c] << " expected=" << p
                       << '\n';
           }
-          superroc::test::Expect(std::isfinite(probabilities[c]) &&
-                                 std::abs(probabilities[c] - p) < 2e-6,
-                             "DFlash sparse proposal probability is incorrect");
+          superroc::test::Expect(
+              std::isfinite(probabilities[c]) &&
+                  std::abs(probabilities[c] - p) < 2e-6,
+              "DFlash sparse proposal probability is incorrect");
           const double previous = cumulative;
           cumulative += p;
           if (previous < 0.37 && cumulative >= 0.37)
@@ -268,15 +270,16 @@ void TestSelector(std::uint32_t vocab) {
         }
       }
       superroc::test::Expect(d_selected.CopyToHost()[0] == sorted[selected],
-                         "DFlash selector chose the wrong candidate");
+                             "DFlash selector chose the wrong candidate");
       const double confidence =
           temperature > 0
               ? std::exp((scores[selected] - maximum) / divisor) / denominator
               : 1.0;
       if (temperature == 0) {
         for (std::size_t c = 0; c < top_k; ++c)
-          superroc::test::Expect(probabilities[c] == (c == selected ? 1.0F : 0.0F),
-                             "greedy proposal probabilities must be one-hot");
+          superroc::test::Expect(
+              probabilities[c] == (c == selected ? 1.0F : 0.0F),
+              "greedy proposal probabilities must be one-hot");
       }
       superroc::test::Expect(
           std::abs(d_confidence.CopyToHost()[0] - confidence) < 2e-6,
@@ -553,8 +556,8 @@ float MaxRouteDifference(Route route, std::uint32_t current_pos,
   float max_difference = 0.0F;
   for (std::size_t index = 0; index < q_elements; ++index) {
     superroc::test::Expect(std::isfinite(wave_out[index]),
-                       "DFlash candidate attention produced a non-finite "
-                       "output");
+                           "DFlash candidate attention produced a non-finite "
+                           "output");
     max_difference =
         std::max(max_difference, std::abs(scalar_out[index] - wave_out[index]));
   }
@@ -606,21 +609,22 @@ float MaxRouteDifference(Route route, std::uint32_t current_pos,
 void TestRouteEquivalence(std::uint32_t current_pos,
                           std::uint32_t history_length, const char* label,
                           std::uint32_t block_count = kBlockCount) {
-  superroc::test::Expect(MaxRouteDifference(Route::kScalar, current_pos,
-                                        history_length, block_count) == 0.0F,
-                     "ring addressing must preserve scalar attention exactly");
+  superroc::test::Expect(
+      MaxRouteDifference(Route::kScalar, current_pos, history_length,
+                         block_count) == 0.0F,
+      "ring addressing must preserve scalar attention exactly");
   const float wave = MaxRouteDifference(Route::kWave, current_pos,
                                         history_length, block_count);
   std::cout << "DFlash non-causal attention " << label
             << ": max |scalar - wave| = " << wave << "\n";
   superroc::test::Expect(wave < 1e-5F,
-                     "DFlash wave attention diverges from the reference");
+                         "DFlash wave attention diverges from the reference");
   const float tiled = MaxRouteDifference(Route::kTiled, current_pos,
                                          history_length, block_count);
   std::cout << "DFlash non-causal attention " << label
             << ": max |scalar - tiled| = " << tiled << "\n";
   superroc::test::Expect(tiled < 1e-5F,
-                     "DFlash tiled attention diverges from the reference");
+                         "DFlash tiled attention diverges from the reference");
   // Forced short ranges, then the production range length.
   for (const auto split_keys : {kTestSplitKeys, 0U}) {
     const float split =
@@ -629,8 +633,8 @@ void TestRouteEquivalence(std::uint32_t current_pos,
     std::cout << "DFlash non-causal attention " << label
               << ": max |scalar - split(" << split_keys << ")| = " << split
               << "\n";
-    superroc::test::Expect(split < 1e-5F,
-                       "DFlash split attention diverges from the reference");
+    superroc::test::Expect(
+        split < 1e-5F, "DFlash split attention diverges from the reference");
   }
 }
 
@@ -697,14 +701,16 @@ void TestLongHistory(std::uint32_t history_length, std::uint32_t block_count,
   } catch (const std::exception& error) {
     std::cerr << "DFlash long-history attention " << label << ": "
               << error.what() << "\n";
-    superroc::test::Expect(false, "DFlash attention must launch at any history");
+    superroc::test::Expect(false,
+                           "DFlash attention must launch at any history");
   }
   HIP_CHECK(hipDeviceSynchronize());
   const auto out = d_out.CopyToHost();
   for (const float value : out) {
-    superroc::test::Expect(std::isfinite(value),
-                       "DFlash long-history attention produced a non-finite "
-                       "output");
+    superroc::test::Expect(
+        std::isfinite(value),
+        "DFlash long-history attention produced a non-finite "
+        "output");
   }
   double max_error = 0;
   for (const auto query : {0U, block_count - 1}) {
@@ -746,9 +752,10 @@ void TestLongHistory(std::uint32_t history_length, std::uint32_t block_count,
   }
   std::cout << "DFlash long-history attention " << label
             << ": max |gpu - double| = " << max_error << "\n";
-  superroc::test::Expect(max_error < 1e-5,
-                     "DFlash long-history attention differs from the softmax "
-                     "equation");
+  superroc::test::Expect(
+      max_error < 1e-5,
+      "DFlash long-history attention differs from the softmax "
+      "equation");
 }
 
 /// Below kDFlashSplitMinKeys the production entry point must not change: with
@@ -798,8 +805,9 @@ void TestRouterShortHistoryUnchanged(std::uint32_t history_length,
       "DFlash attention below the split threshold must be bit-identical");
 }
 
-/// Opt-in (SUPERROC_DFLASH_ATTN_BENCH=1) timing of the DSpark drafter attention:
-/// the routes without scratch against the split route, per history length.
+/// Opt-in (SUPERROC_DFLASH_ATTN_BENCH=1) timing of the DSpark drafter
+/// attention: the routes without scratch against the split route, per history
+/// length.
 void BenchLongHistory() {
   constexpr std::uint32_t block_count = 4;
   const std::size_t q_dim = std::size_t{kLongQueryHeads} * kLongHeadDim;
@@ -870,9 +878,9 @@ void BenchLongHistory() {
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Qwen DFlash non-causal attention ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Qwen DFlash non-causal attention ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }
@@ -926,9 +934,10 @@ int main() {
   // One-key ranges under a window of eight: for draft row t the first t
   // ranges hold only masked keys, which must enter the combine with weight 0.
   for (const auto rows : {1U, 4U, 7U}) {
-    superroc::test::Expect(MaxRouteDifference(Route::kSplit, 20, 20, rows,
-                                          kTestTileKeys, 1, 8) < 1e-5F,
-                       "DFlash split attention with masked ranges diverges");
+    superroc::test::Expect(
+        MaxRouteDifference(Route::kSplit, 20, 20, rows, kTestTileKeys, 1, 8) <
+            1e-5F,
+        "DFlash split attention with masked ranges diverges");
   }
   // Below the threshold the router is unchanged, bit for bit.
   for (const auto history :
@@ -936,7 +945,8 @@ int main() {
     TestRouterShortHistoryUnchanged(history, 4);
     TestRouterShortHistoryUnchanged(history, 1);
   }
-  if (const char* bench = ::superroc::core::GetEnvCompat("SUPERROC_DFLASH_ATTN_BENCH");
+  if (const char* bench =
+          ::superroc::core::GetEnvCompat("SUPERROC_DFLASH_ATTN_BENCH");
       bench != nullptr && bench[0] == '1') {
     BenchLongHistory();
   }

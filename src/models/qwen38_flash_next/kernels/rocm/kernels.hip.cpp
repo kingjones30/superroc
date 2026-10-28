@@ -19,7 +19,7 @@
 #define hipLaunchKernelGGL(kernelName, numBlocks, numThreads, memPerBlock, \
                            streamId, ...)                                  \
   do {                                                                     \
-    ::superroc::models::qwen38_flash_next::rocm::LfnNoteLaunch();              \
+    ::superroc::models::qwen38_flash_next::rocm::LfnNoteLaunch();          \
     kernelName<<<(numBlocks), (numThreads), (memPerBlock), (streamId)>>>(  \
         __VA_ARGS__);                                                      \
   } while (0)

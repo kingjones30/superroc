@@ -119,8 +119,8 @@ struct InterleaveArgs {
 void InterleaveWorker(InterleaveArgs* a) {
   std::vector<float> host(static_cast<std::size_t>(a->n));
   for (int t = 0; t < a->steps && !a->stop->load(); ++t) {
-    if (superroc_fp4_quant_q8(a->dx, a->k, SUPERROC_FP4_Q8_SLOT_GENERIC, a->stream) !=
-        SUPERROC_FP4_OK) {
+    if (superroc_fp4_quant_q8(a->dx, a->k, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                              a->stream) != SUPERROC_FP4_OK) {
       std::fprintf(stderr, "FAIL worker quant step %d\n", t);
       a->mismatches->fetch_add(1);
       a->barrier->trip(*a->stop);
@@ -130,8 +130,9 @@ void InterleaveWorker(InterleaveArgs* a) {
     // read whichever quantize landed last, so at least one side is wrong.
     if (!a->barrier->wait(*a->stop))
       return;
-    if (superroc_fp4_gemv_fp4_q8(a->qtype, a->dw, SUPERROC_FP4_Q8_SLOT_GENERIC, a->dy,
-                             a->k, a->n, a->stream) != SUPERROC_FP4_OK) {
+    if (superroc_fp4_gemv_fp4_q8(a->qtype, a->dw, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                 a->dy, a->k, a->n,
+                                 a->stream) != SUPERROC_FP4_OK) {
       std::fprintf(stderr, "FAIL worker gemv step %d\n", t);
       a->mismatches->fetch_add(1);
       a->barrier->trip(*a->stop);
@@ -225,21 +226,21 @@ int RunInterleave() {
   // Single-stream references, sequential and synced: correct on every tree.
   std::vector<float> ref0(static_cast<std::size_t>(n));
   std::vector<float> ref1(static_cast<std::size_t>(n));
-  SQ10_EXPECT(
-      superroc_fp4_quant_q8(dx0, k, SUPERROC_FP4_Q8_SLOT_GENERIC, s0) == SUPERROC_FP4_OK,
-      "ref quant 0");
-  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dy0, k,
-                                   n, s0) == SUPERROC_FP4_OK,
+  SQ10_EXPECT(superroc_fp4_quant_q8(dx0, k, SUPERROC_FP4_Q8_SLOT_GENERIC, s0) ==
+                  SUPERROC_FP4_OK,
+              "ref quant 0");
+  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                       dy0, k, n, s0) == SUPERROC_FP4_OK,
               "ref gemv 0");
   SQ10_CHECK_HIP(hipStreamSynchronize(s0));
   SQ10_CHECK_HIP(hipMemcpy(ref0.data(), dy0,
                            static_cast<std::size_t>(n) * sizeof(float),
                            hipMemcpyDeviceToHost));
-  SQ10_EXPECT(
-      superroc_fp4_quant_q8(dx1, k, SUPERROC_FP4_Q8_SLOT_GENERIC, s0) == SUPERROC_FP4_OK,
-      "ref quant 1");
-  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dy1, k,
-                                   n, s0) == SUPERROC_FP4_OK,
+  SQ10_EXPECT(superroc_fp4_quant_q8(dx1, k, SUPERROC_FP4_Q8_SLOT_GENERIC, s0) ==
+                  SUPERROC_FP4_OK,
+              "ref quant 1");
+  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                       dy1, k, n, s0) == SUPERROC_FP4_OK,
               "ref gemv 1");
   SQ10_CHECK_HIP(hipStreamSynchronize(s0));
   SQ10_CHECK_HIP(hipMemcpy(ref1.data(), dy1,
@@ -266,8 +267,10 @@ int RunInterleave() {
   std::printf("INTERLEAVE PASS (2 streams x 10000 steps, bit-identical)\n");
 
 #ifdef SUPERROC_FP4_SLOT_OWNER
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s0) == SUPERROC_FP4_OK, "detach s0");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s1) == SUPERROC_FP4_OK, "detach s1");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s0) == SUPERROC_FP4_OK,
+              "detach s0");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s1) == SUPERROC_FP4_OK,
+              "detach s1");
 #endif
   SQ10_CHECK_HIP(hipStreamDestroy(s0));
   SQ10_CHECK_HIP(hipStreamDestroy(s1));
@@ -320,7 +323,8 @@ int RunExhaustion() {
   SQ10_EXPECT(!WaitFlagUntil(done, std::chrono::milliseconds(300)),
               "wait entry holds");
   const unsigned long w0 = superroc_fp4_slot_wait_count();
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(t0) == SUPERROC_FP4_OK, "detach t0");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(t0) == SUPERROC_FP4_OK,
+              "detach t0");
   SQ10_EXPECT(WaitFlagUntil(done, std::chrono::milliseconds(5000)),
               "waiter wakes");
   waiter.join();
@@ -339,7 +343,8 @@ int RunExhaustion() {
   });
   SQ10_EXPECT(!WaitFlagUntil(done, std::chrono::milliseconds(2000)),
               "N+1-th attach waits");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(t0) == SUPERROC_FP4_OK, "detach t0");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(t0) == SUPERROC_FP4_OK,
+              "detach t0");
   SQ10_EXPECT(WaitFlagUntil(done, std::chrono::milliseconds(5000)),
               "waiter wakes");
   waiter.join();
@@ -348,8 +353,10 @@ int RunExhaustion() {
   std::printf("wait_count=%lu wait_us=%lu\n", superroc_fp4_slot_wait_count(),
               superroc_fp4_slot_wait_us());
 #endif
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(t1) == SUPERROC_FP4_OK, "detach t1");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(t2) == SUPERROC_FP4_OK, "detach t2");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(t1) == SUPERROC_FP4_OK,
+              "detach t1");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(t2) == SUPERROC_FP4_OK,
+              "detach t2");
   SQ10_EXPECT(superroc_fp4_slot_stream_detach(t2) == SUPERROC_FP4_ERR_ARG,
               "double detach is loud");
   SQ10_CHECK_HIP(hipStreamDestroy(t0));
@@ -375,14 +382,19 @@ int RunZeroAlloc() {
   const int s1 = superroc_fp4_slot_stream_attach(c1);
   SQ10_EXPECT(s0 >= 0 && s1 >= 0 && s0 != s1, "attach c0/c1");
   SQ10_EXPECT(superroc_fp4_slots_warm_q8(k, c0) == SUPERROC_FP4_OK, "warm q8");
-  SQ10_EXPECT(superroc_fp4_slots_warm_moe(512, 0, 4096) == SUPERROC_FP4_OK, "warm moe");
+  SQ10_EXPECT(superroc_fp4_slots_warm_moe(512, 0, 4096) == SUPERROC_FP4_OK,
+              "warm moe");
   SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratchWarm(1024), "warm swiglu");
   // The two streams own different SwiGLU pairs.
   float *g0 = nullptr, *u0 = nullptr, *g1 = nullptr, *u1 = nullptr;
-  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratchReady(1024, c0), "swiglu ready 0");
-  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratchReady(1024, c1), "swiglu ready 1");
-  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratch(1024, g0, u0, c0), "swiglu 0");
-  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratch(1024, g1, u1, c1), "swiglu 1");
+  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratchReady(1024, c0),
+              "swiglu ready 0");
+  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratchReady(1024, c1),
+              "swiglu ready 1");
+  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratch(1024, g0, u0, c0),
+              "swiglu 0");
+  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratch(1024, g1, u1, c1),
+              "swiglu 1");
   SQ10_EXPECT(g0 != nullptr && u0 != nullptr && g1 != nullptr && u1 != nullptr,
               "swiglu non-null");
   SQ10_EXPECT(g0 != g1 && u0 != u1, "swiglu pairs differ");
@@ -432,30 +444,33 @@ int RunZeroAlloc() {
       hipMemcpy(d_wts, &one_w, sizeof(float), hipMemcpyHostToDevice));
 
   const unsigned long c0alloc = superroc_fp4_slot_alloc_count();
-  SQ10_EXPECT(
-      superroc_fp4_quant_q8(dx, k, SUPERROC_FP4_Q8_SLOT_GENERIC, c0) == SUPERROC_FP4_OK,
-      "decode quant c0");
-  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dy, k,
-                                   n, c0) == SUPERROC_FP4_OK,
+  SQ10_EXPECT(superroc_fp4_quant_q8(dx, k, SUPERROC_FP4_Q8_SLOT_GENERIC, c0) ==
+                  SUPERROC_FP4_OK,
+              "decode quant c0");
+  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                       dy, k, n, c0) == SUPERROC_FP4_OK,
               "decode gemv c0");
-  SQ10_EXPECT(
-      superroc_fp4_quant_q8(dx, k, SUPERROC_FP4_Q8_SLOT_GENERIC, c1) == SUPERROC_FP4_OK,
-      "decode quant c1");
-  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dy, k,
-                                   n, c1) == SUPERROC_FP4_OK,
+  SQ10_EXPECT(superroc_fp4_quant_q8(dx, k, SUPERROC_FP4_Q8_SLOT_GENERIC, c1) ==
+                  SUPERROC_FP4_OK,
+              "decode quant c1");
+  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                       dy, k, n, c1) == SUPERROC_FP4_OK,
               "decode gemv c1");
-  SQ10_EXPECT(
-      superroc_fp4_expert_ffn_dev(qtype, d_gate, d_up, d_down, dx, d_ids, d_wts, 1,
-                              1, k, n_ff, 0.0f, d_moe_y, c0) == SUPERROC_FP4_OK,
-      "decode expert");
-  SQ10_EXPECT(superroc_fp4_moe_dev_check_set(s0) == SUPERROC_FP4_OK, "decode check");
+  SQ10_EXPECT(superroc_fp4_expert_ffn_dev(qtype, d_gate, d_up, d_down, dx,
+                                          d_ids, d_wts, 1, 1, k, n_ff, 0.0f,
+                                          d_moe_y, c0) == SUPERROC_FP4_OK,
+              "decode expert");
+  SQ10_EXPECT(superroc_fp4_moe_dev_check_set(s0) == SUPERROC_FP4_OK,
+              "decode check");
   SQ10_CHECK_HIP(hipStreamSynchronize(c0));
   SQ10_CHECK_HIP(hipStreamSynchronize(c1));
   const unsigned long c1alloc = superroc_fp4_slot_alloc_count();
   SQ10_EXPECT(c0alloc == c1alloc, "zero slot allocs across decode");
 
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(c0) == SUPERROC_FP4_OK, "detach c0");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(c1) == SUPERROC_FP4_OK, "detach c1");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(c0) == SUPERROC_FP4_OK,
+              "detach c0");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(c1) == SUPERROC_FP4_OK,
+              "detach c1");
   SQ10_CHECK_HIP(hipStreamDestroy(c0));
   SQ10_CHECK_HIP(hipStreamDestroy(c1));
   SQ10_CHECK_HIP(hipFree(dw));
@@ -493,8 +508,8 @@ struct HelperArgs {
 void HelperWorker(HelperArgs* a) {
   std::vector<float> host(static_cast<std::size_t>(a->n));
   int st = 1;
-  if (superroc_fp4_gemv_fp4(a->qtype, a->dw, a->dx, a->dy, a->k, a->n, a->stream) ==
-          SUPERROC_FP4_OK &&
+  if (superroc_fp4_gemv_fp4(a->qtype, a->dw, a->dx, a->dy, a->k, a->n,
+                            a->stream) == SUPERROC_FP4_OK &&
       hipStreamSynchronize(a->stream) == hipSuccess &&
       hipMemcpy(host.data(), a->dy,
                 static_cast<std::size_t>(a->n) * sizeof(float),
@@ -550,8 +565,9 @@ int RunProductionHelper() {
   const int a1 = superroc_fp4_slot_stream_attach(s1);
   SQ10_EXPECT(a0 >= 0 && a1 >= 0 && a0 != a1, "production sessions attach");
   std::vector<float> ref(static_cast<std::size_t>(n));
-  SQ10_EXPECT(superroc_fp4_gemv_fp4(qtype, dw, dx, dy, k, n, s0) == SUPERROC_FP4_OK,
-              "production ref launch");
+  SQ10_EXPECT(
+      superroc_fp4_gemv_fp4(qtype, dw, dx, dy, k, n, s0) == SUPERROC_FP4_OK,
+      "production ref launch");
   SQ10_CHECK_HIP(hipStreamSynchronize(s0));
   SQ10_CHECK_HIP(hipMemcpy(ref.data(), dy,
                            static_cast<std::size_t>(n) * sizeof(float),
@@ -582,7 +598,8 @@ int RunProductionHelper() {
   SQ10_EXPECT(superroc_fp4_slot_refuse_count() == r0, "production no refusal");
   SQ10_EXPECT(superroc_fp4_slot_stream_detach(h) == SUPERROC_FP4_OK,
               "production detach helper");
-  SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 0, "production alias flat");
+  SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 0,
+              "production alias flat");
 #endif
   SQ10_EXPECT(superroc_fp4_slot_stream_detach(s0) == SUPERROC_FP4_OK,
               "production detach s0");
@@ -613,13 +630,15 @@ int RunAlias() {
   SQ10_EXPECT(a0 >= 0, "alias owner attach");
   SQ10_EXPECT(superroc_fp4_slot_stream_alias(h, s0) == a0, "alias registers");
   SQ10_EXPECT(superroc_fp4_slot_stream_alias(h, s0) == a0, "alias idempotent");
-  SQ10_EXPECT(superroc_fp4_slot_stream_attach(h) == a0, "helper resolves owner");
+  SQ10_EXPECT(superroc_fp4_slot_stream_attach(h) == a0,
+              "helper resolves owner");
   SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 1, "alias size 1");
   // Bad registrations are loud.
   SQ10_EXPECT(superroc_fp4_slot_stream_alias(x, x) == SUPERROC_FP4_ERR_ARG,
               "self alias refused");
-  SQ10_EXPECT(superroc_fp4_slot_stream_alias(nullptr, s0) == SUPERROC_FP4_ERR_ARG,
-              "null helper refused");
+  SQ10_EXPECT(
+      superroc_fp4_slot_stream_alias(nullptr, s0) == SUPERROC_FP4_ERR_ARG,
+      "null helper refused");
   SQ10_EXPECT(superroc_fp4_slot_stream_alias(h, x) == SUPERROC_FP4_ERR_ARG,
               "unattached owner refused");
   const int ax = superroc_fp4_slot_stream_attach(x);
@@ -648,14 +667,16 @@ int RunAlias() {
                            hipMemcpyHostToDevice));
   std::vector<float> ref(static_cast<std::size_t>(n));
   std::vector<float> got(static_cast<std::size_t>(n));
-  SQ10_EXPECT(superroc_fp4_gemv_fp4(qtype, dw, dx, dy, k, n, s0) == SUPERROC_FP4_OK,
-              "alias ref launch");
+  SQ10_EXPECT(
+      superroc_fp4_gemv_fp4(qtype, dw, dx, dy, k, n, s0) == SUPERROC_FP4_OK,
+      "alias ref launch");
   SQ10_CHECK_HIP(hipStreamSynchronize(s0));
   SQ10_CHECK_HIP(hipMemcpy(ref.data(), dy,
                            static_cast<std::size_t>(n) * sizeof(float),
                            hipMemcpyDeviceToHost));
-  SQ10_EXPECT(superroc_fp4_gemv_fp4(qtype, dw, dx, dy, k, n, h) == SUPERROC_FP4_OK,
-              "alias helper launch");
+  SQ10_EXPECT(
+      superroc_fp4_gemv_fp4(qtype, dw, dx, dy, k, n, h) == SUPERROC_FP4_OK,
+      "alias helper launch");
   SQ10_CHECK_HIP(hipStreamSynchronize(h));
   SQ10_CHECK_HIP(hipMemcpy(got.data(), dy,
                            static_cast<std::size_t>(n) * sizeof(float),
@@ -669,11 +690,15 @@ int RunAlias() {
               "detach helper removes alias");
   SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 0, "alias flat");
   SQ10_EXPECT(superroc_fp4_slot_stream_alias(h, s0) == a0, "re-alias");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s0) == SUPERROC_FP4_OK, "detach owner");
-  SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 0, "owner detach drops it");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s0) == SUPERROC_FP4_OK,
+              "detach owner");
+  SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 0,
+              "owner detach drops it");
   SQ10_EXPECT(superroc_fp4_slot_stream_attach(h) == a0, "ex-helper reattaches");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(h) == SUPERROC_FP4_OK, "detach h");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(x) == SUPERROC_FP4_OK, "detach x");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(h) == SUPERROC_FP4_OK,
+              "detach h");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(x) == SUPERROC_FP4_OK,
+              "detach x");
   SQ10_EXPECT(superroc_fp4_slot_debug_map_size() == 0, "map flat");
   SQ10_CHECK_HIP(hipStreamDestroy(s0));
   SQ10_CHECK_HIP(hipStreamDestroy(h));
@@ -687,7 +712,8 @@ int RunAlias() {
 
 // SPEC2 gate 5: create/destroy 1,000 attach/alias pairs; the maps stay flat.
 int RunLifecycle() {
-  SQ10_EXPECT(superroc_fp4_slot_debug_map_size() == 0, "lifecycle map starts 0");
+  SQ10_EXPECT(superroc_fp4_slot_debug_map_size() == 0,
+              "lifecycle map starts 0");
   SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 0,
               "lifecycle alias starts 0");
   for (int i = 0; i < 1000; ++i) {
@@ -712,7 +738,8 @@ int RunLifecycle() {
     }
   }
   SQ10_EXPECT(superroc_fp4_slot_debug_map_size() == 0, "lifecycle map flat");
-  SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 0, "lifecycle alias flat");
+  SQ10_EXPECT(superroc_fp4_slot_debug_alias_size() == 0,
+              "lifecycle alias flat");
   // Functional proof: two attach, the third refuses, both detach.
   hipStream_t f0 = nullptr;
   hipStream_t f1 = nullptr;
@@ -725,8 +752,10 @@ int RunLifecycle() {
   SQ10_EXPECT(b0 >= 0 && b1 >= 0 && b0 != b1, "lifecycle functional attach");
   SQ10_EXPECT(superroc_fp4_slot_stream_attach(f2) == -SUPERROC_FP4_ERR_BUSY,
               "lifecycle functional refuse");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(f0) == SUPERROC_FP4_OK, "detach f0");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(f1) == SUPERROC_FP4_OK, "detach f1");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(f0) == SUPERROC_FP4_OK,
+              "detach f0");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(f1) == SUPERROC_FP4_OK,
+              "detach f1");
   SQ10_CHECK_HIP(hipStreamDestroy(f0));
   SQ10_CHECK_HIP(hipStreamDestroy(f1));
   SQ10_CHECK_HIP(hipStreamDestroy(f2));
@@ -789,7 +818,7 @@ struct GroupArgs {
 
 #define SQ10_GSTEP(call, msg)                        \
   do {                                               \
-    if ((call) != SUPERROC_FP4_OK) {                     \
+    if ((call) != SUPERROC_FP4_OK) {                 \
       std::fprintf(stderr, "FAIL groups %s\n", msg); \
       a->mismatches->fetch_add(1);                   \
       a->barrier->trip(*a->stop);                    \
@@ -806,21 +835,22 @@ void GroupWorker(GroupArgs* a) {
   std::vector<float> h4(static_cast<std::size_t>(f->mv) *
                         static_cast<std::size_t>(f->n4));
   for (int t = 0; t < a->steps && !a->stop->load(); ++t) {
+    SQ10_GSTEP(superroc_fp4_quant_q8(f->x1, f->k1, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                     f->stream),
+               "quant");
     SQ10_GSTEP(
-        superroc_fp4_quant_q8(f->x1, f->k1, SUPERROC_FP4_Q8_SLOT_GENERIC, f->stream),
-        "quant");
-    SQ10_GSTEP(superroc_fp4_gemv_fp4_q8(a->qtype, f->w1, SUPERROC_FP4_Q8_SLOT_GENERIC,
-                                    f->y1, f->k1, f->n1, f->stream),
-               "gemv");
+        superroc_fp4_gemv_fp4_q8(a->qtype, f->w1, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                 f->y1, f->k1, f->n1, f->stream),
+        "gemv");
     SQ10_GSTEP(superroc_fp4_gemv_m(a->qtype, f->w2, f->x2, f->y2, f->k2, f->n2,
-                               f->m2, f->stream),
+                                   f->m2, f->stream),
                "gemv_m");
-    SQ10_GSTEP(superroc_fp4_expert_ffn_dev(a->qtype, f->gate, f->up, f->down, f->x3,
-                                       f->ids, f->wts, 1, 2, f->k3, f->n_ff,
-                                       0.0f, f->y3, f->stream),
+    SQ10_GSTEP(superroc_fp4_expert_ffn_dev(a->qtype, f->gate, f->up, f->down,
+                                           f->x3, f->ids, f->wts, 1, 2, f->k3,
+                                           f->n_ff, 0.0f, f->y3, f->stream),
                "expert");
     SQ10_GSTEP(superroc_fp4_gemv_verify_m(a->qtype, f->w4, f->x4, f->y4, f->k4,
-                                      f->n4, f->mv, f->stream),
+                                          f->n4, f->mv, f->stream),
                "verify");
     if (hipMemsetAsync(f->sw_g, f->mark_g, 64 * sizeof(float), f->stream) !=
             hipSuccess ||
@@ -886,7 +916,8 @@ int RunInterleaveGroups() {
   const int k4 = 512;
   const int n4 = 128;
   const int mv = 4;
-  SQ10_EXPECT(superroc_fp4_verify_m_reserve(mv * k4) == SUPERROC_FP4_OK, "reserve");
+  SQ10_EXPECT(superroc_fp4_verify_m_reserve(mv * k4) == SUPERROC_FP4_OK,
+              "reserve");
   SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratchWarm(512), "swiglu warm");
   hipStream_t s0 = nullptr;
   hipStream_t s1 = nullptr;
@@ -1030,21 +1061,22 @@ int RunInterleaveGroups() {
     refs[i][1].resize(static_cast<std::size_t>(m2 * n2));
     refs[i][2].resize(static_cast<std::size_t>(k3));
     refs[i][3].resize(static_cast<std::size_t>(mv * n4));
+    SQ10_EXPECT(superroc_fp4_quant_q8(dx1, k1, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                      s0) == SUPERROC_FP4_OK,
+                "groups ref quant");
     SQ10_EXPECT(
-        superroc_fp4_quant_q8(dx1, k1, SUPERROC_FP4_Q8_SLOT_GENERIC, s0) == SUPERROC_FP4_OK,
-        "groups ref quant");
-    SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw1, SUPERROC_FP4_Q8_SLOT_GENERIC, dy1,
-                                     k1, n1, s0) == SUPERROC_FP4_OK,
-                "groups ref gemv");
-    SQ10_EXPECT(
-        superroc_fp4_gemv_m(qtype, dw2, dx2, dy2, k2, n2, m2, s0) == SUPERROC_FP4_OK,
-        "groups ref gemv_m");
-    SQ10_EXPECT(
-        superroc_fp4_expert_ffn_dev(qtype, dgate, dup, ddown, dx3, dids, dwts, 1, 2,
-                                k3, n_ff, 0.0f, dy3, s0) == SUPERROC_FP4_OK,
-        "groups ref expert");
-    SQ10_EXPECT(superroc_fp4_gemv_verify_m(qtype, dw4, dx4, dy4, k4, n4, mv, s0) ==
+        superroc_fp4_gemv_fp4_q8(qtype, dw1, SUPERROC_FP4_Q8_SLOT_GENERIC, dy1,
+                                 k1, n1, s0) == SUPERROC_FP4_OK,
+        "groups ref gemv");
+    SQ10_EXPECT(superroc_fp4_gemv_m(qtype, dw2, dx2, dy2, k2, n2, m2, s0) ==
                     SUPERROC_FP4_OK,
+                "groups ref gemv_m");
+    SQ10_EXPECT(superroc_fp4_expert_ffn_dev(qtype, dgate, dup, ddown, dx3, dids,
+                                            dwts, 1, 2, k3, n_ff, 0.0f, dy3,
+                                            s0) == SUPERROC_FP4_OK,
+                "groups ref expert");
+    SQ10_EXPECT(superroc_fp4_gemv_verify_m(qtype, dw4, dx4, dy4, k4, n4, mv,
+                                           s0) == SUPERROC_FP4_OK,
                 "groups ref verify");
     SQ10_CHECK_HIP(hipStreamSynchronize(s0));
     SQ10_CHECK_HIP(hipMemcpy(refs[i][0].data(), dy1,
@@ -1088,7 +1120,8 @@ int RunInterleaveGroups() {
   // the old pair and hand back a working new one, leaving s1's pair alone.
   float* gg = nullptr;
   float* gu = nullptr;
-  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratch(2048, gg, gu, s0), "groups grow");
+  SQ10_EXPECT(superroc::hip::RocmFp4SwigluScratch(2048, gg, gu, s0),
+              "groups grow");
   SQ10_EXPECT(gg != nullptr && gu != nullptr, "groups grown pair");
   SQ10_EXPECT(gg != g0 && gu != u0, "groups grow reallocates");
   SQ10_CHECK_HIP(hipMemset(gg, 0xc0, 2048 * sizeof(float)));
@@ -1112,7 +1145,8 @@ int RunInterleaveGroups() {
   // in it; the FP4 groups are the separable check.
   SQ10_EXPECT(superroc_fp4_slot_stream_detach(s1) == SUPERROC_FP4_OK,
               "alias-groups detach s1");
-  SQ10_EXPECT(superroc_fp4_slot_stream_alias(s1, s0) == set0, "alias-groups alias");
+  SQ10_EXPECT(superroc_fp4_slot_stream_alias(s1, s0) == set0,
+              "alias-groups alias");
   std::vector<float> ah1(static_cast<std::size_t>(n1));
   std::vector<float> ah2(static_cast<std::size_t>(m2) *
                          static_cast<std::size_t>(n2));
@@ -1123,22 +1157,25 @@ int RunInterleaveGroups() {
     for (int i = 0; i < 2; ++i) {
       GroupFixture* p = (i == 0) ? &f[0] : &f[1];
       hipStream_t st = (i == 0) ? s0 : s1;
-      SQ10_EXPECT(superroc_fp4_quant_q8(p->x1, p->k1, SUPERROC_FP4_Q8_SLOT_GENERIC,
-                                    st) == SUPERROC_FP4_OK,
-                  "alias-groups quant");
-      SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, p->w1, SUPERROC_FP4_Q8_SLOT_GENERIC,
-                                       p->y1, p->k1, p->n1, st) == SUPERROC_FP4_OK,
-                  "alias-groups gemv");
+      SQ10_EXPECT(
+          superroc_fp4_quant_q8(p->x1, p->k1, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                st) == SUPERROC_FP4_OK,
+          "alias-groups quant");
+      SQ10_EXPECT(
+          superroc_fp4_gemv_fp4_q8(qtype, p->w1, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                   p->y1, p->k1, p->n1, st) == SUPERROC_FP4_OK,
+          "alias-groups gemv");
       SQ10_EXPECT(superroc_fp4_gemv_m(qtype, p->w2, p->x2, p->y2, p->k2, p->n2,
-                                  p->m2, st) == SUPERROC_FP4_OK,
+                                      p->m2, st) == SUPERROC_FP4_OK,
                   "alias-groups gemv_m");
-      SQ10_EXPECT(superroc_fp4_expert_ffn_dev(qtype, p->gate, p->up, p->down, p->x3,
-                                          p->ids, p->wts, 1, 2, p->k3, p->n_ff,
-                                          0.0f, p->y3, st) == SUPERROC_FP4_OK,
+      SQ10_EXPECT(superroc_fp4_expert_ffn_dev(
+                      qtype, p->gate, p->up, p->down, p->x3, p->ids, p->wts, 1,
+                      2, p->k3, p->n_ff, 0.0f, p->y3, st) == SUPERROC_FP4_OK,
                   "alias-groups expert");
-      SQ10_EXPECT(superroc_fp4_gemv_verify_m(qtype, p->w4, p->x4, p->y4, p->k4,
-                                         p->n4, p->mv, st) == SUPERROC_FP4_OK,
-                  "alias-groups verify");
+      SQ10_EXPECT(
+          superroc_fp4_gemv_verify_m(qtype, p->w4, p->x4, p->y4, p->k4, p->n4,
+                                     p->mv, st) == SUPERROC_FP4_OK,
+          "alias-groups verify");
       SQ10_CHECK_HIP(hipStreamSynchronize(st));
       SQ10_CHECK_HIP(hipMemcpy(ah1.data(), p->y1, ah1.size() * sizeof(float),
                                hipMemcpyDeviceToHost));
@@ -1166,8 +1203,10 @@ int RunInterleaveGroups() {
   const int set1b = superroc_fp4_slot_stream_attach(s1);
   SQ10_EXPECT(set1b >= 0 && set1b != set0, "alias-groups re-attach s1");
 #endif
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s0) == SUPERROC_FP4_OK, "detach s0");
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s1) == SUPERROC_FP4_OK, "detach s1");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s0) == SUPERROC_FP4_OK,
+              "detach s0");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s1) == SUPERROC_FP4_OK,
+              "detach s1");
   SQ10_CHECK_HIP(hipStreamDestroy(s0));
   SQ10_CHECK_HIP(hipStreamDestroy(s1));
   for (int i = 0; i < 2; ++i) {
@@ -1234,21 +1273,22 @@ int RunStaleStatus() {
   SQ10_CHECK_HIP(hipMemcpy(dids, &good_id, sizeof(int), hipMemcpyHostToDevice));
   SQ10_CHECK_HIP(hipMemcpy(dwts, &one_w, sizeof(float), hipMemcpyHostToDevice));
   // Settle (allocations sync) and clear the word.
-  SQ10_EXPECT(
-      superroc_fp4_expert_ffn_dev(qtype, d_gate, d_up, d_down, dx, dids, dwts, 1,
-                              n_expert, k, n_ff, 0.0f, dy, s) == SUPERROC_FP4_OK,
-      "stale settle");
+  SQ10_EXPECT(superroc_fp4_expert_ffn_dev(qtype, d_gate, d_up, d_down, dx, dids,
+                                          dwts, 1, n_expert, k, n_ff, 0.0f, dy,
+                                          s) == SUPERROC_FP4_OK,
+              "stale settle");
   SQ10_CHECK_HIP(hipStreamSynchronize(s));
-  SQ10_EXPECT(superroc_fp4_moe_dev_check_set(set) == SUPERROC_FP4_OK, "stale clear");
+  SQ10_EXPECT(superroc_fp4_moe_dev_check_set(set) == SUPERROC_FP4_OK,
+              "stale clear");
   // Force the bad id and check at once, with no stream sync between.
   const int bad_id = n_expert;
   SQ10_CHECK_HIP(hipMemcpy(dids, &bad_id, sizeof(int), hipMemcpyHostToDevice));
   int reported = 0;
   int missed = 0;
   for (int t = 0; t < 200; ++t) {
-    if (superroc_fp4_expert_ffn_dev(qtype, d_gate, d_up, d_down, dx, dids, dwts, 1,
-                                n_expert, k, n_ff, 0.0f, dy,
-                                s) != SUPERROC_FP4_OK) {
+    if (superroc_fp4_expert_ffn_dev(qtype, d_gate, d_up, d_down, dx, dids, dwts,
+                                    1, n_expert, k, n_ff, 0.0f, dy,
+                                    s) != SUPERROC_FP4_OK) {
       std::fprintf(stderr, "FAIL stale launch %d\n", t);
       return 1;
     }
@@ -1271,9 +1311,9 @@ int RunStaleStatus() {
   // failing test for the fix (the bare loop above misses on main).
   int fixed_missed = 0;
   for (int t = 0; t < 200; ++t) {
-    if (superroc_fp4_expert_ffn_dev(qtype, d_gate, d_up, d_down, dx, dids, dwts, 1,
-                                n_expert, k, n_ff, 0.0f, dy,
-                                s) != SUPERROC_FP4_OK) {
+    if (superroc_fp4_expert_ffn_dev(qtype, d_gate, d_up, d_down, dx, dids, dwts,
+                                    1, n_expert, k, n_ff, 0.0f, dy,
+                                    s) != SUPERROC_FP4_OK) {
       std::fprintf(stderr, "FAIL stale-ordered launch %d\n", t);
       return 1;
     }
@@ -1286,7 +1326,8 @@ int RunStaleStatus() {
   SQ10_EXPECT(fixed_missed == 0, "ordered check never misses");
   std::printf("STALE_ORDERED missed=%d/200\n", fixed_missed);
 #endif
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s) == SUPERROC_FP4_OK, "stale detach");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s) == SUPERROC_FP4_OK,
+              "stale detach");
   SQ10_CHECK_HIP(hipStreamDestroy(s));
   SQ10_CHECK_HIP(hipFree(d_gate));
   SQ10_CHECK_HIP(hipFree(d_up));
@@ -1366,21 +1407,21 @@ int RunAliasOrder(bool drain) {
   // Serial references on the owner stream, synced: correct on every tree.
   std::vector<float> ref_h(static_cast<std::size_t>(n));
   std::vector<float> ref_o(static_cast<std::size_t>(n));
-  SQ10_EXPECT(
-      superroc_fp4_quant_q8(dxh, k, SUPERROC_FP4_Q8_SLOT_GENERIC, o) == SUPERROC_FP4_OK,
-      "alias-order ref h quant");
-  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dyh, k,
-                                   n, o) == SUPERROC_FP4_OK,
+  SQ10_EXPECT(superroc_fp4_quant_q8(dxh, k, SUPERROC_FP4_Q8_SLOT_GENERIC, o) ==
+                  SUPERROC_FP4_OK,
+              "alias-order ref h quant");
+  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                       dyh, k, n, o) == SUPERROC_FP4_OK,
               "alias-order ref h gemv");
   SQ10_CHECK_HIP(hipStreamSynchronize(o));
   SQ10_CHECK_HIP(hipMemcpy(ref_h.data(), dyh,
                            static_cast<std::size_t>(n) * sizeof(float),
                            hipMemcpyDeviceToHost));
-  SQ10_EXPECT(
-      superroc_fp4_quant_q8(dxo, k, SUPERROC_FP4_Q8_SLOT_GENERIC, o) == SUPERROC_FP4_OK,
-      "alias-order ref o quant");
-  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dyo, k,
-                                   n, o) == SUPERROC_FP4_OK,
+  SQ10_EXPECT(superroc_fp4_quant_q8(dxo, k, SUPERROC_FP4_Q8_SLOT_GENERIC, o) ==
+                  SUPERROC_FP4_OK,
+              "alias-order ref o quant");
+  SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                       dyo, k, n, o) == SUPERROC_FP4_OK,
               "alias-order ref o gemv");
   SQ10_CHECK_HIP(hipStreamSynchronize(o));
   SQ10_CHECK_HIP(hipMemcpy(ref_o.data(), dyo,
@@ -1395,30 +1436,32 @@ int RunAliasOrder(bool drain) {
   int yo_mm = 0;
   std::vector<float> got(static_cast<std::size_t>(n));
   for (int t = 0; t < 200; ++t) {
-    SQ10_EXPECT(
-        superroc_fp4_quant_q8(dxh, k, SUPERROC_FP4_Q8_SLOT_GENERIC, h) == SUPERROC_FP4_OK,
-        "alias-order h quant");
+    SQ10_EXPECT(superroc_fp4_quant_q8(dxh, k, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                      h) == SUPERROC_FP4_OK,
+                "alias-order h quant");
     for (int m = 0; m < 4; ++m) {
       SQ10_CHECK_HIP(hipMemsetAsync(delay, t + m, kDelayBytes, h));
       if (m == 0) {
         SQ10_CHECK_HIP(hipEventRecord(ev, h));
       }
     }
-    SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dyh,
-                                     k, n, h) == SUPERROC_FP4_OK,
-                "alias-order h gemv");
+    SQ10_EXPECT(
+        superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dyh,
+                                 k, n, h) == SUPERROC_FP4_OK,
+        "alias-order h gemv");
     if (drain) {
       SQ10_CHECK_HIP(hipStreamSynchronize(h));
     } else {
       while (hipEventQuery(ev) != hipSuccess) {
       }
     }
+    SQ10_EXPECT(superroc_fp4_quant_q8(dxo, k, SUPERROC_FP4_Q8_SLOT_GENERIC,
+                                      o) == SUPERROC_FP4_OK,
+                "alias-order o quant");
     SQ10_EXPECT(
-        superroc_fp4_quant_q8(dxo, k, SUPERROC_FP4_Q8_SLOT_GENERIC, o) == SUPERROC_FP4_OK,
-        "alias-order o quant");
-    SQ10_EXPECT(superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dyo,
-                                     k, n, o) == SUPERROC_FP4_OK,
-                "alias-order o gemv");
+        superroc_fp4_gemv_fp4_q8(qtype, dw, SUPERROC_FP4_Q8_SLOT_GENERIC, dyo,
+                                 k, n, o) == SUPERROC_FP4_OK,
+        "alias-order o gemv");
     SQ10_CHECK_HIP(hipStreamSynchronize(o));
     SQ10_CHECK_HIP(hipStreamSynchronize(h));
     SQ10_CHECK_HIP(hipMemcpy(got.data(), dyh,
@@ -1506,9 +1549,9 @@ int RunStaleMStatus() {
   SQ10_CHECK_HIP(hipMemcpy(dids, good, sizeof(good), hipMemcpyHostToDevice));
   SQ10_CHECK_HIP(hipMemcpy(dwts, one_w, sizeof(one_w), hipMemcpyHostToDevice));
   // Settle (allocations sync) and clear the word.
-  SQ10_EXPECT(superroc_fp4_expert_ffn_m(qtype, d_gate, d_up, d_down, dx, dids, dwts,
-                                    m, n_used, n_expert, k, n_ff, 0.0f, dy,
-                                    s) == SUPERROC_FP4_OK,
+  SQ10_EXPECT(superroc_fp4_expert_ffn_m(qtype, d_gate, d_up, d_down, dx, dids,
+                                        dwts, m, n_used, n_expert, k, n_ff,
+                                        0.0f, dy, s) == SUPERROC_FP4_OK,
               "mstale settle");
   SQ10_CHECK_HIP(hipStreamSynchronize(s));
   SQ10_EXPECT(superroc_fp4_expert_ffn_m_check_set(set) == SUPERROC_FP4_OK,
@@ -1520,9 +1563,9 @@ int RunStaleMStatus() {
   int reported = 0;
   int missed = 0;
   for (int t = 0; t < 200; ++t) {
-    if (superroc_fp4_expert_ffn_m(qtype, d_gate, d_up, d_down, dx, dids, dwts, m,
-                              n_used, n_expert, k, n_ff, 0.0f, dy,
-                              s) != SUPERROC_FP4_OK) {
+    if (superroc_fp4_expert_ffn_m(qtype, d_gate, d_up, d_down, dx, dids, dwts,
+                                  m, n_used, n_expert, k, n_ff, 0.0f, dy,
+                                  s) != SUPERROC_FP4_OK) {
       std::fprintf(stderr, "FAIL mstale launch %d\n", t);
       return 1;
     }
@@ -1543,13 +1586,14 @@ int RunStaleMStatus() {
 #ifdef SUPERROC_FP4_SLOT_HAS_STREAM_MCHECK
   int fixed_missed = 0;
   for (int t = 0; t < 200; ++t) {
-    if (superroc_fp4_expert_ffn_m(qtype, d_gate, d_up, d_down, dx, dids, dwts, m,
-                              n_used, n_expert, k, n_ff, 0.0f, dy,
-                              s) != SUPERROC_FP4_OK) {
+    if (superroc_fp4_expert_ffn_m(qtype, d_gate, d_up, d_down, dx, dids, dwts,
+                                  m, n_used, n_expert, k, n_ff, 0.0f, dy,
+                                  s) != SUPERROC_FP4_OK) {
       std::fprintf(stderr, "FAIL mstale-ordered launch %d\n", t);
       return 1;
     }
-    if (superroc_fp4_expert_ffn_m_check_set_on_stream(set, s) != SUPERROC_FP4_OK) {
+    if (superroc_fp4_expert_ffn_m_check_set_on_stream(set, s) !=
+        SUPERROC_FP4_OK) {
       ++reported;
     } else {
       ++fixed_missed;
@@ -1558,7 +1602,8 @@ int RunStaleMStatus() {
   SQ10_EXPECT(fixed_missed == 0, "ordered m-check never misses");
   std::printf("MSTALE_ORDERED missed=%d/200\n", fixed_missed);
 #endif
-  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s) == SUPERROC_FP4_OK, "mstale detach");
+  SQ10_EXPECT(superroc_fp4_slot_stream_detach(s) == SUPERROC_FP4_OK,
+              "mstale detach");
   SQ10_CHECK_HIP(hipStreamDestroy(s));
   SQ10_CHECK_HIP(hipFree(d_gate));
   SQ10_CHECK_HIP(hipFree(d_up));

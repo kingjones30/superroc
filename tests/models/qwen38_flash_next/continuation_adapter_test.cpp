@@ -54,7 +54,8 @@ void Wait(cache::Completion done) {
   Require(done.Wait() == cache::TransferResult::kSucceeded, "transfer failed");
 }
 Checkpoint Capture(qfn::ContinuationAdapter& adapter, cache::Slot& slot,
-                   superroc::hip::TransferPool& streams, bool registered = false) {
+                   superroc::hip::TransferPool& streams,
+                   bool registered = false) {
   Checkpoint result{adapter.Positions(slot), {}};
   constexpr std::size_t piece = (1 << 20) + 13;
   for (const auto& component : adapter.Components()) {
@@ -776,7 +777,8 @@ void CheckImages(const std::shared_ptr<qfn::Model>& model, bool mtp) {
     for (std::size_t i = blue ? 2 : 0; i < pixels.pixels.size(); i += 3)
       pixels.pixels[i] = 255;
     prompt->images.push_back(
-        {std::make_shared<const superroc::core::Image>(std::move(pixels)), grid});
+        {std::make_shared<const superroc::core::Image>(std::move(pixels)),
+         grid});
     prompt->images.back().prefix_identity.fill(blue ? 2 : 1);
     prompt->cache_identity.assign(32, blue ? 2 : 1);
     return prompt;
@@ -866,7 +868,8 @@ void CheckImages(const std::shared_ptr<qfn::Model>& model, bool mtp) {
 void CheckLearnedDraftPolicy(const std::shared_ptr<qfn::Model>& model) {
   namespace qt = superroc::tokenization;
   superroc::hip::TransferPool streams(2);
-  qfn::ContinuationAdapter adapter(model, superroc::core::SessionMode::kSpeculative,
+  qfn::ContinuationAdapter adapter(model,
+                                   superroc::core::SessionMode::kSpeculative,
                                    4096, {'p', 'o', 'l', 'i', 'c', 'y'});
   Guard source_guard, destination_guard;
   auto source = adapter.CreateSlot(source_guard);

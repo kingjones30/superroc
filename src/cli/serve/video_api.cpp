@@ -510,7 +510,8 @@ HttpResponse CreateVideo(const HttpRequest& request, VideoJobService& service) {
     }
     if (extension->contains("output_format") &&
         !extension->find("output_format")->is_string()) {
-      return Error(400, "Bad Request", "'superroc.output_format' must be a string",
+      return Error(400, "Bad Request",
+                   "'superroc.output_format' must be a string",
                    "invalid_output_format");
     }
     output_format = extension->member_str("output_format", output_format);
@@ -541,9 +542,10 @@ HttpResponse CreateVideo(const HttpRequest& request, VideoJobService& service) {
     }
   }
   if (preset_explicit && !model_preset.empty() && preset != model_preset) {
-    return Error(400, "Bad Request",
-                 "model alias and 'superroc.preset' must select the same preset",
-                 "preset_model_mismatch");
+    return Error(
+        400, "Bad Request",
+        "model alias and 'superroc.preset' must select the same preset",
+        "preset_model_mismatch");
   }
 
   std::string preset_error;

@@ -214,7 +214,8 @@ std::string BindFile(const std::vector<std::uint8_t>& bytes, const char* path) {
   if (reader == nullptr) {
     return "open: " + error;
   }
-  auto weights = superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
+  auto weights =
+      superroc::models::QwenModelWeights::LoadFromGguf(*reader, &error);
   if (!weights.has_value()) {
     return error;
   }

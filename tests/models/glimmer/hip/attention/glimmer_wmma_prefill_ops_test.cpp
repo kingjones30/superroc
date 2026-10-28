@@ -956,9 +956,9 @@ static_assert(!superroc::hip::detail::IsWmmaAttentionSupportedFor<32, 2>(
 
 int main() {
 #if defined(ENGINE_ENABLE_HIP)
-  const int device_status =
-      superroc::test::GateHipDevice(superroc::test::HipDeviceRequirement::kOptional,
-                                "Glimmer WMMA prefill attention ops test");
+  const int device_status = superroc::test::GateHipDevice(
+      superroc::test::HipDeviceRequirement::kOptional,
+      "Glimmer WMMA prefill attention ops test");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

@@ -275,7 +275,8 @@ void CheckArgmax(std::uint32_t vocab) {
 }
 
 void CheckCandidates(std::uint32_t vocab) {
-  constexpr auto kCandidates = superroc::models::qwen38_flash_next::kMtpCandidates;
+  constexpr auto kCandidates =
+      superroc::models::qwen38_flash_next::kMtpCandidates;
   const auto workspace_size = q::MtpCandidateWorkspaceSize(vocab);
   auto device_ids = Allocate<std::uint32_t>(workspace_size + 2);
   auto scratch_ids = Allocate<std::uint32_t>(workspace_size + 2);

@@ -38,8 +38,10 @@ void CheckBackend(std::initializer_list<const char*> arguments,
 }
 
 int CheckSampledChat() {
-  const char* model = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
-  const char* support = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
+  const char* model =
+      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
+  const char* support =
+      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
   if (!model || !*model || !support || !*support) {
     std::cout << "SKIP: target and DSpark artifacts are required\n";
     return 77;

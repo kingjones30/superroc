@@ -27,8 +27,9 @@ void Check(bool ok, const std::string& name, const std::string& why = "") {
   }
 }
 
-const superroc::core::GgufReader* Open(const std::string& path, std::string* err,
-                                   const std::string& tag) {
+const superroc::core::GgufReader* Open(const std::string& path,
+                                       std::string* err,
+                                       const std::string& tag) {
   auto reader = superroc::core::GgufReader::OpenFile(path, err);
   if (reader == nullptr) {
     Check(false, tag, path + " unreadable: " + *err);

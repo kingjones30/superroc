@@ -67,8 +67,8 @@ void TestSyntheticGeneration() {
   const std::vector<std::string> vocab = {
       "<unk>", "hello", "world", "!", "a", "b", "c", std::string(kImEnd)};
   const std::vector<std::string> merges = {};
-  const std::unordered_map<std::string, superroc::tokenization::TokenId> specials =
-      {
+  const std::unordered_map<std::string, superroc::tokenization::TokenId>
+      specials = {
           {std::string(kImEnd), 7},
       };
 
@@ -77,16 +77,17 @@ void TestSyntheticGeneration() {
   assert(tokenizer != nullptr);
 
   superroc::models::QwenGenerator generator(std::move(weights),
-                                        std::move(tokenizer), 32);
+                                            std::move(tokenizer), 32);
 
-  const std::vector<superroc::tokenization::TokenId> prompt = {1,
-                                                           2};  // "hello world"
+  const std::vector<superroc::tokenization::TokenId> prompt = {
+      1, 2};  // "hello world"
   superroc::models::GenerationOptions gen_opts;
   gen_opts.max_new_tokens = 4;
 
   std::vector<superroc::tokenization::TokenId> generated;
   auto out = generator.Generate(
-      prompt, gen_opts, [&](superroc::tokenization::TokenId tok, std::string_view) {
+      prompt, gen_opts,
+      [&](superroc::tokenization::TokenId tok, std::string_view) {
         generated.push_back(tok);
         return true;
       });

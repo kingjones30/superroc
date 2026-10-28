@@ -357,16 +357,16 @@ void TestValidation(const std::filesystem::path& root) {
         "path traversal-like IDs fail closed");
 
   constexpr std::string_view kBoundary = "superroc-openai-video-boundary";
-  const HttpResponse multipart =
-      Send(service, "POST", "/v1/videos",
-           Multipart(kBoundary,
-                     {
-                         {"model", "minimax-h3-fast"},
-                         {"prompt", "A red fox walking through snow"},
-                         {"size", "512x512"},
-                         {"seconds", "1"},
-                     }),
-           {}, "multipart/form-data; boundary=\"superroc-openai-video-boundary\"");
+  const HttpResponse multipart = Send(
+      service, "POST", "/v1/videos",
+      Multipart(kBoundary,
+                {
+                    {"model", "minimax-h3-fast"},
+                    {"prompt", "A red fox walking through snow"},
+                    {"size", "512x512"},
+                    {"seconds", "1"},
+                }),
+      {}, "multipart/form-data; boundary=\"superroc-openai-video-boundary\"");
   Check(multipart.status == 202,
         "OpenAI-style multipart text-to-video request is admitted");
   runner.WaitForCalls(2);

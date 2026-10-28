@@ -16,9 +16,9 @@
 #include <string_view>
 #include <type_traits>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/sampling.hpp"
 #include "src/models/llama/spm_tokenizer.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace superroc::speculative {
 namespace {
@@ -43,7 +43,8 @@ struct SpecStepCost {
   double ar_ms = 0.0;
   double prime_ms = 0.0;
 };
-SpecStepCost g_cost{.on = ::superroc::core::GetEnvCompat("SUPERROC_SPEC_STEP_COST") != nullptr};
+SpecStepCost g_cost{
+    .on = ::superroc::core::GetEnvCompat("SUPERROC_SPEC_STEP_COST") != nullptr};
 
 class CostTimer {
 public:

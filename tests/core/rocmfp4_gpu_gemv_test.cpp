@@ -9,7 +9,8 @@
 #include <vector>
 
 extern "C" int superroc_fp4_gemv_fp4(int qtype, const void* W, const float* x,
-                                 float* y, int k, int n, hipStream_t stream);
+                                     float* y, int k, int n,
+                                     hipStream_t stream);
 extern "C" int superroc_fp4_gemv_q8_codebook_check(void);
 
 int main() {
@@ -59,7 +60,7 @@ int main() {
     hipMemset(yd, 0, static_cast<std::size_t>(n) * sizeof(float));
     const int rc =
         superroc_fp4_gemv_fp4(qtype, weights, static_cast<const float*>(xd),
-                          static_cast<float*>(yd), k, n, nullptr);
+                              static_cast<float*>(yd), k, n, nullptr);
     hipDeviceSynchronize();
     if (rc != 0) {
       std::cerr << "FAIL gemv rc=" << rc << " type=" << qtype << '\n';

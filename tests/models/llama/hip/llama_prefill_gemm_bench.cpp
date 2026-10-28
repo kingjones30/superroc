@@ -121,12 +121,13 @@ void RunShape(const Shape& shape, std::size_t batch, int iters) {
   HIP_CHECK(hipMemcpy(d_x16, h_x16.data(), h_x16.size() * sizeof(std::uint16_t),
                       hipMemcpyHostToDevice));
 
-  superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_x, d_q8, batch, shape.k);
+  superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_x, d_q8, batch,
+                                                      shape.k);
   HIP_CHECK(hipDeviceSynchronize());
 
   const float fp16_ms = TimeIt("fp16_gemm", 2, iters, [&] {
-    superroc::hip::LaunchBatchedQuantGEMMFp16(shape.type, d_w, d_x16, d_y, batch,
-                                          shape.m, shape.k, nullptr);
+    superroc::hip::LaunchBatchedQuantGEMMFp16(shape.type, d_w, d_x16, d_y,
+                                              batch, shape.m, shape.k, nullptr);
   });
   PrintTflops("fp16_gemm", flops, fp16_ms);
 
@@ -137,12 +138,12 @@ void RunShape(const Shape& shape, std::size_t batch, int iters) {
   PrintTflops("q8_gemm_prequantized", flops, q8_ms);
 
   TimeIt("q8_quantize_only", 2, iters, [&] {
-    superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_x, d_q8, batch, shape.k,
-                                                    nullptr);
+    superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_x, d_q8, batch,
+                                                        shape.k, nullptr);
   });
   TimeIt("q8_quantize+gemm", 2, iters, [&] {
-    superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_x, d_q8, batch, shape.k,
-                                                    nullptr);
+    superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_x, d_q8, batch,
+                                                        shape.k, nullptr);
     superroc::hip::LaunchBatchedQuantGEMMPreQuantized(
         shape.type, d_w, d_q8, d_y, batch, shape.m, shape.k, nullptr);
   });
@@ -165,8 +166,8 @@ void RunShape(const Shape& shape, std::size_t batch, int iters) {
     });
     PrintTflops("q8_dual", 2.0 * flops, dual_q8_ms);
 
-    if (superroc::hip::IsFusedSwiGluGemmEpilogueSupported(shape.type, batch,
-                                                      shape.m, q8_out_bytes)) {
+    if (superroc::hip::IsFusedSwiGluGemmEpilogueSupported(
+            shape.type, batch, shape.m, q8_out_bytes)) {
       const float epi_ms = TimeIt("q8_dual_swiglu_epilogue", 2, iters, [&] {
         superroc::hip::LaunchBatchedDualQuantGEMMSwiGLUQuantizeQ8_1(
             shape.type, d_w, d_w2, d_q8, d_y, d_q8_out, batch, shape.m, shape.k,
@@ -192,7 +193,8 @@ void RunShape(const Shape& shape, std::size_t batch, int iters) {
 
 int main() {
   const int device_status = superroc::test::GateHipDevice(
-      superroc::test::HipDeviceRequirement::kOptional, "llama prefill GEMM bench");
+      superroc::test::HipDeviceRequirement::kOptional,
+      "llama prefill GEMM bench");
   if (device_status != superroc::test::kHipTestSuccess) {
     return device_status;
   }

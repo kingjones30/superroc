@@ -93,7 +93,8 @@ int main() {
   }
 
   std::string error;
-  const auto reader = superroc::core::GgufReader::OpenFile(fs::path(gguf), &error);
+  const auto reader =
+      superroc::core::GgufReader::OpenFile(fs::path(gguf), &error);
   if (reader == nullptr) {
     std::cout << "FAIL lfm2_tokenizer_test: cannot open GGUF: " << error
               << "\n";

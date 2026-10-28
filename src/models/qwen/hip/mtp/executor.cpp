@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/hip/snapshot_transfer.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
@@ -22,7 +23,6 @@
 #include "src/models/qwen/hip/mtp/kat_moe_ffn.hpp"
 #include "src/models/qwen/hip/mtp/kat_mtp_pmin.hpp"
 #include "src/models/qwen/hip/ops.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace superroc::hip {
 namespace {
@@ -33,8 +33,8 @@ void AllocateBuffer(T*& pointer, std::size_t elements) {
 }
 
 // lqw:spec5-prof. One speculative draft forward, split with HIP events.
-// SUPERROC_MTP_PROFILE=1. Events are recorded on the draft stream and read after
-// the step's existing sync, so the spans are GPU time.
+// SUPERROC_MTP_PROFILE=1. Events are recorded on the draft stream and read
+// after the step's existing sync, so the spans are GPU time.
 struct DraftStepProf {
   bool on{false};
   hipEvent_t ev[8]{};
@@ -150,7 +150,8 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
   draft_tail_start_ = 0;
   draft_rows_ = 0;
   // Default N = 98304 (lane DVT, KAT on MAX1: draft counts unchanged, decode
-  // +8-11 %). SUPERROC_MTP_DRAFT_VOCAB=0 keeps the full head; another N trims to N.
+  // +8-11 %). SUPERROC_MTP_DRAFT_VOCAB=0 keeps the full head; another N trims
+  // to N.
   const char* env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_DRAFT_VOCAB");
   const bool env_set = env != nullptr && env[0] != '\0';
   const auto& weights = model_->GetWeights();
@@ -169,7 +170,8 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
   // HT2 (W2 DVT-2, W6 D-2): p-min and the TF dump read the draft
   // distribution, so either keeps the full head, and wins over an explicit
   // SUPERROC_MTP_DRAFT_VOCAB. Same parser as the p-min gate (kat_mtp_pmin.hpp).
-  const bool tf_dump = ::superroc::core::GetEnvCompat("SUPERROC_MTP_TF_DUMP") != nullptr;
+  const bool tf_dump =
+      ::superroc::core::GetEnvCompat("SUPERROC_MTP_TF_DUMP") != nullptr;
   if (MtpPMinFromEnv() > 0.0F || tf_dump) {
     std::fprintf(
         stderr,
@@ -182,10 +184,11 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
     char* parsed_end = nullptr;
     requested = std::strtol(env, &parsed_end, 10);
     if (parsed_end == env || *parsed_end != '\0') {
-      std::fprintf(stderr,
-                   "MTP draft vocab: SUPERROC_MTP_DRAFT_VOCAB='%s' is not a whole "
-                   "number; full head\n",
-                   env);
+      std::fprintf(
+          stderr,
+          "MTP draft vocab: SUPERROC_MTP_DRAFT_VOCAB='%s' is not a whole "
+          "number; full head\n",
+          env);
       return;
     }
   }

@@ -102,8 +102,8 @@ int main(int argc, char** argv) {
 
   std::string err;
   // OpenFile resolves the "-0000N-of-0000M" split set itself; pass shard 1.
-  auto reader =
-      superroc::core::GgufReader::OpenFile(std::filesystem::path(model_path), &err);
+  auto reader = superroc::core::GgufReader::OpenFile(
+      std::filesystem::path(model_path), &err);
   if (reader == nullptr)
     Die("cannot open the GGUF: " + err);
   auto weights = ModelWeights::Bind(*reader, &err);

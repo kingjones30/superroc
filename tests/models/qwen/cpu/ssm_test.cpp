@@ -26,8 +26,8 @@ void TestQwenSsmConvRecurrence() {
   const std::uint32_t val_dim = config.SsmValueSize();
 
   superroc::models::QwenSsmCache cache(num_layers, conv_channels,
-                                   config.ssm_conv_kernel, num_heads, key_dim,
-                                   val_dim);
+                                       config.ssm_conv_kernel, num_heads,
+                                       key_dim, val_dim);
 
   // Check state sizes
   auto conv = cache.GetConvState(0);
@@ -50,7 +50,7 @@ void TestQwenSsmConvRecurrence() {
   std::vector<float> out(config.hidden_size, 0.0F);
 
   superroc::models::ForwardSSM(in, layer, config, cache, 0, qkv_buf, gate_buf,
-                           out_buf, out);
+                               out_buf, out);
 
   // After 1 step, cache is updated
   assert(cache.GetConvState(0).size() ==

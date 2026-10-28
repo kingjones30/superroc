@@ -110,8 +110,8 @@ std::optional<qfn::Config> Parse(const Metadata& fields, bool trunk = true) {
   }
   bytes.resize((bytes.size() + 31) / 32 * 32);
   std::string error;
-  const auto reader =
-      superroc::core::GgufReader::OpenMemory(bytes.data(), bytes.size(), &error);
+  const auto reader = superroc::core::GgufReader::OpenMemory(
+      bytes.data(), bytes.size(), &error);
   assert(reader && error.empty());
   const auto result = qfn::Config::FromGguf(*reader, trunk, &error);
   assert(result.has_value() == error.empty());

@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/detail/decode_step.hpp"
@@ -18,7 +19,6 @@
 #include "src/models/qwen/hip/ops.hpp"
 #include "src/models/qwen/moe/qwen_moe_ffn.hpp"    // KAT-MTP:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"  // KAT-MTP:
-#include "src/core/env_compat.hpp"
 
 namespace superroc::hip {
 namespace {

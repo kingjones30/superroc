@@ -16,10 +16,10 @@
 #include <vector>
 
 #include "src/cli/serve/inference_backend.hpp"
+#include "src/core/env_compat.hpp"
 #include "src/models/deepseek_v4_flash/dspark_sampler.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
 #include "src/models/qwen/chat_template.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -35,17 +35,18 @@ void Expect(bool condition, std::string_view message) {
 
 std::vector<superroc::tokenization::TokenId> GenerateDirect(
     const std::shared_ptr<Model>& model, std::span<const int> prompt,
-    std::size_t max_tokens, const superroc::sampling::SamplingConfig& sampling = {},
+    std::size_t max_tokens,
+    const superroc::sampling::SamplingConfig& sampling = {},
     bool dspark = false) {
   std::string error;
-  auto session =
-      model->CreateSession(dspark ? superroc::core::SessionMode::kSpeculative
-                                  : superroc::core::SessionMode::kAutoregressive,
-                           dspark ? 4096 : 512, &error);
+  auto session = model->CreateSession(
+      dspark ? superroc::core::SessionMode::kSpeculative
+             : superroc::core::SessionMode::kAutoregressive,
+      dspark ? 4096 : 512, &error);
   Expect(session != nullptr, error);
   Expect(session->Sync(prompt, &error), error);
   const std::vector<superroc::sampling::TokenId> history(prompt.begin(),
-                                                     prompt.end());
+                                                         prompt.end());
   superroc::sampling::SamplerState sampler(sampling, history);
 
   std::vector<superroc::tokenization::TokenId> result;
@@ -109,12 +110,12 @@ void CheckSampledBatchReplay(const std::shared_ptr<Model>& model,
         superroc::sampling::SamplerState(
             {.temperature = 1.F, .top_p = 0.95F, .seed = 7}),
         superroc::sampling::SamplerState({.temperature = 0.8F,
-                                      .top_k = 40,
-                                      .top_p = 0.95F,
-                                      .seed = 11,
-                                      .repeat_penalty = 1.1F})};
+                                          .top_k = 40,
+                                          .top_p = 0.95F,
+                                          .seed = 11,
+                                          .repeat_penalty = 1.1F})};
     const std::vector<superroc::sampling::TokenId> history(prompt.begin(),
-                                                       prompt.end());
+                                                           prompt.end());
     std::array<std::vector<int>, 2> output;
     for (std::size_t i = 0; i < sessions.size(); ++i) {
       sessions[i] = model->CreateSession(
@@ -351,11 +352,11 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
              superroc::sampling::SamplingConfig{.temperature = 0.6F, .seed = 7},
              superroc::sampling::SamplingConfig{.temperature = 1.0F, .seed = 7},
              superroc::sampling::SamplingConfig{.temperature = 0.6F,
-                                            .top_k = 40,
-                                            .top_p = 0.95F,
-                                            .seed = 11,
-                                            .repeat_penalty = 1.2F,
-                                            .frequency_penalty = 0.3F},
+                                                .top_k = 40,
+                                                .top_p = 0.95F,
+                                                .seed = 11,
+                                                .repeat_penalty = 1.2F,
+                                                .frequency_penalty = 0.3F},
          }) {
       const auto direct =
           GenerateDirect(model, direct_prompt, 32, sampling, true);
@@ -383,10 +384,10 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
 
   // Greedy and seeded sampled requests share one DSpark cohort.
   const superroc::sampling::SamplingConfig sampled{.temperature = 0.8F,
-                                               .top_k = 20,
-                                               .top_p = 0.9F,
-                                               .seed = 1234,
-                                               .repeat_penalty = 1.1F};
+                                                   .top_k = 20,
+                                                   .top_p = 0.9F,
+                                                   .seed = 1234,
+                                                   .repeat_penalty = 1.1F};
   for (const std::size_t concurrency : {2U, 4U}) {
     InferenceBackend backend;
     Expect(backend.load(model, &error, 4096, concurrency, {}, {}, speculative),
@@ -490,7 +491,8 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
 
 int main(int argc, char** argv) {
   try {
-    const char* model_path = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
+    const char* model_path =
+        ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
     if (model_path == nullptr || model_path[0] == '\0') {
       std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_MODEL is not set\n";
       return 77;
@@ -498,9 +500,11 @@ int main(int argc, char** argv) {
     if (argc > 1) {
       Expect(argc == 2 && std::string_view(argv[1]) == "--dspark-eos",
              "usage: ds4_serving_test [--dspark-eos]");
-      const char* support = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
+      const char* support = ::superroc::core::GetEnvCompat(
+          "SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
       if (support == nullptr || *support == '\0') {
-        std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
+        std::cout
+            << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
         return 77;
       }
       std::string error;
@@ -553,8 +557,8 @@ int main(int argc, char** argv) {
       const std::vector<superroc::tokenization::ChatMessage> messages = {
           {superroc::tokenization::ChatRole::kSystem,
            "Answer with one short sentence.", "", ""},
-          {superroc::tokenization::ChatRole::kUser, "Name one primary color.", "",
-           ""},
+          {superroc::tokenization::ChatRole::kUser, "Name one primary color.",
+           "", ""},
       };
       const std::vector<superroc::models::deepseek_v4_flash::ChatMessage>
           direct_messages = {
@@ -580,8 +584,8 @@ int main(int argc, char** argv) {
              "exact DeepSeek reuse avoids another full snapshot copy");
 
       auto continued_messages = messages;
-      continued_messages.emplace_back(superroc::tokenization::ChatRole::kAssistant,
-                                      http_chat.text);
+      continued_messages.emplace_back(
+          superroc::tokenization::ChatRole::kAssistant, http_chat.text);
       continued_messages.emplace_back(superroc::tokenization::ChatRole::kUser,
                                       "Name a different primary color.");
       auto forked_messages = messages;
@@ -759,8 +763,8 @@ int main(int argc, char** argv) {
       Expect(!recovered.cache_hit,
              "cancelled DeepSeek state must not remain cached");
     }
-    const char* support_path =
-        ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
+    const char* support_path = ::superroc::core::GetEnvCompat(
+        "SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
     if (support_path == nullptr || *support_path == '\0') {
       std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
       return 77;

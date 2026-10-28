@@ -99,10 +99,11 @@ void ReferenceGemm(hipblasHandle_t blas, superroc::core::GgmlType type,
                    const void* weight, hip_bfloat16* weight_bf16,
                    const void* act_bf16, float* y, std::size_t m, std::size_t k,
                    hipStream_t stream) {
-  superroc::hip::LaunchDequantizeToBf16(type, weight, weight_bf16, m * k, stream);
+  superroc::hip::LaunchDequantizeToBf16(type, weight, weight_bf16, m * k,
+                                        stream);
   HIP_CHECK(hipGetLastError());
-  superroc::hip::LaunchHipblasGEMMBF16(blas, weight_bf16, act_bf16, y, kBatch, m, k,
-                                   stream);
+  superroc::hip::LaunchHipblasGEMMBF16(blas, weight_bf16, act_bf16, y, kBatch,
+                                       m, k, stream);
   HIP_CHECK(hipGetLastError());
 }
 
@@ -135,8 +136,8 @@ int main(int argc, char** argv) {
     policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
     auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
-        std::shared_ptr<const superroc::core::GgufReader>(std::move(opened)), &err,
-        256, policy);
+        std::shared_ptr<const superroc::core::GgufReader>(std::move(opened)),
+        &err, 256, policy);
     if (executor == nullptr) {
       std::cerr << "FAIL load " << err << '\n';
       return 1;
@@ -196,8 +197,9 @@ int main(int argc, char** argv) {
     HIP_CHECK(hipMalloc(&d_new_b, y_n * sizeof(float)));
 
     std::vector<float> host;
-    auto one = [&](const char* name, const superroc::models::QwenTensorRef& weight,
-                   std::size_t m, std::size_t k, bool from_fp32) {
+    auto one = [&](const char* name,
+                   const superroc::models::QwenTensorRef& weight, std::size_t m,
+                   std::size_t k, bool from_fp32) {
       if (weight.num_elements < m * k) {
         throw std::runtime_error(std::string(name) + " weight is short");
       }
@@ -205,11 +207,11 @@ int main(int argc, char** argv) {
       ReferenceGemm(blas, weight.type, weight.data, d_w, d_bf16, d_ref, m, k,
                     stream);
       if (from_fp32) {
-        superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_fp32, d_q8, kBatch, k,
-                                                        stream);
+        superroc::hip::LaunchQuantizeActivationQ8_1FromFp32(d_fp32, d_q8,
+                                                            kBatch, k, stream);
       } else {
         superroc::hip::LaunchQuantizeActivationQ8_1(d_bf16, d_q8, kBatch, k,
-                                                stream);
+                                                    stream);
       }
       HIP_CHECK(hipGetLastError());
       superroc::hip::LaunchBatchedQuantGEMMPreQuantized(
@@ -242,7 +244,7 @@ int main(int argc, char** argv) {
     ReferenceGemm(blas, layer.ffn_up.type, layer.ffn_up.data, d_w, d_bf16,
                   d_ref_b, intermediate, hidden, stream);
     superroc::hip::LaunchQuantizeActivationQ8_1(d_bf16, d_q8, kBatch, hidden,
-                                            stream);
+                                                stream);
     HIP_CHECK(hipGetLastError());
     superroc::hip::LaunchBatchedDualQuantGEMMPreQuantized(
         layer.ffn_gate.type, layer.ffn_gate.data, layer.ffn_up.data, d_q8,

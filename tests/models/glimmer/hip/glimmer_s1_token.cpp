@@ -29,8 +29,8 @@ int RunOne(const char* path, std::uint32_t context) {
     superroc::hip::QwenExecutionPolicy policy;
     policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
-    auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(reader, &err,
-                                                               context, policy);
+    auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
+        reader, &err, context, policy);
     if (executor == nullptr) {
       std::cerr << "FAIL load context=" << context << " " << err << '\n';
       return 1;

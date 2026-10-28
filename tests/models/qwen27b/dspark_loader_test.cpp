@@ -11,9 +11,9 @@
 #include <string_view>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/dflash_weights.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace {
 
@@ -258,7 +258,8 @@ void TestRealDsparkFile(const char* path) {
   Expect(df.num_layers == 5, "5 blocks");
   Expect(df.block_size == 15, "block_size 15");
   Expect(df.target_layer_ids.size() == 5, "5 taps");
-  const char* tap_minus1 = ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_TAP_MINUS1");
+  const char* tap_minus1 =
+      ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_TAP_MINUS1");
   const bool want_minus1 = tap_minus1 != nullptr && tap_minus1[0] != '\0' &&
                            !(tap_minus1[0] == '0' && tap_minus1[1] == '\0');
   if (want_minus1) {

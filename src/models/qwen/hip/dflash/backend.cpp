@@ -17,9 +17,9 @@
 #include <utility>
 #include <vector>
 
+#include "src/core/env_compat.hpp"
 #include "src/core/sampling.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
-#include "src/core/env_compat.hpp"
 
 namespace superroc::hip {
 namespace {
