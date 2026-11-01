@@ -51,6 +51,12 @@ __global__ void TiledIm2col(const std::uint16_t* x, std::uint16_t* y,
 using B = hip_bfloat16;
 using Frag = __attribute__((ext_vector_type(16))) unsigned short;
 using Acc = __attribute__((ext_vector_type(8))) float;
+// LLVM 23 requires the WMMA bf16 operands to be <16 x i16> (signed short).
+using wmma_bf16 = __attribute__((ext_vector_type(16))) short;
+template <class T>
+__device__ __forceinline__ wmma_bf16 as_wmma_bf16(T v) {
+  return __builtin_bit_cast(wmma_bf16, v);
+}
 __device__ Frag Load(const unsigned short* p) {
   union {
     Frag f;
@@ -133,7 +139,9 @@ __launch_bounds__(WM * WN * 32) __global__
 #pragma unroll
         for (int i = 0; i < WR; i++)
           acc[i][j] =
-              __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a[i], b, acc[i][j]);
+              __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(a[i]),
+                                                         as_wmma_bf16(b),
+                                                         acc[i][j]);
       }
     }
     __syncthreads();

@@ -9,6 +9,12 @@ namespace superroc::models::qwen_image_21::hip {
 namespace {
 using Fragment = __attribute__((ext_vector_type(16))) unsigned short;
 using Accumulator = __attribute__((ext_vector_type(8))) float;
+// LLVM 23 requires the WMMA bf16 operands to be <16 x i16> (signed short).
+using wmma_bf16 = __attribute__((ext_vector_type(16))) short;
+template <class T>
+__device__ __forceinline__ wmma_bf16 as_wmma_bf16(T v) {
+  return __builtin_bit_cast(wmma_bf16, v);
+}
 
 __device__ Fragment Load(const std::uint16_t* x) {
   union {
@@ -88,7 +94,7 @@ __launch_bounds__(WM * WN * 32) __global__
       for (int j = 0; j < WTS; j++) {
 #pragma unroll
         for (int i = 0; i < WRS; i++) {
-          acc[i][j] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a[i], b[j],
+          acc[i][j] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(a[i]), as_wmma_bf16(b[j]),
                                                                   acc[i][j]);
           if (j == WTS - 1)
             a[i] = load_a(i, next);
@@ -113,7 +119,9 @@ __launch_bounds__(WM * WN * 32) __global__
 #pragma unroll
         for (int i = 0; i < WRS; i++)
           acc[i][j] =
-              __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a[i], b, acc[i][j]);
+              __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(a[i]),
+                                                         as_wmma_bf16(b),
+                                                         acc[i][j]);
       }
     }
   }
@@ -162,9 +170,9 @@ __launch_bounds__(WM * WN * 32) __global__
     for (int j = 0; j < WT; j++) {
 #pragma unroll
       for (int i = 0; i < WR; i++) {
-        ag[i][j] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a[0][i], b[j],
+        ag[i][j] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(a[0][i]), as_wmma_bf16(b[j]),
                                                                ag[i][j]);
-        au[i][j] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a[1][i], b[j],
+        au[i][j] = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(a[1][i]), as_wmma_bf16(b[j]),
                                                                au[i][j]);
         if (j == WT - 1) {
           a[0][i] = la(g, i, min(ks + 1, k / 16 - 1));

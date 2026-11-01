@@ -16,6 +16,12 @@ namespace {
 
 using Fragment = __attribute__((ext_vector_type(16))) unsigned short;
 using Accumulator = __attribute__((ext_vector_type(8))) float;
+// LLVM 23 requires the WMMA bf16 operands to be <16 x i16> (signed short).
+using wmma_bf16 = __attribute__((ext_vector_type(16))) short;
+template <class T>
+__device__ __forceinline__ wmma_bf16 as_wmma_bf16(T v) {
+  return __builtin_bit_cast(wmma_bf16, v);
+}
 
 __device__ BufferResource MakeBuffer(const std::uint16_t* pointer,
                                      unsigned bytes) {
@@ -140,7 +146,9 @@ __global__ __launch_bounds__(256, 1) void WmmaAttention(
         const Fragment k =
             LoadFragment(staged_key[half * 16 + lane % 16] + d * 16);
         scores[half] =
-            __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(k, q[d], scores[half]);
+            __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(k),
+                                                       as_wmma_bf16(q[d]),
+                                                       scores[half]);
       }
       __builtin_amdgcn_sched_barrier(0);
     }
@@ -206,7 +214,9 @@ __global__ __launch_bounds__(256, 1) void WmmaAttention(
         const Fragment v =
             LoadFragment(staged_value[d * 16 + lane % 16] + half * 16);
         result[d] =
-            __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(v, p, result[d]);
+            __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(v),
+                                                       as_wmma_bf16(p),
+                                                       result[d]);
         if (d % 2 == 1)
           __builtin_amdgcn_sched_barrier(0);
       }
@@ -275,7 +285,9 @@ __global__ __launch_bounds__(128) void ShortAttention(
         const auto k =
             LoadFragment(staging.key[half * 16 + swizzled_lane] + d * 16);
         scores[half] =
-            __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(k, q, scores[half]);
+            __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(k),
+                                                       as_wmma_bf16(q),
+                                                       scores[half]);
       }
       __builtin_amdgcn_sched_barrier(0);
     }
@@ -323,7 +335,9 @@ __global__ __launch_bounds__(128) void ShortAttention(
 #pragma unroll
         for (int i = 0; i < 16; ++i)
           v[i] = staging.pv.value[half * 16 + i][d * 16 + swizzled_lane];
-        partial = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(v, p, partial);
+        partial = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(v),
+                                                             as_wmma_bf16(p),
+                                                             partial);
         __builtin_amdgcn_sched_barrier(0);
       }
       for (int i = 0; i < 8; ++i)

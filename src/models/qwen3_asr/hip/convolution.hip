@@ -11,6 +11,12 @@ namespace {
 using B = hip_bfloat16;
 using Fragment = __attribute__((ext_vector_type(16))) unsigned short;
 using Accumulator = __attribute__((ext_vector_type(8))) float;
+// LLVM 23 requires the WMMA bf16 operands to be <16 x i16> (signed short).
+using wmma_bf16 = __attribute__((ext_vector_type(16))) short;
+template <class T>
+__device__ __forceinline__ wmma_bf16 as_wmma_bf16(T v) {
+  return __builtin_bit_cast(wmma_bf16, v);
+}
 
 __device__ Fragment LoadFragment(const unsigned short* source) {
   union {
@@ -66,7 +72,9 @@ __global__ __launch_bounds__(128) void FirstConvolution(
 #pragma unroll
     for (int m = 0; m < 3; ++m) {
       const auto sum =
-          __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(a[m], b, Accumulator{});
+          __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(a[m]),
+                                                     as_wmma_bf16(b),
+                                                     Accumulator{});
 #pragma unroll
       for (int i = 0; i < 8; ++i) {
         const int channel =
@@ -125,7 +133,9 @@ __global__ __launch_bounds__(WM * WN * 32) void Convolution(
 #pragma unroll
         for (int m = 0; m < MR; ++m)
           acc[m][n] =
-              __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(b, a[m], acc[m][n]);
+              __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(b),
+                                                         as_wmma_bf16(a[m]),
+                                                         acc[m][n]);
       }
       __builtin_amdgcn_sched_barrier(0);
     }

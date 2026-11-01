@@ -10,6 +10,12 @@ namespace {
 
 using Fragment = __attribute__((ext_vector_type(16))) unsigned short;
 using Accumulator = __attribute__((ext_vector_type(8))) float;
+// LLVM 23 requires the WMMA bf16 operands to be <16 x i16> (signed short).
+using wmma_bf16 = __attribute__((ext_vector_type(16))) short;
+template <class T>
+__device__ __forceinline__ wmma_bf16 as_wmma_bf16(T v) {
+  return __builtin_bit_cast(wmma_bf16, v);
+}
 
 __device__ Fragment Load(const std::uint16_t* x) {
   union {
@@ -87,7 +93,8 @@ __global__ void FusedAttention(const std::uint16_t* queries,
         Fragment k{};
         if (kr < count)
           k = Load(keys + static_cast<std::size_t>(kr) * 128 + d);
-        dot = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(q, k, dot);
+        dot = __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32(as_wmma_bf16(q),
+                                                        as_wmma_bf16(k), dot);
       }
 #pragma unroll
       for (int i = 0; i < 8; ++i) {
