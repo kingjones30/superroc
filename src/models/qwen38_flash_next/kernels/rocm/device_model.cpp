@@ -95,6 +95,20 @@ bool HostF32Rows(const TensorRef& t, std::vector<float>* rows) {
       }
       return true;
     }
+    case core::GgmlType::kQ4_0_ROCMFP4:
+    case core::GgmlType::kQ4_0_ROCMFP4_FAST: {
+      const std::size_t row_bytes = t.RowBytes();
+      for (std::size_t r = 0; r < static_cast<std::size_t>(t.rows); ++r) {
+        if (t.type == core::GgmlType::kQ4_0_ROCMFP4) {
+          superroc::quant::DequantizeROCMFP4_Dual(
+              base + r * row_bytes, rows->data() + r * cols, cols);
+        } else {
+          superroc::quant::DequantizeROCMFP4_Fast(
+              base + r * row_bytes, rows->data() + r * cols, cols);
+        }
+      }
+      return true;
+    }
     case core::GgmlType::kF16: {
       const auto* bits =
           static_cast<const std::uint16_t*>(static_cast<const void*>(base));
@@ -549,7 +563,13 @@ struct Uploader {
       if (LfxKeepQ6KHead(t.type, t.cols, is_head, LfxQ6KHead())) {
         return Copy(t);
       }
-      if (t.type == core::GgmlType::kQ5_K || t.type == core::GgmlType::kQ6_K) {
+      // A ROCmFP4 table is expanded only in its embedding role: an FP4
+      // output head stays packed and runs through the FP4 head readers.
+      const bool fp4_embedding =
+          !is_head && (t.type == core::GgmlType::kQ4_0_ROCMFP4 ||
+                       t.type == core::GgmlType::kQ4_0_ROCMFP4_FAST);
+      if (t.type == core::GgmlType::kQ5_K || t.type == core::GgmlType::kQ6_K ||
+          fp4_embedding) {
         if (!HostF32Rows(t, &host_rows)) {
           Fail("host dequantisation failed for " + std::string(t.name));
           return DeviceTensor{};

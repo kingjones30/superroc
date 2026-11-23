@@ -1,8 +1,8 @@
 // FLASHNEXT: the trunk binder's LM-head format rule. A ROCmFP4 head (ggml
-// types 100/101) must bind; the embedding table keeps the dense-projection
-// list. Each case builds a metadata-plus-tensor-header GGUF image in memory,
-// binds it, and inspects the binder's error, which is the first tensor it
-// rejected or the first one it could not find.
+// types 100/101) must bind, and so must a ROCmFP4 embedding table. Each case
+// builds a metadata-plus-tensor-header GGUF image in memory, binds it, and
+// inspects the binder's error, which is the first tensor it rejected or the
+// first one it could not find.
 //
 // A full trunk cannot be synthesised here (48 layers of routed experts), so
 // the pass signal for an accepted head is that the binder moves past both
@@ -219,18 +219,19 @@ void CheckHeadFormats() {
 
 void CheckEmbeddingList() {
   const auto fields = ValidMetadata();
-  // token_embd keeps the dense-projection list: neither FP4 form may reach
-  // the embedding role.
+  // A ROCm-FP4 build may store the embedding table in either FP4 form; the
+  // device upload expands it to F32 rows like a Q5_K table.
   Require(BindError(fields, HeadTensors(core::GgmlType::kQ4_0_ROCMFP4_FAST,
-                                        core::GgmlType::kQ6_K)) ==
-              "tensor token_embd.weight has unsupported format "
-              "Q4_0_ROCMFP4_FAST",
-          "a ROCmFP4_FAST embedding table was accepted");
+                                        core::GgmlType::kQ6_K)) == kHeadBound,
+          "a ROCmFP4_FAST embedding table was rejected");
   Require(BindError(fields, HeadTensors(core::GgmlType::kQ4_0_ROCMFP4,
+                                        core::GgmlType::kQ6_K)) == kHeadBound,
+          "a dual-scale ROCmFP4 embedding table was rejected");
+  // A routed-expert format is still not a valid embedding table.
+  Require(BindError(fields, HeadTensors(core::GgmlType::kQ4_K,
                                         core::GgmlType::kQ6_K)) ==
-              "tensor token_embd.weight has unsupported format "
-              "Q4_0_ROCMFP4",
-          "a dual-scale ROCmFP4 embedding table was accepted");
+              "tensor token_embd.weight has unsupported format Q4_K",
+          "a Q4_K embedding table was accepted");
 }
 
 void CheckTiedFallback() {

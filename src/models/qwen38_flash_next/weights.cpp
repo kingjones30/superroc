@@ -286,8 +286,15 @@ std::optional<ModelWeights> ModelWeights::Bind(const core::GgufReader& reader,
     }
     w.config.vocab_size = static_cast<std::uint32_t>(info->dimensions[1]);
   }
+  // A ROCm-FP4 (FAST) build may store the embedding table as ROCmFP4 too;
+  // the device upload expands it to F32 rows like a Q5_K / Q6_K table.
+  const auto embedding = {
+      GgmlType::kQ8_0,         GgmlType::kQ6_K,
+      GgmlType::kQ5_K,         GgmlType::kBF16,
+      GgmlType::kF16,          GgmlType::kF32,
+      GgmlType::kQ4_0_ROCMFP4, GgmlType::kQ4_0_ROCMFP4_FAST};
   w.token_embd =
-      b.Get("token_embd.weight", c.hidden_size, c.vocab_size, 1, dense);
+      b.Get("token_embd.weight", c.hidden_size, c.vocab_size, 1, embedding);
   // The head may also be stored as ROCmFP4: its decode and prompt readers take
   // the FP4 projection paths. The embedding table keeps the list above.
   const auto head = {GgmlType::kQ8_0,         GgmlType::kQ6_K,
