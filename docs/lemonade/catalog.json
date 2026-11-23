@@ -332,5 +332,29 @@
       "tool-calling"
     ],
     "size": 2.51
+  },
+  "Qwen3.5-9B-ROCmFP4": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.5-9B-ROCmFP4-GGUF:Qwen3.5-9B-Q4_0_ROCMFP4_COHERENT.gguf",
+      "mmproj": "kingjones777/Qwen3.5-9B-ROCmFP4-GGUF:mmproj-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 5.58
+  },
+  "Qwen3.5-4B-ROCmFP4": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.5-4B-ROCmFP4-GGUF:Qwen3.5-4B-Q4_0_ROCMFP4_COHERENT.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 2.54
   }
 }

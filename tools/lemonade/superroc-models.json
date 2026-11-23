@@ -247,5 +247,21 @@
     "0",
     "--think",
     "off"
+  ],
+  "Qwen3.5-9B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Qwen3.5-4B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
   ]
 }

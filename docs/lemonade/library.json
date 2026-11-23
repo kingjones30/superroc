@@ -278,5 +278,25 @@
     "labels": ["chat", "tool-calling"],
     "size_gb": 2.51,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.5-9B-ROCmFP4",
+    "repo": "kingjones777/Qwen3.5-9B-ROCmFP4-GGUF",
+    "file": "Qwen3.5-9B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": "kingjones777/Qwen3.5-9B-ROCmFP4-GGUF:mmproj-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 5.58,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.5-4B-ROCmFP4",
+    "repo": "kingjones777/Qwen3.5-4B-ROCmFP4-GGUF",
+    "file": "Qwen3.5-4B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 2.54,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
   }
 ]
