@@ -11,8 +11,12 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <vector>
+
+#include "src/core/quant/ggml_dequant.hpp"
 
 namespace q = superroc::models::qwen38_flash_next;
 
@@ -536,12 +540,66 @@ void TestCounters() {
 }
 }  // namespace
 
+// A ROCm-FP4 build stores the PLE table as ROCmFP4 (18-byte blocks) or its
+// FAST form (17-byte blocks). Cold, cached and mixed gathers must decode
+// every row exactly like the host dequantizer does on the same bytes.
+void TestFp4Rows(superroc::core::GgmlType type, std::size_t block_bytes,
+                 const char* tag) {
+  const auto path = std::filesystem::temp_directory_path() /
+                    (std::string("qwen38_ngram_") + tag + ".bin");
+  constexpr std::uint32_t dim = 160;
+  constexpr std::uint32_t rows = 77;
+  constexpr std::uint64_t offset = 4096 + 90;
+  const std::size_t row_bytes = dim / 32 * block_bytes;
+  std::vector<std::uint8_t> bytes(rows * row_bytes);
+  for (std::size_t i = 0; i < bytes.size(); ++i) {
+    bytes[i] = static_cast<std::uint8_t>((i * 37 + i / row_bytes * 11) % 251);
+  }
+  {
+    std::ofstream file(path, std::ios::binary);
+    file.seekp(offset);
+    file.write(reinterpret_cast<const char*>(bytes.data()),
+               static_cast<std::streamsize>(bytes.size()));
+    Check(file.good(), "ROCmFP4 fixture written");
+  }
+  std::string error;
+  auto table = OpenTable(path, offset, rows, dim, type, &error);
+  Check(table != nullptr, error.c_str());
+  if (table) {
+    std::vector<float> expected(dim);
+    const auto gather = [&](std::span<const std::uint32_t> ids) {
+      std::vector<float> out(ids.size() * dim, -123.0F);
+      Check(table->Read(ids, out), "ROCmFP4 gather completes");
+      for (std::size_t i = 0; i < ids.size(); ++i) {
+        const std::uint8_t* src = bytes.data() + ids[i] * row_bytes;
+        if (type == superroc::core::GgmlType::kQ4_0_ROCMFP4) {
+          superroc::quant::DequantizeROCMFP4_Dual(src, expected.data(), dim);
+        } else {
+          superroc::quant::DequantizeROCMFP4_Fast(src, expected.data(), dim);
+        }
+        Check(std::memcmp(out.data() + i * dim, expected.data(),
+                          dim * sizeof(float)) == 0,
+              "ROCmFP4 row decodes like the host dequantizer");
+      }
+    };
+    const std::array<std::uint32_t, 6> warm{0, 5, 76, 5, 0, 40};
+    gather(warm);
+    gather(warm);
+    const std::array<std::uint32_t, 5> mixed{76, 3, 5, 61, 3};
+    gather(mixed);
+  }
+  table.reset();
+  std::filesystem::remove(path);
+}
+
 int main() {
   TestReplacedPath();
   TestHash();
   TestTable();
   TestQuantizedRows();
   TestQ5_1Rows();
+  TestFp4Rows(superroc::core::GgmlType::kQ4_0_ROCMFP4, 18, "fp4");
+  TestFp4Rows(superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST, 17, "fp4fast");
   TestDistantRows();
   TestCounters();
   if (failures != 0) {

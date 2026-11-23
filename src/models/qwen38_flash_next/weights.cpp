@@ -319,7 +319,8 @@ std::optional<ModelWeights> ModelWeights::Bind(const core::GgufReader& reader,
     } else {
       w.ple_table =
           b.Get("per_layer_token_embd.weight", c.ple_head_dim, rows, 1,
-                {GgmlType::kIQ4_NL, GgmlType::kBF16, GgmlType::kQ5_1});
+                {GgmlType::kIQ4_NL, GgmlType::kBF16, GgmlType::kQ5_1,
+                 GgmlType::kQ4_0_ROCMFP4, GgmlType::kQ4_0_ROCMFP4_FAST});
     }
   }
   w.layers.reserve(c.num_layers);

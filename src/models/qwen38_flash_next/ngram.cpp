@@ -109,10 +109,15 @@ std::unique_ptr<NgramTable> NgramTable::Open(
   std::unique_ptr<NgramTable> t(new NgramTable());
   // FLASHNEXT: the ROC quantizer stores the PLE table as Q5_1 (24-byte
   // 32-value blocks); the direct-read table accepts it alongside IQ4_NL.
+  // A ROCm-FP4 build stores it as ROCmFP4 (18 bytes) or its FAST form
+  // (17 bytes), also 32 values per block.
   const bool q5_1 = type == core::GgmlType::kQ5_1;
-  const bool blocked = type == core::GgmlType::kIQ4_NL || q5_1;
+  const bool fp4_fast = type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
+  const bool blocked = type == core::GgmlType::kIQ4_NL || q5_1 ||
+                       type == core::GgmlType::kQ4_0_ROCMFP4 || fp4_fast;
   const std::size_t block = blocked ? 32 : 1;
-  const std::size_t block_bytes = blocked ? (q5_1 ? 24 : 18) : 2;
+  const std::size_t block_bytes =
+      blocked ? (q5_1 ? 24 : (fp4_fast ? 17 : 18)) : 2;
   if ((!blocked && type != core::GgmlType::kBF16) || row_dim == 0 ||
       row_dim % block != 0) {
     if (error_msg != nullptr) {
@@ -154,6 +159,10 @@ void NgramTable::DecodeRow(const std::uint8_t* src, float* dst) const {
     superroc::quant::DequantizeIQ4_NL(src, dst, row_dim_);
   } else if (type_ == core::GgmlType::kQ5_1) {
     DequantizeQ5_1Row(src, dst, row_dim_);
+  } else if (type_ == core::GgmlType::kQ4_0_ROCMFP4) {
+    superroc::quant::DequantizeROCMFP4_Dual(src, dst, row_dim_);
+  } else if (type_ == core::GgmlType::kQ4_0_ROCMFP4_FAST) {
+    superroc::quant::DequantizeROCMFP4_Fast(src, dst, row_dim_);
   } else {
     for (std::uint32_t i = 0; i < row_dim_; ++i) {
       std::uint16_t bits = 0;
