@@ -543,5 +543,71 @@
       "mtp"
     ],
     "size": 15.31
+  },
+  "Ling-3.0-flash-ROCmFP4-STRIX_LEAN": {
+    "checkpoints": {
+      "main": "kingjones777/Ling-3.0-flash-ROCmFP4-STRIX_LEAN-GGUF:Ling-3.0-flash-I-ROCmFP4-STRIX_LEAN.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 68.14
+  },
+  "LFM2.5-2.6B-ROCmFP4-LEAN": {
+    "checkpoints": {
+      "main": "kingjones777/LFM2.5-2.6B-ROCmFP4-LEAN-GGUF:LFM2.5-2.6B-Q4_0_ROCMFP4_LEAN.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 1.56
+  },
+  "LFM2.5-2.6B-ROCmFP4-COHERENT": {
+    "checkpoints": {
+      "main": "kingjones777/LFM2.5-2.6B-ROCmFP4-COHERENT-GGUF:LFM2.5-2.6B-Q4_0_ROCMFP4_COHERENT.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 1.59
+  },
+  "LFM2.5-8B-A1B-ROCmFP4-COHERENT": {
+    "checkpoints": {
+      "main": "kingjones777/LFM2.5-8B-A1B-ROCmFP4-COHERENT-GGUF:LFM2.5-8B-A1B-Q4_0_ROCMFP4_COHERENT.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 4.84
+  },
+  "LFM2-24B-A2B-ROCmFPX": {
+    "checkpoints": {
+      "main": "kingjones777/LFM2-24B-A2B-ROCmFPX-GGUF:LFM2-24B-A2B-Q4_0_ROCMFP4_COHERENT.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 13.47
+  },
+  "LFM2-8B-A1B-ROCmFPX": {
+    "checkpoints": {
+      "main": "kingjones777/LFM2-8B-A1B-ROCmFPX-GGUF:LFM2-8B-A1B-Q4_0_ROCMFP4_COHERENT.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 4.73
   }
 }

@@ -458,5 +458,65 @@
     "labels": ["chat", "tool-calling", "vision", "mtp"],
     "size_gb": 15.31,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--speculative", "mtp", "-d", "2", "--min-draft-tokens", "1", "--prompt-lookup", "--think", "off"]
+  },
+  {
+    "name": "Ling-3.0-flash-ROCmFP4-STRIX_LEAN",
+    "repo": "kingjones777/Ling-3.0-flash-ROCmFP4-STRIX_LEAN-GGUF",
+    "file": "Ling-3.0-flash-I-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 68.14,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "LFM2.5-2.6B-ROCmFP4-LEAN",
+    "repo": "kingjones777/LFM2.5-2.6B-ROCmFP4-LEAN-GGUF",
+    "file": "LFM2.5-2.6B-Q4_0_ROCMFP4_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 1.56,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "LFM2.5-2.6B-ROCmFP4-COHERENT",
+    "repo": "kingjones777/LFM2.5-2.6B-ROCmFP4-COHERENT-GGUF",
+    "file": "LFM2.5-2.6B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 1.59,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "LFM2.5-8B-A1B-ROCmFP4-COHERENT",
+    "repo": "kingjones777/LFM2.5-8B-A1B-ROCmFP4-COHERENT-GGUF",
+    "file": "LFM2.5-8B-A1B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 4.84,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "LFM2-24B-A2B-ROCmFPX",
+    "repo": "kingjones777/LFM2-24B-A2B-ROCmFPX-GGUF",
+    "file": "LFM2-24B-A2B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 13.47,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "LFM2-8B-A1B-ROCmFPX",
+    "repo": "kingjones777/LFM2-8B-A1B-ROCmFPX-GGUF",
+    "file": "LFM2-8B-A1B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 4.73,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
   }
 ]

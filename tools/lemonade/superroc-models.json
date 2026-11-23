@@ -401,5 +401,53 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "Ling-3.0-flash-I-ROCmFP4-STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "LFM2.5-2.6B-Q4_0_ROCMFP4_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "LFM2.5-2.6B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "LFM2.5-8B-A1B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "LFM2-24B-A2B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "LFM2-8B-A1B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
   ]
 }
