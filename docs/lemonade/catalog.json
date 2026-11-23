@@ -238,5 +238,63 @@
       "vision"
     ],
     "size": 19.2
+  },
+  "Qwen3.5-4B-3D-Coder": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.5-4B-3D-Coder-SuperRoc-GGUF:Qwen3.5-4B-3D-Coder-Q4_0-ROCmFP4-FAST-imatrix.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 2.43
+  },
+  "Ling-3.0-flash": {
+    "checkpoints": {
+      "main": "kingjones777/Ling-3.0-flash-ROCmFP4-STRIX_LEAN-GGUF:Ling-3.0-flash-ROCmFP4-STRIX-MTP-Q4_0"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "mtp"
+    ],
+    "size": 44.52
+  },
+  "Apodex-1.1-mini-ROCmFP4-COHERENT": {
+    "checkpoints": {
+      "main": "kingjones777/Apodex-1.1-mini-ROCmFP4-COHERENT-GGUF:apodex-1.1-mini-Q4_0_ROCMFP4_COHERENT.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 19.85
+  },
+  "Apodex-1.1-mini-ROCmFP4-STRIX_LEAN": {
+    "checkpoints": {
+      "main": "kingjones777/Apodex-1.1-mini-ROCmFP4-STRIX_LEAN-GGUF:apodex-1.1-mini-Q4_0_ROCMFP4_STRIX_LEAN.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 18.74
+  },
+  "Ornith-1.5-9B-ROCmFP4-FAST": {
+    "checkpoints": {
+      "main": "kingjones777/Ornith-1.5-9B-ROCmFP4-FAST-GGUF:Ornith-1.5-9B-Q4_0_ROCMFP4_FAST_COHERENT.gguf",
+      "mmproj": "kingjones777/Ornith-1.5-9B-ROCmFP4-FAST-GGUF:mmproj-Ornith-1.5-9B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 5.36
   }
 }

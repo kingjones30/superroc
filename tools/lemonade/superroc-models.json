@@ -177,5 +177,45 @@
     "--prompt-lookup",
     "--cache-floor-bytes",
     "8589934592"
+  ],
+  "Qwen3.5-4B-3D-Coder-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Ling-3.0-flash-ROCmFP4-STRIX-MTP-Q4_0-00001-of-00002.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "apodex-1.1-mini-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "apodex-1.1-mini-Q4_0_ROCMFP4_STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Ornith-1.5-9B-Q4_0_ROCMFP4_FAST_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
   ]
 }
