@@ -6,6 +6,17 @@ Notable user-facing changes to Super Roc are recorded here. Releases follow
 
 ## [Unreleased]
 
+### Fixed
+
+- LFM2 family: the prompt cache now keeps the conversation up to the
+  generation framing, so a follow-up turn reuses the whole previous prompt
+  (a 4,818-token turn now reuses 4,815 tokens; it reused 4,096).
+
+### Added
+
+- LFM2-24B-A2B and LFM2-8B-A1B chat templates (the first LFM2 template's tool
+  list and tool-result markers) are recognised and rendered.
+
 ## [0.20.0] - 2026-11-23
 
 ### Added

@@ -282,24 +282,27 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
     sys = rest[0].content;
     rest = rest.subspan(1);
   }
+  std::string list;
+  std::string tail;
   if (!tools.empty()) {
     if (!sys.empty()) {
       sys.push_back('\n');
     }
-    sys.append("List of tools: [");
+    sys.append("List of tools: ");
+    list.push_back('[');
     bool first_tool = true;
     for (const ChatTool& tool : tools) {
       if (!first_tool) {
-        sys.append(", ");
+        list.append(", ");
       }
       first_tool = false;
-      AppendToolJson(sys, tool);
+      AppendToolJson(list, tool);
     }
-    sys.push_back(']');
+    list.push_back(']');
     if (options.require_tool_call) {
       // LFM2: superroc extension, the pinned template has no "required"; same
       // sentence as the Qwen renderer.
-      sys.append(
+      tail.append(
           "\nYou must call at least one available function. Do not answer the "
           "user directly.");
     }
@@ -308,9 +311,20 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
     out.append("<|im_start|>system\n");
     // The tool list is client text too, so the whole system
     // turn body is content: a special-token spelling inside a tool
-    // description stays characters. It holds no framing token of its own, so
-    // a normal render tokenizes exactly as before.
-    AppendContent(out, content_spans, sys);
+    // description stays characters. Only the first LFM2 template's
+    // <|tool_list_start|> / <|tool_list_end|> are framing; without them a
+    // normal render tokenizes exactly as before.
+    if (variant.v1_markers && !list.empty()) {
+      AppendContent(out, content_spans, sys);
+      out.append("<|tool_list_start|>");
+      AppendContent(out, content_spans, list);
+      out.append("<|tool_list_end|>");
+      if (!tail.empty()) {
+        AppendContent(out, content_spans, tail);
+      }
+    } else {
+      AppendContent(out, content_spans, sys + list + tail);
+    }
     out.append("<|im_end|>\n");
   }
 
@@ -337,7 +351,7 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
           variant.keep_thinking == Lfm2KeepThinking::kAfterLastUser
               ? static_cast<long>(i) > last_user
               : static_cast<long>(i) == last_assistant;
-      if (keep && !message.thought.empty()) {
+      if (keep && !message.thought.empty() && !variant.v1_markers) {
         out.append("<think>");
         AppendContent(out, content_spans, message.thought);
         out.append("</think>");
@@ -381,7 +395,13 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
       out.append("<|im_end|>\n");
       continue;
     }
-    AppendContent(out, content_spans, message.content);
+    if (variant.v1_markers && message.role == ChatRole::kTool) {
+      out.append("<|tool_response_start|>");
+      AppendContent(out, content_spans, message.content);
+      out.append("<|tool_response_end|>");
+    } else {
+      AppendContent(out, content_spans, message.content);
+    }
     out.append("<|im_end|>\n");
   }
 
@@ -411,7 +431,7 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
         }
       } else {
         out.append("<|im_start|>assistant\n");
-        if (!options.enable_thinking) {
+        if (!options.enable_thinking && !variant.v1_markers) {
           out.append("<think></think>");
         }
       }

@@ -75,6 +75,49 @@ int main() {
     Check(!InContent(*out, spans, "<|im_start|>system"),
           "system turn marker is framing");
   }
+  // The first LFM2 template (LFM2-8B-A1B): list and tool-response markers
+  // are framing, the list and the result are content, and no think tag is
+  // written even with thinking off. LFM2-24B-A2B renders as the 1.2B.
+  const auto* v1 = superroc::tokenization::FindLfm2TemplateVariant(
+      "89e790f027916b5a2bca145a6a8454e06ffc7a5043bf3b6d97829aff86bb543f");
+  const auto* l24 = superroc::tokenization::FindLfm2TemplateVariant(
+      "013eed60546434b6967e3483153d8c5c37abcb1d667f8b1f914683f2a9411531");
+  Check(v1 != nullptr && v1->name == "lfm2-8b-a1b" && v1->v1_markers,
+        "lfm2-8b-a1b template is pinned");
+  Check(l24 != nullptr && l24->name == "lfm2-24b-a2b" && !l24->v1_markers &&
+            !l24->generation_opens_think,
+        "lfm2-24b-a2b template is pinned");
+  if (v1 != nullptr) {
+    superroc::tokenization::ChatTemplateOptions off;
+    off.enable_thinking = false;
+    std::vector<ContentSpan> v1_spans;
+    const auto v1_out = superroc::tokenization::Lfm2Render(
+        messages, tools, off, &error, &v1_spans, *v1);
+    Check(v1_out.has_value(), "v1 render ok " + error);
+    if (v1_out.has_value()) {
+      const auto list = v1_out->find("<|tool_list_start|>[");
+      Check(list != std::string::npos &&
+                !InContent(*v1_out, v1_spans, "<|tool_list_start|>", list),
+            "v1 tool list start marker is framing");
+      Check(InContent(*v1_out, v1_spans, "[", list + 19),
+            "v1 tool list is content");
+      Check(v1_out->find("]<|tool_list_end|><|im_end|>") != std::string::npos,
+            "v1 tool list end marker closes the system turn");
+      Check(
+          v1_out->find("<|im_start|>tool\n<|tool_response_start|>12:00"
+                       "<|tool_response_end|><|im_end|>") != std::string::npos,
+          "v1 tool result is wrapped in response markers");
+      Check(InContent(*v1_out, v1_spans, "12:00"), "v1 tool result is content");
+      Check(InContent(*v1_out, v1_spans, evil),
+            "v1 tool description is content");
+      Check(v1_out->find("<think>") == std::string::npos,
+            "v1 writes no think tag with thinking off");
+      Check(v1_out->size() >= 22 &&
+                v1_out->compare(v1_out->size() - 22, 22,
+                                "<|im_start|>assistant\n") == 0,
+            "v1 generation prompt is plain assistant");
+    }
+  }
   std::cout << (failures == 0 ? "lfm2_render_spans_test: passed\n"
                               : "lfm2_render_spans_test: FAILED\n");
   return failures == 0 ? 0 : 1;

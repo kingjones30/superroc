@@ -20,7 +20,7 @@ inline constexpr std::string_view kLfm2ChatTemplateSha256 =
 
 /// Super Roc: LFM2 chat-template variants rendered natively, keyed by the
 /// GGUF template's SHA-256. Each switch is a difference between
-/// the three templates (verified against Jinja references).
+/// the templates (verified against Jinja references).
 enum class Lfm2KeepThinking : std::uint8_t {
   kAfterLastUser,      // assistants after the last user turn keep thinking
   kLastAssistantOnly,  // only the last assistant message keeps thinking
@@ -32,8 +32,13 @@ struct Lfm2TemplateVariant {
   bool python_repr_sequences;   // lists (and dicts inside them): Python repr
   bool generation_opens_think;  // generation prompt ends "assistant\n<think>"
   Lfm2KeepThinking keep_thinking;
+  // LFM2 before 2.5: the tool list sits between <|tool_list_start|> and
+  // <|tool_list_end|>, a tool result between <|tool_response_start|> and
+  // <|tool_response_end|>, and the model has no thinking mode, so no think
+  // tags are ever written.
+  bool v1_markers = false;
 };
-inline constexpr std::array<Lfm2TemplateVariant, 3> kLfm2TemplateVariants{{
+inline constexpr std::array<Lfm2TemplateVariant, 5> kLfm2TemplateVariants{{
     {kLfm2ChatTemplateSha256, "lfm2.5-24b-a2b", true, false, true,
      Lfm2KeepThinking::kAfterLastUser},
     {"c5b67247c9f736f6c40eaa91ae1ef27dc67f5b041eedaadb97a1bea5030fb0ff",
@@ -41,6 +46,16 @@ inline constexpr std::array<Lfm2TemplateVariant, 3> kLfm2TemplateVariants{{
     {"ba551d58630afa3190b1be3602e28301f3d2e9bbac978dfc49d6d825171648b6",
      "lfm2.5-1.2b-instruct", true, false, false,
      Lfm2KeepThinking::kLastAssistantOnly},
+    // LFM2-24B-A2B: the 1.2B rules (past thinking dropped except on the last
+    // assistant, plain "assistant\n" generation prompt). The template renders
+    // no replayed tool calls; they are written as the 1.2B writes them.
+    {"013eed60546434b6967e3483153d8c5c37abcb1d667f8b1f914683f2a9411531",
+     "lfm2-24b-a2b", true, false, false, Lfm2KeepThinking::kLastAssistantOnly},
+    // LFM2-8B-A1B: the first LFM2 template (tool list / tool response
+    // markers, no thinking mode).
+    {"89e790f027916b5a2bca145a6a8454e06ffc7a5043bf3b6d97829aff86bb543f",
+     "lfm2-8b-a1b", true, false, false, Lfm2KeepThinking::kLastAssistantOnly,
+     true},
 }};
 /// nullptr = not an LFM2 template Super Roc renders.
 [[nodiscard]] const Lfm2TemplateVariant* FindLfm2TemplateVariant(
