@@ -135,5 +135,47 @@
     "3",
     "--think",
     "off"
+  ],
+  "Ornith-1.5-122B-Q4_0_ROCMFP4_STRIX-imatrix-headQ6K-00001-of-00002.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--speculative",
+    "mtp",
+    "-d",
+    "2",
+    "--min-draft-tokens",
+    "1",
+    "--prompt-lookup",
+    "--think",
+    "off"
+  ],
+  "Ornith-1.5-35B-A3B-Abliterated-Q4_0_ROCMFP4_STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Ornith-1.5-9B-Abliterated-Q4_0_ROCMFP4_STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Agents-A1-Uncensored-MTP-Q4_0_ROCMFP4_STRIX_LEAN.gguf": [
+    "--think",
+    "off",
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--cache-floor-bytes",
+    "8589934592"
   ]
 }

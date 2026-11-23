@@ -12,6 +12,7 @@ Output: docs/lemonade/catalog.json
 """
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +25,16 @@ FIELDS = ("name", "repo", "file", "mmproj", "draft", "labels",
           "size_gb", "superroc_args")
 
 
+# Lemonade merges a split GGUF (NAME-00001-of-00002.gguf, ...) into one
+# variant named NAME, and downloads every part of it.
+_SHARD = re.compile(r"^(.+)[-._]\d{5}-of-\d{5}\.gguf$", re.IGNORECASE)
+
+
+def lemonade_variant(file_name):
+    match = _SHARD.match(file_name)
+    return match.group(1) if match else file_name
+
+
 def build(library):
     catalog = {}
     model_args = {}
@@ -31,7 +42,8 @@ def build(library):
         for field in FIELDS:
             if field not in entry:
                 raise SystemExit("library entry missing %r: %r" % (field, entry))
-        checkpoints = {"main": "%s:%s" % (entry["repo"], entry["file"])}
+        checkpoints = {"main": "%s:%s" % (entry["repo"],
+                                           lemonade_variant(entry["file"]))}
         if entry["mmproj"]:
             checkpoints["mmproj"] = entry["mmproj"]
         if entry["draft"]:

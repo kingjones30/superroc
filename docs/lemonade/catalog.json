@@ -189,5 +189,54 @@
       "mtp"
     ],
     "size": 18.06
+  },
+  "Ornith-1.5-122B": {
+    "checkpoints": {
+      "main": "kingjones777/Ornith-1.5-122B-SuperRoc-GGUF:Ornith-1.5-122B-Q4_0_ROCMFP4_STRIX-imatrix-headQ6K",
+      "mmproj": "kingjones777/Ornith-1.5-122B-SuperRoc-GGUF:mmproj-Ornith-1.5-122B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision",
+      "mtp"
+    ],
+    "size": 68.2
+  },
+  "Ornith-1.5-35B-A3B-Abliterated-ROCmFP4": {
+    "checkpoints": {
+      "main": "kingjones777/Ornith-1.5-35B-A3B-Abliterated-ROCmFP4-GGUF:Ornith-1.5-35B-A3B-Abliterated-Q4_0_ROCMFP4_STRIX_LEAN.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 18.74
+  },
+  "Ornith-1.5-9B-Abliterated-ROCmFP4": {
+    "checkpoints": {
+      "main": "kingjones777/Ornith-1.5-9B-Abliterated-ROCmFP4-GGUF:Ornith-1.5-9B-Abliterated-Q4_0_ROCMFP4_STRIX_LEAN.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 5.25
+  },
+  "Agents-A1-Abliterated-MTP-ROCmFP4": {
+    "checkpoints": {
+      "main": "kingjones777/Agents-A1-Abliterated-MTP-ROCmFP4-GGUF:Agents-A1-Uncensored-MTP-Q4_0_ROCMFP4_STRIX_LEAN.gguf",
+      "mmproj": "kingjones777/Agents-A1-Abliterated-MTP-ROCmFP4-GGUF:mmproj-Agents-A1-Abliterated-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 19.2
   }
 }
