@@ -263,5 +263,102 @@
     "0",
     "--think",
     "off"
+  ],
+  "Qwen3.5-2B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Qwen3.8-27B-Uncensored-ROCmFP4-STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Hemmingway-1-Q4_0_ROCMFP4_STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Qwen3.5-27B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Tiel-Coder-35B-A3B-Q4_0-ROCmFP4-FAST.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "BTL-4-Q4_0_ROCMFP4_STRIX.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Tiel-Coder-35B-A3B-Q4_0-ROCmFP4-STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Ornith-1.5-35B-A3B-Q4_0_ROCMFP4_FAST_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Ornith-1.5-35B-A3B-Abliterated-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "MiniCPM-V-4.7-35B-A3B-ROCmFP4-LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Ornith-1.5-35B-A3B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Phai-A1-35B-1M-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--think",
+    "off"
   ]
 }

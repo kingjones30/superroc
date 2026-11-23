@@ -298,5 +298,125 @@
     "labels": ["chat", "tool-calling"],
     "size_gb": 2.54,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.5-2B-ROCmFP4",
+    "repo": "kingjones777/Qwen3.5-2B-ROCmFP4-GGUF",
+    "file": "Qwen3.5-2B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 1.2,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.8-27B-Uncensored-ROCmFP4-STRIX-MTP",
+    "repo": "kingjones777/Qwen3.8-27B-Uncensored-ROCmFP4-STRIX-MTP-GGUF",
+    "file": "Qwen3.8-27B-Uncensored-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 14.59,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Hemmingway-1-ROCmFP4",
+    "repo": "kingjones777/Hemmingway-1-ROCmFP4-GGUF",
+    "file": "Hemmingway-1-Q4_0_ROCMFP4_STRIX_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 15.21,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.5-27B-ROCmFP4",
+    "repo": "kingjones777/Qwen3.5-27B-ROCmFP4-GGUF",
+    "file": "Qwen3.5-27B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": "kingjones777/Qwen3.5-27B-ROCmFP4-GGUF:mmproj-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 15.8,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Tiel-Coder-35B-A3B-ROCmFP4-FAST",
+    "repo": "kingjones777/Tiel-Coder-35B-A3B-ROCmFP4-FAST-GGUF",
+    "file": "Tiel-Coder-35B-A3B-Q4_0-ROCmFP4-FAST.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 18.65,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "BTL-4-ROCmFP4-STRIX",
+    "repo": "kingjones777/BTL-4-ROCmFP4-STRIX-GGUF",
+    "file": "BTL-4-Q4_0_ROCMFP4_STRIX.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 18.66,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Tiel-Coder-35B-A3B-ROCmFP4-STRIX_LEAN",
+    "repo": "kingjones777/Tiel-Coder-35B-A3B-ROCmFP4-STRIX_LEAN-GGUF",
+    "file": "Tiel-Coder-35B-A3B-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 18.74,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Ornith-1.5-35B-A3B-ROCmFP4-FAST",
+    "repo": "kingjones777/Ornith-1.5-35B-A3B-ROCmFP4-FAST-GGUF",
+    "file": "Ornith-1.5-35B-A3B-Q4_0_ROCMFP4_FAST_COHERENT.gguf",
+    "mmproj": "kingjones777/Ornith-1.5-35B-A3B-ROCmFP4-FAST-GGUF:mmproj-Ornith-1.5-35B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 19.25,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Ornith-1.5-35B-A3B-Abliterated-ROCmFP4-COHERENT",
+    "repo": "kingjones777/Ornith-1.5-35B-A3B-Abliterated-ROCmFP4-COHERENT-GGUF",
+    "file": "Ornith-1.5-35B-A3B-Abliterated-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 19.85,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "MiniCPM-V-4.7-35B-A3B-ROCmFP4",
+    "repo": "kingjones777/MiniCPM-V-4.7-35B-A3B-ROCmFP4-GGUF",
+    "file": "MiniCPM-V-4.7-35B-A3B-ROCmFP4-LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 19.85,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Ornith-1.5-35B-A3B-ROCmFP4-COHERENT",
+    "repo": "kingjones777/Ornith-1.5-35B-A3B-ROCmFP4-COHERENT-GGUF",
+    "file": "Ornith-1.5-35B-A3B-Q4_0_ROCMFP4_COHERENT.gguf",
+    "mmproj": "kingjones777/Ornith-1.5-35B-A3B-ROCmFP4-COHERENT-GGUF:mmproj-Ornith-1.5-35B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 20.33,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Phai-A1-35B-1M",
+    "repo": "kingjones777/Phai-A1-35B-1M-SuperRoc-GGUF",
+    "file": "Phai-A1-35B-1M-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+    "mmproj": "kingjones777/Phai-A1-35B-1M-SuperRoc-GGUF:mmproj-Phai-A1-35B-1M-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 18.8,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
   }
 ]
