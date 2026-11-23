@@ -68,5 +68,95 @@
     "labels": ["chat", "tool-calling", "vision", "mtp"],
     "size_gb": 19.64,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--speculative", "mtp", "-d", "2", "--min-draft-tokens", "1", "--prompt-lookup", "--think", "off"]
+  },
+  {
+    "name": "Nex-N2.5-mini-ROCmFP4",
+    "repo": "kingjones777/Nex-N2.5-mini-ROCmFP4-GGUF",
+    "file": "Nex-N2.5-mini-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": "kingjones777/Nex-N2.5-mini-ROCmFP4-GGUF:mmproj-Nex-N2.5-mini-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 18.74,
+    "superroc_args": ["--think", "off", "-t", "0", "--presence-penalty", "0"]
+  },
+  {
+    "name": "Ornith-1.5-9B-ROCmFP4-STRIX-LEAN",
+    "repo": "kingjones777/Ornith-1.5-9B-ROCmFP4-STRIX-LEAN-GGUF",
+    "file": "Ornith-1.5-9B-Q4_0_ROCMFP4_STRIX_LEAN.gguf",
+    "mmproj": "kingjones777/Ornith-1.5-9B-ROCmFP4-STRIX-LEAN-GGUF:mmproj-Ornith-1.5-9B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 5.25,
+    "superroc_args": ["--think", "off", "-t", "0", "--presence-penalty", "0"]
+  },
+  {
+    "name": "BTL-4-ROCmFP4-STRIX_LEAN",
+    "repo": "kingjones777/BTL-4-ROCmFP4-STRIX_LEAN-GGUF",
+    "file": "BTL-4-Q4_0_ROCMFP4_STRIX_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 18.6,
+    "superroc_args": ["--think", "off", "-t", "0", "--presence-penalty", "0"]
+  },
+  {
+    "name": "MiMo-V2.6-Distill-Qwen-9B-ROCmFP4",
+    "repo": "kingjones777/MiMo-V2.6-Distill-Qwen-9B-ROCmFP4-GGUF",
+    "file": "MiMo-V2.6-Distill-Qwen-9B-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 5.25,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "MiMo-V2.6-Distill-Qwen-9B-ROCmFP4-imatrix",
+    "repo": "kingjones777/MiMo-V2.6-Distill-Qwen-9B-ROCmFP4-imatrix-GGUF",
+    "file": "MiMo-V2.6-Distill-Qwen-9B-Q4_0-ROCmFP4-STRIX_LEAN-imatrix.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 5.25,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Nex-N2.5-mini-ROCmFP4-imatrix",
+    "repo": "kingjones777/Nex-N2.5-mini-ROCmFP4-imatrix-GGUF",
+    "file": "Nex-N2.5-mini-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": "kingjones777/Nex-N2.5-mini-ROCmFP4-imatrix-GGUF:mmproj-Nex-N2.5-mini-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 18.74,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "OxCoder-9B-MTP-ROCmFP4-imatrix",
+    "repo": "kingjones777/OxCoder-9B-MTP-ROCmFP4-imatrix-GGUF",
+    "file": "OxCoder-9B-MTP-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": "kingjones777/OxCoder-9B-MTP-ROCmFP4-imatrix-GGUF:mmproj-OxCoder-9B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision", "mtp"],
+    "size_gb": 5.4,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--speculative", "mtp", "-d", "3", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-ROCmFP4-FAST-imatrix",
+    "repo": "kingjones777/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-ROCmFP4-FAST-imatrix-GGUF",
+    "file": "Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+    "mmproj": "kingjones777/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-ROCmFP4-FAST-imatrix-GGUF:mmproj-Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 14.93,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Agnes-3.0-Flash-Preview-MTP-ROCmFP4-imatrix",
+    "repo": "kingjones777/Agnes-3.0-Flash-Preview-MTP-ROCmFP4-imatrix-GGUF",
+    "file": "Agnes-3.0-Flash-Preview-MTP-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": "kingjones777/Agnes-3.0-Flash-Preview-MTP-ROCmFP4-imatrix-GGUF:mmproj-Agnes-3.0-Flash-Preview-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision", "mtp"],
+    "size_gb": 18.06,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--speculative", "mtp", "-d", "3", "--think", "off"]
   }
 ]

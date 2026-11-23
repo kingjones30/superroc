@@ -76,5 +76,118 @@
       "mtp"
     ],
     "size": 19.64
+  },
+  "Nex-N2.5-mini-ROCmFP4": {
+    "checkpoints": {
+      "main": "kingjones777/Nex-N2.5-mini-ROCmFP4-GGUF:Nex-N2.5-mini-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+      "mmproj": "kingjones777/Nex-N2.5-mini-ROCmFP4-GGUF:mmproj-Nex-N2.5-mini-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 18.74
+  },
+  "Ornith-1.5-9B-ROCmFP4-STRIX-LEAN": {
+    "checkpoints": {
+      "main": "kingjones777/Ornith-1.5-9B-ROCmFP4-STRIX-LEAN-GGUF:Ornith-1.5-9B-Q4_0_ROCMFP4_STRIX_LEAN.gguf",
+      "mmproj": "kingjones777/Ornith-1.5-9B-ROCmFP4-STRIX-LEAN-GGUF:mmproj-Ornith-1.5-9B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 5.25
+  },
+  "BTL-4-ROCmFP4-STRIX_LEAN": {
+    "checkpoints": {
+      "main": "kingjones777/BTL-4-ROCmFP4-STRIX_LEAN-GGUF:BTL-4-Q4_0_ROCMFP4_STRIX_LEAN.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 18.6
+  },
+  "MiMo-V2.6-Distill-Qwen-9B-ROCmFP4": {
+    "checkpoints": {
+      "main": "kingjones777/MiMo-V2.6-Distill-Qwen-9B-ROCmFP4-GGUF:MiMo-V2.6-Distill-Qwen-9B-Q4_0-ROCmFP4-STRIX_LEAN.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 5.25
+  },
+  "MiMo-V2.6-Distill-Qwen-9B-ROCmFP4-imatrix": {
+    "checkpoints": {
+      "main": "kingjones777/MiMo-V2.6-Distill-Qwen-9B-ROCmFP4-imatrix-GGUF:MiMo-V2.6-Distill-Qwen-9B-Q4_0-ROCmFP4-STRIX_LEAN-imatrix.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 5.25
+  },
+  "Nex-N2.5-mini-ROCmFP4-imatrix": {
+    "checkpoints": {
+      "main": "kingjones777/Nex-N2.5-mini-ROCmFP4-imatrix-GGUF:Nex-N2.5-mini-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+      "mmproj": "kingjones777/Nex-N2.5-mini-ROCmFP4-imatrix-GGUF:mmproj-Nex-N2.5-mini-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 18.74
+  },
+  "OxCoder-9B-MTP-ROCmFP4-imatrix": {
+    "checkpoints": {
+      "main": "kingjones777/OxCoder-9B-MTP-ROCmFP4-imatrix-GGUF:OxCoder-9B-MTP-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+      "mmproj": "kingjones777/OxCoder-9B-MTP-ROCmFP4-imatrix-GGUF:mmproj-OxCoder-9B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision",
+      "mtp"
+    ],
+    "size": 5.4
+  },
+  "Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-ROCmFP4-FAST-imatrix": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-ROCmFP4-FAST-imatrix-GGUF:Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+      "mmproj": "kingjones777/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-ROCmFP4-FAST-imatrix-GGUF:mmproj-Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 14.93
+  },
+  "Agnes-3.0-Flash-Preview-MTP-ROCmFP4-imatrix": {
+    "checkpoints": {
+      "main": "kingjones777/Agnes-3.0-Flash-Preview-MTP-ROCmFP4-imatrix-GGUF:Agnes-3.0-Flash-Preview-MTP-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+      "mmproj": "kingjones777/Agnes-3.0-Flash-Preview-MTP-ROCmFP4-imatrix-GGUF:mmproj-Agnes-3.0-Flash-Preview-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision",
+      "mtp"
+    ],
+    "size": 18.06
   }
 }

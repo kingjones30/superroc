@@ -55,5 +55,85 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "Nex-N2.5-mini-Q4_0-ROCmFP4-STRIX_LEAN.gguf": [
+    "--think",
+    "off",
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0"
+  ],
+  "Ornith-1.5-9B-Q4_0_ROCMFP4_STRIX_LEAN.gguf": [
+    "--think",
+    "off",
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0"
+  ],
+  "BTL-4-Q4_0_ROCMFP4_STRIX_LEAN.gguf": [
+    "--think",
+    "off",
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0"
+  ],
+  "MiMo-V2.6-Distill-Qwen-9B-Q4_0-ROCmFP4-STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "MiMo-V2.6-Distill-Qwen-9B-Q4_0-ROCmFP4-STRIX_LEAN-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Nex-N2.5-mini-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "OxCoder-9B-MTP-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--speculative",
+    "mtp",
+    "-d",
+    "3",
+    "--think",
+    "off"
+  ],
+  "Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Agnes-3.0-Flash-Preview-MTP-imatrix-Q4_0-ROCmFP4-STRIX_LEAN.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--speculative",
+    "mtp",
+    "-d",
+    "3",
+    "--think",
+    "off"
   ]
 }
