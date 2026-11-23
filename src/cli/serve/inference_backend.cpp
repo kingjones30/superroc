@@ -4384,11 +4384,21 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
   // downstream.
   {
     std::string probe_error;
-    auto probe = core::GgufReader::OpenFile(model_path, &probe_error);
+    auto probe = core::GgufReader::OpenFile(
+        model_path, &probe_error, core::GgufReader::FileRole::kMetadata);
     if (probe != nullptr &&
         superroc::core::IsModelFamily(
             probe->GetMetadataString("general.architecture").value_or(""),
             superroc::core::ModelFamilyId::kBailingMoe3)) {
+      // The probe above reads metadata only (kMetadata): no tensor overlay,
+      // no ROCmFPX repack. The Ling weights bind below reads tensor data
+      // (ling3/weights.cpp ModelWeights::Bind), so re-open with the default
+      // role here; everything downstream sees the same full reader as before.
+      probe = core::GgufReader::OpenFile(model_path, &probe_error);
+      if (probe == nullptr) {
+        SetError(error, "Failed to open Ling artifact: " + probe_error);
+        return false;
+      }
       std::shared_ptr<models::ling3::vision::VisionTower> vision_tower;
       if (!vision_model_path.empty()) {
         const auto general_name =

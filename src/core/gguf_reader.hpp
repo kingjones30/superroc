@@ -46,6 +46,9 @@ enum class GgmlType : std::uint16_t {
   /// ROCmFP4 with a single per-block UE4M3 scale.
   /// 17 bytes per 32 elements (4.25 BPW).
   kQ4_0_ROCMFP4_FAST = 101,
+  /// ROCmFPX Q8_0 variant: int8 values with a UE4M3 exponent scale.
+  /// 33 bytes per 32 elements; load-time repacked to Q8_0 (lossless).
+  kQ8_0_ROCMFPX = 103,
 };
 
 [[nodiscard]] constexpr std::string_view ToString(GgmlType type) noexcept {
@@ -94,6 +97,8 @@ enum class GgmlType : std::uint16_t {
       return "Q4_0_ROCMFP4";
     case GgmlType::kQ4_0_ROCMFP4_FAST:
       return "Q4_0_ROCMFP4_FAST";
+    case GgmlType::kQ8_0_ROCMFPX:
+      return "Q8_0_ROCMFPX";
   }
   return "UNKNOWN";
 }
@@ -156,6 +161,8 @@ struct GgufMappedRegion {
   std::size_t size{0};
   /// Borrowed descriptor, valid for the reader lifetime; -1 for memory images.
   int file_descriptor{-1};
+  /// Reader-owned anonymous memory (file_descriptor -1).
+  bool anonymous{false};
 };
 
 /// Zero-copy, lightweight GGUF binary reader and tensor indexer.
@@ -172,7 +179,13 @@ public:
   /// (SUPERROC_TENSOR_OVERLAY) replaces tensors of the model file only: a
   /// draft model, an MTP head or a vision projector is read as it is, also
   /// when it holds a tensor of the same name.
-  enum class FileRole : std::uint8_t { kModel, kSidecar };
+  enum class FileRole : std::uint8_t {
+    kModel,
+    kSidecar,
+    /// Metadata/tensor-table only; no tensor overlay, no ROCmFPX repack;
+    /// tensor data pointers may hold unconverted types.
+    kMetadata,
+  };
 
   /// The role of a draft or head file named beside `model`: when it is the
   /// model file itself it stays the model, and the overlay applies to it.
@@ -193,6 +206,13 @@ public:
   [[nodiscard]] static std::unique_ptr<GgufReader> OpenMemory(
       const void* data, std::size_t size, std::string* error_msg = nullptr);
 
+  /// Load-time repack of type-103 (Q8_0_ROCMFPX) tensors to Q8_0. Returns
+  /// `base` unchanged when no tensor has type 103. Otherwise the returned
+  /// reader owns one anonymous mapping with every tensor's bytes (103 blocks
+  /// repacked to Q8_0) and keeps `base` alive in shards_.
+  [[nodiscard]] static std::unique_ptr<GgufReader> RepackRocmFpx(
+      std::unique_ptr<GgufReader> base, std::string* error_msg = nullptr);
+
   [[nodiscard]] std::uint32_t GetVersion() const noexcept { return version_; }
   [[nodiscard]] std::uint64_t GetTensorCount() const noexcept {
     return tensors_.size();
@@ -209,6 +229,16 @@ public:
   [[nodiscard]] std::span<const GgufMappedRegion> GetMappedRegions()
       const noexcept {
     return mapped_regions_;
+  }
+  [[nodiscard]] std::span<const GgufMappedRegion> GetIdentityRegions()
+      const noexcept {
+    if (!identity_regions_.empty()) {
+      return identity_regions_;
+    }
+    return mapped_regions_;
+  }
+  [[nodiscard]] bool IsRocmFpxRepacked() const noexcept {
+    return rocmfpx_repacked_;
   }
 
   /// Metadata lookup helpers
@@ -277,6 +307,10 @@ private:
   std::size_t size_{0};
   int fd_{-1};
   bool owns_mmap_{false};
+  /// Anonymous repack buffer owned by RepackRocmFpx readers (munmap on
+  /// destruction; moved, never copied).
+  void* anon_addr_{nullptr};
+  std::size_t anon_size_{0};
 
   std::uint32_t version_{0};
   std::uint64_t alignment_{32};
@@ -284,6 +318,8 @@ private:
   std::vector<GgufTensorInfo> tensors_;
   std::unordered_map<std::string_view, std::size_t> tensor_index_;
   std::vector<GgufMappedRegion> mapped_regions_;
+  std::vector<GgufMappedRegion> identity_regions_;
+  bool rocmfpx_repacked_{false};
   std::vector<std::unique_ptr<GgufReader>> shards_;
 };
 

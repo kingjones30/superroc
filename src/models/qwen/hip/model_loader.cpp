@@ -23,7 +23,11 @@ namespace {
 
 void ReleaseWeightRegions(std::vector<QwenGpuWeightRegion>& regions) noexcept {
   for (auto& region : regions) {
-    if (region.host_copy != nullptr) {
+    if (region.registered_in_place != nullptr) {
+      // Reader-owned repack buffer: unregister only, never munmap. The
+      // reader (QwenGpuModel::reader_) outlives the regions.
+      (void)hipHostUnregister(region.registered_in_place);
+    } else if (region.host_copy != nullptr) {
       (void)hipHostUnregister(region.host_copy);
       (void)munmap(region.host_copy, region.size);
     }
@@ -70,6 +74,28 @@ void CopyMappedWeights(const core::GgufMappedRegion& source, void* copy) {
 
 [[nodiscard]] hipError_t MapRegisteredRegion(
     const core::GgufMappedRegion& source, QwenGpuWeightRegion& destination) {
+  if (source.anonymous) {
+    // Reader-owned repack buffer: register in place, no host copy. The
+    // reader outlives the regions, so ReleaseWeightRegions only unregisters.
+    void* pinned = const_cast<void*>(source.data);
+    const auto register_error = hipHostRegister(
+        pinned, source.size, hipHostRegisterMapped | hipHostRegisterReadOnly);
+    if (register_error != hipSuccess) {
+      return register_error;
+    }
+    void* device_data = nullptr;
+    const auto pointer_error = hipHostGetDevicePointer(&device_data, pinned, 0);
+    if (pointer_error != hipSuccess) {
+      (void)hipHostUnregister(pinned);
+      return pointer_error;
+    }
+    destination = {.host_data = source.data,
+                   .device_data = device_data,
+                   .host_copy = nullptr,
+                   .size = source.size,
+                   .registered_in_place = pinned};
+    return hipSuccess;
+  }
   void* host_copy = mmap(nullptr, source.size, PROT_READ | PROT_WRITE,
                          MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (host_copy == MAP_FAILED)

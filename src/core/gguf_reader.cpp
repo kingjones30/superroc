@@ -7,9 +7,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
+#include <cerrno>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -23,6 +26,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -69,6 +73,9 @@ GgufReader::~GgufReader() {
   if (owns_mmap_ && mmap_addr_ != nullptr && size_ > 0) {
     munmap(mmap_addr_, size_);
   }
+  if (anon_addr_ != nullptr && anon_size_ > 0) {
+    munmap(anon_addr_, anon_size_);
+  }
   if (fd_ >= 0) {
     close(fd_);
   }
@@ -80,24 +87,34 @@ GgufReader::GgufReader(GgufReader&& other) noexcept
       size_(other.size_),
       fd_(other.fd_),
       owns_mmap_(other.owns_mmap_),
+      anon_addr_(other.anon_addr_),
+      anon_size_(other.anon_size_),
       version_(other.version_),
       alignment_(other.alignment_),
       metadata_(std::move(other.metadata_)),
       tensors_(std::move(other.tensors_)),
       tensor_index_(std::move(other.tensor_index_)),
       mapped_regions_(std::move(other.mapped_regions_)),
+      identity_regions_(std::move(other.identity_regions_)),
+      rocmfpx_repacked_(other.rocmfpx_repacked_),
       shards_(std::move(other.shards_)) {
   other.data_ = nullptr;
   other.mmap_addr_ = nullptr;
   other.size_ = 0;
   other.fd_ = -1;
   other.owns_mmap_ = false;
+  other.anon_addr_ = nullptr;
+  other.anon_size_ = 0;
+  other.rocmfpx_repacked_ = false;
 }
 
 GgufReader& GgufReader::operator=(GgufReader&& other) noexcept {
   if (this != &other) {
     if (owns_mmap_ && mmap_addr_ != nullptr && size_ > 0) {
       munmap(mmap_addr_, size_);
+    }
+    if (anon_addr_ != nullptr && anon_size_ > 0) {
+      munmap(anon_addr_, anon_size_);
     }
     if (fd_ >= 0) {
       close(fd_);
@@ -108,12 +125,16 @@ GgufReader& GgufReader::operator=(GgufReader&& other) noexcept {
     size_ = other.size_;
     fd_ = other.fd_;
     owns_mmap_ = other.owns_mmap_;
+    anon_addr_ = other.anon_addr_;
+    anon_size_ = other.anon_size_;
     version_ = other.version_;
     alignment_ = other.alignment_;
     metadata_ = std::move(other.metadata_);
     tensors_ = std::move(other.tensors_);
     tensor_index_ = std::move(other.tensor_index_);
     mapped_regions_ = std::move(other.mapped_regions_);
+    identity_regions_ = std::move(other.identity_regions_);
+    rocmfpx_repacked_ = other.rocmfpx_repacked_;
     shards_ = std::move(other.shards_);
 
     other.data_ = nullptr;
@@ -121,6 +142,9 @@ GgufReader& GgufReader::operator=(GgufReader&& other) noexcept {
     other.size_ = 0;
     other.fd_ = -1;
     other.owns_mmap_ = false;
+    other.anon_addr_ = nullptr;
+    other.anon_size_ = 0;
+    other.rocmfpx_repacked_ = false;
   }
   return *this;
 }
@@ -146,10 +170,170 @@ std::unique_ptr<GgufReader> GgufReader::OpenFile(
       return nullptr;
     }
   }
-  if (role == FileRole::kSidecar) {
+  if (role == FileRole::kMetadata) {
     return first;
   }
-  return ApplyTensorOverlay(std::move(first), error_msg);
+  if (role == FileRole::kSidecar) {
+    return RepackRocmFpx(std::move(first), error_msg);
+  }
+  return RepackRocmFpx(ApplyTensorOverlay(std::move(first), error_msg),
+                       error_msg);
+}
+
+std::unique_ptr<GgufReader> GgufReader::RepackRocmFpx(
+    std::unique_ptr<GgufReader> base, std::string* error_msg) {
+  if (base == nullptr) {
+    return nullptr;
+  }
+  std::size_t repack_count = 0;
+  for (const auto& tensor : base->tensors_) {
+    if (tensor.type == GgmlType::kQ8_0_ROCMFPX) {
+      ++repack_count;
+    }
+  }
+  if (repack_count == 0) {
+    return base;
+  }
+
+  const std::size_t alignment =
+      base->alignment_ != 0 ? static_cast<std::size_t>(base->alignment_) : 32;
+  const std::size_t count = base->tensors_.size();
+  std::vector<std::size_t> new_bytes(count, 0);
+  std::vector<std::size_t> offsets(count, 0);
+  std::vector<std::size_t> blocks(count, 0);
+  std::size_t total = 0;
+  for (std::size_t i = 0; i < count; ++i) {
+    const auto& tensor = base->tensors_[i];
+    std::size_t bytes = tensor.size_bytes;
+    if (tensor.type == GgmlType::kQ8_0_ROCMFPX) {
+      const std::uint64_t elements = tensor.ElementCount();
+      const std::size_t tensor_blocks = static_cast<std::size_t>(elements / 32);
+      if (tensor_blocks == 0 ||
+          tensor_blocks > std::numeric_limits<std::size_t>::max() /
+                              sizeof(quant::block_q8_0)) {
+        if (error_msg != nullptr) {
+          *error_msg = "Q8_0_ROCMFPX tensor has no repackable blocks: " +
+                       std::string(tensor.name);
+        }
+        return nullptr;
+      }
+      blocks[i] = tensor_blocks;
+      bytes = tensor_blocks * sizeof(quant::block_q8_0);
+    }
+    const std::size_t aligned = (total + alignment - 1) / alignment * alignment;
+    if (aligned > std::numeric_limits<std::size_t>::max() - bytes) {
+      if (error_msg != nullptr) {
+        *error_msg = "Q8_0_ROCMFPX repack buffer size overflows";
+      }
+      return nullptr;
+    }
+    offsets[i] = aligned;
+    new_bytes[i] = bytes;
+    total = aligned + bytes;
+  }
+  if (total == 0) {
+    if (error_msg != nullptr) {
+      *error_msg = "Q8_0_ROCMFPX repack buffer is empty";
+    }
+    return nullptr;
+  }
+
+  void* buffer = mmap(nullptr, total, PROT_READ | PROT_WRITE,
+                      MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (buffer == MAP_FAILED) {
+    if (error_msg != nullptr) {
+      *error_msg = "Failed to allocate Q8_0_ROCMFPX repack buffer";
+    }
+    return nullptr;
+  }
+  (void)madvise(buffer, total, MADV_HUGEPAGE);
+
+  const long page_size = ::sysconf(_SC_PAGESIZE);
+  const auto page = page_size > 0 ? static_cast<std::size_t>(page_size)
+                                  : static_cast<std::size_t>(4096);
+  std::atomic<std::size_t> next{0};
+  auto repack_one = [&](std::size_t index) {
+    const auto& tensor = base->tensors_[index];
+    auto* dst = static_cast<std::uint8_t*>(buffer) + offsets[index];
+    if (tensor.type == GgmlType::kQ8_0_ROCMFPX) {
+      quant::RepackQ8_0_ROCMFPXToQ8_0(tensor.data, dst, blocks[index]);
+    } else if (tensor.size_bytes != 0) {
+      std::memcpy(dst, tensor.data, tensor.size_bytes);
+    }
+    // The repacked copy now owns these bytes. Drop the source pages so the
+    // file-backed resident set does not double while the base stays alive in
+    // shards_. Errors are ignored: memory images are not mappings.
+    const auto begin = reinterpret_cast<std::uintptr_t>(tensor.data);
+    const auto inner_begin = (begin + page - 1) / page * page;
+    const auto inner_end = (begin + tensor.size_bytes) / page * page;
+    if (inner_end > inner_begin) {
+      (void)madvise(reinterpret_cast<void*>(inner_begin),
+                    inner_end - inner_begin, MADV_DONTNEED);
+    }
+  };
+  auto worker = [&] {
+    while (true) {
+      const std::size_t index = next.fetch_add(1, std::memory_order_relaxed);
+      if (index >= count) {
+        break;
+      }
+      repack_one(index);
+    }
+  };
+  {
+    std::vector<std::thread> workers;
+    const std::size_t worker_count = std::min<std::size_t>(16, count);
+    for (std::size_t i = 1; i < worker_count; ++i) {
+      workers.emplace_back(worker);
+    }
+    worker();
+    for (auto& thread : workers) {
+      thread.join();
+    }
+  }
+  if (mprotect(buffer, total, PROT_READ) != 0) {
+    const int saved = errno;
+    munmap(buffer, total);
+    if (error_msg != nullptr) {
+      *error_msg = "Failed to seal Q8_0_ROCMFPX repack buffer: " +
+                   std::string(std::strerror(saved));
+    }
+    return nullptr;
+  }
+
+  auto repacked = std::unique_ptr<GgufReader>(new GgufReader());
+  repacked->version_ = base->version_;
+  repacked->alignment_ = base->alignment_;
+  repacked->metadata_ = base->metadata_;
+  repacked->tensors_ = base->tensors_;
+  repacked->tensor_index_ = base->tensor_index_;
+  for (std::size_t i = 0; i < count; ++i) {
+    auto& tensor = repacked->tensors_[i];
+    tensor.data = static_cast<const std::uint8_t*>(buffer) + offsets[i];
+    tensor.offset = static_cast<std::uint64_t>(offsets[i]);
+    if (tensor.type == GgmlType::kQ8_0_ROCMFPX) {
+      tensor.type = GgmlType::kQ8_0;
+      tensor.size_bytes = new_bytes[i];
+    }
+  }
+  repacked->data_ = static_cast<const std::uint8_t*>(buffer);
+  repacked->size_ = total;
+  repacked->fd_ = -1;
+  repacked->anon_addr_ = buffer;
+  repacked->anon_size_ = total;
+  repacked->mapped_regions_.push_back(
+      {repacked->data_, total, -1, /*anonymous=*/true});
+  repacked->identity_regions_ = base->identity_regions_.empty()
+                                    ? base->mapped_regions_
+                                    : base->identity_regions_;
+  repacked->rocmfpx_repacked_ = true;
+  repacked->shards_.push_back(std::move(base));
+  std::fprintf(stderr,
+               "rocmfpx: repacked %zu Q8_0_ROCMFPX tensors to Q8_0 "
+               "(%.2f GiB in memory)\n",
+               repack_count,
+               static_cast<double>(total) / (1024.0 * 1024.0 * 1024.0));
+  return repacked;
 }
 
 std::unique_ptr<GgufReader> GgufReader::ApplyTensorOverlay(

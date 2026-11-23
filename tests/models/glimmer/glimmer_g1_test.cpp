@@ -358,9 +358,14 @@ int main(int argc, char** argv) {
     }
     auto chat =
         superroc::tokenization::QwenChatTemplate::CreateFromGguf(*reader, &err);
+    const std::string chat_sha = chat == nullptr
+                                     ? std::string()
+                                     : std::string(chat->GetTemplateSha256());
     if (chat == nullptr ||
-        chat->GetTemplateSha256() != superroc::tokenization::QwenChatTemplate::
-                                         MuseGlimmerTemplateSha256() ||
+        (chat_sha != superroc::tokenization::QwenChatTemplate::
+                         MuseGlimmerTemplateSha256() &&
+         chat_sha != superroc::tokenization::QwenChatTemplate::
+                         MuseGlimmerTemplateSha256Pretty()) ||
         chat->GetProfile() !=
             superroc::tokenization::QwenChatTemplate::Profile::kMuseGlimmer ||
         !superroc::tokenization::QwenChatTemplate::ValidateGgufTemplate(*reader,

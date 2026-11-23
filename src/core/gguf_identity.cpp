@@ -230,18 +230,21 @@ std::string RegionDigest(const GgufMappedRegion& region) {
 
 std::string GgufIdentityHex(const GgufReader& reader) {
   std::vector<std::string> stamps;
-  for (const auto& region : reader.GetMappedRegions())
+  for (const auto& region : reader.GetIdentityRegions())
     stamps.push_back(region.file_descriptor < 0
                          ? std::string{}
                          : FileStamp(region.file_descriptor, region.size));
   crypto::Sha256Hasher hash;
   HashString(hash, kGgufIdentityScheme);
-  for (const auto& region : reader.GetMappedRegions()) {
+  if (reader.IsRocmFpxRepacked()) {
+    HashString(hash, ":rocmfpx-q8_0-repack-v1");
+  }
+  for (const auto& region : reader.GetIdentityRegions()) {
     HashString(hash, ":" + std::to_string(region.size) + ":");
     HashString(hash, RegionDigest(region));
   }
   for (std::size_t index = 0; index < stamps.size(); ++index) {
-    const auto& region = reader.GetMappedRegions()[index];
+    const auto& region = reader.GetIdentityRegions()[index];
     if (!stamps[index].empty() &&
         stamps[index] != FileStamp(region.file_descriptor, region.size))
       throw std::runtime_error("GGUF artifact changed during identity lookup");

@@ -71,6 +71,9 @@ struct QwenGpuWeightRegion {
   void* device_data{nullptr};
   void* host_copy{nullptr};
   std::size_t size{0};
+  // Reader-owned anonymous repack buffer registered in place (never munmapped
+  // here; the reader that owns it outlives the regions).
+  void* registered_in_place{nullptr};
 };
 
 struct QwenGpuMemoryUsage {

@@ -539,7 +539,8 @@ std::unique_ptr<QwenChatTemplate> QwenChatTemplate::CreateFromGguf(
       return nullptr;
     }
     const std::string sha = TemplateSha256(*template_str);
-    if (sha != MuseGlimmerTemplateSha256()) {
+    if (sha != MuseGlimmerTemplateSha256() &&
+        sha != MuseGlimmerTemplateSha256Pretty()) {
       if (error_msg != nullptr) {
         *error_msg =
             "muse-glimmer chat template SHA-256 is not the pinned template: " +

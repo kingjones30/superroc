@@ -60,6 +60,13 @@ struct block_q8_0 {
   std::int8_t qs[32];
 };
 
+// Q8_0_ROCMFPX: 32 int8 values + UE4M3 exponent scale (QK=32, 33 bytes).
+// Load-time repacked to Q8_0; the scale mapping is exact in fp16.
+struct block_q8_0_rocmfpx {
+  std::int8_t qs[32];
+  std::uint8_t e;
+};
+
 // Q4_0: fp16 scale + 32 signed 4-bit values packed as 16 bytes (QK=32). The
 // low nibble of qs[j] is element j and the high nibble is element j + 16; both
 // are unsigned codes biased by 8. This is the standard ggml block_q4_0 layout,
@@ -105,6 +112,8 @@ static_assert(sizeof(block_q6_K) == 210, "block_q6_K must be 210 bytes");
 static_assert(sizeof(block_q3_K) == 110, "block_q3_K must be 110 bytes");
 static_assert(sizeof(block_q8_K) == 292, "block_q8_K must be 292 bytes");
 static_assert(sizeof(block_q8_0) == 34, "block_q8_0 must be 34 bytes");
+static_assert(sizeof(block_q8_0_rocmfpx) == 33,
+              "block_q8_0_rocmfpx must be 33 bytes");
 static_assert(sizeof(block_q4_0) == 18, "block_q4_0 must be 18 bytes");
 static_assert(sizeof(block_iq4_nl) == 18, "block_iq4_nl must be 18 bytes");
 static_assert(sizeof(block_iq4_xs) == 136, "block_iq4_xs must be 136 bytes");
@@ -128,6 +137,7 @@ inline constexpr std::int8_t kValuesIq4Nl[16] = {
     case core::GgmlType::kIQ4_NL:
     case core::GgmlType::kQ4_0_ROCMFP4:
     case core::GgmlType::kQ4_0_ROCMFP4_FAST:
+    case core::GgmlType::kQ8_0_ROCMFPX:
       return 32;
     case core::GgmlType::kQ2_K:
     case core::GgmlType::kIQ2_XXS:
@@ -197,6 +207,16 @@ float DotProductQ8_K(const void* row_data, std::span<const float> vec,
 
 // Dequantize row of Q8_0 to float
 void DequantizeQ8_0(const void* src, float* dst, std::size_t k);
+
+// UE4M3 exponent scale used by Q8_0_ROCMFPX (exact in fp16/fp32).
+float Ue4m3ScaleToFloat(std::uint8_t e) noexcept;
+
+// Dequantize row of Q8_0_ROCMFPX to float
+void DequantizeQ8_0_ROCMFPX(const void* src, float* dst, std::size_t k);
+
+// Lossless repack of Q8_0_ROCMFPX blocks to Q8_0 blocks.
+void RepackQ8_0_ROCMFPXToQ8_0(const void* src, void* dst,
+                              std::size_t blocks) noexcept;
 
 // Dequantize row of Q4_0 to float
 void DequantizeQ4_0(const void* src, float* dst, std::size_t k);

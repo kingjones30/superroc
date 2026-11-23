@@ -255,6 +255,12 @@ public:
     return "114f55ebdc1804c1af371197b9fdf2d6bb925966c9dfe46b73782a71bc07965e";
   }
 
+  // Same template, pretty-printed; renders byte-identical.
+  [[nodiscard]] static constexpr std::string_view
+  MuseGlimmerTemplateSha256Pretty() noexcept {
+    return "cfc67e5f349f37690dfd31ed1f18bc4442a9dd32fe39a648f993cb4eb3cae678";
+  }
+
   // LFM2: the LFM2.5 GGUFs carry this template.
   [[nodiscard]] static constexpr std::string_view
   Lfm2TemplateSha256() noexcept {

@@ -881,6 +881,14 @@ if (BUILD_TESTING)
   add_test(NAME gguf_identity_test COMMAND gguf_identity_test)
   set_tests_properties(gguf_identity_test PROPERTIES LABELS "cpu;core;gguf")
 
+  add_executable(gguf_rocmfpx_repack_test
+    tests/core/gguf_rocmfpx_repack_test.cpp)
+  target_link_libraries(gguf_rocmfpx_repack_test PRIVATE superroc_core)
+
+  add_test(NAME gguf_rocmfpx_repack_test COMMAND gguf_rocmfpx_repack_test)
+  set_tests_properties(gguf_rocmfpx_repack_test
+    PROPERTIES LABELS "cpu;core;gguf")
+
   add_executable(minimax_h3_runtime_test
     tests/models/minimax_h3_runtime_test.cpp)
   target_link_libraries(minimax_h3_runtime_test PRIVATE superroc_core)

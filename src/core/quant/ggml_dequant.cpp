@@ -214,6 +214,9 @@ std::size_t QuantizedRowBytes(core::GgmlType type,
     case core::GgmlType::kQ8_0:
       block_bytes = sizeof(block_q8_0);
       break;
+    case core::GgmlType::kQ8_0_ROCMFPX:
+      block_bytes = sizeof(block_q8_0_rocmfpx);
+      break;
     case core::GgmlType::kIQ4_NL:
       block_bytes = sizeof(block_iq4_nl);
       break;
@@ -511,6 +514,40 @@ float DotProductQ8_0(const void* row_data, std::span<const float> vec,
     }
   }
   return sum;
+}
+
+float Ue4m3ScaleToFloat(std::uint8_t e) noexcept {
+  if (e > 0x7e) {
+    return 0.0F;
+  }
+  const int exp = (e >> 3) & 0x0F;
+  const int mant = e & 0x07;
+  if (exp == 0) {
+    return static_cast<float>(mant) * std::ldexp(1.0F, -10);
+  }
+  return static_cast<float>(8 + mant) * std::ldexp(1.0F, exp - 11);
+}
+
+void DequantizeQ8_0_ROCMFPX(const void* src, float* dst, std::size_t k) {
+  const auto* blocks = static_cast<const block_q8_0_rocmfpx*>(src);
+  const std::size_t nb = k / 32;
+
+  for (std::size_t b = 0; b < nb; ++b) {
+    const float scale = Ue4m3ScaleToFloat(blocks[b].e);
+    for (std::size_t i = 0; i < 32; ++i) {
+      dst[(b * 32) + i] = scale * static_cast<float>(blocks[b].qs[i]);
+    }
+  }
+}
+
+void RepackQ8_0_ROCMFPXToQ8_0(const void* src, void* dst,
+                              std::size_t blocks) noexcept {
+  const auto* in = static_cast<const block_q8_0_rocmfpx*>(src);
+  auto* out = static_cast<block_q8_0*>(dst);
+  for (std::size_t b = 0; b < blocks; ++b) {
+    out[b].d = FloatToFp16(Ue4m3ScaleToFloat(in[b].e));
+    std::memcpy(out[b].qs, in[b].qs, 32);
+  }
 }
 
 // ---------------------------------------------------------------------------
