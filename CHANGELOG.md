@@ -6,6 +6,26 @@ Notable user-facing changes to Super Roc are recorded here. Releases follow
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-11-23
+
+### Added
+
+- Q8_0_ROCMFPX (GGUF type 103) files load: each block (32 int8 values and one
+  UE4M3 scale byte) is converted to Q8_0 once at load, without loss, and the
+  converted weights are registered with the GPU in place. A repacked model's
+  artifact identity is hashed from its source file, so restarts reuse the
+  cached digest.
+- Qwen3.8-Flash-Next: ROCmFP4 and ROCmFP4-FAST builds whose embedding table
+  and per-layer embedding table are also ROCmFP4 now load.
+- Muse Glimmer accepts the pretty-printed copy of its chat template, which
+  renders byte-identical to the pinned one.
+- The Lemonade model list adds Qwen3.5-27B-Post-Reasoning and Summerwise-27B.
+
+### Fixed
+
+- The serve architecture probe reads metadata only, so a model file is no
+  longer fully processed twice during load.
+
 ## [0.20.1] - 2026-11-23
 
 ### Fixed
