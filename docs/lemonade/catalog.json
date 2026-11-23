@@ -609,5 +609,18 @@
       "tool-calling"
     ],
     "size": 4.73
+  },
+  "Qwen3.5-27B-Post-Reasoning": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.5-27B-Post-Reasoning-SuperRoc-GGUF:Qwen3.5-27B-Post-Reasoning-Q4_0-ROCmFP4-LEAN-imatrix.gguf",
+      "mmproj": "kingjones777/Qwen3.5-27B-Post-Reasoning-SuperRoc-GGUF:mmproj-Qwen3.5-27B-Post-Reasoning-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 15.82
   }
 }

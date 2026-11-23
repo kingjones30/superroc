@@ -518,5 +518,15 @@
     "labels": ["chat", "tool-calling"],
     "size_gb": 4.73,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.5-27B-Post-Reasoning",
+    "repo": "kingjones777/Qwen3.5-27B-Post-Reasoning-SuperRoc-GGUF",
+    "file": "Qwen3.5-27B-Post-Reasoning-Q4_0-ROCmFP4-LEAN-imatrix.gguf",
+    "mmproj": "kingjones777/Qwen3.5-27B-Post-Reasoning-SuperRoc-GGUF:mmproj-Qwen3.5-27B-Post-Reasoning-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 15.82,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
   }
 ]

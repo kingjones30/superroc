@@ -449,5 +449,14 @@
     "0",
     "--think",
     "off"
+  ],
+  "Qwen3.5-27B-Post-Reasoning-Q4_0-ROCmFP4-LEAN-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--think",
+    "off"
   ]
 }
