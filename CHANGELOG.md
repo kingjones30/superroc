@@ -6,6 +6,8 @@ Notable user-facing changes to Super Roc are recorded here. Releases follow
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-11-23
+
 ### Fixed
 
 - LFM2 family: the prompt cache now keeps the conversation up to the
