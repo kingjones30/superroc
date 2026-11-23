@@ -1676,13 +1676,28 @@ public:
       }
       return TextPreparedPrompt{std::move(*tokens), {}, 0};
     }
-    // LFM2: the same tokens-only TextPreparedPrompt as Glimmer.
+    // LFM2: snapshot before the generation framing, the Flint / DeepSeek
+    // stable-frontier rule. The LFM2.5 generation prompt opens <think> (or
+    // writes <think></think>) after "assistant\n"; a client that resends the
+    // assistant turn without its reasoning diverges there, so a snapshot at
+    // the prompt end never matched the next turn and reuse fell back to the
+    // last 2048-row grid point (4096 of 4818 tokens).
     if (superroc::core::IsLfm2Family(model_->GetConfig().architecture)) {
       auto tokens = RenderAndTokenize(request);
       if (!tokens.has_value()) {
         return std::nullopt;
       }
-      return TextPreparedPrompt{std::move(*tokens), {}, 0};
+      TextPreparedPrompt prepared{std::move(*tokens), {}, 0};
+      auto continuation = request;
+      continuation.messages.emplace_back(tokenization::ChatRole::kUser, "");
+      if (const auto continued = RenderAndTokenize(continuation)) {
+        prepared.cache_prefix_tokens = static_cast<std::size_t>(
+            std::mismatch(prepared.tokens.begin(), prepared.tokens.end(),
+                          continued->begin(), continued->end())
+                .first -
+            prepared.tokens.begin());
+      }
+      return prepared;
     }
     if (model_->GetConfig().llama) {
       auto tokens = RenderAndTokenize(request);
