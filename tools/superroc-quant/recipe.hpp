@@ -141,8 +141,8 @@ inline bool UseMoreBits(int i_layer, int n_layers) {
 }
 
 /// The 7 fork recipes. ftype = GGUF file_type value (100..106).
-/// The two EVEN recipes map to ftype 100/103 with --pure (see DECISIONS/SPEC2
-/// item 6 and the fork's quantize.cpp, which sets params.pure for
+/// The two EVEN recipes map to ftype 100/103 with --pure (see
+/// the fork's quantize.cpp, which sets params.pure for
 /// Q4_0_ROCMFP4_EVEN/FAST_EVEN).
 /// G4 recipes (product track) are superroc-native layout variants (120/121).
 enum class Recipe {
@@ -153,7 +153,7 @@ enum class Recipe {
   kFastCoherent = 104,
   kStrix = 105,
   kStrixLean = 106,
-  // superroc-native split-scale-plane recipes (RV20 §3). file_type stays 105/106
+  // superroc-native split-scale-plane recipes. file_type stays 105/106
   // (G4 files carry the g4 recipe in superroc.quant.recipe and format_version 2).
   kG4Strix = 200,
   kG4StrixLean = 201,
@@ -192,7 +192,7 @@ inline Recipe RecipeFromFtype(std::uint32_t ftype) {
 // The G4 recipes are built as a post-transform of the STRIX recipe: run the
 // STRIX selection, then map 100->120 and 101->121 (split scale plane). The
 // g4-strix recipe additionally keeps shared experts (ffn_*_shexp) and
-// attention K/V on the dual-scale 120 layout (RV20 §3.3).
+// attention K/V on the dual-scale 120 layout.
 [[nodiscard]] inline Type G4Map(Type t) {
   if (t == (Type)100) return (Type)120;
   if (t == (Type)101) return (Type)121;

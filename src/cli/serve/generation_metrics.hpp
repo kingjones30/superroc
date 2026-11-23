@@ -165,6 +165,7 @@ inline std::string GenerationLogDetails(
       << " queue_ms=" << result.queue_ms
       << " shared_prefix_wait_ms=" << result.shared_prefix_wait_ms
       << " ttft_ms=" << result.ttft_ms
+      << " prefill_tail_ms=" << result.prefill_tail_ms
       << " prefill_tps=" << PrefillTokensPerSecond(result) << " decode_tps="
       << (result.decode_ms > 0
               ? 1000.0 * result.completion_tokens / result.decode_ms
@@ -201,6 +202,7 @@ inline std::string GenerationLogDetails(
     out << " cache_miss_reason=" << result.cache_miss_reason
         << " common_prefix_tokens=" << result.cache_common_prefix_tokens
         << " nearest_checkpoint_tokens=" << result.cache_checkpoint_tokens;
+  out << " loop_guard_fired=" << (result.loop_guard_fired ? 1 : 0);
   return out.str();
 }
 
@@ -216,15 +218,21 @@ inline json::Value GenerationTimings(
           : 0.0;
   timings["prompt_per_second"] = PrefillTokensPerSecond(result);
   timings["predicted_n"] = result.completion_tokens;
-  timings["predicted_ms"] = result.decode_ms;
+  // First-to-last emitted token has no window with fewer than two tokens,
+  // and the wall time of a lone decode step is queue jitter, not a rate.
+  // Report the llama.cpp pair (0 ms, 0 per second) instead of a fabricated
+  // spike; lemonade's bench reads predicted_per_second directly.
+  const bool predicted_timed = result.completion_tokens > 1;
+  timings["predicted_ms"] = predicted_timed ? result.decode_ms : 0.0;
   timings["predicted_per_token_ms"] =
-      result.completion_tokens > 0
+      predicted_timed
           ? result.decode_ms / static_cast<double>(result.completion_tokens)
           : 0.0;
   timings["predicted_per_second"] =
-      result.decode_ms > 0.0 ? static_cast<double>(result.completion_tokens) *
-                                   1000.0 / result.decode_ms
-                             : 0.0;
+      predicted_timed && result.decode_ms > 0.0
+          ? static_cast<double>(result.completion_tokens) * 1000.0 /
+                result.decode_ms
+          : 0.0;
   timings["cache_n"] = result.cached_prompt_tokens;
   timings["cache_restore_ms"] = result.cache_restore_ms;
   timings["cache_snapshot_ms"] = result.cache_snapshot_ms;

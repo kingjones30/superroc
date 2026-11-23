@@ -16,7 +16,6 @@
 #include <vector>
 
 #include "src/core/json.hpp"
-#include "src/core/previous_name_compat.hpp"
 
 namespace superroc::server {
 namespace {
@@ -330,13 +329,7 @@ std::optional<json::Value> ParseMultipartBody(const HttpRequest& request,
     }
     const std::string_view content =
         body.substr(content_begin, content_end - content_begin);
-    // Compatibility: the previous engine-name field is built from
-    // parts so its spelling never appears here; both spellings share one
-    // code path and are stored under the current name.
-    static const std::string kPreviousExtension =
-        ::superroc::core::PreviousEngineName("superroc");
-    if ((field_name == "superroc" || field_name == kPreviousExtension) &&
-        !filename_present) {
+    if (field_name == "superroc" && !filename_present) {
       try {
         json::Value extension = json::parse(std::string(content));
         if (!extension.is_object()) {
@@ -422,10 +415,8 @@ HttpResponse CreateVideo(const HttpRequest& request, VideoJobService& service) {
                  "image and ordered-reference conditioning are not supported",
                  "unsupported_input_reference");
   }
-  static const std::string kPreviousExtension =
-      ::superroc::core::PreviousEngineName("superroc");
-  if (!HasOnlyMembers(body, {"model", "prompt", "size", "seconds", "superroc",
-                             kPreviousExtension})) {
+  if (!HasOnlyMembers(body,
+                      {"model", "prompt", "size", "seconds", "superroc"})) {
     return Error(400, "Bad Request",
                  "request contains an unsupported video field",
                  "unsupported_field");
@@ -486,12 +477,7 @@ HttpResponse CreateVideo(const HttpRequest& request, VideoJobService& service) {
   std::optional<int> frames;
   std::optional<int> selected_frame;
   bool preset_explicit = false;
-  // Compatibility: previous releases sent the previous engine-name
-  // key; prefer the current one.
   const json::Value* extension = body.find("superroc");
-  if (extension == nullptr) {
-    extension = body.find(kPreviousExtension);
-  }
   if (extension != nullptr) {
     if (!extension->is_object() ||
         !HasOnlyMembers(*extension, {"preset", "seed", "frames",

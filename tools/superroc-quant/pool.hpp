@@ -16,7 +16,7 @@
 // lets the exception escape main). A task may legitimately run after a
 // sibling threw; the pool drains those, it does not abandon the queue.
 //
-// v0.8 (RV-LQP2 F2): a throwing task must WAKE the caller's waiter, which may
+// A throwing task must WAKE the caller's waiter, which may
 // sleep on a different condition variable than the pool's own done_cv_ (the
 // quantizer's writer waits on its pipeline cv and only polls pool.error() on
 // wakeup -- a throw skipped the only notify and hung the run forever). The

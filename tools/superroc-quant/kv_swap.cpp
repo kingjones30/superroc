@@ -1,7 +1,7 @@
 // kv_swap — write a GGUF whose KV/metadata block is copied verbatim from a
 // template file and whose tensor payloads come verbatim from another file.
 //
-// SPEC6 item 1: King's 27B seat should change ONLY the weights. The weighted
+// A 27B quant should change ONLY the weights. The weighted
 // 27B differs from the served file in its metadata too (chat template,
 // add_bos_token, padding_token_id, general.*/base_model.*), so a drop-in is
 // the served file's KV block with the weighted tensor bytes.

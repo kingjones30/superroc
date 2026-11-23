@@ -1,4 +1,4 @@
-// ling3-fusion-w1-test -- RV25 wave 1 (F1..F5) unit gate. LF1, 2026-10-03.
+// ling3-fusion-w1-test -- unit gate.
 //
 // Wave 1 is backend-only: every candidate is a rewrite that the design claims is
 // BIT-IDENTICAL, not merely close. This test proves the two that have arithmetic
@@ -20,9 +20,9 @@
 // F2's claim (the shared expert's FFN_X quant rewrote identical bytes over
 // themselves) is exercised by the xq_ready = 1 case of (b): skipping the quant
 // must leave the output byte-identical. F1 and F5 have no arithmetic -- they are
-// checked by the 64-token launch trace (REPORT8), not here.
+// checked by the 64-token launch trace, not here.
 //
-// Run inside gpu-run. Small and fast: no model, no server, synthetic weights.
+// Run on an otherwise idle GPU. Small and fast: no model, no server, synthetic weights.
 
 #include <hip/hip_runtime.h>
 
@@ -77,7 +77,7 @@ __global__ void t_axpy(float w, const float* p, float* y, int n) {
 __global__ void t_zp(const float* p, float* y, int n) {
   int i = (int)(blockIdx.x * blockDim.x + threadIdx.x);
   if (i >= n) return;
-  y[i] = 0.0f + p[i];   // RV25 F3's store
+  y[i] = 0.0f + p[i];   // the fused store
 }
 __global__ void t_raw(const float* p, float* y, int n) {
   int i = (int)(blockIdx.x * blockDim.x + threadIdx.x);

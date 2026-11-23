@@ -17,7 +17,7 @@
 namespace superroc::models::ling3 {
 namespace {
 
-/// LS4 phase 3: how many prompt positions to prime the MTP head over.
+/// How many prompt positions to prime the MTP head over.
 /// LING3_MTP_PRIME overrides; 0 disables priming entirely.
 int PrimeBudget() {
   static const int v = [] {
@@ -32,7 +32,7 @@ int PrimeBudget() {
 
 }  // namespace
 
-// LS3: the batched-prefill knobs. Read once; the same env vars size the ROCm
+// The batched-prefill knobs. Read once; the same env vars size the ROCm
 // backend's chunk scratch (rocm_backend.cpp reads LING3_PREFILL_CHUNK itself
 // so buffer sizing and chunking cannot drift apart).
 bool PrefillBatchEnabled() {
@@ -131,7 +131,7 @@ bool Model::Init(const std::string& model_path, const ModelOptions& options,
         }
         return false;
       }
-      // LS4: the MTP draft head. Two switches reach it, and both must load it:
+      // The MTP draft head. Two switches reach it, and both must load it:
       //   LING3_MTP=1        -- speculative decoding (phase 2)
       //   LING3_MTP_PROBE=1  -- the phase-1 acceptance probe
       // With neither set this is a no-op and nothing extra is resident.
@@ -320,7 +320,7 @@ bool Model::StepBatch(const std::int32_t* tokens, int n, void* state,
     return true;
   }
 #if defined(LING3_WITH_ROCM)
-  // LS4: logit_rows MUST stay 0 here. Prefill wants the LAST position logits,
+  // logit_rows MUST stay 0 here. Prefill wants the LAST position logits,
   // which is LS3s span-size-driven path; passing a non-zero logit_rows would
   // switch ForwardBatch to its per-row branch and return ROW 0s logits
   // instead -- a silently wrong prompt representation and wrong text. The
@@ -430,7 +430,7 @@ void Session::Reset() {
   if (spec_ != nullptr) {
     // The head's cache and the policy window are both per-sequence: a new
     // sequence must not inherit the previous one's latent cache or its
-    // acceptance history. RV4 (Jay build28f): rewind both in place -- the
+    // acceptance history. Rewind both in place -- the
     // head's allocations are identical every request, so destroying and
     // re-creating them per request was pure churn.
     mtp::ResetSpecState(spec_);
@@ -560,7 +560,7 @@ bool Session::Evaluate(std::int32_t token, std::string* error_msg) {
     return false;
   }
 #if defined(LING3_WITH_ROCM)
-  // ---- LS4 MTP probe (LING3_MTP_PROBE=1) --------------------------------
+  // ---- MTP probe (LING3_MTP_PROBE=1) --------------------------------
   // This has to run BEFORE Step, and that is the whole subtlety.
   //
   // The draft batch is { token = the token about to be fed, pos = its own
@@ -606,7 +606,7 @@ bool Session::Evaluate(std::int32_t token, std::string* error_msg) {
   tokens_.push_back(token);
 
 #if defined(LING3_WITH_ROCM)
-  // LS4: keep pending_h_ in step with the batched path. Step() leaves the final
+  // Keep pending_h_ in step with the batched path. Step() leaves the final
   // hidden in state->t, so ReadHidden is valid here.
   if (mtp::SpeculativeEnabled()) {
     if (pending_h_.size() != model_->config().hidden_size) {
@@ -625,7 +625,7 @@ bool Session::EvaluateBatch(std::span<const std::int32_t> tokens,
   if (position_ == 0 && !vision_guard_) {
     vision::Clear();
   }
-  // SPEC6 item 4: the per-REQUEST boundary on the serve path. The scheduler
+  // The per-REQUEST boundary on the serve path. The scheduler
   // keeps ONE Session resident for the whole server -- ~Session runs once at
   // shutdown and Reset is never called -- so the only thing that fires once per
   // prompt is this call. The row that flushes here is the PREVIOUS prompt's,
@@ -633,7 +633,7 @@ bool Session::EvaluateBatch(std::span<const std::int32_t> tokens,
   // overwritten.
   FlushSpecReport();
   // This call is one prefill CHUNK. Accumulate so the row that eventually
-  // flushes carries the request's whole prompt length (SPEC6 item 4: "LM1_COST
+  // flushes carries the request's whole prompt length ("LM1_COST
   // per length" -- the length is the row's identity).
   spec_report_prompt_tokens_ += static_cast<int>(tokens.size());
   if (tokens.empty()) {
@@ -652,7 +652,7 @@ bool Session::EvaluateBatch(std::span<const std::int32_t> tokens,
   const std::size_t H = model_->config().hidden_size;
   const std::size_t n_rows = tokens.size();
 
-  // LS4 phase 3: prime the MTP head over the prompt.
+  // Prime the MTP head over the prompt.
   //
   // The head is the only writer of its own latent cache, so without this its
   // attention at the first speculative step runs over a cache whose prompt
@@ -674,7 +674,7 @@ bool Session::EvaluateBatch(std::span<const std::int32_t> tokens,
       model_->options_.backend == BackendKind::kRocm) {
     spec_ = mtp::NewSpecState(max_context_, spec_policy_, nullptr);
   }
-  // LM1 (DECISIONS 00:30): LING3_MTP_PRIME_BATCH=1 primes the WHOLE chunk with
+  // LING3_MTP_PRIME_BATCH=1 primes the WHOLE chunk with
   // one batched head forward instead of PrimeNext per row. It ignores the
   // LING3_MTP_PRIME budget on purpose -- the point is that priming the entire
   // prompt is now cheap enough to always do. Default off until the gates land.
@@ -705,7 +705,7 @@ bool Session::EvaluateBatch(std::span<const std::int32_t> tokens,
     if (prime_batch) {
       // One batched forward over the chunk.
       //
-      // RV5 fix 2: the head pairs token t with the TRUNK hidden at t-1, which
+      // The head pairs token t with the TRUNK hidden at t-1, which
       // is what the fork does (common/speculative.cpp:1578-1585 -- it shifts
       // the target embeddings one to the right before decoding the draft). So
       // row 0 of a chunk sees the PREVIOUS chunk's last trunk row, and row r
@@ -741,7 +741,7 @@ bool Session::EvaluateBatch(std::span<const std::int32_t> tokens,
         (void)prime_error;
       }
     } else {
-      // Row-by-row fallback. Same RV5 fix 2 pairing: feed each row the trunk
+      // Row-by-row fallback. Same pairing: feed each row the trunk
       // hidden at the PREVIOUS position, not the head's own output (which is
       // what chaining h_next did, and which the fork never does during
       // prefill). Row 0 takes pending_h_ / zeros exactly as above.

@@ -42,6 +42,10 @@ namespace superroc::hip {
 class HipblasLtGemm;
 class QwenGpuExecutor;
 
+/// Most tokens one draft may carry into a verification: a verification item
+/// holds the anchor token and the drafted ones, eight in all.
+inline constexpr std::uint32_t kQwenMaxDraftTokens = 7;
+
 struct QwenGpuBatchItem {
   QwenGpuExecutor* executor{nullptr};
   tokenization::TokenId token_id{0};
@@ -131,6 +135,12 @@ public:
   }
   [[nodiscard]] const core::GgufReader& GetReader() const noexcept {
     return *reader_;
+  }
+  /// The model file's reader, shared: an MTP block inside the model file is
+  /// bound through it.
+  [[nodiscard]] std::shared_ptr<const core::GgufReader> ShareReader()
+      const noexcept {
+    return reader_;
   }
   [[nodiscard]] const core::ModelConfig& GetConfig() const noexcept {
     return weights_.config;
@@ -344,7 +354,7 @@ public:
   float* d_logits{nullptr};
   void* d_attention_kv_f16{nullptr};
   float* d_kv_cache{nullptr};
-  // LGA: token-major fp16 K then V, same element count as d_kv_cache. Null
+  // Token-major fp16 K then V, same element count as d_kv_cache. Null
   // unless policy.glimmer_fp16_kv. Ling leaves this null.
   void* d_glimmer_kv_f16{nullptr};
   // Mirrors of the live recurrent buffers (see BeginRecurrentWrite); reassigned
@@ -364,7 +374,7 @@ public:
   void* d_scratch_q8_act{nullptr};
   // KAT S3/S4: qwen35moe MoE scratch (allocated only when config_.is_moe).
   float* d_moe_logits{nullptr};
-  float* d_lfm2_attn_partial{nullptr};  // LFM2
+  float* d_lfm2_attn_partial{nullptr};
   int* d_moe_ids{nullptr};
   float* d_moe_weights{nullptr};
   float* d_moe_sig{nullptr};
@@ -394,8 +404,10 @@ public:
   [[nodiscard]] std::size_t SnapshotPayloadBytes(
       std::uint32_t valid_context) const;
 
+  /// Null sources read the live recurrent state.
   [[nodiscard]] std::unique_ptr<QwenGpuSnapshot> SaveSnapshot(
-      std::uint32_t valid_context);
+      std::uint32_t valid_context, const void* conv_source = nullptr,
+      const void* recurrent_source = nullptr);
   void RestoreSnapshot(const QwenGpuSnapshot& snapshot);
   void RestoreCompactSnapshot(std::span<const std::uint8_t> payload,
                               std::uint32_t expected_valid_context);
@@ -445,7 +457,7 @@ private:
   float* d_ssm_replay_beta_{nullptr};
   std::uint32_t* d_ssm_replay_enabled_{nullptr};
   std::uint32_t saved_context_{0};
-  // LGA mirror freshness: leading rows of d_glimmer_kv_f16 that match the
+  // Mirror freshness: leading rows of d_glimmer_kv_f16 that match the
   // fp32 cache. Casts advance it; a rollback (RestoreState) clamps it to the
   // saved position so rewritten rows are re-cast.
   std::uint32_t glimmer_kv_f16_valid_rows_{0};
@@ -457,7 +469,7 @@ private:
   std::size_t verify_debug_bytes_{0};
 };
 
-/// SQ19-2: load-time FP4 slot attach for one executor stream. Attaches
+/// Load-time FP4 slot attach for one executor stream. Attaches
 /// `stream` (reusing a free set, else growing the table, configured or not)
 /// and warms the set's buffers; a no-op for models without ROCmFP4 tensors.
 /// Called from the executor constructor, never in-step.
@@ -571,12 +583,12 @@ public:
   /// Copies the logits produced by the most recent forward pass to host memory.
   [[nodiscard]] std::span<const float> CopyLastLogits();
 
-  /// GLM: final-norm logits for one row still resident from the last
+  /// Final-norm logits for one row still resident from the last
   /// muse-glimmer prefill chunk. Does not change the KV cache.
   void MaterializeGlimmerRowLogits(std::size_t row);
-  // LFM2: final-norm logits for one row still resident from the last // LFM2
-  // LFM2 batched prefill chunk. Does not change the KV cache. // LFM2
-  void MaterializeLfm2RowLogits(std::size_t row);  // LFM2
+  // LFM2: final-norm logits for one row still resident from the last
+  // LFM2 batched prefill chunk. Does not change the KV cache.
+  void MaterializeLfm2RowLogits(std::size_t row);
   void MaterializeFlintRowLogits(std::size_t row);
 
   /// Samples the most recent device-resident logit row and transfers one token.
@@ -627,7 +639,7 @@ public:
   [[nodiscard]] std::uint32_t GetMaxContext() const noexcept {
     return arena_.GetMaxContext();
   }
-  /// SQ10 SPEC2 (R1): the session stream that owns this executor's slot set.
+  /// The session stream that owns this executor's slot set.
   /// A drafter backend created for this session aliases its own stream here.
   [[nodiscard]] hipStream_t ArenaStream() const noexcept {
     return arena_.stream;
@@ -654,6 +666,20 @@ public:
   }
   [[nodiscard]] std::unique_ptr<QwenGpuSnapshot> SaveSnapshot(
       std::uint32_t valid_context);
+  /// A prompt checkpoint inside one pass: the next chunk holding `position`
+  /// also leaves the recurrent state and the logits of that row, which
+  /// SavePromptCheckpoint and the two accessors below hand over.
+  [[nodiscard]] bool CanCheckpointPromptInPass() const noexcept;
+  void ArmPromptCheckpoint(std::uint32_t position);
+  void DisarmPromptCheckpoint() noexcept { prompt_checkpoint_position_ = 0; }
+  [[nodiscard]] std::unique_ptr<QwenGpuSnapshot> SavePromptCheckpoint();
+  [[nodiscard]] tokenization::TokenId PromptCheckpointFrontier()
+      const noexcept {
+    return prompt_checkpoint_frontier_;
+  }
+  [[nodiscard]] std::vector<float> TakePromptCheckpointLogits() noexcept {
+    return std::move(h_prompt_checkpoint_logits_);
+  }
   void RestoreSnapshot(const QwenGpuSnapshot& snapshot);
   void RestoreCompactSnapshot(std::span<const std::uint8_t> payload,
                               std::uint32_t expected_valid_context);
@@ -678,6 +704,7 @@ private:
   std::exception_ptr reset_failure_;
   void ReplaySsmState(std::uint32_t position, std::uint32_t count = 1);
   void EnsureVerificationLogits(std::size_t batch_size);
+  void PrepareInt4Route();
   [[nodiscard]] GpuSamplingParameters PrepareGpuSamplingParameters(
       const sampling::SamplerState& sampler);
 
@@ -689,13 +716,13 @@ private:
       std::span<const tokenization::TokenId> prompt_tokens,
       std::uint32_t start_pos, bool compute_logits);
   // LFM2: single-token loop over ExecuteLfm2DecodeStep (batched prefill later).
-  [[nodiscard]] tokenization::TokenId ForwardLfm2PromptChunk(  // LFM2
+  [[nodiscard]] tokenization::TokenId ForwardLfm2PromptChunk(
       std::span<const tokenization::TokenId> prompt_tokens,
       std::uint32_t start_pos, bool compute_logits);
-  // LFM2: batched prefill for lfm2moe (batch >= 2).  // LFM2
-  [[nodiscard]] tokenization::TokenId ForwardLfm2PromptBatch(  // LFM2
-      std::span<const tokenization::TokenId> prompt_tokens,    // LFM2
-      std::uint32_t start_pos, bool compute_logits);           // LFM2
+  // LFM2: batched prefill for lfm2moe (batch >= 2).
+  [[nodiscard]] tokenization::TokenId ForwardLfm2PromptBatch(
+      std::span<const tokenization::TokenId> prompt_tokens,
+      std::uint32_t start_pos, bool compute_logits);
   [[nodiscard]] tokenization::TokenId ForwardFlintPromptChunk(
       std::span<const tokenization::TokenId> prompt_tokens,
       std::uint32_t start_pos, bool compute_logits);
@@ -705,7 +732,7 @@ private:
   [[nodiscard]] tokenization::TokenId ForwardLlamaPromptBatch(
       std::span<const tokenization::TokenId> prompt_tokens,
       std::uint32_t start_pos, bool compute_logits);
-  // NBFAST T1: block verification for llama through its prefill path
+  // block verification for llama through its prefill path
   // (logits for every row, target-layer taps per row).
   [[nodiscard]] std::vector<tokenization::TokenId>
   ForwardLlamaVerificationChunk(
@@ -718,6 +745,18 @@ private:
   ForwardDecodeEquivalentVerificationChunk(
       std::span<const tokenization::TokenId> candidate_tokens,
       std::uint32_t start_pos, bool capture_logits);
+  // LFM2: rows 2..8 through the exact single-token decode arithmetic with
+  // shared weight reads; CommitVerificationChunk restores the accepted
+  // prefix's conv state from the per-row snapshots.
+  [[nodiscard]] std::vector<tokenization::TokenId> ForwardLfm2VerificationRows(
+      std::span<const tokenization::TokenId> tokens, std::uint32_t start_pos,
+      bool capture_logits);
+  // Flint: rows 2..8 through the exact single-token decode arithmetic with
+  // shared weight reads; each row writes its KV at its final position, and
+  // there is no recurrent state to roll back.
+  [[nodiscard]] std::vector<tokenization::TokenId> ForwardFlintVerificationRows(
+      std::span<const tokenization::TokenId> tokens, std::uint32_t start_pos,
+      bool capture_logits);
 
   std::shared_ptr<const QwenGpuModel> model_;
   const models::QwenModelWeights& weights_;
@@ -729,10 +768,23 @@ private:
   models::qwen::vision::DeviceInput vision_input_;
   std::vector<float> h_logits_;
   std::vector<float> h_prompt_hidden_;
+  std::uint32_t prompt_checkpoint_position_{0};
+  tokenization::TokenId prompt_checkpoint_frontier_{0};
+  std::vector<float> h_prompt_checkpoint_logits_;
+  struct HipFreeDeleter {
+    void operator()(void* p) const noexcept { (void)hipFree(p); }
+  };
+  std::unique_ptr<void, HipFreeDeleter> d_prompt_checkpoint_conv_;
+  std::unique_ptr<void, HipFreeDeleter> d_prompt_checkpoint_recurrent_;
   std::vector<float> h_verification_hidden_;
   std::vector<float> h_verification_logits_;
   std::vector<float> h_last_hidden_;
   float* d_verification_logits_{nullptr};
+  // LFM2: one saved short-conv state per verification row (total_conv floats
+  // each), so CommitVerificationChunk can accept a prefix without re-running
+  // its rows; lfm2_rows_verified_ says the snapshots are current.
+  float* d_lfm2_row_conv_{nullptr};
+  bool lfm2_rows_verified_{false};
   std::size_t verification_logits_capacity_{0};
   std::size_t last_verification_rows_{0};
   std::size_t last_hidden_offset_{0};

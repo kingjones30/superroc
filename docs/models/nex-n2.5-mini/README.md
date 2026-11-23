@@ -20,7 +20,7 @@ Nex-N2.5-mini is a 40-layer Qwen3.5 MoE model with 256 routed experts (8 active)
 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Nex-N2.5-mini-Q4_0-ROCmFP4-STRIX_LEAN.gguf --served-model-name nex-n2.5-mini --context 65536 --think off
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 

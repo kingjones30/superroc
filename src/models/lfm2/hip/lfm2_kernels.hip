@@ -19,7 +19,7 @@ Lfm2LaunchStatus Ok() noexcept { return {true, nullptr}; }
 
 Lfm2LaunchStatus Bad(const char* error) noexcept { return {false, error}; }
 
-// Audit F04: report an async launch failure under a static string.
+// Report an async launch failure under a static string.
 Lfm2LaunchStatus CheckLaunch(const char* what) noexcept {
   if (hipGetLastError() != hipSuccess) {
     return Bad(what);
@@ -99,7 +99,7 @@ __global__ void Lfm2ShortConvDecodeKernel(const float* __restrict__ bcx,
   state[static_cast<std::size_t>(l_cache - 2U) * hidden + c] = bx;
 }
 
-// LPF: parallel short-conv prefill. Thread (t, c) forms y[t][c] exactly as the
+// Parallel short-conv prefill. Thread (t, c) forms y[t][c] exactly as the
 // former one-thread-per-channel loop did: acc = w[l-1] * bx_t, then
 // acc += w[j] * v_j for j = 0..l-2, where v_j is bx of token t-(l-1)+j, or
 // the incoming state row t+j when that token is before the chunk. The state
@@ -138,7 +138,7 @@ __global__ void Lfm2ShortConvPrefillKernel(const float* __restrict__ bcx,
       brow[static_cast<std::size_t>(hidden) + c] * acc;
 }
 
-// LPF: after the chunk, state row j holds bx of token n-(l-1)+j, or the old
+// After the chunk, state row j holds bx of token n-(l-1)+j, or the old
 // state row n+j when the chunk is shorter than the state.
 __global__ void Lfm2ShortConvStateKernel(const float* __restrict__ bcx,
                                         float* __restrict__ state,
@@ -199,7 +199,7 @@ __global__ void Lfm2MoeDotKernel(const float* __restrict__ x,
   }
 }
 
-// LPF: router logits for a batch, one block per token computing every
+// Router logits for a batch, one block per token computing every
 // expert. Each logit is formed exactly as Lfm2MoeDotKernel forms it (thread i
 // sums columns i, i+256, ... in order, then the same halving tree), so batch
 // rows stay bit-identical to the single-token launcher; the token's row is
@@ -254,7 +254,7 @@ __global__ void Lfm2MoeDotRowsKernel(const float* __restrict__ x,
 // e < n_expert forms p/sel. Then n_used rounds of a block argmax over the
 // experts not yet taken: larger sel wins, equal sel -> lower id, which is the
 // order the former serial scan used (strict >, ascending). NaN sel never
-// wins. Thread 0 normalizes in pick order. (Super ROC: the serial scan of
+// wins. Thread 0 normalizes in pick order. (Super Roc: the serial scan of
 // one thread over a 256-entry local array cost 21.5 us per layer.)
 __global__ void Lfm2MoePickKernel(const float* __restrict__ logits,
                                   const float* __restrict__ bias,
@@ -406,7 +406,7 @@ Lfm2LaunchStatus LaunchLfm2MoeRouteBatch(
     return tok;
   }
   Lfm2MoeDotRowsKernel<<<n_tokens, kBlock, k * sizeof(float), stream>>>(
-      x, gate_inp, k, n_expert, n_tokens, logits);  // LPF
+      x, gate_inp, k, n_expert, n_tokens, logits);
   const Lfm2LaunchStatus dot = CheckLaunch("lfm2 moe route logits launch failed");
   if (!dot.ok) {
     return dot;
@@ -418,7 +418,7 @@ Lfm2LaunchStatus LaunchLfm2MoeRouteBatch(
 
 namespace {
 
-// LKF: ResidualAddKernel (out = a + b) then RMSNormKernel<> (one 256-thread
+// ResidualAddKernel (out = a + b) then RMSNormKernel<> (one 256-thread
 // block, strided sum of squares, tree reduction, (x * inv_rms) * w), fused.
 // Every value is formed by the same expression in the same order.
 __global__ void Lfm2AddRMSNormKernel(float* __restrict__ hidden,

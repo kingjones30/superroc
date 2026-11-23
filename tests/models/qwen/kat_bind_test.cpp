@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 
@@ -14,6 +15,13 @@ void Expect(bool ok, const std::string& msg) {
     std::cerr << "FAIL " << msg << "\n";
     std::exit(1);
   }
+}
+
+// exists() throws or says yes for a fixture the user cannot read; open it
+// instead.
+bool FixtureReadable(const std::string& p) {
+  std::ifstream f(p, std::ios::binary);
+  return f.good();
 }
 
 }  // namespace
@@ -33,8 +41,8 @@ int main() {
              KatDispatch::kAccept,
          "embedded MTP accepted");
   Expect(ClassifyKatDispatch("qwen35moe", KatSpecKind::kMtp, false, false) ==
-             KatDispatch::kRefuseSidecar,
-         "sidecar MTP refused");
+             KatDispatch::kAccept,
+         "sidecar MTP accepted");
   Expect(ClassifyKatDispatch("qwen35moe", KatSpecKind::kDSpark, true, false) ==
              KatDispatch::kRefuseDSpark,
          "DSpark refused");
@@ -50,7 +58,7 @@ int main() {
       path_env != nullptr ? path_env
                           : "/path/to/models/swap/kat-coder/"
                             "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf";
-  if (!std::filesystem::exists(path)) {
+  if (!FixtureReadable(path)) {
     std::cout << "SKIP: KAT GGUF not found: " << path << " (set KAT_GGUF)\n";
     return 77;
   }

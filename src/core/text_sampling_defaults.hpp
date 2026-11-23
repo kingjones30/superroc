@@ -66,11 +66,11 @@ inline SamplingConfig ResolveTextSampling(TextModelPreset model,
       result.presence_penalty = 1.5F;
     }
   }
-  // Jay 2026-10-01: Ling-3.0-flash fell through to the generic 1.0 / 0.95 / no
+  // Ling-3.0-flash fell through to the generic 1.0 / 0.95 / no
   // top-k, hot enough to drift into DeepSeek-style tool tags
   // (<\uFF5Ctool\uFF5C>, <\uFF5Ctool\u2581call\uFF5C>, ...) that no parser
-  // accepts. King's fork seat runs Ling at temperature 0.6, top-p 0.95, top-k
-  // 20; use the same. A request's own sampling fields still win.
+  // accepts. The fork runs Ling at temperature 0.6, top-p 0.95, top-k 20;
+  // use the same. A request's own sampling fields still win.
   if (model == TextModelPreset::kLing3) {
     result.temperature = 0.6F;
     result.top_k = 20;

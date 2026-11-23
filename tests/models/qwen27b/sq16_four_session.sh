@@ -1,5 +1,5 @@
 #!/bin/bash
-# SQ16 SPEC2 (S2-4): drafting must not change any client's answer when four
+# Drafting must not change any client's answer when four
 # sessions share a verify batch (KAT+MTP, three fresh servers).
 #
 # Serves the KAT+MTP model named by SUPERROC_SQ16_KAT_MODEL: first one -j 1
@@ -32,7 +32,7 @@ PORT=${SUPERROC_SQ16_PORT:-18237}
 OUT=${SUPERROC_SQ16_OUT:-$(pwd)}
 ROUNDS=${SUPERROC_SQ16_ROUNDS:-3}
 TOKENS=${SUPERROC_SQ16_TOKENS:-96}
-# SPEC3 (1b): ROUNDS must be an integer >= 1; anything else FAILs before any
+# ROUNDS must be an integer >= 1; anything else FAILs before any
 # server starts (ROUNDS=0 used to print PASS with zero rounds).
 case $ROUNDS in
   ''|*[!0-9]*)
@@ -70,9 +70,9 @@ sys.exit(0)
 PY
 }
 serve() { # $1 jobs $2 tag
-  # SPEC3 (1c): the port must be FREE before our server starts; a stale
+  # The port must be FREE before our server starts; a stale
   # server's /health answer must never count for a server that failed to
-  # bind. Never kill the other process (it may be another lane's server).
+  # bind. Never kill the other process (it may be another server).
   if port_busy "$PORT"; then
     echo "FAIL sq16_four_session: port $PORT already in use"
     return 1
@@ -93,7 +93,7 @@ serve() { # $1 jobs $2 tag
     tail -n 5 "$LOG" | cut -c1-200
     return 1
   fi
-  # SPEC3 (1c): /health answered, but by OUR server? If our process died,
+  # /health answered, but by OUR server? If our process died,
   # the answer came from some other process and must never count.
   if ! kill -0 "$P" 2>/dev/null; then
     echo "FAIL sq16_four_session: server $2 died though port $PORT answers /health (another process?)"
@@ -107,7 +107,7 @@ import json, sys, urllib.request
 port, out, idx, ntok = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 prompts = ["Write a Python function that checks whether a number is prime, with a docstring.",
            "Explain in three sentences how a hash map handles collisions.",
-           "Run jay-q2-fixed",
+           "Run run-q2-fixed",
            "Write a haiku about graphics processors."]
 body = {"model": "m", "messages": [{"role": "user", "content": prompts[idx - 1]}],
         "max_tokens": ntok, "temperature": 0}
@@ -123,7 +123,7 @@ except Exception as e:
     json.dump({"error": type(e).__name__ + ": " + str(e)[:160]}, open(out, "w"))
 PY
 }
-# Client c uses prompt m[c] (Jay's sq16v mapping: clients 1 and 4 share p1).
+# Client c uses prompt m[c] (clients 1 and 4 share p1).
 if ! serve 1 base; then exit 1; fi
 for c in 1 2 3 4; do
   case $c in 1) p=1;; 2) p=2;; 3) p=4;; 4) p=1;; esac
@@ -163,7 +163,7 @@ for r in range(1, rounds + 1):
             cells.append("c%d MISSING" % c)
             bad += 1
         elif a == "" or b == "":
-            # SPEC3 (1a): an empty text on either side FAILs ("" == ""
+            # An empty text on either side FAILs ("" == ""
             # used to pass as "same").
             cells.append("c%d EMPTY" % c)
             bad += 1

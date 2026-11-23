@@ -2,8 +2,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-reference_root="${QWEN3_TTS_REFERENCE_ROOT:-/home/fbozzo/projects/Qwen3-TTS}"
-model_root="${QWEN3_TTS_MODEL_ROOT:-/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-CustomVoice}"
+reference_root="${QWEN3_TTS_REFERENCE_ROOT:-/path/to/Qwen3-TTS}"
+model_root="${QWEN3_TTS_MODEL_ROOT:-/path/to/Qwen3-TTS-12Hz-1.7B-CustomVoice}"
 official_python="${QWEN3_TTS_PYTHON:-$reference_root/.venv/bin/python}"
 output_root="$repo_root/artifacts/qwen3_tts/quality"
 text_path="$output_root/long_form.txt"

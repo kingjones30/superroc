@@ -1,15 +1,15 @@
 // ling3_mla.hpp — gated-MLA attention block of a Ling-3.0 `bailingmoe3` layer.
-// Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with LG's
-// drafts. Lane LK, phase 2 of the Ling-on-superroc build. Phase-1 companion:
+// MiMo — Ling-on-superroc build. Do not confuse with the other drafts.
+// Companion:
 // ling3_kda.hpp.
 //
 // The fork's code is the spec:
 //   src/models/bailingmoe3.cpp   the gated-MLA branch (absorbed form, wk_b &&
 //   wv_b) src/llama-graph.cpp          build_attn / build_attn_mha (how v_mla
 //   is applied) ggml rope (GGML_ROPE_TYPE_NORM) for the rotary variant
-// Cross-checked against LG's CPU implementation, which passes
+// Cross-checked against the CPU implementation, which passes
 // tools/mla_layer_test.cpp:
-//   ~/src/port/gufo-ling/src/models/ling3/reference.cpp
+//   src/models/ling3/reference.cpp
 //   ReferenceModel::MlaLayer
 //
 // SCOPE — the four projections are the CALLER's GEMMs; their outputs are this
@@ -88,7 +88,7 @@ struct MlaWeights {
   const float* wk_b = nullptr;
   const float* wv_b = nullptr;
   const float* kv_a_norm = nullptr;
-  // SPEC6: optional row-transposed copies for the DECODE path only.
+  // Optional row-transposed copies for the DECODE path only.
   //   wk_bT[h][i][r] == wk_b[h][r][i]      (n_head, nope, kv)
   //   wv_bT[h][j][r] == wv_b[h][r][j]      (n_head, kv, head_v)
   // They exist so attn_sk_prep_kernel / attn_sk_reduce_kernel can read one
@@ -171,7 +171,7 @@ void mla_cache_append(const MlaShape& sh, const MlaCache& cache,
                       const int* pos_d = nullptr);
 
 // ---------------------------------------------------------------------------
-// LC1 SPEC4 (RV25 M1 + Q2-MLA): the decode fusions.
+// The decode fusions.
 // ---------------------------------------------------------------------------
 
 /// M1: rope(q) + rope(kv) + latent_norm + cache_append in ONE kernel (-3
@@ -210,7 +210,7 @@ void mla_fusion_stats_reset();
 //   out      [head_v*n_head, T]   = [4096, T] gated, pre-`attn_output`
 // Reads the first `n_pos` cache positions of every sequence.
 // `scores` is caller-owned scratch of mla_block_scratch_bytes() floats.
-// `wo_qs` / `wo_ds` (LC1 SPEC4 Q2-MLA) are the Q8_1 activation the wo GEMV
+// `wo_qs` / `wo_ds` are the Q8_1 activation the wo GEMV
 // reads: when non-null and the call is one token of one sequence, the kernel
 // quantises `out` into them as its epilogue (k_q8_1_quant's recipe verbatim)
 // and the caller skips its own quantise. nullptr keeps the old kernel exactly.
@@ -245,7 +245,7 @@ void mla_block(const MlaShape& sh, const MlaScalars& sc, const MlaWeights& w,
                int n_pos, const View& out, float* scores, hipStream_t stream,
                const int* pos_d = nullptr);
 
-// LS3 2026-10-01: token-parallel attention for batched prefill. mla_attn's
+// Token-parallel attention for batched prefill. mla_attn's
 // grid is (n_head, n_seqs) with a serial token loop inside, so a 512-token
 // chunk runs on 32 blocks and takes ~1.5 s as the context grows. This
 // variant puts the token axis in the grid -- one block per (head, token of
@@ -268,7 +268,7 @@ void mla_block_scratch(const MlaShape& sh, const MlaScalars& sc,
                        hipStream_t stream, const int* pos_d = nullptr);
 
 // ---------------------------------------------------------------------------
-// LS3 PHASE4 2026-10-01: split-K ("flash decoding") attention for the DECODE
+// Split-K ("flash decoding") attention for the DECODE
 // step (n_tokens == 1). mla_attn runs one block per head (32 blocks) and
 // walks the whole cache serially, so decode slows as the context grows
 // (36 tok/s at 50 positions -> 22 at 6.5K). Here the cache positions are
@@ -279,7 +279,7 @@ void mla_block_scratch(const MlaShape& sh, const MlaScalars& sc,
 // mla_attn (q_abs absorption, causal window = n_pos, j-ascending latent sum).
 //
 // Scratch, caller-owned and PREALLOCATED FOR max_ctx (no malloc or sync in
-// the step, per LS2's HIP-graph wrapping):
+// the step, per the HIP-graph wrapping):
 //   part_m / part_l : [n_head][k_slices] floats, k_slices = max_ctx / slice
 //   part_acc        : [n_head][k_slices][kv] floats
 // mla_splitk_bytes() sizes the whole set; slice is 1024 unless overridden.
@@ -324,14 +324,14 @@ inline int mla_splitk_slice_auto(int n_pos, int target_wg) {
   return slice;
 }
 
-// `wo_qs` / `wo_ds` (LC1 SPEC4 Q2-MLA): see mla_attn -- the reduce kernel
+// `wo_qs` / `wo_ds`: see mla_attn -- the reduce kernel
 // quantises `out` into this pair as its epilogue when they are non-null.
 void mla_attn_splitk(
     const MlaShape& sh, const MlaScalars& sc, const MlaWeights& w,
     const MlaCache& cache, int n_pos, const MlaInputs& in, const View& out,
     float* q_abs,  // [n_head][kv], the hoisted absorbed q
     float* part_m, float* part_l, float* part_acc, int slice_cap,
-    int head_shared,  // LS3 P5: 1 = one workgroup per (8-head group,
+    int head_shared,  // 1 = one workgroup per (8-head group,
                       // slice) so each cache slice is read once per
                       // group instead of once per head
     hipStream_t stream, std::int8_t* wo_qs = nullptr, float* wo_ds = nullptr);
@@ -345,7 +345,7 @@ void mla_block_splitk(const MlaShape& sh, const MlaScalars& sc,
                       float* part_l, float* part_acc, int slice_cap,
                       int head_shared, hipStream_t stream);
 
-// LS3 PHASE7: the m-row split-K decode attention for LM1's multi-row verify.
+// The m-row split-K decode attention for multi-row verify.
 // m query rows (2 <= m <= 4) at CONSECUTIVE positions n_pos-m .. n_pos-1,
 // already roped / latent-normed / appended to the cache by the caller (the
 // shared block stages above handle n_tokens = m); row j attends causally to
@@ -376,7 +376,7 @@ void mla_block_decode(const MlaShape& sh, const MlaScalars& sc,
                       const MlaInputs& in, const int* pos, int n_pos,
                       const View& out, hipStream_t stream);
 
-// LVV: null keeps every rope angle equal to pos[t] * freq. A device table
+// Null keeps every rope angle equal to pos[t] * freq. A device table
 // of (t, h, w) per physical token selects sections [8, 12, 12].
 void mla_set_mrope(const int* device_triples_or_null);
 

@@ -7,6 +7,8 @@
 #include <stdexcept>
 #include <utility>
 
+#include "src/core/text/content_spans.hpp"
+
 namespace superroc::models::deepseek_v4_flash {
 namespace {
 
@@ -214,8 +216,24 @@ std::vector<int> Model::EncodeChat(std::span<const ChatMessage> messages,
 std::vector<int> Model::EncodeChat(std::span<const ChatMessage> messages,
                                    std::span<const ChatTool> tools,
                                    const ChatTemplateOptions& options) const {
-  const std::string rendered = RenderChat(messages, tools, options);
-  return Tokenize(rendered, true);
+  // SR-03: client text must never become a control token. These are the
+  // spellings the runtime tokenizer matches as specials in a rendered chat
+  // (special_token_at in runtime/tokenizer.cpp); keep the two lists equal.
+  static const std::vector<std::string> kSpecialSpellings = {
+      "<｜begin▁of▁sentence｜>",
+      "<｜end▁of▁sentence｜>",
+      "<｜User｜>",
+      "<｜Assistant｜>",
+      "<think>",
+      "</think>",
+      "｜DSML｜"};
+  std::vector<core::TextSpan> spans;
+  const std::string rendered = RenderChat(messages, tools, options, &spans);
+  return core::EncodeWithContentSpans<int>(
+      rendered, spans, kSpecialSpellings,
+      [&](std::size_t /*offset*/, std::string_view piece, bool parse_special) {
+        return Tokenize(piece, parse_special);
+      });
 }
 
 std::string Model::DecodeToken(int token) const {

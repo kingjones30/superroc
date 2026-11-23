@@ -456,11 +456,9 @@ void CheckPredictorHistory(qwen3_tts_hip::TalkerHipRuntime& runtime,
 int main(int argc, char** argv) {
   CheckBfloat16Operators();
   const std::filesystem::path model_root =
-      argc > 1 ? argv[1]
-               : "/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+      argc > 1 ? argv[1] : "/path/to/Qwen3-TTS-12Hz-1.7B-CustomVoice";
   const std::filesystem::path artifacts =
-      argc > 2 ? argv[2]
-               : "/home/fbozzo/projects/strix-halo.cpp/artifacts/qwen3_tts";
+      argc > 2 ? argv[2] : "/path/to/strix-halo.cpp/artifacts/qwen3_tts";
   const std::filesystem::path embeddings_path =
       artifacts / "internals" / "prefill_inputs_embeds.npy";
   if (!std::filesystem::is_regular_file(model_root / "model.safetensors") ||

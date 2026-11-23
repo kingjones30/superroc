@@ -398,7 +398,8 @@ void L2Norm(std::span<float> x, float eps) {
   // `sum += (ggml_float)(xi * xi)` -- the product is rounded to float first and
   // only then widened -- and it narrows to float *before* the sqrt rather than
   // rounding a double root. Both details are worth about 1 ULP; verified
-  // bit-exact against the fork in tools/kda_math_test.cpp on the Mac.
+  // bit-exact against the fork in tools/kda_math_test.cpp on a host without
+  // a GPU.
   double sum = 0.0;
   for (const float v : x) {
     sum += static_cast<double>(v * v);

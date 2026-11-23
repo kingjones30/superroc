@@ -20,7 +20,7 @@ Agents-A1 is a 40-layer Qwen3.5-35B-A3B mixture-of-experts model. This card serv
 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Agents-A1-Uncensored-MTP-Q4_0_ROCMFP4_STRIX_LEAN.gguf --served-model-name agents-a1 --context 131072 --think off
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 
@@ -34,10 +34,10 @@ AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request a
 
 ## Quality
 
-Perplexity on long6k (n_ctx 4096): 8.08751 on Super ROC against 8.1080 ± 0.36500 on llama.cpp (ROCmFPX build) of the same file.
+Perplexity on long6k (n_ctx 4096): 8.08751 on Super Roc against 8.1080 ± 0.36500 on llama.cpp (ROCmFPX build) of the same file.
 
 ## Notes
 
-- The file's grafted MTP block is stored at 4 bits, and Super ROC refuses to draft with it at load, so the model is served without a drafter.
+- The file's grafted MTP block is stored at 4 bits, and Super Roc refuses to draft with it at load, so the model is served without a drafter.
 - With thinking on, the model returns an empty answer on most non-code prompts; the serve flags disable thinking.
-- Super ROC serves this model as text only: its vision path takes a projector of width 5120, and this model's projector is 2048 wide.
+- Super Roc serves this model as text only: its vision path takes a projector of width 5120, and this model's projector is 2048 wide.

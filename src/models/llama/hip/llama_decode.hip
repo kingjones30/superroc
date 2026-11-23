@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <stdexcept>
 
+#include "src/core/canonical.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/models/flint/hip/flint_attention.hpp"
 #include "src/models/glimmer/hip/glimmer_decode.hpp"
@@ -166,7 +167,7 @@ void ExecuteLlamaDecodeStep(QwenGpuArena& arena,
       LaunchResidualAdd(scratch.decode.hidden.data(), scratch.ffn.out.data(),
                         scratch.decode.hidden.data(), hidden, arena.stream);
     }
-    // NBFAST T1: DFlash2 target-layer tap, same point as the Qwen decode
+    // DFlash2 target-layer tap, same point as the Qwen decode
     // step (layer output after the FFN residual add).
     if (const auto tap_index = arena.GetTargetLayerCaptureIndex(l);
         tap_index.has_value()) {
@@ -213,7 +214,11 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptChunk(
   if (end_pos > arena_.GetMaxContext()) {
     throw std::length_error("prompt exceeds the GPU context length");
   }
-  if (batch >= 2) {
+  // Canonical cache: a 1-row pass takes the batch path with one row, so the
+  // prompt state does not depend on where earlier requests cut it. Default
+  // keeps the decode step for one row.
+  if (batch >= 2 ||
+      (batch == 1 && ::superroc::core::CanonicalCacheOn())) {
     return ForwardLlamaPromptBatch(prompt_tokens, start_pos, compute_logits);
   }
   last_hidden_offset_ = 0;
@@ -221,7 +226,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptChunk(
     const std::uint32_t pos = start_pos + static_cast<std::uint32_t>(i);
     ExecuteLlamaDecodeStep(arena_, weights_, prompt_tokens[i], pos,
                            compute_logits && i + 1 == batch, &vision_input_);
-    // NBFAST T1: prompt hidden capture for the single-token chunk path,
+    // prompt hidden capture for the single-token chunk path,
     // appended in the same [token][tap][hidden] order as the batched path.
     if (capture_prompt_hidden_) {
       const auto hidden = CopyLastHidden();

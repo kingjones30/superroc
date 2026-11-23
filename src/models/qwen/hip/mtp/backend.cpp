@@ -16,9 +16,11 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
+#include "src/core/sampling.hpp"
 #include "src/models/qwen/hip/mtp.hpp"
 #include "src/models/qwen/hip/mtp/kat_mtp_pmin.hpp"
+#include "src/models/qwen/hip/mtp/mtp_sampled_row.hpp"
 #include "src/models/qwen/hip/mtp/snapshot_guard.hpp"
 
 namespace superroc::hip {
@@ -36,22 +38,28 @@ QwenMtpGpuDraftBackend::QwenMtpGpuDraftBackend(
     throw std::invalid_argument(
         "MTP target output_norm width does not match the hidden size");
   }
-  if (const char* kv_dump =
-          ::superroc::core::GetEnvCompat("SUPERROC_MTP_KV_DUMP");
+  if (const char* kv_dump = ::superroc::core::GetEnv("SUPERROC_MTP_KV_DUMP");
       kv_dump != nullptr && *kv_dump != '\0') {
     kv_dump_path_ = kv_dump;
   }
   if (const char* serial =
-          ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_SERIAL");
+          ::superroc::core::GetEnv("SUPERROC_MTP_PRIME_SERIAL");
       serial != nullptr && *serial != '\0' && std::atoi(serial) != 0) {
     batch_prime_ = false;
   }
-  if (const char* prenorm =
-          ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRENORM_H");
+  if (const char* prenorm = ::superroc::core::GetEnv("SUPERROC_MTP_PRENORM_H");
       prenorm != nullptr && *prenorm != '\0' && std::atoi(prenorm) != 0) {
     norm_at_ingest_ = false;
   }
-  if (const char* path = ::superroc::core::GetEnvCompat("SUPERROC_MTP_TF_DUMP");
+  if (const char* e = ::superroc::core::GetEnv("SUPERROC_MTP_SAMPLED");
+      e != nullptr && *e == '0') {
+    sampled_enabled_ = false;
+  }
+  if (const char* e = ::superroc::core::GetEnv("SUPERROC_MTP_SAMPLED_TOPK");
+      e != nullptr && *e != '\0') {
+    sampled_top_k_ = static_cast<std::size_t>(std::clamp(std::atoi(e), 1, 64));
+  }
+  if (const char* path = ::superroc::core::GetEnv("SUPERROC_MTP_TF_DUMP");
       path != nullptr && *path != '\0') {
     tf_path_ = path;
     tf_file_ = std::fopen(path, "w");
@@ -62,8 +70,7 @@ QwenMtpGpuDraftBackend::QwenMtpGpuDraftBackend(
     std::fprintf(tf_file_,
                  "# TF cell=MTP KV position of the input pair; prediction "
                  "target position is cell+idx+1\n");
-    if (const char* logits =
-            ::superroc::core::GetEnvCompat("SUPERROC_MTP_TF_LOGITS");
+    if (const char* logits = ::superroc::core::GetEnv("SUPERROC_MTP_TF_LOGITS");
         logits != nullptr && *logits != '\0' && std::atoi(logits) != 0) {
       tf_logits_file_ = std::fopen((tf_path_ + ".bin").c_str(), "wb");
       if (tf_logits_file_ == nullptr) {
@@ -90,9 +97,21 @@ std::span<const float> QwenMtpGpuDraftBackend::NormalizeTargetHidden(
   if (!norm_at_ingest_) {
     return hidden;
   }
+  // Eight partial sums keep the reduction vectorizable without fast-math;
+  // only the draft sees the changed add order.
+  float partial[8] = {0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F, 0.0F};
+  std::size_t index = 0;
+  for (; index + 8 <= hidden.size(); index += 8) {
+    for (std::size_t lane = 0; lane < 8; ++lane) {
+      partial[lane] += hidden[index + lane] * hidden[index + lane];
+    }
+  }
+  for (; index < hidden.size(); ++index) {
+    partial[0] += hidden[index] * hidden[index];
+  }
   float sum = 0.0F;
-  for (const float value : hidden) {
-    sum += value * value;
+  for (const float lane : partial) {
+    sum += lane;
   }
   const float scale =
       1.0F / std::sqrt(sum / static_cast<float>(hidden.size()) + 1.0e-6F);
@@ -179,14 +198,19 @@ std::unique_ptr<QwenMtpGpuDraftBackend> QwenMtpGpuDraftBackend::CreateFromGguf(
     }
     return nullptr;
   }
-  auto reader_owner =
-      core::GgufReader::OpenFile(std::string(model_path), error_msg);
+  auto reader_owner = core::GgufReader::OpenFile(
+      std::string(model_path), error_msg, core::GgufReader::FileRole::kSidecar);
   if (reader_owner == nullptr) {
     return nullptr;
   }
   std::shared_ptr<const core::GgufReader> reader(std::move(reader_owner));
-  auto model = QwenMtpGpuModel::Create(std::move(reader),
-                                       std::move(target_model), error_msg);
+  // A MoE target binds the sidecar's own nextn block; a dense target keeps
+  // the standalone-sidecar pack.
+  auto model = target_model->GetConfig().is_moe
+                   ? QwenMtpGpuModel::CreateFromMoeSidecar(
+                         std::move(reader), std::move(target_model), error_msg)
+                   : QwenMtpGpuModel::Create(
+                         std::move(reader), std::move(target_model), error_msg);
   if (model == nullptr) {
     return nullptr;
   }
@@ -212,33 +236,37 @@ bool QwenMtpGpuDraftBackend::PrimeTargetContext(
     // consumes post-final-norm hidden states).
     (void)executor_->ForwardTargetHidden(context.prompt_tokens[0], zero_hidden_,
                                          0, false);
-    // KAT-MTP: a full MoE step per prompt token is the expensive path, so
-    // batch the KV-only prime for every prompt longer than one token. The
-    // dense sidecar keeps the old floor.
+    // The KV-only prime costs one fusion and two small projections per chunk
+    // whatever the chunk's size, where the serial loop runs the whole block
+    // once per prompt token. So every prompt longer than one token is batched.
+    // The full-block prime on a dense block keeps its old floor.
+    const bool full_prime =
+        ::superroc::core::GetEnv("SUPERROC_MTP_PRIME_FULL") != nullptr;
     const std::size_t batch_floor =
-        executor_->IsMoe() ? 1 : (1 + QwenMtpGpuExecutor::kPrimeBatchRows / 16);
+        (executor_->IsMoe() || !full_prime)
+            ? 1
+            : QwenMtpGpuExecutor::kFullPrimeBatchFloor;
     if (batch_prime_ && context.prompt_tokens.size() > batch_floor) {
-      // SPEC4 item 2: prime in batched chunks (one MTP-block forward per
+      // Prime in batched chunks (one MTP-block forward per
       // chunk) instead of one forward per prompt token. Falls back to the
       // serial loop below when the batched path rejects the configuration.
       try {
         const std::size_t pair_count = context.prompt_tokens.size() - 1;
-        std::vector<float> normed_rows;
         std::size_t offset = 0;
         while (offset < pair_count) {
           const std::size_t count = std::min(
               QwenMtpGpuExecutor::kPrimeBatchRows, pair_count - offset);
-          normed_rows.resize(count * context.hidden_size);
+          prime_rows_.resize(count * context.hidden_size);
           for (std::size_t row = 0; row < count; ++row) {
             const auto hidden = context.prompt_hidden_states.subspan(
                 (offset + row) * context.hidden_size, context.hidden_size);
             std::ranges::copy(
                 NormalizeTargetHidden(hidden),
-                normed_rows.begin() +
+                prime_rows_.begin() +
                     static_cast<std::ptrdiff_t>(row * context.hidden_size));
           }
           executor_->ForwardTargetBatch(
-              context.prompt_tokens.subspan(offset + 1, count), normed_rows,
+              context.prompt_tokens.subspan(offset + 1, count), prime_rows_,
               static_cast<std::uint32_t>(offset + 1));
           offset += count;
         }
@@ -299,22 +327,23 @@ bool QwenMtpGpuDraftBackend::AppendTargetContext(
     return false;
   }
   if (batch_prime_ && !context.prompt_tokens.empty()) {
-    // SPEC4 item 2: the extend path (prefill chunks after the first, and any
+    // The extend path (prefill chunks after the first, and any
     // long append) batches exactly like priming. Row r pairs (x_{pos+r},
     // h_{pos+r-1}): row 0 uses target_hidden_ (already normalized), rows >= 1
     // use the captured features normalized here.
     try {
       const std::size_t rows = context.prompt_tokens.size();
-      std::vector<float> h_rows(rows * context.hidden_size);
-      std::ranges::copy(target_hidden_, h_rows.begin());
+      prime_rows_.resize(rows * context.hidden_size);
+      std::ranges::copy(target_hidden_, prime_rows_.begin());
       for (std::size_t row = 1; row < rows; ++row) {
         std::ranges::copy(
             NormalizeTargetHidden(context.prompt_hidden_states.subspan(
                 (row - 1) * context.hidden_size, context.hidden_size)),
-            h_rows.begin() +
+            prime_rows_.begin() +
                 static_cast<std::ptrdiff_t>(row * context.hidden_size));
       }
-      executor_->ForwardTargetBatch(context.prompt_tokens, h_rows, position);
+      executor_->ForwardTargetBatch(context.prompt_tokens, prime_rows_,
+                                    position);
       std::ranges::copy(
           NormalizeTargetHidden(context.prompt_hidden_states.subspan(
               (rows - 1) * context.hidden_size, context.hidden_size)),
@@ -362,18 +391,16 @@ speculative::DraftProposal QwenMtpGpuDraftBackend::Propose(
   proposed_tokens_.clear();
   proposed_tokens_.reserve(count);
 
-  // KAT-MTP: fork draft-mtp p-min. Default 0 keeps every draft.
-  // SUPERROC_MTP_PMIN is clamped to [0, 1], matching
-  // common_speculative_effective_p_min.
-  const float p_min = MtpPMinFromEnv();
+  // The p-min gate: a draft token the head gives less than p_min ends the
+  // draft there. SUPERROC_MTP_PMIN is clamped to [0, 1]; 0 keeps every draft.
+  const float p_min = MtpEffectivePMin(executor_->IsMoe());
+  executor_->SetDraftProbability(p_min > 0.0F);
 
   auto token = executor_->ForwardTargetHidden(proposal_input_, target_hidden_,
                                               proposal_checkpoint_, true);
   auto keep = [&](tokenization::TokenId drafted, std::uint32_t index) {
     if (p_min > 0.0F) {
-      const float probability =
-          KatMtpTop1Probability(executor_->CopyLastLogits());
-      if (probability < p_min) {
+      if (executor_->LastTop1Probability() < p_min) {
         // KAT-MTP position invariant. A rejected draft leaves proposed_tokens_
         // short (possibly empty); the verifier then commits the target's own
         // token, and AdvanceCommittedToken -> AppendTargetContext requires
@@ -405,6 +432,61 @@ speculative::DraftProposal QwenMtpGpuDraftBackend::Propose(
   return proposal;
 }
 
+speculative::DraftProposal QwenMtpGpuDraftBackend::ProposeSampled(
+    std::span<const tokenization::TokenId> prompt_tokens,
+    std::uint32_t current_pos, std::uint32_t max_tokens, float temperature,
+    std::uint64_t* rng_state) {
+  if (!primed_ || prompt_tokens.empty() || current_pos == 0)
+    throw std::logic_error("MTP GPU draft backend is not primed");
+  if (proposal_active_)
+    throw std::logic_error("MTP GPU proposal feedback is pending");
+  if (executor_->GetNextPosition() != current_pos)
+    throw std::logic_error("MTP GPU draft position is inconsistent");
+  if (!std::isfinite(temperature) || temperature <= 0.0F ||
+      rng_state == nullptr)
+    throw std::invalid_argument(
+        "MTP sampled proposal needs a temperature and RNG state");
+
+  speculative::DraftProposal proposal;
+  proposal.start_pos = current_pos;
+  const std::uint32_t count = std::min(max_tokens, config_.max_draft_tokens);
+  if (count == 0)
+    return proposal;
+  proposal_checkpoint_ = executor_->GetNextPosition();
+  proposal_input_ = prompt_tokens.back();
+  proposal_target_hidden_ = target_hidden_;
+  committed_target_hidden_.clear();
+  proposed_tokens_.clear();
+  proposed_tokens_.reserve(count);
+  proposal.candidates_per_token = sampled_top_k_;
+  proposal.candidate_ids.reserve(count * sampled_top_k_);
+  proposal.candidate_probabilities.reserve(count * sampled_top_k_);
+
+  // The row reports the distribution actually sampled: the top-K logits at
+  // this temperature, renormalized. Verification rejects and corrects, so
+  // the output distribution stays the target's.
+  const auto draw = [&]() -> tokenization::TokenId {
+    return DrawSampledRow(executor_->CopyLastLogits(), temperature,
+                          sampled_top_k_, rng_state, proposal.candidate_ids,
+                          proposal.candidate_probabilities);
+  };
+
+  (void)executor_->ForwardTargetHidden(proposal_input_, target_hidden_,
+                                       proposal_checkpoint_, true);
+  auto token = draw();
+  TfRecord(token, proposal_checkpoint_, 0);
+  proposed_tokens_.push_back(token);
+  for (std::uint32_t index = 1; index < count; ++index) {
+    (void)executor_->ForwardFeedback(token, proposal_checkpoint_ + index, true);
+    token = draw();
+    TfRecord(token, proposal_checkpoint_ + index, index);
+    proposed_tokens_.push_back(token);
+  }
+  proposal.tokens = proposed_tokens_;
+  proposal_active_ = true;
+  return proposal;
+}
+
 void QwenMtpGpuDraftBackend::AcceptFeedback(
     std::span<const tokenization::TokenId> accepted,
     tokenization::TokenId correction_token) {
@@ -417,15 +499,14 @@ void QwenMtpGpuDraftBackend::AcceptFeedback(
     throw std::logic_error("MTP feedback requires each committed target row");
   }
 
-  // lqw:spec6. Verify already stored the committed trunk hiddens. Propose
+  // Verify already stored the committed trunk hiddens. Propose
   // wrote MTP KV for the drafted positions; the fork's accept() does not
   // re-decode them. Re-running that layer here is what inflated the host draft
   // bucket. SUPERROC_MTP_REPLAY=1 keeps the old logits-off replay.
-  const char* replay_env =
-      ::superroc::core::GetEnvCompat("SUPERROC_MTP_REPLAY");
+  const char* replay_env = ::superroc::core::GetEnv("SUPERROC_MTP_REPLAY");
   const bool replay = replay_env != nullptr && replay_env[0] == '1';
   const char* prof_env =
-      ::superroc::core::GetEnvCompat("SUPERROC_MTP_REPLAY_PROFILE");
+      ::superroc::core::GetEnv("SUPERROC_MTP_REPLAY_PROFILE");
   const bool prof = prof_env != nullptr && prof_env[0] == '1';
   const auto t0 = std::chrono::steady_clock::now();
   std::size_t replay_forwards = 0;
@@ -650,6 +731,12 @@ std::size_t QwenMtpGpuDraftBackend::SnapshotPayloadBytes() const {
     throw std::overflow_error("MTP snapshot size overflows");
   }
   return gpu_bytes + target_hidden_.size() * sizeof(float);
+}
+
+std::optional<std::size_t> QwenMtpGpuDraftBackend::SnapshotPayloadBytesAt(
+    std::uint32_t position) const {
+  return executor_->SnapshotPayloadBytesAt(position) +
+         target_hidden_.size() * sizeof(float);
 }
 
 std::unique_ptr<speculative::IDraftBackendSnapshot>

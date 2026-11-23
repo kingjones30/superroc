@@ -27,11 +27,6 @@ def parse_args() -> argparse.Namespace:
         default=Path("result/bin/superroc"),
         help="release superroc binary containing native Qwen3-ASR",
     )
-# Compatibility with the previous binary-path flag spelling (hidden alias).
-    parser.add_argument("--" + "g" + "ufo", dest="superroc",
-                        type=Path, default=argparse.SUPPRESS,
-                        help=argparse.SUPPRESS)
-
     parser.add_argument(
         "--contract",
         type=Path,

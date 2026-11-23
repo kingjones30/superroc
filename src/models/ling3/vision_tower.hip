@@ -1,4 +1,4 @@
-// Ling-VL vision tower for King's superroc.
+// Ling-VL vision tower for SuperROC.
 // Qwen3-VL graph from llama.cpp clip_graph_qwen3vl: temporal conv sum,
 // 2x2 reorder, absolute position embeddings, LayerNorm + GELU ViT,
 // merger mm.0 / GELU / mm.2. GEMMs run on the GPU through hipBLAS.

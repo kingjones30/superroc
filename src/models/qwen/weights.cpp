@@ -73,7 +73,7 @@ enum class TensorRole : std::uint8_t {
              type == core::GgmlType::kQ6_K || type == core::GgmlType::kIQ4_NL ||
              type == core::GgmlType::kIQ4_XS ||
              type == core::GgmlType::kIQ3_S ||
-             type == core::GgmlType::kQ4_0_ROCMFP4 ||  // lqw:weights-emb
+             type == core::GgmlType::kQ4_0_ROCMFP4 ||
              type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
     case TensorRole::kNorm:
     case TensorRole::kSsmParameter:
@@ -91,7 +91,7 @@ enum class TensorRole : std::uint8_t {
              type == core::GgmlType::kIQ4_NL ||
              type == core::GgmlType::kIQ4_XS ||
              type == core::GgmlType::kIQ3_S ||
-             type == core::GgmlType::kQ4_0_ROCMFP4 ||  // lqw:weights-proj
+             type == core::GgmlType::kQ4_0_ROCMFP4 ||
              type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
   }
   return false;
@@ -265,18 +265,16 @@ std::optional<QwenModelWeights> BindGlimmerWeights(
 // layers carry GQA projections, lead layers are dense SwiGLU and the rest are
 // sigmoid-routed ROCmFP4 experts. Mirrors the ExtractTensorRef/ValidateTensor
 // discipline of BindGlimmerWeights.
-std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
-    const core::GgufReader& reader, const core::ModelConfig& config,
-    std::string* error_msg) {
-  auto fail = [&](const std::string& msg)  // LFM2
-      -> std::optional<QwenModelWeights> {
+std::optional<QwenModelWeights> BindLfm2Weights(const core::GgufReader& reader,
+                                                const core::ModelConfig& config,
+                                                std::string* error_msg) {
+  auto fail = [&](const std::string& msg) -> std::optional<QwenModelWeights> {
     if (error_msg != nullptr) {
       *error_msg = msg;
     }
     return std::nullopt;
   };
-  auto mul = [&](std::size_t a, std::size_t b)  // LFM2
-      -> std::optional<std::size_t> {
+  auto mul = [&](std::size_t a, std::size_t b) -> std::optional<std::size_t> {
     if (a != 0 && b > SIZE_MAX / a) {
       if (error_msg != nullptr) {
         *error_msg = "lfm2moe tensor size overflows";
@@ -285,8 +283,7 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
     }
     return a * b;
   };
-  auto expect_dims = [&](const std::string& name,
-                         const std::uint64_t* dims,  // LFM2
+  auto expect_dims = [&](const std::string& name, const std::uint64_t* dims,
                          std::size_t n_dims) -> bool {
     const auto* info = reader.FindTensor(name);
     if (info == nullptr || info->dimensions.size() != n_dims) {
@@ -308,7 +305,7 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
     }
     return true;
   };
-  auto require_fp4 = [&](const QwenTensorRef& ref,  // LFM2
+  auto require_fp4 = [&](const QwenTensorRef& ref,
                          const std::string& name) -> bool {
     if (!ref.empty() && ref.type != core::GgmlType::kQ4_0_ROCMFP4 &&
         ref.type != core::GgmlType::kQ4_0_ROCMFP4_FAST) {
@@ -322,49 +319,44 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
     return true;
   };
 
-  QwenModelWeights weights;  // LFM2
+  QwenModelWeights weights;
   weights.config = config;
-  const std::size_t hidden = config.hidden_size;    // LFM2
-  const std::size_t vocab = config.vocab_size;      // LFM2
-  const std::size_t attn = config.AttentionSize();  // LFM2
-  const std::size_t kv =                            // LFM2
+  const std::size_t hidden = config.hidden_size;
+  const std::size_t vocab = config.vocab_size;
+  const std::size_t attn = config.AttentionSize();
+  const std::size_t kv =
       static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
-  const std::size_t inter = config.intermediate_size;          // LFM2
-  const std::size_t n_expert = config.expert_count;            // LFM2
-  const std::size_t n_ff = config.expert_feed_forward_length;  // LFM2
-  const std::size_t l_cache = config.shortconv_l_cache;        // LFM2
-  const auto hidden_vocab = mul(hidden, vocab);                // LFM2
+  const std::size_t inter = config.intermediate_size;
+  const std::size_t n_expert = config.expert_count;
+  const std::size_t n_ff = config.expert_feed_forward_length;
+  const std::size_t l_cache = config.shortconv_l_cache;
+  const auto hidden_vocab = mul(hidden, vocab);
   if (!hidden_vocab.has_value()) {
     return std::nullopt;
   }
 
-  weights.token_embd =  // LFM2
-      ExtractTensorRef(reader, "token_embd.weight");
-  if (reader.FindTensor("output_norm.weight") != nullptr) {  // LFM2
+  weights.token_embd = ExtractTensorRef(reader, "token_embd.weight");
+  if (reader.FindTensor("output_norm.weight") != nullptr) {
     return fail("lfm2moe final norm must be token_embd_norm.weight");
   }
-  weights.output_norm =  // LFM2
-      ExtractTensorRef(reader, "token_embd_norm.weight");
-  weights.output = ExtractTensorRef(reader, "output.weight");  // LFM2
-  if (weights.output.empty()) {                                // LFM2
+  weights.output_norm = ExtractTensorRef(reader, "token_embd_norm.weight");
+  weights.output = ExtractTensorRef(reader, "output.weight");
+  if (weights.output.empty()) {
     weights.output = weights.token_embd;
     weights.output_tied_to_token_embd = true;
   }
-  if (!ValidateTensor(weights.token_embd, *hidden_vocab,  // LFM2
-                      TensorRole::kEmbedding, "token_embd.weight", error_msg,
-                      hidden) ||
-      !ValidateTensor(weights.output_norm, hidden, TensorRole::kNorm,  // LFM2
+  if (!ValidateTensor(weights.token_embd, *hidden_vocab, TensorRole::kEmbedding,
+                      "token_embd.weight", error_msg, hidden) ||
+      !ValidateTensor(weights.output_norm, hidden, TensorRole::kNorm,
                       "token_embd_norm.weight", error_msg) ||
-      !ValidateTensor(weights.output, *hidden_vocab,
-                      TensorRole::kProjection,  // LFM2
+      !ValidateTensor(weights.output, *hidden_vocab, TensorRole::kProjection,
                       "output.weight", error_msg, hidden)) {
     return std::nullopt;
   }
 
-  weights.layers.resize(
-      config.num_layers);  // LFM2 (audit F09: resize only after the top-level
-                           // tensors validated)
-  for (std::uint32_t i = 0; i < config.num_layers; ++i) {  // LFM2
+  weights.layers.resize(config.num_layers);  // LFM2 (resize only after the
+                                             // top-level tensors validated)
+  for (std::uint32_t i = 0; i < config.num_layers; ++i) {
     const std::string prefix = "blk." + std::to_string(i) + ".";
     auto& layer = weights.layers[i];
     layer.attn_norm = ExtractTensorRef(reader, prefix + "attn_norm.weight");
@@ -375,7 +367,7 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
                         prefix + "ffn_norm.weight", error_msg)) {
       return std::nullopt;
     }
-    if (config.LayerIsLfm2Attention(i)) {  // LFM2
+    if (config.LayerIsLfm2Attention(i)) {
       layer.is_full_attention = true;
       layer.attn_q = ExtractTensorRef(reader, prefix + "attn_q.weight");
       layer.attn_k = ExtractTensorRef(reader, prefix + "attn_k.weight");
@@ -408,13 +400,12 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
                           prefix + "attn_k_norm.weight", error_msg)) {
         return std::nullopt;
       }
-      if (reader.FindTensor(prefix + "shortconv.in_proj.weight") !=
-          nullptr) {  // LFM2
+      if (reader.FindTensor(prefix + "shortconv.in_proj.weight") != nullptr) {
         return fail("lfm2moe attention layer " + std::to_string(i) +
                     " has shortconv tensors");
       }
     } else {
-      layer.is_shortconv = true;  // LFM2
+      layer.is_shortconv = true;
       layer.shortconv_conv =
           ExtractTensorRef(reader, prefix + "shortconv.conv.weight");
       layer.shortconv_in_proj =
@@ -444,12 +435,12 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
               prefix + "shortconv.out_proj.weight", error_msg, hidden)) {
         return std::nullopt;
       }
-      if (reader.FindTensor(prefix + "attn_q.weight") != nullptr) {  // LFM2
+      if (reader.FindTensor(prefix + "attn_q.weight") != nullptr) {
         return fail("lfm2moe conv layer " + std::to_string(i) +
                     " has attention tensors");
       }
     }
-    if (i < config.dense_lead_layers) {  // LFM2
+    if (i < config.dense_lead_layers) {
       layer.ffn_gate = ExtractTensorRef(reader, prefix + "ffn_gate.weight");
       layer.ffn_up = ExtractTensorRef(reader, prefix + "ffn_up.weight");
       layer.ffn_down = ExtractTensorRef(reader, prefix + "ffn_down.weight");
@@ -466,13 +457,12 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
                           prefix + "ffn_down.weight", error_msg, inter)) {
         return std::nullopt;
       }
-      if (reader.FindTensor(prefix + "ffn_gate_inp.weight") !=
-          nullptr) {  // LFM2
+      if (reader.FindTensor(prefix + "ffn_gate_inp.weight") != nullptr) {
         return fail("lfm2moe dense layer " + std::to_string(i) +
                     " has a router");
       }
     } else {
-      layer.is_moe = true;  // LFM2
+      layer.is_moe = true;
       layer.ffn_gate_inp =
           ExtractTensorRef(reader, prefix + "ffn_gate_inp.weight");
       layer.exp_probs_b = ExtractTensorRef(reader, prefix + "exp_probs_b.bias");
@@ -519,35 +509,34 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
           !expect_dims(prefix + "ffn_down_exps.weight", down_dims, 3)) {
         return std::nullopt;
       }
-      if (!require_fp4(layer.ffn_gate_exps,  // LFM2
-                       prefix + "ffn_gate_exps.weight") ||
+      if (!require_fp4(layer.ffn_gate_exps, prefix + "ffn_gate_exps.weight") ||
           !require_fp4(layer.ffn_up_exps, prefix + "ffn_up_exps.weight") ||
           !require_fp4(layer.ffn_down_exps, prefix + "ffn_down_exps.weight")) {
         return std::nullopt;
       }
-      const std::string shexp = prefix + "ffn_gate_shexp.weight";  // LFM2
+      const std::string shexp = prefix + "ffn_gate_shexp.weight";
       if (reader.FindTensor(shexp) != nullptr) {
         return fail("lfm2moe has no shared expert; " + shexp + " found");
       }
     }
   }
 
-  struct NamedPtr {  // LFM2
+  struct NamedPtr {
     const void* ptr = nullptr;
     std::string name;
   };
-  std::vector<NamedPtr> allocs;  // LFM2 (audit F11: alias check, LFM2 only)
+  std::vector<NamedPtr> allocs;  // LFM2 (alias check, LFM2 only)
   auto track = [&](const QwenTensorRef& ref, const std::string& name) {
     if (!ref.empty()) {
       allocs.push_back({ref.data, name});
     }
   };
-  track(weights.token_embd, "token_embd.weight");        // LFM2
-  track(weights.output_norm, "token_embd_norm.weight");  // LFM2
-  if (!weights.output_tied_to_token_embd) {              // LFM2
+  track(weights.token_embd, "token_embd.weight");
+  track(weights.output_norm, "token_embd_norm.weight");
+  if (!weights.output_tied_to_token_embd) {
     track(weights.output, "output.weight");
   }
-  for (std::uint32_t i = 0; i < config.num_layers; ++i) {  // LFM2
+  for (std::uint32_t i = 0; i < config.num_layers; ++i) {
     const std::string prefix = "blk." + std::to_string(i) + ".";
     const auto& layer = weights.layers[i];
     track(layer.attn_norm, prefix + "attn_norm.weight");
@@ -570,9 +559,9 @@ std::optional<QwenModelWeights> BindLfm2Weights(  // LFM2
     track(layer.ffn_up_exps, prefix + "ffn_up_exps.weight");
     track(layer.ffn_down_exps, prefix + "ffn_down_exps.weight");
   }
-  std::sort(allocs.begin(), allocs.end(),  // LFM2
+  std::sort(allocs.begin(), allocs.end(),
             [](const NamedPtr& a, const NamedPtr& b) { return a.ptr < b.ptr; });
-  for (std::size_t k = 1; k < allocs.size(); ++k) {  // LFM2
+  for (std::size_t k = 1; k < allocs.size(); ++k) {
     if (allocs[k].ptr == allocs[k - 1].ptr) {
       return fail("lfm2moe tensors " + allocs[k - 1].name + " and " +
                   allocs[k].name + " share storage");
@@ -1038,6 +1027,48 @@ bool BindKatFullAttention(const core::GgufReader& reader,
 
 }  // namespace
 
+std::optional<QwenLayerWeights> LoadMoeMtpBlock(const core::GgufReader& reader,
+                                                const core::ModelConfig& config,
+                                                std::uint32_t block_index,
+                                                std::string* error_msg) {
+  QwenLayerWeights mtp;
+  const std::string prefix = "blk." + std::to_string(block_index) + ".";
+  mtp.attn_norm = ExtractTensorRef(reader, prefix + "attn_norm.weight");
+  mtp.ffn_norm =
+      ExtractTensorRef(reader, prefix + "post_attention_norm.weight");
+  if (mtp.ffn_norm.empty()) {
+    mtp.ffn_norm = ExtractTensorRef(reader, prefix + "attn_post_norm.weight");
+  }
+  const std::size_t hidden_size = config.hidden_size;
+  if (!ValidateTensor(mtp.attn_norm, hidden_size, TensorRole::kNorm,
+                      prefix + "attn_norm.weight", error_msg) ||
+      !ValidateTensor(mtp.ffn_norm, hidden_size, TensorRole::kNorm,
+                      prefix + "post_attention_norm.weight", error_msg) ||
+      !BindKatFullAttention(reader, mtp, config, prefix, error_msg) ||
+      !BindKatMoe(reader, mtp, config, prefix, error_msg)) {
+    return std::nullopt;
+  }
+  mtp.nextn_eh_proj = ExtractTensorRef(reader, prefix + "nextn.eh_proj.weight");
+  mtp.nextn_enorm = ExtractTensorRef(reader, prefix + "nextn.enorm.weight");
+  mtp.nextn_hnorm = ExtractTensorRef(reader, prefix + "nextn.hnorm.weight");
+  mtp.nextn_shared_head_norm =
+      ExtractTensorRef(reader, prefix + "nextn.shared_head_norm.weight");
+  const std::size_t concat = hidden_size * 2;
+  if (!ValidateTensor(mtp.nextn_eh_proj, hidden_size * concat,
+                      TensorRole::kProjection, prefix + "nextn.eh_proj.weight",
+                      error_msg, concat) ||
+      !ValidateTensor(mtp.nextn_enorm, hidden_size, TensorRole::kNorm,
+                      prefix + "nextn.enorm.weight", error_msg) ||
+      !ValidateTensor(mtp.nextn_hnorm, hidden_size, TensorRole::kNorm,
+                      prefix + "nextn.hnorm.weight", error_msg) ||
+      !ValidateTensor(mtp.nextn_shared_head_norm, hidden_size,
+                      TensorRole::kNorm,
+                      prefix + "nextn.shared_head_norm.weight", error_msg)) {
+    return std::nullopt;
+  }
+  return mtp;
+}
+
 std::optional<QwenModelWeights> QwenModelWeights::LoadFromGguf(
     const core::GgufReader& reader, std::string* error_msg) {
   const auto config_opt = reader.ExtractModelConfig(error_msg);
@@ -1050,7 +1081,7 @@ std::optional<QwenModelWeights> QwenModelWeights::LoadFromGguf(
   }
   if (config_opt->lfm2) {
     return BindLfm2Weights(reader, *config_opt, error_msg);
-  }  // LFM2
+  }
   if (config_opt->flint) {
     return BindFlintWeights(reader, *config_opt, error_msg);
   }
@@ -1286,42 +1317,12 @@ std::optional<QwenModelWeights> QwenModelWeights::LoadFromGguf(
       }
       return std::nullopt;
     }
-    QwenLayerWeights mtp;
     const std::uint32_t mtp_index = weights.config.num_layers;
+    auto mtp = LoadMoeMtpBlock(reader, weights.config, mtp_index, error_msg);
+    if (!mtp.has_value()) {
+      return std::nullopt;
+    }
     const std::string prefix = "blk." + std::to_string(mtp_index) + ".";
-    mtp.attn_norm = ExtractTensorRef(reader, prefix + "attn_norm.weight");
-    mtp.ffn_norm =
-        ExtractTensorRef(reader, prefix + "post_attention_norm.weight");
-    if (mtp.ffn_norm.empty()) {
-      mtp.ffn_norm = ExtractTensorRef(reader, prefix + "attn_post_norm.weight");
-    }
-    if (!ValidateTensor(mtp.attn_norm, hidden_size, TensorRole::kNorm,
-                        prefix + "attn_norm.weight", error_msg) ||
-        !ValidateTensor(mtp.ffn_norm, hidden_size, TensorRole::kNorm,
-                        prefix + "post_attention_norm.weight", error_msg) ||
-        !BindKatFullAttention(reader, mtp, weights.config, prefix, error_msg) ||
-        !BindKatMoe(reader, mtp, weights.config, prefix, error_msg)) {
-      return std::nullopt;
-    }
-    mtp.nextn_eh_proj =
-        ExtractTensorRef(reader, prefix + "nextn.eh_proj.weight");
-    mtp.nextn_enorm = ExtractTensorRef(reader, prefix + "nextn.enorm.weight");
-    mtp.nextn_hnorm = ExtractTensorRef(reader, prefix + "nextn.hnorm.weight");
-    mtp.nextn_shared_head_norm =
-        ExtractTensorRef(reader, prefix + "nextn.shared_head_norm.weight");
-    const std::size_t concat = hidden_size * 2;
-    if (!ValidateTensor(mtp.nextn_eh_proj, hidden_size * concat,
-                        TensorRole::kProjection,
-                        prefix + "nextn.eh_proj.weight", error_msg, concat) ||
-        !ValidateTensor(mtp.nextn_enorm, hidden_size, TensorRole::kNorm,
-                        prefix + "nextn.enorm.weight", error_msg) ||
-        !ValidateTensor(mtp.nextn_hnorm, hidden_size, TensorRole::kNorm,
-                        prefix + "nextn.hnorm.weight", error_msg) ||
-        !ValidateTensor(mtp.nextn_shared_head_norm, hidden_size,
-                        TensorRole::kNorm,
-                        prefix + "nextn.shared_head_norm.weight", error_msg)) {
-      return std::nullopt;
-    }
     const bool head_present =
         reader.FindTensor(prefix + "nextn.shared_head_head.weight") != nullptr;
     const bool emb_present =

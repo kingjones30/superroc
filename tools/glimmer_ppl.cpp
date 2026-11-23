@@ -1,4 +1,4 @@
-// GLM: perplexity in the fork llama-perplexity protocol (ppl_stride == 0).
+// Perplexity in the fork llama-perplexity protocol (ppl_stride == 0).
 // Chunks of n_ctx, non-overlapping. When add_bos is set, position 0 of each
 // chunk is the BOS token. Score logit positions first..n_ctx-2 with
 // first = n_ctx/2. Print the running perplexity after each chunk.
@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
     superroc::hip::QwenExecutionPolicy policy;
     policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
-    policy.glimmer_fp16_kv = true;  // LGA: Glimmer fp16-KV plane
+    policy.glimmer_fp16_kv = true;  // Glimmer fp16-KV plane
     auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
         std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)),
         &error, static_cast<std::uint32_t>(n_ctx), policy);

@@ -1,5 +1,5 @@
 {
-  "schema": "gufo.speculative-corpus.v1",
+  "schema": "superroc.speculative-corpus.v1",
   "prompts": [
     {
       "id": "expository_pangram",

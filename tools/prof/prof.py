@@ -9,8 +9,7 @@ optimization decisions on gfx1151:
   * occupancy of the timeline -- GPU busy time versus wall span, plus the
     largest idle gaps and which dispatch precedes them, which is how launch
     bound and host bound phases become visible;
-  * A/B comparison -- two runs diffed per kernel and per stage, which is the
-    form every experiment in docs/models/qwen3.8-27b/BENCHMARKS.md is recorded in.
+  * A/B comparison -- two runs diffed per kernel and per stage.
 
 Usage
 -----

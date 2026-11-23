@@ -8,6 +8,8 @@
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <mutex>
 #include <stdexcept>
@@ -25,20 +27,42 @@ struct CommittedPages {
   explicit operator bool() const { return data != nullptr; }
 };
 
-// Ordinary anonymous pages, then registered with the GPU. Opt out of THP
-// before population: later huge-page promotion can invalidate GPU mappings.
-CommittedPages CommitPages(std::size_t bytes) {
+// A mapping of `bytes` that starts on a 2 MiB boundary, so that its first
+// touch can be served with huge pages.
+void* MapHugeAligned(std::size_t bytes) {
+  constexpr std::size_t huge = 2ULL << 20;
+  if (bytes > std::numeric_limits<std::size_t>::max() - huge)
+    return MAP_FAILED;
+  auto* const base = static_cast<std::byte*>(
+      mmap(nullptr, bytes + huge, PROT_READ | PROT_WRITE,
+           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  if (base == MAP_FAILED)
+    return MAP_FAILED;
+  const auto address = reinterpret_cast<std::uintptr_t>(base);
+  const std::size_t head = (huge - address % huge) % huge;
+  if (head != 0)
+    munmap(base, head);
+  munmap(base + head + bytes, huge - head);
+  return base + head;
+}
+
+// Maps and touches `bytes` of anonymous memory: ordinary pages that are opted
+// out of THP, or huge pages from a 2 MiB boundary. Null when the mapping or
+// its population fails.
+void* MapPopulated(std::size_t bytes, bool huge) {
   constexpr std::size_t page = 4096;
   const auto workers = std::min<std::size_t>(4, bytes / (128ULL << 20));
-  void* data = mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
-                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void* data = huge ? MapHugeAligned(bytes)
+                    : mmap(nullptr, bytes, PROT_READ | PROT_WRITE,
+                           MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (data == MAP_FAILED)
-    return {};
-  // Kernels built without THP reject this advice with EINVAL; their pages
+    return nullptr;
+  // Kernels built without THP reject either advice with EINVAL; their pages
   // cannot be promoted. All other failures must release the mapping.
-  if (madvise(data, bytes, MADV_NOHUGEPAGE) != 0 && errno != EINVAL) {
+  if (madvise(data, bytes, huge ? MADV_HUGEPAGE : MADV_NOHUGEPAGE) != 0 &&
+      errno != EINVAL) {
     munmap(data, bytes);
-    return {};
+    return nullptr;
   }
   std::atomic<bool> populated{true};
   const auto populate = [&](std::size_t begin, std::size_t end) {
@@ -57,8 +81,8 @@ CommittedPages CommitPages(std::size_t bytes) {
   };
   if (workers >= 2) {
     // Large serial page faults can hold up inference even when growth runs
-    // on a background thread. Populate disjoint ordinary-page ranges, then
-    // join before registering or exposing any of the backing.
+    // on a background thread. Populate disjoint page ranges, then join
+    // before registering or exposing any of the backing.
     std::array<std::jthread, 3> faults;
     std::size_t next = 0;
     for (std::size_t i = 0; i + 1 < workers; ++i) {
@@ -77,9 +101,43 @@ CommittedPages CommitPages(std::size_t bytes) {
     populate(0, bytes);
   if (!populated.load(std::memory_order_relaxed)) {
     munmap(data, bytes);
-    return {};
+    return nullptr;
   }
-  const int pin = PinHostPages(data, bytes);
+  return data;
+}
+
+// Anonymous pages, then registered with the GPU. With a long-term pin:
+// ordinary pages, opted out of THP before population, because a later
+// huge-page promotion would invalidate the GPU mapping. Without one (a
+// container that filters io_uring, or a locked-memory limit below this size)
+// the kernel would migrate ordinary pages under the mapping whenever it
+// compacts memory; it leaves huge pages alone, so the backing is then built
+// from huge pages from its first touch and locked against swap where the
+// limit allows.
+CommittedPages CommitPages(std::size_t bytes) {
+  void* data = nullptr;
+  int pin = -1;
+  if (LongTermPinsAvailable()) {
+    // A population that fails is out of memory: the other layout would need
+    // the same pages, so it is reported, not retried. Only a refused pin
+    // goes on to the huge-page layout.
+    data = MapPopulated(bytes, false);
+    if (data == nullptr)
+      return {};
+    pin = PinHostPages(data, bytes);
+    if (pin < 0) {
+      munmap(data, bytes);
+      data = nullptr;
+    }
+  }
+  if (data == nullptr) {
+    data = MapPopulated(bytes, true);
+    if (data == nullptr)
+      return {};
+#if defined(MLOCK_ONFAULT)
+    (void)mlock2(data, bytes, MLOCK_ONFAULT);
+#endif
+  }
   if (hipHostRegister(data, bytes, hipHostRegisterDefault) != hipSuccess) {
     UnpinHostPages(pin);
     munmap(data, bytes);

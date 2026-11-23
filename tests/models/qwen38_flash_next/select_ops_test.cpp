@@ -143,6 +143,29 @@ bool Run(std::uint32_t n_tokens, std::uint32_t start_pos, std::uint32_t seed,
   }
   CheckHip(hipFree(d_chunk_scores), "free chunk scores");
 
+  // A live range sends a wide batch to the kernel that groups tokens per key:
+  // every score it writes must equal the per-token kernel's, bit for bit.
+  float* d_group = Upload(std::vector<float>(scores.size(), -1.0F));
+  q::SelectBlocks(d_q, d_blocks, d_mask, d_group, n_tokens, d_pos, 0, kHeads,
+                  kDim, kRatio, kBudget, mask_words, max_blocks, nullptr,
+                  (start_pos + n_tokens) / kRatio);
+  CheckHip(hipDeviceSynchronize(), "group scores");
+  const auto group = Download(d_group, scores.size());
+  for (std::uint32_t t = 0; t < n_tokens; ++t) {
+    const std::uint32_t complete = (start_pos + t + 1) / kRatio;
+    if (complete <= kBudget)
+      continue;
+    const std::size_t row = std::size_t{t} * max_blocks;
+    if (std::memcmp(group.data() + row, scores.data() + row,
+                    std::size_t{complete} * sizeof(float)) != 0) {
+      throw std::runtime_error("group scores differ from per-token scores");
+    }
+  }
+  if (Download(d_mask, mask.size()) != mask) {
+    throw std::runtime_error("group scores changed the mask");
+  }
+  CheckHip(hipFree(d_group), "free group scores");
+
   double worst_score = 0.0;
   std::size_t mismatches = 0;
   for (std::uint32_t t = 0; t < n_tokens; ++t) {

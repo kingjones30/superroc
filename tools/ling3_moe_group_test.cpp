@@ -111,8 +111,8 @@ void RunCase(const char * label, int n, int kMaxExperts, int n_expert, int cap,
   std::vector<int> ids(slots), rc(n, 0);
   std::vector<float> wts(slots);
   for (int j = 0; j < slots; ++j) {
-    // `skew` sends most slots to one expert, which is what real routing does (Jay
-    // measured one expert taking 488 of 512 tokens) and is what makes kMoeGroupCap bite.
+    // `skew` sends most slots to one expert, which is what real routing does (one
+    // expert was measured taking 488 of 512 tokens) and is what makes kMoeGroupCap bite.
     ids[j] = (skew > 0 && (j % 100) < skew) ? 7 : (int) (Next() % (std::uint32_t) n_expert);
     wts[j] = 0.05f + 0.2f * (float) Next() / 4294967296.0F;
   }
@@ -208,7 +208,7 @@ void RunCase(const char * label, int n, int kMaxExperts, int n_expert, int cap,
   hipFree(d_tok_slots); hipFree(d_ge); hipFree(d_go); hipFree(d_gc); hipFree(d_gz); hipFree(d_sd);
 }
 
-// LK1: both kernels, memcmp of every output, including error paths.
+// Both kernels, memcmp of every output, including error paths.
 
 extern "C" int ling3_moe_group_debug_counts(int * host, int n_out);
 

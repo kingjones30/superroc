@@ -1,4 +1,4 @@
-// LFM2 decode step (SPEC2, lane LFD): embedding, per-layer RMSNorm,
+// LFM2 decode step: embedding, per-layer RMSNorm,
 // short-conv operator or GQA attention with fp32 KV, residual, dense SwiGLU
 // or sigmoid-routed FP4 MoE, residual; optional tied-head logits + argmax.
 // Prefill v1 (ForwardLfm2PromptChunk) is the single-token loop over this step.
@@ -16,10 +16,10 @@
 #include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
 #include "src/core/rocm_fp4/superroc_fp4_quant.hpp"  // LFM2 (SUPERROC_FP4_OK)
 #include "src/models/qwen/hip/executor.hpp"
-#include "src/models/qwen/hip/fp4_launch.hpp"  // LFM2 (LKF: shared q/k/v quant)
+#include "src/models/qwen/hip/fp4_launch.hpp"  // LFM2
 #include "src/models/glimmer/hip/glimmer_decode.hpp"  // LFM2 (fp32 KV + attention)
-#include "src/models/lfm2/hip/lfm2_kernels.hpp"  // LFM2
-#include "src/models/lfm2/hip/lfm2_attention.hpp"  // LFM2
+#include "src/models/lfm2/hip/lfm2_kernels.hpp"
+#include "src/models/lfm2/hip/lfm2_attention.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
 #include "src/models/qwen/hip/ops/swiglu.hpp"
@@ -59,7 +59,7 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
     throw std::runtime_error("lfm2moe decode called for a non-lfm2 config");
   }
   if (arena.d_kv_cache == nullptr && arena.d_attention_kv_f16 == nullptr) {
-    throw std::runtime_error("lfm2moe requires a KV cache");  // LFM2 (SPEC3)
+    throw std::runtime_error("lfm2moe requires a KV cache");  // LFM2
   }
   if (arena.d_ssm_conv_state == nullptr) {
     throw std::runtime_error("lfm2moe requires ssm conv state");
@@ -101,12 +101,12 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
   // LFM2: NO norm after the embedding.
 
   const std::size_t plane = arena.GetAttentionKvPlaneElements();
-  // LFM2 (SPEC3): fp16 token-major plane when the arena has one, else fp32.
+  // LFM2: fp16 token-major plane when the arena has one, else fp32.
   const bool kv_f16 = arena.d_attention_kv_f16 != nullptr;
-  float* v_cache = kv_f16 ? nullptr : arena.d_kv_cache + plane;  // LFM2
+  float* v_cache = kv_f16 ? nullptr : arena.d_kv_cache + plane;
   auto* k_f16 = static_cast<std::uint16_t*>(arena.d_attention_kv_f16);
   std::uint16_t* v_f16 = kv_f16 ? k_f16 + plane : nullptr;
-  const float eps = config.norm_eps_pre;  // LFM2
+  const float eps = config.norm_eps_pre;
   const std::uint32_t max_ctx = arena.GetMaxContext();
   const std::uint32_t heads = config.num_attention_heads;
   const std::uint32_t kv_heads = config.num_key_value_heads;
@@ -117,7 +117,7 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
   const std::uint32_t n_used = config.expert_used_count;
   const std::uint32_t expert_ff = config.expert_feed_forward_length;
   const std::uint32_t l_cache = config.shortconv_l_cache;
-  // LFM2 (LKF): normed holds attn_norm(hidden) at the top of every layer.
+  // LFM2: normed holds attn_norm(hidden) at the top of every layer.
   // Layer 0 norms here; every residual add below is fused with the RMSNorm
   // that follows it (ffn_norm, the next layer's attn_norm, output_norm).
   if (config.num_layers != 0) {
@@ -127,7 +127,7 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
   }
   for (std::uint32_t l = 0; l < config.num_layers; ++l) {
     const auto& layer = weights.layers[l];
-    if (layer.is_shortconv) {  // LFM2
+    if (layer.is_shortconv) {
       // Rows B | C | X of the in-projection land in ffn.activation [3H].
       LaunchGEMV(layer.shortconv_in_proj.data, layer.shortconv_in_proj.type,
                  scratch.decode.normed.data(), scratch.ffn.activation.data(),
@@ -143,7 +143,7 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
                  scratch.ssm.out.data(), scratch.attention.output.data(),
                  hidden, hidden, arena.stream);
     } else {  // LFM2 attention layer
-      // LFM2 (LKF): with ROCmFP4 q/k/v, quantise normed ONCE into the
+      // LFM2: with ROCmFP4 q/k/v, quantise normed ONCE into the
       // attention slot and run the three matvecs against it -- the same
       // quant and matvec kernels LaunchGEMV runs per matrix, so bit-identical.
       // Any refusal falls back to LaunchGEMV for that matrix.
@@ -193,7 +193,7 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
       LaunchRoPE(scratch.attention.q.data(), scratch.attention.k.data(), heads,
                  kv_heads, head_dim, rotary_dim, d_pos, rope_theta,
                  arena.stream, nullptr);  // LFM2 (NEOX)
-      if (kv_f16) {  // LFM2 (SPEC3)
+      if (kv_f16) {  // LFM2
         Require(LaunchLfm2WriteKvDevF16(
             scratch.attention.k.data(), scratch.attention.v.data(), k_f16,
             v_f16, config.Lfm2KindIndex(l), d_pos, max_ctx, kv_heads,
@@ -217,7 +217,7 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
                  scratch.ssm.out.data(), scratch.attention.output.data(),
                  hidden, attn, arena.stream);
     }
-    Require(LaunchLfm2AddRMSNorm(  // LFM2 (LKF: residual + ffn_norm)
+    Require(LaunchLfm2AddRMSNorm(  // LFM2
         scratch.decode.hidden.data(), scratch.attention.output.data(),
         static_cast<const float*>(layer.ffn_norm.data),
         scratch.decode.normed.data(), static_cast<std::uint32_t>(hidden), eps,
@@ -250,7 +250,7 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
         throw std::runtime_error("lfm2moe decode experts failed");
       }
     }
-    // LFM2 (LKF): residual + the next RMSNorm (next layer's attn_norm, or
+    // LFM2: residual + the next RMSNorm (next layer's attn_norm, or
     // output_norm after the last layer when logits are wanted).
     const float* next_norm =
         l + 1U < config.num_layers
@@ -282,7 +282,7 @@ void ExecuteLfm2DecodeStep(QwenGpuArena& arena,
   if (!compute_logits) {
     return;
   }
-  // LFM2 (LKF): normed already holds output_norm(hidden).
+  // LFM2: normed already holds output_norm(hidden).
   LaunchGEMV(weights.output.data, weights.output.type,
              scratch.decode.normed.data(), scratch.decode.logits.data(),
              config.vocab_size, hidden, arena.stream);
@@ -314,9 +314,9 @@ tokenization::TokenId QwenGpuExecutor::ForwardLfm2PromptChunk(
   if (end_pos > arena_.GetMaxContext()) {
     throw std::length_error("prompt exceeds the GPU context length");
   }
-  if (batch >= 2) {  // LFM2
-    return ForwardLfm2PromptBatch(prompt_tokens, start_pos, compute_logits);  // LFM2
-  }  // LFM2
+  if (batch >= 2) {
+    return ForwardLfm2PromptBatch(prompt_tokens, start_pos, compute_logits);
+  }
   last_hidden_offset_ = 0;  // LFM2 (single-token scratch)
   for (std::size_t i = 0; i < batch; ++i) {
     const std::uint32_t pos = start_pos + static_cast<std::uint32_t>(i);

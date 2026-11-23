@@ -24,13 +24,13 @@
 //
 // Also asserts the dispatch contract: the shared IsTiledAttentionSupported
 // still rejects (16,2) (the tiled kernel stays (24,4)-only), the WMMA launcher
-// accepts (16,2), (24,4) and (16,4) (SQ17 MiMo), and rejects other head
+// accepts (16,2), (24,4) and (16,4), and rejects other head
 // configs.
 //
-// SQ17: the MiMo (16,4,256) instantiation runs the same oracle (RunCase is
+// The MiMo (16,4,256) instantiation runs the same oracle (RunCase is
 // templated on head config), and CheckBaselineGuard proves the baseline
 // launcher refuses an over-LDS span with length_error instead of faulting.
-// SQ17-2 (F2): two (16,4) cases past the guarded boundary, the guard's
+// Two (16,4) cases past the guarded boundary, the guard's
 // positive side (a fitting span must not throw), and the timing gate reads
 // the device block-LDS limit instead of a hardcoded 64 KiB.
 
@@ -122,7 +122,7 @@ void Compare(const char* label, const std::vector<float>& got,
   }
 }
 
-// SQ17: templated on head config so the MiMo (16,4) instantiation runs the
+// Templated on head config so the MiMo (16,4) instantiation runs the
 // same oracle. The locals shadow the KAT file constants; <16,2> folds to the
 // same values as before.
 template<std::uint32_t Hq, std::uint32_t Hkv>
@@ -366,7 +366,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
     std::cout << "  chunk boundaries: byte-identical\n";
   }
 
-  if (start_pos >= 8192 || batch_size >= 1024) {
+  if (start_pos >= 8192 || batch_size >= 256) {
     const std::size_t length = start_pos + batch_size;
     const std::array<std::size_t, 2> words{
         length * kv_size / 2,
@@ -428,7 +428,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
         const bool untouched = std::all_of(
             first.begin(), first.end(), [](auto byte) { return byte == 0xA5; });
         if (untouched ==
-            (key_heads != 0 && value_heads != 0 && batch_size >= 1024 &&
+            (key_heads != 0 && value_heads != 0 && batch_size >= 256 &&
              key_begin < length && key_begin % 16 == 0))
           std::abort();
         for (std::size_t off : {std::size_t{0}, sizes[i] + 16}) {
@@ -460,7 +460,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
 // are rejected launches. Multiply by 10 (KAT attention layers) for a chunk's
 // attention-stage total.
 void BenchTiming() {
-  // SQ17-2 (F2): the baseline-compare gate reads the device block-LDS limit,
+  // The baseline-compare gate reads the device block-LDS limit,
   // like the launcher guard does, not a hardcoded 64 KiB.
   int bench_device = 0;
   HIP_CHECK(hipGetDevice(&bench_device));
@@ -606,7 +606,7 @@ void BenchTiming() {
 
 // The dispatch contract: the shared tiled gate still rejects KAT (the tiled
 // kernel stays (24,4)-only), the WMMA launcher accepts (16,2), (24,4) and
-// (16,4) (SQ17 MiMo) and rejects anything else, so unknown shapes keep
+// (16,4) and rejects anything else, so unknown shapes keep
 // falling back to baseline.
 void CheckDispatch() {
   constexpr std::size_t kBatch = 64;
@@ -660,7 +660,7 @@ void CheckDispatch() {
   HIP_CHECK(hipFree(d_cache_f16));
 }
 
-// SQ17: the baseline launcher refuses an over-LDS span with length_error
+// The baseline launcher refuses an over-LDS span with length_error
 // before anything is enqueued (MiMo's 27.7K failure class), instead of
 // faulting the queue. The span derives from the device's own block limit so
 // this holds on any GPU. Null device pointers are safe: the guard runs first.
@@ -686,7 +686,7 @@ void CheckBaselineGuard() {
     std::cerr << "baseline launcher accepted an over-LDS span\n";
     std::abort();
   }
-  // SQ17-2 (F2): the positive side — a span that fits must not throw. Valid
+  // The positive side — a span that fits must not throw. Valid
   // device buffers this time: past the guard the launcher really enqueues.
   constexpr std::size_t kFitBatch = 1024;
   constexpr std::uint32_t kFitContext = 2048;
@@ -755,7 +755,7 @@ static_assert(superroc::hip::detail::IsWmmaAttentionSupportedFor<16, 2>(
                   kKatDispatchParams),
               "the WMMA gate must accept KAT");
 
-// SQ17: MiMo (16,4) dispatch contract at compile time.
+// MiMo (16,4) dispatch contract at compile time.
 constexpr superroc::hip::detail::AttentionSupportParams kMimoDispatchParams{
     .batch_size = 1024,
     .start_pos = 0,
@@ -771,6 +771,23 @@ static_assert(
 static_assert(superroc::hip::detail::IsWmmaAttentionSupportedFor<16, 4>(
                   kMimoDispatchParams),
               "the WMMA gate must accept MiMo");
+
+// Ornith-1.5-122B (32,2) dispatch contract at compile time.
+constexpr superroc::hip::detail::AttentionSupportParams
+    kOrnith122DispatchParams{.batch_size = 1024,
+                             .start_pos = 0,
+                             .max_context = 32768,
+                             .num_heads = 32,
+                             .num_kv_heads = 2,
+                             .head_dim = 256,
+                             .has_k_cache_f16 = true,
+                             .has_v_cache_f16 = true};
+static_assert(
+    !superroc::hip::detail::IsTiledAttentionSupported(kOrnith122DispatchParams),
+    "the shared tiled gate must keep rejecting Ornith-1.5-122B");
+static_assert(superroc::hip::detail::IsWmmaAttentionSupportedFor<32, 2>(
+                  kOrnith122DispatchParams),
+              "the WMMA gate must accept Ornith-1.5-122B");
 
 #endif  // defined(ENGINE_ENABLE_HIP)
 
@@ -810,10 +827,10 @@ int main() {
   RunCase<16, 2>(8192, 1024, true, 16, false);
   RunCase<16, 2>(8192, 1024, true, 17, false);
   RunCase<16, 2>(8192, 1024, false, 9216, false);
-  // SQ17: MiMo (16,4) instantiation under the same oracle bars: production
+  // MiMo (16,4) instantiation under the same oracle bars: production
   // chunks at start 0 and at depth, the 16K span (packed-vs-canonical plus
   // the FP64 oracle; the baseline cannot stage that span), partial tiles,
-  // and the LSE path. SQ17-2 (F2): two cases past the guarded boundary
+  // and the LSE path. Two cases past the guarded boundary
   // (visible 17408 and 24096; no baseline compare there either).
   RunCase<16, 4>(0, 1024, false, 0, true);
   RunCase<16, 4>(0, 2048, false, 0, true);
@@ -823,10 +840,20 @@ int main() {
   RunCase<16, 4>(8192, 1024, true, 16, false);
   RunCase<16, 4>(16384, 1024, false, 0, false);
   RunCase<16, 4>(20000, 4096, false, 0, false);
+  // Ornith-1.5-122B (32,2) instantiation under the same bars, including
+  // spans past 16K (visible 17408 and 32768), where the scalar fallback's
+  // LDS passes the device limit.
+  RunCase<32, 2>(0, 1024, false, 0, true);
+  RunCase<32, 2>(8192, 1024, false, 0, true);
+  RunCase<32, 2>(0, 100, false, 0, true);
+  RunCase<32, 2>(8192, 1024, true, 16, false);
+  RunCase<32, 2>(16384, 1024, false, 0, false);
+  RunCase<32, 2>(28672, 4096, false, 0, false);
 
   BenchTiming();
 
-  std::cout << "KAT+MiMo WMMA prefill attention ops test passed on gfx1151.\n";
+  std::cout << "KAT+MiMo+Ornith-122B WMMA prefill attention ops test passed on "
+               "gfx1151.\n";
   return 0;
 #else
   std::cout << "HIP disabled, skipping KAT WMMA prefill attention ops test.\n";

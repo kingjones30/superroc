@@ -27,6 +27,7 @@
 #include "src/cli/serve/logging.hpp"
 #include "src/cli/serve/stop_sequences.hpp"
 #include "src/cli/serve/trace.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::server {
 namespace {
@@ -87,6 +88,7 @@ struct ScheduledRequest {
   bool cache_prompt{true};
   std::size_t cache_prefix_tokens{0};
   bool stop_at_eos{true};
+  bool warmup{false};
   std::size_t token_limit{1};
   sampling::SamplingConfig sampling;
   TextGenerationScheduler::CancellationCheck external_cancellation;
@@ -113,21 +115,37 @@ struct ScheduledRequest {
   std::optional<TextGenerationScheduler::Clock::time_point> prefill_start;
   bool decode_due{false};
   std::optional<TextRunnerToken> preview_token;
+  std::exception_ptr first_token_failure;
   bool advance_pending{false};
   bool preview_stops{false};
   std::size_t generated_output_bytes{0};
+  // Byte offset of each logprobs report's token in the unfiltered output,
+  // parallel to result.token_logprobs.
+  std::vector<std::size_t> logprob_starts;
   StopSequenceFilter stop_filter;
 
   std::mutex output_mutex;
   std::condition_variable output_condition;
-  std::deque<std::string> output_pieces;
+  struct QueuedPiece {
+    std::string text;
+    // Parallel to the piece's token: present only when the runner captured
+    // logprobs for it. Empty pieces (heartbeats, progress) carry none.
+    std::optional<TextGenerationBackend::TokenMeta> meta;
+  };
+  std::deque<QueuedPiece> output_pieces;
   std::optional<TextGenerationBackend::PromptProgress> pending_progress;
+  // Set by the transport before Wait when it consumes per-token logprobs.
+  TextGenerationBackend::TokenMetaCallback token_meta_callback;
   // Set at admission for streams; the consumer reports its start at most once.
   bool admitted{false};
   std::size_t buffered_output_bytes{0};
   // A stalled consumer trips backpressure on every token, so the debug line is
   // written once per request. Only the scheduler thread touches this.
   bool backpressure_logged{false};
+  // The reasoning loop guard's firing line is written once per request, the
+  // first step whose sampler reports it. Only the scheduler thread touches
+  // this.
+  bool loop_guard_fired_logged{false};
   // Only the scheduler worker changes this, from admission through cleanup.
   bool counted_processing{false};
   // Admission waits at most once for a resident request to publish the
@@ -270,7 +288,8 @@ void LogBackpressure(const std::shared_ptr<ScheduledRequest>& request,
 }
 
 [[nodiscard]] bool PublishPiece(
-    const std::shared_ptr<ScheduledRequest>& request, std::string piece) {
+    const std::shared_ptr<ScheduledRequest>& request, std::string piece,
+    std::optional<TextGenerationBackend::TokenMeta> meta = {}) {
   if (!request->publish_token_pieces) {
     return true;
   }
@@ -293,7 +312,8 @@ void LogBackpressure(const std::shared_ptr<ScheduledRequest>& request,
         request->result.max_buffered_output_bytes =
             std::max(request->result.max_buffered_output_bytes,
                      request->buffered_output_bytes);
-        request->output_pieces.push_back(std::move(piece));
+        request->output_pieces.push_back(
+            {.text = std::move(piece), .meta = std::move(meta)});
       } catch (...) {
         request->output_budget->Release(piece_bytes);
         request->buffered_output_bytes -= piece_bytes;
@@ -660,6 +680,30 @@ struct TextGenerationScheduler::Impl {
     }
   }
 
+  // Records a fired reasoning loop guard once per request: one server log
+  // line with the request id, the generated reasoning tokens so far, and the
+  // firing period and repeat count, plus the flag on the request's
+  // `event=completed` line. The sampler latches the firing; the scheduler
+  // owns the request id, so the sampler itself stays silent.
+  void NoteLoopGuardFired(const std::shared_ptr<ScheduledRequest>& request) {
+    if (request->loop_guard_fired_logged || !request->runner_request)
+      return;
+    if (!request->runner_request.loop_guard_fired())
+      return;
+    request->loop_guard_fired_logged = true;
+    request->result.loop_guard_fired = true;
+    try {
+      std::ostringstream message;
+      message << "request=" << request->id
+              << " event=loop_guard_fired reasoning_tokens="
+              << request->runner_request.loop_guard_reasoning_tokens()
+              << " period=" << request->runner_request.loop_guard_period()
+              << " repeats=" << request->runner_request.loop_guard_repeats();
+      Logger::Info("scheduler", message.str());
+    } catch (...) {
+    }
+  }
+
   /// Keeps the process-wide deferred gauge in step. Requires queue_mutex.
   void SetQueuedCountLocked(std::size_t count) {
     detail::RequestsDeferred().fetch_add(
@@ -784,7 +828,10 @@ struct TextGenerationScheduler::Impl {
       return;
     }
     try {
-      if (request->runner_request) {
+      if (request->runner_request && request->warmup) {
+        // A cancelled warm-up keeps nothing either (see the completion path).
+        request->runner_request.Invalidate();
+      } else if (request->runner_request) {
         const auto retained = request->runner_request.Cancel();
         request->result.component_cache = retained.component_cache;
         request->result.cache_snapshot_bytes = retained.snapshot_bytes;
@@ -795,7 +842,8 @@ struct TextGenerationScheduler::Impl {
       request->result.cancelled = true;
       FinalizeResult(request, TextGenerationBackend::FinishReason::kCancelled);
       LogDecodeProgress(request, true);
-      RecordRequestMetrics(request->result);
+      if (!request->warmup)
+        RecordRequestMetrics(request->result);
       PublishTerminal(request, {}, true);
     } catch (...) {
       PublishTerminal(request, std::current_exception(), true);
@@ -942,6 +990,9 @@ struct TextGenerationScheduler::Impl {
 
   void CompleteSuccess(const std::shared_ptr<ScheduledRequest>& request,
                        TextGenerationBackend::FinishReason finish_reason) {
+    // Backstop: every completed request carries the flag, even if the firing
+    // step took a path without its own check.
+    NoteLoopGuardFired(request);
     if (request->stop_filter.enabled()) {
       auto tail = request->stop_filter.Finish();
       request->result.text += tail;
@@ -959,10 +1010,18 @@ struct TextGenerationScheduler::Impl {
     request->result.ngram_dedup_rows = ngram.dedup_rows;
     request->result.ngram_cache_hits = ngram.cache_hits;
     request->result.ngram_disk_reads = ngram.disk_reads;
-    const auto cache_commit =
-        finish_reason == TextGenerationBackend::FinishReason::kStopSequence
-            ? request->runner_request.Cancel()
-            : request->runner_request.Commit();
+    // A warm-up leaves no state behind. Committed, it would hold a
+    // checkpoint nobody restores, and the first prompt after it would have to
+    // move that checkpoint off the session's rows before writing its own.
+    TextRunnerPool::Request::CommitMetrics cache_commit;
+    if (request->warmup) {
+      request->runner_request.Invalidate();
+    } else {
+      cache_commit =
+          finish_reason == TextGenerationBackend::FinishReason::kStopSequence
+              ? request->runner_request.Cancel()
+              : request->runner_request.Commit();
+    }
     request->result.component_cache = cache_commit.component_cache;
     request->result.cache_snapshot_bytes = cache_commit.snapshot_bytes;
     request->result.cache_snapshot_ms = cache_commit.snapshot_ms;
@@ -976,8 +1035,9 @@ struct TextGenerationScheduler::Impl {
     FinalizeResult(request, finish_reason);
     LogDecodeProgress(request, true);
     // Recorded here rather than by the HTTP adapter, so a client that leaves
-    // before reading the result still counts.
-    RecordRequestMetrics(request->result);
+    // before reading the result still counts. A warm-up is not a request.
+    if (!request->warmup)
+      RecordRequestMetrics(request->result);
     PublishTerminal(request);
   }
 
@@ -1300,12 +1360,41 @@ struct TextGenerationScheduler::Impl {
         request->result.prefill_fallback_reason =
             "incremental_prefill_unavailable";
       }
+      // The draft catch-up and prompt snapshot left in the step that ends the
+      // prompt do not change the first token: publish it ahead of them.
+      static const bool early_first_token = [] {
+        const char* e = ::superroc::core::GetEnv("SUPERROC_EARLY_FIRST_TOKEN");
+        return e == nullptr || e[0] != '0';
+      }();
+      if (multi_token_decode && early_first_token) {
+        request->runner_request.SetPromptLogitsHook(
+            [this, &request] { PublishPromptLogits(request); });
+      }
       const auto start = Clock::now();
+      const bool first_token_pending = !request->previous_token.has_value();
       const auto step = request->runner_request.Prefill(budget);
+      request->runner_request.SetPromptLogitsHook({});
+      if (request->first_token_failure) {
+        CompleteFailure(request,
+                        std::exchange(request->first_token_failure, nullptr));
+        return;
+      }
       const double step_ms =
           std::chrono::duration<double, std::milli>(Clock::now() - start)
               .count();
-      request->result.prefill_ms += step_ms;
+      // When the first token went out inside this step, the client's wait
+      // for the prompt ended there. The rest of the step is reported as the
+      // prompt's tail, not as prompt time.
+      double prompt_ms = step_ms;
+      if (first_token_pending && request->previous_token.has_value()) {
+        const double step_start_ms = std::chrono::duration<double, std::milli>(
+                                         start - request->request_start)
+                                         .count();
+        prompt_ms =
+            std::clamp(request->result.ttft_ms - step_start_ms, 0.0, step_ms);
+        request->result.prefill_tail_ms += step_ms - prompt_ms;
+      }
+      request->result.prefill_ms += prompt_ms;
       request->result.prefill_tokens += step.consumed_tokens;
       if (!decoder_runnable && !peer_waiting)
         publication_prefill.Observe(step.consumed_tokens, step_ms);
@@ -1380,6 +1469,7 @@ struct TextGenerationScheduler::Impl {
     request->result.decode_ms +=
         std::chrono::duration<double, std::milli>(Clock::now() - decode_start)
             .count();
+    NoteLoopGuardFired(request);
     if (request->stop_filter.stopped()) {
       CompleteSuccess(request,
                       TextGenerationBackend::FinishReason::kStopSequence);
@@ -1389,7 +1479,32 @@ struct TextGenerationScheduler::Impl {
     return PrepareDecode(request);
   }
 
+  /// Runs inside the prefill step that ends the prompt, so it must not
+  /// complete the request: a failure waits for that step to return.
+  void PublishPromptLogits(const std::shared_ptr<ScheduledRequest>& request) {
+    if (!request->result.tokens.empty() || request->preview_stops)
+      return;
+    const auto preview = request->runner_request.PreviewPromptLogits();
+    if (preview && !preview->stop) {
+      request->first_token_failure = PublishSelectionOutput(request, *preview);
+      if (!request->first_token_failure)
+        request->preview_token = preview->token;
+    }
+    request->preview_stops = preview && preview->stop;
+  }
+
   [[nodiscard]] bool PublishSelection(
+      const std::shared_ptr<ScheduledRequest>& request,
+      const TextDecodeSelection& selection) {
+    if (auto failure = PublishSelectionOutput(request, selection)) {
+      CompleteFailure(request, failure);
+      return false;
+    }
+    return !CompleteIfStopped(request);
+  }
+
+  /// Sends one selected token to the client. Returns why it could not.
+  [[nodiscard]] std::exception_ptr PublishSelectionOutput(
       const std::shared_ptr<ScheduledRequest>& request,
       const TextDecodeSelection& selection) {
     const auto now = Clock::now();
@@ -1408,37 +1523,89 @@ struct TextGenerationScheduler::Impl {
     request->previous_token = now;
     if (selection.piece.size() >
         request->max_output_bytes - request->generated_output_bytes) {
-      CompleteFailure(request,
-                      std::make_exception_ptr(TextGenerationError(
-                          TextGenerationErrorCode::kOutputLimit,
-                          "text generation output byte limit exceeded")));
-      return false;
+      return std::make_exception_ptr(
+          TextGenerationError(TextGenerationErrorCode::kOutputLimit,
+                              "text generation output byte limit exceeded"));
     }
+    const std::size_t piece_start = request->generated_output_bytes;
     request->generated_output_bytes += selection.piece.size();
     request->result.tokens.push_back(selection.token);
     request->live_generated_tokens.store(request->result.tokens.size(),
                                          std::memory_order_relaxed);
     detail::TotalGenTokens().fetch_add(1, std::memory_order_relaxed);
+    // Logprobs are purely observational: when the request did not ask for
+    // them, no entry is appended, no text is copied and no Decode runs, so
+    // token_logprobs stays empty and the queued piece carries no metadata.
+    // When armed, each token gets one entry in token_logprobs, in order; a
+    // matched stop sequence then removes the entries of the tokens it
+    // swallowed whole. Runners without a tokenizer leave text empty; fill it
+    // from the runner so the transport never maps an id to text itself.
     const auto piece = request->stop_filter.enabled()
                            ? request->stop_filter.Push(selection.piece)
                            : selection.piece;
-    if ((!piece.empty() || !request->stop_filter.enabled()) &&
-        !PublishPiece(request, piece)) {
-      CompleteFailure(request,
-                      std::make_exception_ptr(TextGenerationError(
-                          TextGenerationErrorCode::kOutputBackpressure,
-                          "text generation buffered output limit exceeded")));
-      return false;
+    std::optional<TextGenerationBackend::TokenMeta> meta;
+    if (request->sampling.logprobs) {
+      auto& logged = request->result.token_logprobs.emplace_back();
+      request->logprob_starts.push_back(piece_start);
+      if (selection.logprobs.has_value()) {
+        logged = *selection.logprobs;
+      } else {
+        logged.token = selection.token;
+        logged.logprob = std::numeric_limits<double>::quiet_NaN();
+      }
+      if (logged.text.empty()) {
+        logged.text = selection.piece;
+      }
+      if (logged.text.empty()) {
+        try {
+          logged.text =
+              runner_pool->runner().Decode(std::span<const TextRunnerToken>(
+                  &request->result.tokens.back(), 1));
+        } catch (...) {
+        }
+      }
+      for (auto& entry : logged.top) {
+        if (!entry.text.empty())
+          continue;
+        try {
+          const TextRunnerToken id = static_cast<TextRunnerToken>(entry.token);
+          entry.text = runner_pool->runner().Decode(
+              std::span<const TextRunnerToken>(&id, 1));
+        } catch (...) {
+        }
+      }
+      if (selection.logprobs.has_value()) {
+        meta = TextGenerationBackend::TokenMeta{
+            .token = selection.token, .piece = piece, .logprobs = logged};
+      }
+    }
+    // A token whose text the stop filter is holding back still reports: its
+    // entry rides an empty piece, and the transport attaches it to the text
+    // that follows. A token the matched stop sequence swallowed whole reports
+    // nothing.
+    const bool report_held =
+        meta.has_value() && !request->stop_filter.stopped();
+    if ((!piece.empty() || !request->stop_filter.enabled() || report_held) &&
+        !PublishPiece(request, piece, std::move(meta))) {
+      return std::make_exception_ptr(TextGenerationError(
+          TextGenerationErrorCode::kOutputBackpressure,
+          "text generation buffered output limit exceeded"));
     }
     if (incremental_text_is_exact) {
       request->result.text += piece;
     }
-    if (request->stop_filter.stopped())
+    if (request->stop_filter.stopped()) {
       request->result.stop_sequence = request->stop_filter.matched_sequence();
-    if (CompleteIfStopped(request)) {
-      return false;
+      // The reports follow the returned text: a token that starts at or past
+      // its end contributed nothing to it.
+      auto& reports = request->result.token_logprobs;
+      while (!reports.empty() &&
+             request->logprob_starts.back() >= request->result.text.size()) {
+        reports.pop_back();
+        request->logprob_starts.pop_back();
+      }
     }
-    return true;
+    return nullptr;
   }
 
   void FinishAdvanced(const std::shared_ptr<ScheduledRequest>& request,
@@ -1506,6 +1673,7 @@ struct TextGenerationScheduler::Impl {
         if (request->stop_filter.stopped())
           break;
       }
+      NoteLoopGuardFired(request);
 
       request->result.decode_ms +=
           std::chrono::duration<double, std::milli>(Clock::now() - decode_start)
@@ -1820,6 +1988,7 @@ struct TextGenerationScheduler::Impl {
         if (item.request->stop_filter.stopped())
           break;
       }
+      NoteLoopGuardFired(item.request);
       item.request->result.decode_ms +=
           std::chrono::duration<double, std::milli>(Clock::now() -
                                                     item.decode_start)
@@ -2169,6 +2338,7 @@ TextGenerationScheduler::Result TextGenerationScheduler::Request::Wait(
 
   while (true) {
     std::string piece;
+    std::optional<TextGenerationBackend::TokenMeta> token_meta;
     std::optional<TextGenerationBackend::PromptProgress> progress;
     bool start = false;
     bool has_piece = false;
@@ -2198,10 +2368,11 @@ TextGenerationScheduler::Result TextGenerationScheduler::Request::Wait(
         progress = std::exchange(impl_->request->pending_progress, {});
       } else if (!impl_->request->output_pieces.empty()) {
         has_piece = true;
-        const std::size_t piece_bytes =
-            QueuedPieceCost(impl_->request->output_pieces.front());
-        piece = std::move(impl_->request->output_pieces.front());
+        auto queued = std::move(impl_->request->output_pieces.front());
         impl_->request->output_pieces.pop_front();
+        const std::size_t piece_bytes = QueuedPieceCost(queued.text);
+        piece = std::move(queued.text);
+        token_meta = std::move(queued.meta);
         impl_->request->buffered_output_bytes -= piece_bytes;
         impl_->request->output_budget->Release(piece_bytes);
       } else if (impl_->request->terminal) {
@@ -2233,6 +2404,12 @@ TextGenerationScheduler::Result TextGenerationScheduler::Request::Wait(
     if (progress.has_value() && deliver_pieces && on_progress) {
       deliver(on_progress, *progress);
     }
+    // The token's logprobs precede its piece so a streaming transport can
+    // attach them to the chunk the piece becomes.
+    if (has_piece && deliver_pieces && token_meta.has_value() &&
+        impl_->request->token_meta_callback) {
+      deliver(impl_->request->token_meta_callback, *token_meta);
+    }
     if (has_piece && deliver_pieces && on_token) {
       deliver(on_token, piece);
     }
@@ -2263,6 +2440,13 @@ void TextGenerationScheduler::Request::Cancel() noexcept {
   if (*this && !IsTerminal(impl_->request)) {
     impl_->request->cancellation_requested.store(true,
                                                  std::memory_order_release);
+  }
+}
+
+void TextGenerationScheduler::Request::SetTokenMetaCallback(
+    TextGenerationBackend::TokenMetaCallback callback) {
+  if (*this) {
+    impl_->request->token_meta_callback = std::move(callback);
   }
 }
 
@@ -2327,12 +2511,20 @@ TextGenerationScheduler::Request TextGenerationScheduler::Submit(
   const std::size_t available = context - prompt.size();
   sampling.Validate();
   ValidateStopSequences(metadata.stop_sequences);
+  // Ling-3's pieces are the exact decoded text (LingTokenizer::Decode is the
+  // per-token TokenText concatenation), so Ling3TextRunner advertises
+  // incremental_text_is_exact. The guard stays for the runner family whose
+  // pieces are not Decode()-exact (llama SPM): admitting stop there would
+  // stream trimmed pieces and then rebuild result.text with an untrimmed
+  // Decode(), so fail closed instead.
   if (!metadata.stop_sequences.empty() && !impl_->incremental_text_is_exact)
     throw std::invalid_argument(
         "stop sequences require exact incremental token decoding");
 
   auto request = std::make_shared<ScheduledRequest>();
-  request->stop_filter = StopSequenceFilter(std::move(metadata.stop_sequences));
+  request->stop_filter =
+      StopSequenceFilter(std::move(metadata.stop_sequences),
+                         std::move(metadata.stop_reasoning_ends));
   request->id = impl_->next_request_id.fetch_add(1, std::memory_order_relaxed);
   request->client_id =
       metadata.client_id.empty() ? "anonymous" : std::move(metadata.client_id);
@@ -2350,6 +2542,7 @@ TextGenerationScheduler::Request TextGenerationScheduler::Submit(
   request->cache_prompt = metadata.cache_prompt;
   request->cache_prefix_tokens = metadata.cache_prefix_tokens;
   request->stop_at_eos = metadata.stop_at_eos;
+  request->warmup = metadata.warmup;
   request->token_limit =
       max_tokens > 0 ? std::min(max_tokens, available) : available;
   request->sampling = sampling;

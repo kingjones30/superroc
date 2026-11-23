@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -17,7 +18,6 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/previous_name_compat.hpp"
 #include "src/models/minimax_h3/json.hpp"
 #include "src/models/minimax_h3/runtime.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
@@ -294,21 +294,30 @@ ModelInventory InspectFixture(const ModelFixture& fixture) {
   return std::move(*inventory);
 }
 
-void TestPreviousManifestSchemaAccepted() {
-  // Compatibility: manifests written by previous releases carry the
-  // previous engine-name schema (built from parts so its spelling never
-  // appears here); the reader accepts both spellings.
-  static const std::string previous_schema =
-      std::string("g") + "ufo.minimax-h3-source.v1";
-  Expect(::superroc::core::MatchesCurrentOrPrevious(
-             previous_schema, "superroc.minimax-h3-source.v1"),
-         "previous manifest schema accepted");
-  Expect(::superroc::core::MatchesCurrentOrPrevious(
-             "superroc.minimax-h3-source.v1", "superroc.minimax-h3-source.v1"),
-         "current manifest schema accepted");
-  Expect(!::superroc::core::MatchesCurrentOrPrevious(
-             "other.v1", "superroc.minimax-h3-source.v1"),
-         "unrelated manifest schema rejected");
+void TestManifestSchemaChecked() {
+  TemporaryDirectory temporary;
+  ModelFixture fixture(temporary.path);
+  const auto manifest_path = fixture.root / "source-manifest.json";
+  std::string error;
+  Expect(ModelInventory::Inspect(fixture.root, manifest_path,
+                                 InspectionOptions{false}, &error)
+             .has_value(),
+         "current manifest schema accepted: " + error);
+
+  std::ifstream in(manifest_path);
+  std::string manifest((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+  const std::string schema = "superroc.minimax-h3-source.v1";
+  const auto at = manifest.find(schema);
+  Expect(at != std::string::npos, "fixture manifest names its schema");
+  manifest.replace(at, schema.size(), "other.v1");
+  WriteText(manifest_path, manifest);
+  error.clear();
+  const auto other = ModelInventory::Inspect(fixture.root, manifest_path,
+                                             InspectionOptions{false}, &error);
+  Expect(!other.has_value(), "unrelated manifest schema rejected");
+  Expect(error.find("identity does not match") != std::string::npos,
+         "schema mismatch diagnostic retained: " + error);
 }
 
 void TestStrictJson() {
@@ -513,7 +522,7 @@ void TestCancellationAndPhasePeaks() {
 }  // namespace
 
 int main() {
-  TestPreviousManifestSchemaAccepted();
+  TestManifestSchemaChecked();
   TestStrictJson();
   TestInspectionAndInventory();
   TestUnknownArchitectureRejected();

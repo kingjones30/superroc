@@ -771,7 +771,7 @@ std::unique_ptr<QwenTokenizer> QwenTokenizer::CreateFromGguf(
              std::optional<std::string_view>{"llama4"}) {  // GLIMMER
     tokenizer->pre_tokenizer_ = PreTokenizer::kLlama4;
   } else if (reader.GetMetadataString("tokenizer.ggml.pre") ==
-             std::optional<std::string_view>{"lfm2"}) {  // LFM2
+             std::optional<std::string_view>{"lfm2"}) {
     tokenizer->pre_tokenizer_ = PreTokenizer::kLlama3;
     tokenizer->ignore_merges_ = true;
     tokenizer->add_bos_token_ = true;
@@ -802,7 +802,7 @@ std::unique_ptr<QwenTokenizer> QwenTokenizer::CreateFromGguf(
           reader.GetMetadataBool("tokenizer.ggml.add_bos_token")) {  // GLIMMER
     tokenizer->add_bos_token_ = *add_bos;
   }
-  // GLM: stop on <|eot|>. Do not read eom into the stop set.
+  // Stop on <|eot|>. Do not read eom into the stop set.
   if (const auto eot =
           reader.GetMetadataUint32("tokenizer.ggml.eot_token_id")) {
     tokenizer->eot_token_id_ = *eot;
@@ -1060,14 +1060,13 @@ std::vector<std::string> QwenTokenizer::PreTokenizePieces(
     return FlintPieces(text);
   }
   if (pre_tokenizer_ != PreTokenizer::kLlama4 &&
-      pre_tokenizer_ != PreTokenizer::kLlama3) {  // LFM2
+      pre_tokenizer_ != PreTokenizer::kLlama3) {
     if (!text.empty()) {
       pieces.emplace_back(text);
     }
     return pieces;
   }
-  const bool is_llama3 =  // LFM2
-      (pre_tokenizer_ == PreTokenizer::kLlama3);
+  const bool is_llama3 = (pre_tokenizer_ == PreTokenizer::kLlama3);
   std::size_t offset = 0;
   while (offset < text.size()) {
     const std::size_t end =

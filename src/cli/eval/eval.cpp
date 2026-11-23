@@ -20,7 +20,7 @@
 #include <vector>
 
 #include "src/cli/arg_parser.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/json.hpp"
 #include "src/eval/dataset.hpp"
 #include "src/eval/extract.hpp"
@@ -85,7 +85,7 @@ std::filesystem::path DefaultEvalData() {
 }
 
 std::string Environment(std::string_view name) {
-  const char* value = ::superroc::core::GetEnvCompat(std::string(name).c_str());
+  const char* value = ::superroc::core::GetEnv(std::string(name).c_str());
   return value == nullptr ? std::string() : std::string(value);
 }
 
@@ -217,13 +217,7 @@ std::optional<ModelInfo> ParseSingleModel(const HttpResult& response,
     if (info.revision.empty()) {
       info.revision = model.member_str("model_revision");
     }
-    // Compatibility: previous releases reported the previous
-    // engine-name object (built from parts so its spelling never appears
-    // here); prefer the current name.
     const Value* extension = model.find("superroc");
-    if (extension == nullptr) {
-      extension = model.find(std::string("g") + "ufo");
-    }
     if (extension != nullptr && extension->is_object()) {
       info.artifact_id = extension->member_str("artifact_id");
       if (info.revision.empty()) {

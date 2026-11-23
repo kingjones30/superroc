@@ -5,6 +5,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblas/hipblas.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -233,6 +234,15 @@ struct PrefillCheckpoint {
   std::vector<float> logits;
 };
 
+// The tier's tiled kernels compute whole column tiles; below this width the
+// matrix-vector kernels read each weight once per row and win outright.
+constexpr std::uint32_t kVecBatch = 8;
+// Widest late in-pass checkpoint (SUPERROC_TAIL_CAPTURE dual capture): the
+// earlier P view's boundary may trail the pass end by up to this many rows;
+// its boundary logits and kept hidden rows stay in the widened final-layer
+// scratch rows.
+constexpr std::uint32_t kPairTailRows = 256;
+
 /// Runs the trunk graph on the GPU for one session at a time. Buffers are
 /// sized once for `max_batch` tokens; longer prompts are fed in chunks.
 class Executor {
@@ -267,7 +277,8 @@ public:
   enum class ForwardMode { kDecode, kVerify, kPrefill };
   [[nodiscard]] std::unique_ptr<PrefillCheckpoint> MakePrefillCheckpoint(
       Session& session, std::span<const std::int32_t> tokens,
-      std::uint32_t prefix, std::string* error_msg) const;
+      std::uint32_t prefix, std::string* error_msg,
+      std::uint32_t max_tail = kVecBatch) const;
 
   /// Appends `tokens` (at most max_batch) to the session and returns the
   /// logits of the last `n_logits` tokens in `logits` (n_logits * vocab
@@ -279,12 +290,13 @@ public:
   /// prompt: once its own n-gram rows have arrived it starts reading the
   /// next chunk's, so that read overlaps this chunk's layers. The rows are
   /// used only if the next batch has exactly those tokens.
-  [[nodiscard]] bool Forward(Session& session,
-                             std::span<const std::int32_t> tokens,
-                             std::uint32_t n_logits, float* logits,
-                             ForwardMode mode, std::string* error_msg,
-                             PrefillCheckpoint* checkpoint = nullptr,
-                             std::span<const std::int32_t> next = {}) const;
+  [[nodiscard]] bool Forward(
+      Session& session, std::span<const std::int32_t> tokens,
+      std::uint32_t n_logits, float* logits, ForwardMode mode,
+      std::string* error_msg, PrefillCheckpoint* checkpoint = nullptr,
+      PrefillCheckpoint* checkpoint2 = nullptr,
+      std::span<const std::int32_t> next = {},
+      const std::function<void()>* logits_ready = nullptr) const;
 
   struct BatchItem {
     Session* session;
@@ -440,13 +452,23 @@ private:
     const void* data;
     std::uint32_t n;
     std::uint32_t k;
+    const std::int8_t* fp4_q{nullptr};  ///< this activation for FP4 weights
+    const float* fp4_d{nullptr};
   };
   bool Quantize(const float* x, std::uint32_t n_tokens, std::uint32_t k,
                 Q8Input* q, std::string* error_msg) const;
+  /// One quantisation for projections that are all FP4; valid until the next
+  /// FP4 quantisation.
+  bool QuantizeFp4(const float* x, std::uint32_t n_tokens, std::uint32_t k,
+                   Q8Input* q, std::string* error_msg) const;
   /// Q8_1 rows of a small-batch input that its producer kernel already
   /// wrote (byte-identical to Quantize's), or null.
   const void* ReadyQ8(const float* x, std::uint32_t n_tokens,
                       std::uint32_t k) const;
+  /// Whether s_.mixed_fp4_q/d already hold x in the FP4 GEMV's Q8_1 form
+  /// (written by the mix epilogue under SUPERROC_FN_MIX_FP4Q8).
+  bool ReadyFp4Mixed(const float* x, std::uint32_t n_tokens,
+                     std::uint32_t k) const;
   /// Forgets the producer-written Q8_1 rows (their sources are rewritten).
   void DropReadyQ8() const;
   bool Dense(const DeviceTensor& w, const Q8Input& q, float* out,
@@ -461,15 +483,46 @@ private:
   bool GatedDense(const DeviceTensor& up, const DeviceTensor& gate,
                   const float* x, float* out, std::uint32_t n_tokens,
                   const DeviceTensor* down, std::string* error_msg) const;
+  /// The 4-bit prefill route (SUPERROC_INT4_WEIGHTS, narrowed by
+  /// SUPERROC_INT4_TENSORS; off unless a route file is given). True when
+  /// this projection of this batch runs on the route.
+  struct Int4State;
+  bool FnInt4Applies(const DeviceTensor& w, std::uint32_t n_tokens) const;
+  /// The routed form of Dense: F16 rows packed once per input, then the
+  /// int4 WMMA GEMM. Only called when FnInt4Applies holds.
+  bool FnInt4Dense(const DeviceTensor& w, const float* x, float* out,
+                   std::uint32_t n_tokens, std::string* error_msg) const;
+  /// The routed form of the shared expert's gate+up pair: SwiGLU rows in
+  /// s_.shexp_half with shexp_half_ready_ set. False with *handled false
+  /// leaves GatedDense on its stock path.
+  bool FnInt4Gated(const DeviceTensor& up, const DeviceTensor& gate,
+                   const float* x, std::uint32_t n_tokens,
+                   std::string* error_msg, bool* handled) const;
+  /// Builds the route state from the environment at Create; a null result
+  /// with true means no route file was given (a canonical server leaves
+  /// the route off too).
+  static bool BuildInt4(const DeviceModel& model, std::uint32_t max_batch,
+                        hipStream_t stream, std::unique_ptr<Int4State>* out,
+                        std::string* error_msg);
   /// Reuse or populate the F16 activation staging buffer.
   void PrepareHalfInput(const float* x, std::uint32_t rows,
                         std::uint32_t cols) const;
   /// Whether a wide dense Q8_0 projection takes the F16 WMMA GEMM.
   bool DenseF16Route(const DeviceTensor& w, std::uint32_t n_tokens) const;
+  /// True when a wide projection reads its input through the F16 rows in
+  /// s_.x_half alone, so the mix need not write F32 or tiled Q8 copies.
+  bool ReadsHalfRows(const DeviceTensor& w, std::uint32_t n_tokens) const;
+  /// True when a wide FP4 layer's mixer reads the mix only as F16 rows.
+  bool Fp4MixHalfOnly(const DeviceLayer& l, std::uint32_t n_tokens) const;
+  /// True when a wide FP4 layer's FFN reads the mix only as F16 rows.
+  bool Fp4FfnHalfOnly(const DeviceLayer& l, std::uint32_t n_tokens) const;
+  /// True when a shared expert's FP4 down projection takes the F16 kernel.
+  bool Fp4SharedDownF16(const DeviceTensor& down, std::uint32_t n_tokens) const;
   void RoutedHints(const DeviceTensor& w, std::uint32_t n_tokens) const;
   /// Reads the routing of the current batch back and derives the tile
   /// hints for its expert GEMMs (tiled batches only).
-  bool RouteHints(std::uint32_t n_tokens, std::string* error_msg) const;
+  bool RouteHints(std::uint32_t n_tokens, bool fp4_mapped,
+                  std::string* error_msg) const;
   /// Routed gate/up projections followed by SwiGLU.
   bool GatedExperts(const DeviceTensor& a, const DeviceTensor& b,
                     const float* x, const std::int32_t* ids, float* out,
@@ -511,13 +564,15 @@ private:
   bool Ple(const DeviceLayer& l, Session& s, std::uint32_t n_tokens, float* res,
            bool speculative, std::string* error_msg,
            bool embeddings_ready = false,
-           PrefillCheckpoint* checkpoint = nullptr) const;
+           PrefillCheckpoint* checkpoint = nullptr,
+           PrefillCheckpoint* checkpoint2 = nullptr) const;
   bool LinearAttention(const DeviceLayer& l, Session::LinearState& s,
                        const float* x, float* out, std::uint32_t n_tokens,
                        bool speculative, std::string* error_msg,
                        bool projections_ready = false,
                        bool project_output = true,
-                       GdnCheckpoint checkpoint = {}) const;
+                       GdnCheckpoint checkpoint = {},
+                       GdnCheckpoint checkpoint2 = {}) const;
   /// `pos`/`first_block` are device values; `start_pos` and `pool_grid`
   /// are their host-side counterparts for the eager-only decisions.
   bool Attention(const DeviceLayer& l, Session::AttentionState& s,
@@ -527,7 +582,15 @@ private:
                  std::uint32_t max_context, bool sparse, std::string* error_msg,
                  bool last_only = false, bool projections_ready = false,
                  bool project_output = true,
-                 std::uint32_t checkpoint_tokens = 0) const;
+                 std::uint32_t checkpoint_tokens = 0,
+                 std::uint32_t checkpoint_tokens2 = 0) const;
+  // The trunk may route fewer experts than the file; the draft head keeps the
+  // file's count.
+  mutable bool in_draft_head_ = false;
+  [[nodiscard]] std::uint32_t ActiveExperts() const {
+    return in_draft_head_ ? config().num_experts_file
+                          : config().num_experts_used;
+  }
   bool Moe(const DeviceLayer& l, const float* x, float* out,
            std::uint32_t n_tokens, std::string* error_msg,
            bool last_only = false) const;
@@ -563,6 +626,7 @@ private:
                    std::uint32_t first_layer, std::uint32_t end_layer,
                    std::string* error_msg,
                    PrefillCheckpoint* checkpoint = nullptr,
+                   PrefillCheckpoint* checkpoint2 = nullptr,
                    bool embeddings_ready = false) const;
   bool MtpBody(Session& session, std::uint32_t n, std::uint32_t pos, bool token,
                bool candidates, std::string* error_msg, std::uint32_t pool_grid,
@@ -581,7 +645,7 @@ private:
   [[nodiscard]] std::shared_ptr<SnapshotAllocator> GetSnapshotAllocator() const;
   mutable std::once_flag snapshot_allocator_once_;
   mutable std::shared_ptr<SnapshotAllocator> snapshot_allocator_;
-  mutable std::shared_ptr<void> checkpoint_storage_;
+  mutable std::array<std::shared_ptr<void>, 2> checkpoint_storage_;
   hipStream_t stream_{nullptr};
   hipEvent_t counts_ready_{nullptr};
   hipblasHandle_t blas_{nullptr};
@@ -590,8 +654,17 @@ private:
   // Scratch, sized for max_batch tokens. Names follow reference.cpp.
   struct Scratch {
     std::int32_t* tokens;
-    void* x_half;   ///< activations narrowed to the weight's 16-bit type
-    void* x_q8[2];  ///< Q8_1 activations of a decode batch, alternating
+    void* x_half;          ///< activations narrowed to the weight's 16-bit type
+    void* x_q8[2];         ///< Q8_1 activations of a decode batch, alternating
+    std::int8_t* fp4_x_q;  ///< an FFN input's FP4 activations, kept across the
+                           ///< shared expert
+    float* fp4_x_d;
+    std::int8_t* mixed_fp4_q;  ///< mixed in the FP4 GEMV's Q8_1 form, by the
+                               ///< mix epilogue (SUPERROC_FN_MIX_FP4Q8)
+    float* mixed_fp4_d;
+    std::int8_t* gdn_fp4_q;  ///< gdn_out likewise, by the GDN epilogue
+                             ///< (SUPERROC_FN_GDN_FP4Q8)
+    float* gdn_fp4_d;
     /// Q8_1 rows of a decode batch written by the kernel that produces
     /// them: xn by HcCombine, lo by SiluScale, mixed by the mix epilogue.
     void* xn_q8_1;
@@ -702,12 +775,12 @@ private:
   // used=1. Sized for max_batch (S8 prefill folds a whole chunk through it).
   mutable float* moe_ones_ = nullptr;
   mutable std::uint32_t moe_ones_cap_ = 0;
-  // FLASHNEXT: S8 -- bounds for the grouped FP4 prefill buffers, and the
+  // FLASHNEXT: bounds for the grouped FP4 prefill buffers, and the
   // event that orders superroc_fp4's NULL-stream entry points against stream_.
   std::uint32_t fp4_group_cap_{256};
   std::uint32_t fp4_tiles_cap_{0};
   hipEvent_t fp4_order_{nullptr};
-  // FLASHNEXT: SPEC3. LFN_DECODE_PROFILE=1 records HIP events around each
+  // FLASHNEXT: LFN_DECODE_PROFILE=1 records HIP events around each
   // decode stage and counts kernel launches. The flag also runs that token
   // eagerly so the events are not graph nodes. Unset, decode stays captured
   // and these fields are unused.
@@ -746,6 +819,8 @@ private:
   mutable double prof_b_shared_{0};
   mutable double prof_b_mix_{0};
   mutable double prof_b_head_{0};
+  /// The sidecar's draft head, read per draft step (0 without one).
+  mutable double prof_b_draft_head_{0};
   mutable double prof_b_embed_{0};
   mutable double prof_b_gdn_{0};
   mutable double prof_kv_per_pos_{0};
@@ -758,7 +833,7 @@ private:
   /// (fallback: the float SmallGemm leg).
   bool Fp4DensePrefill(const DeviceTensor& w, const float* x, float* out,
                        std::uint32_t n_tokens, std::string* error_msg) const;
-  /// Wide-batch FP4 dense projection on the F16 WMMA kernel (LFP). Falls
+  /// Wide-batch FP4 dense projection on the F16 WMMA kernel. Falls
   /// back to Fp4DensePrefill where the F16 route cannot run or loses.
   bool Fp4DenseF16Prefill(const DeviceTensor& w, const float* x, float* out,
                           std::uint32_t n_tokens, std::string* error_msg) const;
@@ -841,6 +916,10 @@ private:
   mutable std::uint32_t routed_64_tiles_{0};  ///< wide batches' down tiles
   mutable std::uint32_t routed_pair_offset_{0};
   mutable std::uint32_t routed_pair_tiles_{0};
+  /// Block lists of a wide FP4 layer, full and short tiles interleaved.
+  mutable bool routed_mixed_{false};
+  mutable std::uint32_t routed_pair_blocks_{0};
+  mutable std::uint32_t routed_down_blocks_{0};
   mutable std::uint32_t routed_tile_rows_{48};  ///< token rows per tile
   mutable int routed_tile_cols_{0};
   float* logits_host_{nullptr};
@@ -848,8 +927,17 @@ private:
   MtpCandidateLogits* mtp_candidates_host_{nullptr};
   /// The model geometry allows the wide mixer route (see Combine).
   bool wide_mixer_{false};
+  /// The mixer down projections are FP4 FAST beside Q8_0 up projections:
+  /// decode reads them with the dedicated kernel over the staged Q8_1 rows.
+  bool fp4_hc_down_vec_{false};
   /// Set by Moe when its epilogue is left for the combine that follows.
   mutable bool moe_pending_{false};
+  /// Set by the decode FP4 MoeExperts when its epilogue is left for the
+  /// combine that follows (SUPERROC_FN_FUSE_MOE_COMBINE).
+  mutable bool moe_fuse_pending_{false};
+  /// Whether the caller behind MoeExperts runs Combine next (the batched
+  /// route runs CombineBatch instead, so it clears this around its calls).
+  mutable bool moe_fuse_allowed_{true};
   /// Set before an attention-side combine whose FFN combine fuses the MoE
   /// epilogue: that combine may then leave its residual update to the next
   /// one (res_deferred_), which reads s_.block_out and s_.hc_defer_w.
@@ -858,6 +946,7 @@ private:
   /// Set by GatedDense when s_.shexp_half holds the SwiGLU rows its F16
   /// down projection reads.
   mutable bool shexp_half_ready_{false};
+  mutable const float* fp4_x_ready_{nullptr};
   // What s_.x_q8t / s_.x_half currently hold (input pointer, rows, cols,
   // and the half type), so a projection over the same rows skips its
   // activation pass. Cleared whenever the source buffer is rewritten.
@@ -885,6 +974,12 @@ private:
   };
   mutable ReadyRows xn_q8_ready_;
   mutable ReadyRows mixed_q8_ready_;
+  /// The mix rows s_.mixed_fp4_q/d currently quantize (source and rows),
+  /// or null. Width is always the hidden size.
+  mutable const float* mixed_fp4_src_{nullptr};
+  mutable std::uint32_t mixed_fp4_n_{0};
+  /// The 4-bit prefill route state; null unless a route file was given.
+  std::unique_ptr<Int4State> int4_;
 };
 
 }  // namespace superroc::models::qwen38_flash_next::rocm

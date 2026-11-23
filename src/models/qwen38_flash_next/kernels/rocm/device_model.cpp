@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <initializer_list>
 #include <utility>
 #include <vector>
@@ -15,6 +17,9 @@
 // FLASHNEXT: host dequantisation for the formats the ROC artifact carries on
 // tensors whose device kernels read floats only (Q5_K/Q6_K/F16).
 #include "src/core/quant/ggml_dequant.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
+#include "src/models/qwen38_flash_next/draft_vocab.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
@@ -28,14 +33,27 @@ namespace {
 /// activation padding and contribute nothing).
 constexpr std::size_t kTailMargin = 4096;
 
-// FLASHNEXT: King's ROC quantizer ROCmFP4 pair (ggml types 100/101). The
+// FLASHNEXT: Super Roc's ROC quantizer ROCmFP4 pair (ggml types 100/101). The
 // device side reads these raw; the dense GEMV/GEMM kernels decode them.
 constexpr bool IsRocmFp4(core::GgmlType type) {
   return type == core::GgmlType::kQ4_0_ROCMFP4 ||
          type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
 }
 
-// LFX1B: the ROC artifact's Q6_K output.weight stays quantized on device
+// Bytes of one row of the device tensor an upload produced. The embedding
+// table and the LM head are the roles copy_embedding may expand to F32 on the
+// host; every other tensor keeps the file's encoded row size. The draft table
+// and the row-addressing reads built on output_row_bytes() address device
+// memory, so they need this size rather than the file's.
+std::size_t DeviceRowBytes(const TensorRef& file, const DeviceTensor& device) {
+  if (device.type == core::GgmlType::kF32 &&
+      file.type != core::GgmlType::kF32) {
+    return static_cast<std::size_t>(device.cols) * sizeof(float);
+  }
+  return file.RowBytes();
+}
+
+// The ROC artifact's Q6_K output.weight stays quantized on device
 // and the LM head runs through the Q6_K GEMV (Executor::Dense). Default
 // on; LFX_Q6K_HEAD=0 restores the F32 host expand for A/B runs.
 bool LfxQ6KHead() {
@@ -90,16 +108,86 @@ bool HostF32Rows(const TensorRef& t, std::vector<float>* rows) {
   }
 }
 
+// Rows per group of the trunk's routed FP4 experts. LFN_MOE_R=1 keeps them
+// row-major; the grouped prefill route (LFN_FP4_PREFILL=w8a8) reads row-major.
+std::uint32_t MoeRowGroup() {
+  const char* route = std::getenv("LFN_FP4_PREFILL");
+  if (route != nullptr && std::strcmp(route, "w8a8") == 0) {
+    return 1;
+  }
+  const char* e = std::getenv("LFN_MOE_R");
+  if (e == nullptr || e[0] == '\0') {
+    return 2;
+  }
+  const int v = std::atoi(e);
+  return v >= 2 && v <= 64 && (v & (v - 1)) == 0 ? static_cast<std::uint32_t>(v)
+                                                 : 1;
+}
+
+// Compares a grouped tensor with its file bytes (LFN_MOE_R_CHECK=1).
+bool RowGroupMatches(const DeviceTensor& d, const TensorRef& t) {
+  const std::size_t size = t.SizeBytes();
+  std::vector<std::uint8_t> host(size);
+  if (hipMemcpy(host.data(), d.data, size, hipMemcpyDeviceToHost) !=
+      hipSuccess) {
+    return false;
+  }
+  const auto* file = static_cast<const std::uint8_t*>(t.data);
+  const std::size_t tsz =
+      t.type == core::GgmlType::kQ4_0_ROCMFP4_FAST ? 17 : 18;
+  const std::size_t nb = t.cols / 32;
+  const std::size_t rb = nb * tsz;
+  const std::size_t rows = size / rb;
+  const std::size_t group = d.row_group;
+  for (std::size_t r = 0; r < rows; ++r) {
+    for (std::size_t b = 0; b < nb; ++b) {
+      const std::uint8_t* from = file + r * rb + b * tsz;
+      const std::uint8_t* to = host.data() + (r / group) * group * rb +
+                               b * group * tsz + (r % group) * tsz;
+      if (std::memcmp(from, to, tsz) != 0) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 struct Conversion {
   void* source;
   void* destination;
   std::size_t count;
 };
 
+/// Bytes of one device row. The LM heads keep their file format (Q8_0, Q6_K,
+/// ROCmFP4) or are expanded to F32 on upload, so the device tensor -- not the
+/// file it came from -- decides the row size. Unknown formats return 0.
+std::size_t DeviceRowBytes(const DeviceTensor& t) noexcept {
+  switch (t.type) {
+    case core::GgmlType::kF32:
+      return static_cast<std::size_t>(t.cols) * 4;
+    case core::GgmlType::kF16:
+    case core::GgmlType::kBF16:
+      return static_cast<std::size_t>(t.cols) * 2;
+    case core::GgmlType::kQ8_0:
+      return static_cast<std::size_t>(t.cols / 32) * 34;
+    case core::GgmlType::kQ5_K:
+      return static_cast<std::size_t>(t.cols / 256) * 176;
+    case core::GgmlType::kQ6_K:
+      return static_cast<std::size_t>(t.cols / 256) * 210;
+    case core::GgmlType::kQ4_0_ROCMFP4:
+      return static_cast<std::size_t>(t.cols / 32) * 18;
+    case core::GgmlType::kQ4_0_ROCMFP4_FAST:
+      return static_cast<std::size_t>(t.cols / 32) * 17;
+    default:
+      return 0;
+  }
+}
+
 /// The trunk and the optional MTP block as one traversal's output.
 struct Uploaded {
   DeviceTensor token_embd;
   DeviceTensor output;
+  DeviceTensor mtp_output;
   DeviceMixer hc_head;
   std::vector<DeviceLayer> layers;
   DeviceLayer mtp;
@@ -173,14 +261,14 @@ struct Uploader {
     if (t.type == core::GgmlType::kQ8_0 && t.experts == 1) {
       max_q8_cols = std::max<std::size_t>(max_q8_cols, t.cols);
     }
-    // LFP SPEC2 item 3: FP4 dense projections that take the int8 route
+    // FP4 dense projections that take the int8 route
     // (ssm_out/attn_output at k=6144) stage their tiled Q8 activations in
     // s_.x_q8t, so their widths size it exactly like Q8_0's (+17.7 MB on
-    // ROC: 2048x10240 tiled vs 2048x2560; counted in REPORT2).
+    // ROC: 2048x10240 tiled vs 2048x2560).
     if (IsRocmFp4(t.type) && t.experts == 1) {
       max_q8_cols = std::max<std::size_t>(max_q8_cols, t.cols);
     }
-    // LFX1B: a Q6_K head kept on device (see copy_embedding) quantizes
+    // A Q6_K head kept on device (see copy_embedding) quantizes
     // its activations through the same Q8_1 slots, so its width sizes
     // them. The head gate is by role, so only the trunk/sidecar LM heads
     // reach Copy as Q6_K.
@@ -447,7 +535,7 @@ struct Uploader {
     // FLASHNEXT: host-dequantise the ROC artifact's Q5_K embedding (and any
     // Q6_K tensor the head gate below declines) into F32 device tensors; the
     // tied-weight shortcut keys on the host refs, before any conversion.
-    // LFX1B (RV53 F2/F5): a Q6_K output.weight otherwise stays quantized on
+    // A Q6_K output.weight otherwise stays quantized on
     // device and the head runs through the Q6_K GEMV. The gate is by role —
     // only the trunk/sidecar LM heads keep Q6_K, every token_embd expands
     // exactly as before — and by shape (K a multiple of 256), else the old
@@ -485,6 +573,13 @@ struct Uploader {
     if (mtp != nullptr) {
       shard_base = trunk_shards;
       u.mtp = Layer(mtp->block);
+      // A sidecar that carries its own LM head gives the draft a smaller
+      // copy to read (see PlanDraftHead). The stock sidecar leaves it empty
+      // and drafts borrow the trunk head. Upload it by the head gate so a
+      // Q6_K/ROCmFP4 head stays quantized exactly like the trunk's.
+      if (!mtp->output.empty()) {
+        u.mtp_output = copy_embedding(mtp->output, true);
+      }
     }
     return u;
   }
@@ -506,17 +601,17 @@ bool DeviceModel::SetDraftVocab(std::uint32_t prefix_rows,
       *error_msg = message;
     return false;
   };
-  if (output_.empty() || output_.rows == 0 || output_bytes_ % output_.rows != 0)
+  if (draft_head().empty() || draft_head().rows == 0 || draft_row_bytes_ == 0)
     return fail("draft vocabulary needs a row-addressable output head");
-  if (prefix_rows == 0 || prefix_rows >= output_.rows)
+  if (prefix_rows == 0 || prefix_rows >= draft_head().rows)
     return fail("draft vocabulary prefix must leave rows out");
   for (const auto id : specials) {
     if (id < static_cast<std::int32_t>(prefix_rows) ||
-        static_cast<std::uint32_t>(id) >= output_.rows)
+        static_cast<std::uint32_t>(id) >= draft_head().rows)
       return fail("draft special tokens must lie above the prefix");
   }
   // The prefix is the head's own leading rows: no copy.
-  draft_output_ = output_;
+  draft_output_ = draft_head();
   draft_output_.rows = prefix_rows;
   draft_specials_ = std::move(specials);
   return true;
@@ -542,6 +637,23 @@ std::unique_ptr<DeviceModel> DeviceModel::Upload(
   };
   if (!std::all_of(w.layers.begin(), w.layers.end(), layer_supported) ||
       (mtp != nullptr && !layer_supported(mtp->block))) {
+    return nullptr;
+  }
+  // A sidecar head, when present, must be the trunk head's shape. Drafts
+  // only propose and the target verifies over the trunk's row set, so a
+  // mismatched copy is refused rather than silently scored.
+  const bool has_mtp_head = mtp != nullptr && !mtp->output.empty();
+  const DraftHeadPlan head_plan = PlanDraftHead(
+      has_mtp_head, w.output.rows, w.output.cols,
+      has_mtp_head ? mtp->output.rows : 0, has_mtp_head ? mtp->output.cols : 0);
+  if (!head_plan.valid) {
+    if (error_msg != nullptr) {
+      *error_msg = "MTP output head is " + std::to_string(mtp->output.rows) +
+                   " rows x " + std::to_string(mtp->output.cols) +
+                   " cols; the trunk head is " + std::to_string(w.output.rows) +
+                   " rows x " + std::to_string(w.output.cols) +
+                   " cols -- a draft head must match it";
+    }
     return nullptr;
   }
   std::unique_ptr<DeviceModel> m(new DeviceModel());
@@ -584,7 +696,7 @@ std::unique_ptr<DeviceModel> DeviceModel::Upload(
   Uploader up{*stager,   &weights,          conversions,     m->allocations_,
               m->bytes_, m->max_half_cols_, m->max_q8_cols_, error_msg};
   Uploaded uploaded = up.Model(w, mtp, shard_count);
-  // LFX1B (RV53 F2): by role, not by type — the embedding tables above
+  // By role, not by type — the embedding tables above
   // always expand, so a Q6_K device tensor in an embedding role is a bug.
   // Only the LM heads may stay quantized (Executor::Dense reads them).
   if (uploaded.token_embd.type == core::GgmlType::kQ6_K ||
@@ -599,10 +711,34 @@ std::unique_ptr<DeviceModel> DeviceModel::Upload(
   assert(up.requested == measured);
   m->token_embd_ = uploaded.token_embd;
   m->output_ = uploaded.output;
-  m->output_bytes_ = w.output.SizeBytes();
+  m->output_row_bytes_ = DeviceRowBytes(m->output_);
+  if (m->output_row_bytes_ == 0) {
+    if (error_msg != nullptr) {
+      *error_msg = "unsupported output head format " +
+                   std::string(core::ToString(m->output_.type));
+    }
+    return nullptr;
+  }
   m->hc_head_ = uploaded.hc_head;
   m->layers_ = std::move(uploaded.layers);
   m->mtp_ = uploaded.mtp;
+  m->mtp_output_ = uploaded.mtp_output;
+  m->draft_row_bytes_ = m->mtp_output_.empty() ? m->output_row_bytes_
+                                               : DeviceRowBytes(m->mtp_output_);
+  if (m->draft_row_bytes_ == 0) {
+    if (error_msg != nullptr) {
+      *error_msg = "unsupported MTP output head format " +
+                   std::string(core::ToString(m->mtp_output_.type));
+    }
+    return nullptr;
+  }
+  if (!m->mtp_output_.empty()) {
+    std::fprintf(stderr,
+                 "LFN_MTP draft head %s row_bytes=%zu (trunk head %zu); "
+                 "drafts read the sidecar copy\n",
+                 std::string(core::ToString(m->mtp_output_.type)).c_str(),
+                 m->draft_row_bytes_, m->output_row_bytes_);
+  }
   m->has_mtp_ = mtp != nullptr;
   for (const auto& c : conversions) {
     NarrowActivations(static_cast<const float*>(c.source), c.destination, false,
@@ -620,6 +756,68 @@ std::unique_ptr<DeviceModel> DeviceModel::Upload(
     std::erase(m->allocations_, c.source);
     (void)hipFree(c.source);
     m->bytes_ -= c.count * sizeof(float) + kTailMargin;
+  }
+  // The MTP block stays row-major: its short catch-up batches take the grouped
+  // prefill route.
+  if (const std::uint32_t group = MoeRowGroup(); group > 1) {
+    const auto t0 = std::chrono::steady_clock::now();
+    std::size_t moved = 0;
+    for (auto& l : m->layers_) {
+      DeviceTensor* parts[] = {&l.ffn_gate_exps, &l.ffn_up_exps,
+                               &l.ffn_down_exps};
+      bool groupable = true;
+      for (const DeviceTensor* t : parts) {
+        groupable = groupable && !t->empty() && IsRocmFp4(t->type) &&
+                    t->type == l.ffn_gate_exps.type && t->experts > 1 &&
+                    t->rows % group == 0 && t->cols % 64 == 0;
+      }
+      if (!groupable) {
+        continue;
+      }
+      for (DeviceTensor* t : parts) {
+        const std::size_t rows = static_cast<std::size_t>(t->rows) * t->experts;
+        if (superroc_fp4_group_rows(t->data, static_cast<int>(t->type), rows,
+                                    static_cast<int>(t->cols),
+                                    static_cast<int>(group),
+                                    nullptr) != SUPERROC_FP4_OK) {
+          if (error_msg != nullptr) {
+            *error_msg = "row grouping of routed FP4 experts failed";
+          }
+          return nullptr;
+        }
+        t->row_group = group;
+        ++moved;
+      }
+    }
+    const auto grouped = hipDeviceSynchronize();
+    if (grouped != hipSuccess) {
+      if (error_msg != nullptr) {
+        *error_msg =
+            "row grouping failed: " + std::string(hipGetErrorString(grouped));
+      }
+      return nullptr;
+    }
+    std::fprintf(
+        stderr, "LFN_MOE_R %u: %zu tensors in %.2f s\n", group, moved,
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+            .count());
+    const char* check = std::getenv("LFN_MOE_R_CHECK");
+    if (check != nullptr && check[0] == '1' && moved != 0) {
+      for (std::size_t i : {std::size_t{0}, m->layers_.size() - 1}) {
+        const auto& d = m->layers_[i];
+        const auto& t = w.layers[i];
+        if (!RowGroupMatches(d.ffn_gate_exps, t.ffn_gate_exps) ||
+            !RowGroupMatches(d.ffn_up_exps, t.ffn_up_exps) ||
+            !RowGroupMatches(d.ffn_down_exps, t.ffn_down_exps)) {
+          if (error_msg != nullptr) {
+            *error_msg =
+                "row grouping changed bytes in layer " + std::to_string(i);
+          }
+          return nullptr;
+        }
+        std::fprintf(stderr, "LFN_MOE_R_CHECK layer %zu matches the file\n", i);
+      }
+    }
   }
   return m;
 }

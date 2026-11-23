@@ -373,7 +373,8 @@ struct Encoder::Impl {
   Impl(const std::filesystem::path& path, std::uint32_t width)
       : output_width(width) {
     std::string error;
-    reader = core::GgufReader::OpenFile(path, &error);
+    reader = core::GgufReader::OpenFile(path, &error,
+                                        core::GgufReader::FileRole::kSidecar);
     if (!reader)
       throw std::invalid_argument(error);
     const auto expect = [&](std::string_view key, std::uint64_t value) {
@@ -390,7 +391,7 @@ struct Encoder::Impl {
     expect("clip.vision.attention.head_count", kHeads);
     expect("clip.vision.spatial_merge_size", 2);
     expect("clip.vision.image_size", 768);
-    if ((width != 5120 && width != 2560) ||
+    if ((width != 5120 && width != 4096 && width != 3072 && width != 2560 && width != 2048) ||
         reader->GetMetadataString("general.architecture") != "clip" ||
         reader->GetMetadataString("general.type") != "mmproj" ||
         reader->GetMetadataBool("clip.has_vision_encoder") != true ||

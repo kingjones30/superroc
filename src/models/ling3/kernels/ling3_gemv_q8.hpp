@@ -1,7 +1,7 @@
 #pragma once
-// LI1: LS2 phase-14 dropped-stream fixes -- see ling3_moe.hpp.
+// Dropped-stream fixes -- see ling3_moe.hpp.
 #include <hip/hip_runtime.h>
-// LS1 2026-10-01: activation-quantised ROCmFP4 GEMV.
+// Activation-quantised ROCmFP4 GEMV.
 //
 // The decode step's matvecs are ~78 % of GPU time and move only ~54 GB/s of the
 // box's ~256 GB/s, so the bottleneck is the per-element work: ling3_moe.hip's
@@ -36,13 +36,13 @@ enum {
   LING3_Q8_SLOT_FFN_X = 1,
   LING3_Q8_SLOT_FFN_H = 2,
   LING3_Q8_SLOT_MOE_H = 3,
-  // LS1 PHASE7 item 3: st->normed, quantised ONCE per layer and shared by that
+  // st->normed, quantised ONCE per layer and shared by that
   // layer's attention projections instead of being re-quantised by each of
   // them.
   LING3_Q8_SLOT_ATTN_NORM = 4
 };
 
-/// Quantise x[0..k) into a caller-chosen slot (k % 32 == 0). LS1 PHASE7 item 3.
+/// Quantise x[0..k) into a caller-chosen slot (k % 32 == 0).
 ///
 /// This is the ONLY supported way to quantise once and reuse: the caller NAMES
 /// the slot, so nothing can go stale. A pointer-keyed cache must never be used
@@ -65,7 +65,7 @@ int ling3_q8_slot_device(int slot, int k, int8_t** qs, float** ds);
 int ling3_gemv_fp4_q8(int qtype, const void* W, int slot, float* y, int k,
                       int n, hipStream_t stream = nullptr);
 
-/// RV25 wave1 F3: as ling3_gemv_fp4_q8, but the store is y[row] = 0.0f + s --
+/// As ling3_gemv_fp4_q8, but the store is y[row] = 0.0f + s --
 /// the exact value of the unfused hipMemset(y,0) + k_axpy(1.0f, p, y) pair, so
 /// a down projection can write the caller's output directly with no scratch and
 /// no second launch. Decode only (n <= 8192). Never use it where the old pair
@@ -102,10 +102,10 @@ void ling3_moe_dev_register_route_rc(int* rc_d);
 int ling3_moe_dev_check(void);
 
 // ---------------------------------------------------------------------------
-// LS1 phase 4 item 3: the small-m decode forward, for MTP verification.
+// The small-m decode forward, for MTP verification.
 // ---------------------------------------------------------------------------
 
-/// LVL SPEC1: matvec for a Q6_K weight matrix, the format of the VL artifact's
+/// Matvec for a Q6_K weight matrix, the format of the VL artifact's
 /// LM head. One warp per output row, warp shuffle reduction, k a multiple of
 /// 256. Declared here so ling3_moe.hip's ling3_gemv() can route LING3_Q6_K to
 /// it instead of the per-element float path. Reads x as float; nothing is
@@ -113,7 +113,7 @@ int ling3_moe_dev_check(void);
 int ling3_gemv_q6k(int qtype, const void* W, const float* x, float* y, int k,
                    int n, hipStream_t stream);
 
-/// LM1 SPEC4 item 2: quantise n_tokens * k floats (token-major) into the
+/// Quantise n_tokens * k floats (token-major) into the
 /// small-m path's Q8_1 pair and hand the pair back, so a caller running several
 /// matrices against ONE activation pays for one quantise instead of one per
 /// matrix. This is the m-row counterpart of ling3_act_prepare +
@@ -151,7 +151,7 @@ int ling3_expert_ffn_m(int qtype, const void* gate, const void* up,
                        int n_expert, int k, int n_ff, float limit, float* y,
                        hipStream_t stream = nullptr);
 
-/// LV1 R3: n_used == 1 and n_tokens > 1 reads each weight row once. Otherwise
+/// n_used == 1 and n_tokens > 1 reads each weight row once. Otherwise
 /// this is ling3_expert_ffn_m. Same status word; ling3_expert_ffn_m_check
 /// covers it.
 int ling3_expert_ffn_shared_m(int qtype, const void* gate, const void* up,
@@ -165,7 +165,7 @@ int ling3_expert_ffn_shared_m(int qtype, const void* gate, const void* up,
 /// batch.
 int ling3_expert_ffn_m_check(void);
 
-// PHASE6: the warp-per-row variant of the plain matvec and of the grouped down
+// The warp-per-row variant of the plain matvec and of the grouped down
 // projection. Both must agree BIT-EXACTLY with the CTA-per-row kernels above,
 // which tools/ling3_gemv_q8_test.cpp checks, and LING3_GEMV_VARIANT=1 makes
 // the shipped entry points use them (default 0, so nothing changes unset).

@@ -54,8 +54,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardToken(
                            arena_.stream));
 
   // GLIMMER: host audit can throw. Do not capture this path in a HIP graph.
-  if (config.attention_only || config.lfm2 || config.flint ||
-      config.llama) {  // LFM2
+  if (config.attention_only || config.lfm2 || config.flint || config.llama) {
     ExecuteDecodeStep(arena_, weights_, policy_, token_id, pos, compute_logits,
                       recurrent_state, &vision_input_);
     if (!compute_logits) {
@@ -98,7 +97,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardToken(
   // KAT: qwen35moe decode stays eager. hipGraph capture is invalidated by
   // the rocm_fp4 quant slot first hipMalloc and by the expert-scratch
   // growth, and a throw inside TryCapture skips the eager retry.
-  // sq16 SPEC2 (S2-3): the stage snapshots synchronize the stream, which is
+  // The stage snapshots synchronize the stream, which is
   // illegal inside a capture, so a debug run stays eager and says so once.
   const bool verify_debug_no_capture =
       detail::VerifyDebugEnabled() &&

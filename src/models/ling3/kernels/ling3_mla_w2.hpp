@@ -1,9 +1,9 @@
-// ling3_mla_w2.hpp — LW1 (wave 2): two-pass WMMA absorbed-MLA PREFILL
+// ling3_mla_w2.hpp — two-pass WMMA absorbed-MLA PREFILL
 // attention.
 //
 // The batched prefill's attention (mla_attn_tok in ling3_mla.hip) computes the
 // 576-wide score dot and the 512-wide latent accumulation on fp32 vector ALUs:
-// 2,799 of ~3,930 ms per 512-token chunk at 11.5K context (LS4's profile), and
+// 2,799 of ~3,930 ms per 512-token chunk at 11.5K context, and
 // that share grows linearly with position. This module computes the SAME
 // arithmetic as two plain f16 GEMMs on the WMMA matrix cores with a
 // materialized score tile — deliberately the simplest correct shape:

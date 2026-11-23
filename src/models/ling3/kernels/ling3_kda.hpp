@@ -1,6 +1,6 @@
 // ling3_kda.hpp — KDA (Kimi Delta Attention) block of a Ling-3.0 `bailingmoe3`
-// layer. Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse
-// with LG's drafts. Standalone deliverable of lane LK for the Ling-on-superroc
+// layer. Ling-on-superroc overnight build. Do not confuse
+// with other drafts. Standalone deliverable for the Ling-on-superroc
 // build.
 //
 // The fork's code is the spec:
@@ -10,7 +10,7 @@
 //   on ROCm) ggml/src/ggml-cuda/norm.cu          (rms_norm / l2_norm)
 //   ggml/src/ggml-cuda/unary.cuh        (silu / sigmoid)
 //
-// Scope (exactly the four points of the LK spec): this module owns
+// Scope (exactly the four points of the spec): this module owns
 //   (1) causal short conv (kernel 4) + SiLU on q, k, v, with conv-state carry
 //   for decode (2) the fine-grained decay gate from ssm_f: ssm_a / A_log,
 //   ssm_dt.bias, the "safe gate"
@@ -176,10 +176,10 @@ void kda_conv_silu(const KdaShape& sh, const float* conv_w, const ViewC& in,
                    const View& out, float* conv_state, int qkv, int n_tokens,
                    int n_seqs, hipStream_t stream);
 
-// LC1 (wave 3): which path the last conv call took -- 0 = the serial kernel, 1
+// Which path the last conv call took -- 0 = the serial kernel, 1
 // = the token-parallel prefill pair (taken for n_tokens > 1). Diagnostic: the
-// parity test reads it so it cannot compare the serial path with itself (LG1's
-// test did exactly that).
+// parity test reads it so it cannot compare the serial path with itself (an
+// earlier test did exactly that).
 int kda_conv_silu_last_path();
 
 // (2) Decay gate + beta.
@@ -251,7 +251,7 @@ void kda_forward_decode(const KdaShape& sh, const KdaScalars& sc,
 
 // Scratch bytes kda_forward needs for its intermediate buffers (g1, beta, and
 // the three conv outputs). `kda_forward` allocates this from the current device
-// if you pass nullptr; superroc can pass its own arena instead. LKF (wave 3). 0
+// if you pass nullptr; superroc can pass its own arena instead. 0
 // = LING3_KDA_DECODE_FUSED (default on, read once). 1 = force off. 2 = force
 // on. Serve does not call this.
 void kda_decode_fused_test_pick(int pick);

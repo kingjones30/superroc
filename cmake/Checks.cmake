@@ -14,6 +14,7 @@ set(superroc_pr_targets
   cache_tiered_test
   cache_retention_test
   arg_parser_test json_test model_family_test json_constraint_test gguf_reader_test gguf_identity_test
+  recipe_test logprobs_json_test int4_route_file_test
   heap_placement_test
   logit_sampler_test ggml_dequant_test
   quote_tracker_test
@@ -41,6 +42,8 @@ list(APPEND superroc_pr_tests
   superroc_version superroc_help serve_cli_test eval_http_test functional_runner_test
   cache_workloads_test cache_disk_faults_test
   cache_boundary_test
+  recipe_env_keys_check text_model_runner_tail_capture_test
+  text_model_runner_canonical_cache_test
   kernel_resources_parser_test check_docs_test check_pr_title_test)
 list(JOIN superroc_pr_tests "|" superroc_pr_pattern)
 add_custom_target(check-pr

@@ -76,5 +76,3 @@ For larger uploads, raise `--max-request-bytes` and the proxy's body limit.
 `/health`, `/ready` and `/v1/models` are available. Nix `mkSuperrocServe` supports
 `modality = "image"` with `model` and `servedModelName`.
 
-[Benchmarks](BENCHMARKS.md) · [Quality](QUALITY.md) ·
-[Experiments](EXPERIMENTS.md)

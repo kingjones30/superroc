@@ -1,5 +1,5 @@
 // g4_twin — build a G4 (120/121) twin of a ROCmFP4 (100/101) GGUF and verify
-// that every tensor decodes to bit-identical f32 (SPEC2 item 3 proof).
+// that every tensor decodes to bit-identical f32.
 //
 // The G4 twin keeps the same codes/scales as its 100/101 source, so
 // decode(G4 twin) == decode(100/101) bit-for-bit. This tool:

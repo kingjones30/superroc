@@ -298,9 +298,8 @@ int main(int argc, char** argv) {
   Check(argc == 1 || argc == 3,
         "usage: base_encoders_hip_test [model artifacts]");
   const std::filesystem::path model_root =
-      argc == 3
-          ? argv[1]
-          : "/home/fbozzo/projects/audio.cpp/models/Qwen3-TTS-12Hz-1.7B-Base";
+      argc == 3 ? argv[1]
+                : "/path/to/audio.cpp/models/Qwen3-TTS-12Hz-1.7B-Base";
   const std::filesystem::path artifacts =
       argc == 3 ? argv[2] : "artifacts/qwen3_tts/base";
   if (!std::filesystem::is_regular_file(model_root / "model.safetensors") ||

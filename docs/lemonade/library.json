@@ -1,0 +1,52 @@
+[
+  {
+    "name": "LFM2.5-1.2B-Instruct",
+    "repo": "kingjones777/LFM2.5-1.2B-Instruct-ROCmFP4-GGUF",
+    "file": "LFM2.5-1.2B-Instruct-Q4_0_ROCMFP4_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 0.7,
+    "superroc_args": []
+  },
+  {
+    "name": "LFM2.5-8B-A1B",
+    "repo": "kingjones777/LFM2.5-8B-A1B-ROCmFP4-LEAN-GGUF",
+    "file": "LFM2.5-8B-A1B-Q4_0_ROCMFP4_LEAN.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 4.81,
+    "superroc_args": [
+      "-t", "0",
+      "--prompt-lookup",
+      "--cache-floor-bytes", "8589934592"
+    ]
+  },
+  {
+    "name": "Qwen3.8-27B",
+    "repo": "kingjones777/Qwen3.8-27B-ROCmFP4-STRIX-MTP-GGUF",
+    "file": "Qwen3.8-27B-Q4_0_ROCMFP4_STRIX-imatrix-headQ6K.gguf",
+    "mmproj": "unsloth/Qwen3.8-27B-GGUF:mmproj-BF16.gguf",
+    "draft": "z-lab/Qwen3.8-27B-DFlash2-GGUF:Qwen3.8-27B-DFlash2-Q4_K_M.gguf",
+    "labels": ["chat", "reasoning", "tool-calling", "vision", "mtp"],
+    "size_gb": 15.38,
+    "superroc_args": [
+      "--think", "off",
+      "-t", "0",
+      "--presence-penalty", "0",
+      "--prompt-lookup",
+      "--cache-floor-bytes", "8589934592"
+    ]
+  },
+  {
+    "name": "OxCoder-9B",
+    "repo": "kingjones777/OxCoder-9B-MTP-ROCmFP4-GGUF",
+    "file": "OxCoder-9B-MTP-Q4_0-ROCmFP4-STRIX_LEAN.gguf",
+    "mmproj": "kingjones777/OxCoder-9B-MTP-ROCmFP4-GGUF:mmproj-OxCoder-9B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision", "mtp"],
+    "size_gb": 5.4,
+    "superroc_args": ["--speculative", "mtp", "-d", "3", "--think", "off"]
+  }
+]

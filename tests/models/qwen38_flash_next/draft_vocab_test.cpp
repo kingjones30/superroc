@@ -103,6 +103,27 @@ void CheckEligibility() {
   }
 }
 
+// Drafts read the sidecar's own output head when it carries one, and that
+// head must have the trunk head's exact shape. Without one, drafts keep
+// reading the trunk head, so a stock sidecar behaves as before.
+void CheckDraftHeadPlan() {
+  using qfn::DraftHeadSource;
+  const auto trunk = qfn::PlanDraftHead(false, 248320, 2560, 0, 0);
+  Require(trunk.valid && trunk.source == DraftHeadSource::kTrunk &&
+              trunk.rows == 248320 && trunk.cols == 2560,
+          "drafts left the trunk head");
+  const auto sidecar = qfn::PlanDraftHead(true, 248320, 2560, 248320, 2560);
+  Require(sidecar.valid && sidecar.source == DraftHeadSource::kMtp &&
+              sidecar.rows == 248320 && sidecar.cols == 2560,
+          "a matching sidecar head was not chosen");
+  Require(!qfn::PlanDraftHead(true, 248320, 2560, 248320, 2048).valid,
+          "a sidecar head with another hidden size was accepted");
+  Require(!qfn::PlanDraftHead(true, 248320, 2560, 151936, 2560).valid,
+          "a sidecar head with another vocabulary was accepted");
+  Require(!qfn::PlanDraftHead(true, 248320, 2560, 0, 0).valid,
+          "an empty sidecar head passed as a matching one");
+}
+
 int main() {
   try {
     CheckCommonText();
@@ -110,6 +131,7 @@ int main() {
     CheckCapacity();
     CheckReset();
     CheckEligibility();
+    CheckDraftHeadPlan();
   } catch (const std::exception& e) {
     std::cerr << e.what() << '\n';
     return 1;

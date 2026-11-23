@@ -18,7 +18,7 @@
 #include "dspark_policy.h"
 #include "model_data_internal.h"
 #include "native_internal.h"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -1248,7 +1248,7 @@ static bool rocm_graph_encode_decode_layer(
   }
 
     bool ok = true;
-    const bool decode_stage_profile = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_DECODE_STAGE_PROFILE") != NULL;
+    const bool decode_stage_profile = ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_DECODE_STAGE_PROFILE") != NULL;
     double decode_stage_t0 = decode_stage_profile ? ds4_now_seconds() : 0.0;
 #define SUPERROC_DEEPSEEK_ROCM_PROFILE_DECODE_STAGE(name) do { \
         if (ok && decode_stage_profile) { \
@@ -1315,7 +1315,7 @@ static bool rocm_graph_encode_decode_layer(
     ds4_gpu_tensor *comp_selected = NULL;
     uint32_t n_selected = 0;
     double decode_index_stage_t0 = 0.0;
-    const bool decode_index_stage_profile = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_INDEXER_STAGE_PROFILE") != NULL;
+    const bool decode_index_stage_profile = ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_INDEXER_STAGE_PROFILE") != NULL;
     if (ok && compressed) {
         const uint32_t ratio = ds4_layer_compress_ratio(il);
         const uint32_t coff = ratio == 4 ? 2u : 1u;
@@ -2502,11 +2502,11 @@ static bool rocm_graph_encode_layer_attention_batch(
   const bool compressed = ratio != 0;
   const bool zero_prefix = pos0 == 0;
   const bool index_stage_profile =
-      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_INDEXER_STAGE_PROFILE") != NULL;
+      ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_INDEXER_STAGE_PROFILE") != NULL;
   const bool layer_stage_profile =
-      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_LAYER_STAGE_PROFILE") != NULL;
+      ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_LAYER_STAGE_PROFILE") != NULL;
   const bool q_stage_profile =
-      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_Q_STAGE_PROFILE") != NULL;
+      ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_Q_STAGE_PROFILE") != NULL;
   double layer_stage_t0 = layer_stage_profile ? ds4_now_seconds() : 0.0;
   double q_stage_t0 = q_stage_profile ? ds4_now_seconds() : 0.0;
 #define SUPERROC_DEEPSEEK_ROCM_PROFILE_ATTN_STAGE(name) do { \
@@ -3708,7 +3708,7 @@ static bool rocm_graph_encode_sessions_attention_batch(
     const uint32_t group_dim = DS4_N_HEAD_DIM * group_heads;
     const uint32_t rank = DS4_N_LORA_O;
     const bool stage_profile =
-        ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_LAYER_STAGE_PROFILE") != NULL;
+        ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_LAYER_STAGE_PROFILE") != NULL;
     double stage_t0 = stage_profile ? ds4_now_seconds() : 0.0;
 #define SUPERROC_DEEPSEEK_ROCM_PROFILE_SESSION_ATTN(name) do { \
         if (ok && stage_profile) { \
@@ -3997,7 +3997,7 @@ static bool rocm_graph_encode_layer_ffn_batch(
       ds4_routed_expert_row_bytes(layer->ffn_down_exps);
   const uint64_t down_expert_bytes = routed_out_dim * down_row_bytes;
   const bool layer_stage_profile =
-      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_LAYER_STAGE_PROFILE") != NULL;
+      ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_LAYER_STAGE_PROFILE") != NULL;
   double layer_stage_t0 = layer_stage_profile ? ds4_now_seconds() : 0.0;
 #define SUPERROC_DEEPSEEK_ROCM_PROFILE_FFN_STAGE(name) do { \
         if (ok && layer_stage_profile) { \
@@ -4264,7 +4264,7 @@ static bool rocm_graph_eval_token_raw_swa(
         int                    token,
         uint32_t               pos,
         float                 *logits) {
-    const bool profile = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_GRAPH_TOKEN_PROFILE") != NULL;
+    const bool profile = ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_GRAPH_TOKEN_PROFILE") != NULL;
     const double t0 = profile ? ds4_now_seconds() : 0.0;
 
     bool ok = ds4_gpu_begin_commands() != 0;
@@ -4353,7 +4353,7 @@ static bool rocm_graph_prefill_layer_major(
     if (!ok) return false;
 
     const bool profile =
-        ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_GRAPH_PREFILL_PROFILE") != NULL;
+        ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_GRAPH_PREFILL_PROFILE") != NULL;
     const double t0 = profile ? ds4_now_seconds() : 0.0;
 
     ok = rocm_graph_upload_prompt_embeddings_hc(g->batch_cur_hc,
@@ -4478,7 +4478,7 @@ static bool rocm_graph_prefill_chunked_range(
     if (start != 0 && chunk_cap > g->raw_cap) chunk_cap = g->raw_cap;
     if (chunk_cap == 0) return false;
 
-    const bool profile = ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_ROCM_GRAPH_PREFILL_PROFILE") != NULL;
+    const bool profile = ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_ROCM_GRAPH_PREFILL_PROFILE") != NULL;
     const double t0 = profile ? ds4_now_seconds() : 0.0;
     const uint32_t end = start + n_tokens;
 

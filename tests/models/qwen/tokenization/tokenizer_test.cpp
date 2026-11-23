@@ -54,6 +54,13 @@ public:
     metadata_count_++;
   }
 
+  void AddMetadataBool(std::string_view key, bool val) {
+    AppendString(key);
+    AppendPod(static_cast<std::uint32_t>(superroc::core::GgufValueType::kBool));
+    AppendPod(static_cast<std::uint8_t>(val ? 1 : 0));
+    metadata_count_++;
+  }
+
   void AddMetadataStringArray(std::string_view key,
                               const std::vector<std::string>& arr) {
     AppendString(key);
@@ -367,6 +374,85 @@ void TestCorpusConformance() {
   }
 }
 
+void TestRawPromptBosFollowsTheGgufFlag() {
+  // <|im_start|> is Qwen's BOS, exactly what the fallback in CreateFromGguf
+  // picks when the GGUF carries no bos_token_id.
+  const std::vector<std::string> vocab{"a", "b", std::string(kImStart),
+                                       std::string(kImEnd)};
+  const std::unordered_map<std::string, superroc::tokenization::TokenId>
+      specials{{std::string(kImStart), 2}, {std::string(kImEnd), 3}};
+  const superroc::tokenization::TokenId kImStartId = 2;
+
+  const auto load = [&](auto configure) {
+    GgufTokenizerBuilder builder;
+    builder.AddMetadataStringArray("tokenizer.ggml.tokens", vocab);
+    builder.AddMetadataStringArray("tokenizer.ggml.merges", {});
+    configure(builder);
+    auto bytes = builder.Build();
+    std::string error;
+    auto reader = superroc::core::GgufReader::OpenMemory(bytes.data(),
+                                                         bytes.size(), &error);
+    Expect(reader != nullptr, error);
+    auto tokenizer =
+        superroc::tokenization::QwenTokenizer::CreateFromGguf(*reader, &error);
+    Expect(tokenizer != nullptr, error);
+    return tokenizer;
+  };
+
+  // Flag true: the raw-prompt BOS is the GGUF id, while Encode stays
+  // flag-blind (chat renders do their own framing).
+  auto on = load([](GgufTokenizerBuilder& builder) {
+    builder.AddMetadataUint32("tokenizer.ggml.bos_token_id", kImStartId);
+    builder.AddMetadataBool("tokenizer.ggml.add_bos_token", true);
+  });
+  Expect(on->RawPromptBos() ==
+             std::optional<superroc::tokenization::TokenId>{kImStartId},
+         "add_bos_token=true publishes the GGUF BOS id");
+  Expect(on->Encode("a") == std::vector<superroc::tokenization::TokenId>{0u},
+         "Encode without options stays flag-blind");
+
+  // Flag false: the model asked for no BOS.
+  auto off = load([](GgufTokenizerBuilder& builder) {
+    builder.AddMetadataUint32("tokenizer.ggml.bos_token_id", kImStartId);
+    builder.AddMetadataBool("tokenizer.ggml.add_bos_token", false);
+  });
+  Expect(off->RawPromptBos() == std::nullopt,
+         "add_bos_token=false publishes no raw-prompt BOS");
+
+  // A BOS id outside the vocabulary is not a valid BOS.
+  auto stray = load([](GgufTokenizerBuilder& builder) {
+    builder.AddMetadataUint32("tokenizer.ggml.bos_token_id", 9);
+    builder.AddMetadataBool("tokenizer.ggml.add_bos_token", true);
+  });
+  Expect(stray->RawPromptBos() == std::nullopt,
+         "an out-of-range BOS id is not a raw-prompt BOS");
+
+  // The flag, not the id alone, asks for the BOS.
+  auto id_only = load([](GgufTokenizerBuilder& builder) {
+    builder.AddMetadataUint32("tokenizer.ggml.bos_token_id", kImStartId);
+  });
+  Expect(id_only->RawPromptBos() == std::nullopt,
+         "a BOS id without the flag is not a raw-prompt BOS");
+
+  // LFM2 asks for the BOS through tokenizer.ggml.pre, not through the flag;
+  // the id comes from the metadata or the <|im_start|> fallback.
+  auto lfm2 = load([](GgufTokenizerBuilder& builder) {
+    builder.AddMetadataString("tokenizer.ggml.pre", "lfm2");
+    builder.AddMetadataUint32("tokenizer.ggml.bos_token_id", kImStartId);
+  });
+  Expect(lfm2->RawPromptBos() ==
+             std::optional<superroc::tokenization::TokenId>{kImStartId},
+         "the LFM2 pre-tokenizer asks for the raw-prompt BOS");
+
+  // No id anywhere: nothing to prepend, and the fallback finds <|im_start|>.
+  auto flagged_no_id = load([](GgufTokenizerBuilder& builder) {
+    builder.AddMetadataBool("tokenizer.ggml.add_bos_token", true);
+  });
+  Expect(flagged_no_id->RawPromptBos() ==
+             std::optional<superroc::tokenization::TokenId>{kImStartId},
+         "the flag falls back to <|im_start|> for the BOS id");
+}
+
 }  // namespace
 
 int main() {
@@ -377,6 +463,7 @@ int main() {
   TestUnicodeContractionBoundary();
   TestEmptyAndSpecialEdgeCases();
   TestCorpusConformance();
+  TestRawPromptBosFollowsTheGgufFlag();
   std::cout << "All QwenTokenizer tests passed successfully!\n";
   return 0;
 }

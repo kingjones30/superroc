@@ -1,4 +1,4 @@
-// Super ROC QKS: the Qwen fp16 KV store (QwenKvF16) saturates at +-65504
+// Super Roc QKS: the Qwen fp16 KV store (QwenKvF16) saturates at +-65504
 // instead of overflowing to +-inf, keeps NaN, and is bit-identical to
 // __float2half_rn for every input that was finite before (|x| < 65520).
 // Runs on a live ROCm device (label gpu).

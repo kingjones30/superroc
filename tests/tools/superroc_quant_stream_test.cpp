@@ -1,4 +1,4 @@
-// superroc_quant_stream_test — SPEC7 item 2(a): the streaming GGUF writer.
+// superroc_quant_stream_test — the streaming GGUF writer.
 //
 // `tools/superroc-quant/gguf.hpp` WriteGguf used to build the whole output file
 // in one std::vector and write it in a single call; v0.4 (gq6) streams tensor
@@ -21,8 +21,8 @@
 //           runtime picked (scalar, or SHA-NI where the CPU has it).
 //
 // The end-to-end proof that this streaming writer reproduces the pre-streaming
-// writer byte-for-byte on make_synth / make_moe_synth / 2-shard fixtures is in
-// REPORT7.md (hand-run, `cmp`): the two binaries differ only in this function.
+// writer byte-for-byte on make_synth / make_moe_synth / 2-shard fixtures is a
+// hand-run `cmp`: the two binaries differ only in this function.
 //
 // Usage: superroc_quant_stream_test <path-to-superroc-quant> [workdir]
 

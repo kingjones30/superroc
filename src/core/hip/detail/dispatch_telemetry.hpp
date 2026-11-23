@@ -9,14 +9,13 @@
 #include <sstream>
 #include <string_view>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::hip::detail {
 
 [[nodiscard]] inline bool DispatchTelemetryEnabled() noexcept {
   static const bool enabled = [] {
-    const char* value =
-        ::superroc::core::GetEnvCompat("SUPERROC_DISPATCH_TELEMETRY");
+    const char* value = ::superroc::core::GetEnv("SUPERROC_DISPATCH_TELEMETRY");
     if (value == nullptr) {
       return false;
     }

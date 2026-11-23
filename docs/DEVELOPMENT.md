@@ -179,5 +179,5 @@ hosted selection is described in [testing](TESTING.md).
 [models](models/README.md).
 
 The production package ships the HIP backend only. Experimental accelerator work
-remains on `perf/qwen27b-dflash2-npu`; offline quantization research remains in
-PR #234. Neither toolchain is required to install or run main.
+and offline quantization research are kept out of main; neither toolchain is
+required to install or run it.

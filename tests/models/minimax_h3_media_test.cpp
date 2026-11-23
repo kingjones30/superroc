@@ -10,7 +10,7 @@
 #include <thread>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/models/minimax_h3/media.hpp"
 
 namespace {
@@ -185,7 +185,7 @@ int main() {
   }
   std::filesystem::remove(cancelled_output, ignored);
 
-  const char* saved = ::superroc::core::GetEnvCompat("SUPERROC_FFMPEG");
+  const char* saved = ::superroc::core::GetEnv("SUPERROC_FFMPEG");
   const std::string saved_value = saved == nullptr ? "" : saved;
   WriteSentinel(error_output);
   setenv("SUPERROC_FFMPEG", "/bin/false", 1);
@@ -202,7 +202,7 @@ int main() {
     Fail("FFmpeg child error did not preserve the prior output");
   }
 
-  const char* saved_probe = ::superroc::core::GetEnvCompat("SUPERROC_FFPROBE");
+  const char* saved_probe = ::superroc::core::GetEnv("SUPERROC_FFPROBE");
   const std::string saved_probe_value =
       saved_probe == nullptr ? "" : saved_probe;
   WriteSentinel(probe_error_output);

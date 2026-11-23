@@ -167,7 +167,7 @@ __device__ inline std::size_t QuantBlockBytes(core::GgmlType t) {
       return sizeof(IQ4XSBlock);
     case core::GgmlType::kIQ3_S:
       return sizeof(IQ3SBlock);
-    case core::GgmlType::kQ4_0_ROCMFP4:  // lqw:qbytes
+    case core::GgmlType::kQ4_0_ROCMFP4:
       return 18;
     case core::GgmlType::kQ4_0_ROCMFP4_FAST:
       return 17;
@@ -196,7 +196,7 @@ __device__ inline std::size_t QuantBlockQK(core::GgmlType t) {
       return kIQ4XSBlockSize;
     case core::GgmlType::kIQ3_S:
       return kIQ3SBlockSize;
-    case core::GgmlType::kQ4_0_ROCMFP4:  // lqw:qqk
+    case core::GgmlType::kQ4_0_ROCMFP4:
     case core::GgmlType::kQ4_0_ROCMFP4_FAST:
       return 32;
     default:
@@ -526,7 +526,6 @@ __device__ inline float RocmFp4Ue4m3Half(std::uint8_t e) noexcept {
   return cast.f;
 }
 
-// lqw:sub16-helper
 template<bool SharedScales = false>
 __device__ inline void DecodeQuantSub16(core::GgmlType type,
                                         const void* __restrict__ row,
@@ -699,7 +698,7 @@ __device__ inline void DecodeQuantSub16(core::GgmlType type,
     }
     case core::GgmlType::kQ4_0_ROCMFP4:
     case core::GgmlType::kQ4_0_ROCMFP4_FAST: {
-      // lqw:sub16-case. Byte loads: a 17-byte FAST block is not dword aligned.
+      // Byte loads: a 17-byte FAST block is not dword aligned.
       const bool fast = type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
       const std::size_t block_bytes = fast ? 17 : 18;
       const std::size_t blk_i = sub16 / 2;
@@ -750,8 +749,7 @@ __device__ inline bool IsSub16DecodedQuant(core::GgmlType t) noexcept {
   return t == core::GgmlType::kQ4_K || t == core::GgmlType::kQ5_K ||
          t == core::GgmlType::kQ6_K || t == core::GgmlType::kQ3_K ||
          t == core::GgmlType::kIQ4_NL || t == core::GgmlType::kIQ4_XS ||
-         t == core::GgmlType::kIQ3_S ||
-         t == core::GgmlType::kQ4_0_ROCMFP4 ||  // lqw:issub16
+         t == core::GgmlType::kIQ3_S || t == core::GgmlType::kQ4_0_ROCMFP4 ||
          t == core::GgmlType::kQ4_0_ROCMFP4_FAST;
 }
 

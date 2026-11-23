@@ -21,8 +21,7 @@
 #include "src/models/minimax_h3/json.hpp"
 #include "src/models/minimax_h3/runtime.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
-#include "src/core/previous_name_compat.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 #ifndef SUPERROC_H3_SOURCE_MANIFEST
 #define SUPERROC_H3_SOURCE_MANIFEST ""
@@ -415,8 +414,8 @@ void CheckSpectrogram(std::span<const float> waveform,
 }
 
 int RealTest() {
-  const char* model_root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* golden_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_AUDIO_VAE_GOLDEN");
+  const char* model_root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
+  const char* golden_value = ::superroc::core::GetEnv("SUPERROC_H3_AUDIO_VAE_GOLDEN");
   const std::filesystem::path fixture = SUPERROC_H3_AUDIO_VAE_FIXTURE;
   if (model_root == nullptr || *model_root == '\0' || golden_value == nullptr ||
       *golden_value == '\0') {
@@ -425,9 +424,8 @@ int RealTest() {
     return 77;
   }
   const json::Value contract = json::ParseFile(fixture, 1U << 20U);
-  if (!::superroc::core::MatchesCurrentOrPrevious(
-          Required(contract, "schema").AsString(),
-          "superroc.minimax-h3-audio-vae-golden.v1") ||
+  if ((Required(contract, "schema").AsString()) !=
+          ("superroc.minimax-h3-audio-vae-golden.v1") ||
       Required(contract, "model_revision").AsString() !=
           "42ed227ee7df40d41602854ae760620d6eb651fe" ||
       Required(contract, "reference_revision").AsString() !=

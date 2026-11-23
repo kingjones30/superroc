@@ -168,9 +168,26 @@ public:
   GgufReader(GgufReader&& other) noexcept;
   GgufReader& operator=(GgufReader&& other) noexcept;
 
+  /// What a file is to its caller. The tensor overlay
+  /// (SUPERROC_TENSOR_OVERLAY) replaces tensors of the model file only: a
+  /// draft model, an MTP head or a vision projector is read as it is, also
+  /// when it holds a tensor of the same name.
+  enum class FileRole : std::uint8_t { kModel, kSidecar };
+
+  /// The role of a draft or head file named beside `model`: when it is the
+  /// model file itself it stays the model, and the overlay applies to it.
+  [[nodiscard]] static FileRole SidecarRole(
+      const std::filesystem::path& file, const std::filesystem::path& model) {
+    std::error_code error;
+    return std::filesystem::equivalent(file, model, error) && !error
+               ? FileRole::kModel
+               : FileRole::kSidecar;
+  }
+
   /// Memory-maps a .gguf file from disk and parses metadata and tensor headers.
   [[nodiscard]] static std::unique_ptr<GgufReader> OpenFile(
-      const std::filesystem::path& path, std::string* error_msg = nullptr);
+      const std::filesystem::path& path, std::string* error_msg = nullptr,
+      FileRole role = FileRole::kModel);
 
   /// Parses a GGUF file from an existing in-memory buffer without file mapping.
   [[nodiscard]] static std::unique_ptr<GgufReader> OpenMemory(
@@ -227,10 +244,9 @@ public:
       std::string* error_msg = nullptr) const;
 
   /// Names the weight format this file was produced in, for benchmark and
-  /// diagnostic output. Prefers the `general.file_type` the quantizer recorded
-  /// (llama.cpp's ftype, so the label matches `llama-bench` on the same
-  /// artifact) and otherwise falls back to whichever tensor type holds the most
-  /// bytes. Never empty.
+  /// diagnostic output: the tensor type that holds the most elements. The
+  /// recorded `general.file_type` is not used, because some published files
+  /// carry a stale one. Never empty.
   [[nodiscard]] std::string GetQuantizationLabel() const;
 
   /// Inspects presence of MTP speculative tensors
@@ -247,6 +263,12 @@ private:
   [[nodiscard]] static std::unique_ptr<GgufReader> OpenSplitFileSet(
       const std::filesystem::path& path, std::unique_ptr<GgufReader> first,
       std::string* error_msg);
+  /// SUPERROC_TENSOR_OVERLAY names a GGUF whose tensors are read in place of
+  /// the copies of the same name, so a few sharper tensors need no new model
+  /// file. A tensor the model does not have is ignored; other dimensions are
+  /// an error.
+  [[nodiscard]] static std::unique_ptr<GgufReader> ApplyTensorOverlay(
+      std::unique_ptr<GgufReader> base, std::string* error_msg);
 
   bool ParseHeaders(std::string* error_msg);
 

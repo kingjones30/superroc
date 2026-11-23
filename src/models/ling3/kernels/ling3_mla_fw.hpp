@@ -1,10 +1,10 @@
-// ling3_mla_fw.hpp — LX1 (wave 3): fused WMMA flash-attention for the
+// ling3_mla_fw.hpp — fused WMMA flash-attention for the
 // absorbed-MLA PREFILL, the whole 512-token chunk in ONE kernel launch.
 //
-// Design (see the lane's STATUS.md): per (layer, chunk) the f32 cache is
+// Design: per (layer, chunk) the f32 cache is
 // staged to f16 by mla_w2_prep (kernels/ling3_mla_w2.hip — SHARED buffers,
 // one prep per layer per chunk, unchanged; it is the ONLY w2 piece used).
-// Everything else is in this module (RV3 C2: w2's serial-dot pack/out were
+// Everything else is in this module (w2's serial-dot pack/out were
 // the latency bound at the whole-chunk row count, MEASURED 77/84 ms —
 // replaced by f16 WMMA GEMMs at ~0.3 ms each):
 //   fw_qtrans_kernel  stages q_nope [head][token][dim] + q16's rope tail
@@ -14,7 +14,7 @@
 //   S = q16 . k16^T        (WMMA f16->f32, one 16x16x16 tile per warp)
 //   online softmax        (f32, in registers + one LDS pass, no atomics;
 //                          STANDARD running max m_new = fmax(m_old, mx) —
-//                          every rescale factor <= 1, RV17 H1)
+//                          every rescale factor <= 1)
 //   O = P . V             (WMMA f16->f32, P and V read as f16 fragments)
 //   fw_deabsorb_kernel out = sigmoid(gate) * wv_b . (O / rowsum)
 //
@@ -30,12 +30,12 @@
 // P is an f16 [32][64] LDS tile; GEMM2 splits the 32x512 output accumulator
 // across the 8 warps BY DIMENSION (warp w owns dims [64w, 64w+64) x all 32
 // rows = 8 WMMA C fragments = 64 f32 registers per lane), so no wave ever
-// holds more than 64 accumulator registers — LF1's parked WMMA kernel
-// (REPORT2) died at 256.
+// holds more than 64 accumulator registers — the parked WMMA kernel
+// died at 256.
 //
 // Numerics: f16 K/V and f16 P (the fork's precision class, same as tile),
 // f32 online softmax, f32 O accumulation — but the ABSORB and DE-ABSORB run
-// as f16 WMMA GEMMs (f16 operands, f32 accumulation; RV3 C2), and the sums
+// as f16 WMMA GEMMs, and the sums
 // are reordered (online softmax over 64-wide chunks, WMMA k-order). NOT
 // bit-identical to any existing path; gate is max_rel <= 2e-3 vs
 // mla_attn_tok plus determinism (same input -> identical output bytes; no
@@ -44,7 +44,7 @@
 // Determinism: no atomics; every reduction (softmax butterflies, WMMA
 // instruction, running max/sum update) has a fixed order.
 //
-// Bounds discipline (LF1's lf_audit model): every global index is enumerated
+// Bounds discipline: every global index is enumerated
 // in the header comment of ling3_mla_fw.hip and re-checked host-side by
 // fw_audit() before any launch; the kernels only touch indices the audit
 // proved in-bounds. Any refusal returns false and the caller falls back to
@@ -94,7 +94,7 @@ bool mla_fw_attn(const MlaShape& sh, const MlaScalars& sc, const MlaWeights& w,
                  const MlaW2Bufs& w2bufs, MlaFwBufs& bufs, int tok_base,
                  int tok_count, int chunk_tokens, hipStream_t stream);
 
-const char* mla_fw_version();  // "ling3-mla-fw/1.2-lx1" (1.2 = RV17 H1/H2/H3)
+const char* mla_fw_version();  // "ling3-mla-fw/1.2-lx1"
 
 }  // namespace ling3
 

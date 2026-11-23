@@ -1,0 +1,29 @@
+{
+  "LFM2.5-1.2B-Instruct-Q4_0_ROCMFP4_LEAN.gguf": [],
+  "LFM2.5-8B-A1B-Q4_0_ROCMFP4_LEAN.gguf": [
+    "-t",
+    "0",
+    "--prompt-lookup",
+    "--cache-floor-bytes",
+    "8589934592"
+  ],
+  "Qwen3.8-27B-Q4_0_ROCMFP4_STRIX-imatrix-headQ6K.gguf": [
+    "--think",
+    "off",
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--cache-floor-bytes",
+    "8589934592"
+  ],
+  "OxCoder-9B-MTP-Q4_0-ROCmFP4-STRIX_LEAN.gguf": [
+    "--speculative",
+    "mtp",
+    "-d",
+    "3",
+    "--think",
+    "off"
+  ]
+}

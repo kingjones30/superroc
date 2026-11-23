@@ -1,14 +1,14 @@
 #ifndef SUPERROC_CORE_ROCM_FP4_FP4_F16_PREFILL_HPP_
 #define SUPERROC_CORE_ROCM_FP4_FP4_F16_PREFILL_HPP_
 
-// SQ1 (Super ROC wave, A1a; rd1 DESIGN.md section 2.2.1): the Flash-Next
+// The Flash-Next
 // FP4->F16 prefill kernels, promoted from
 // src/models/qwen38_flash_next/kernels/rocm/{kernels.hpp,fp4_f16.hpp}
 // at 1194fea. The kernel and launcher symbol names are UNCHANGED (same
 // namespaces) so the HIP fat-binary symdiff shows a pure move; the
 // qwen family (src/models/qwen/hip/prefill_chunk.cpp) calls the same
 // launchers. (The Flash-Next namespace inside src/core is deliberate
-// for symbol stability; the B2 op-registry rename is Jay's follow-up.)
+// for symbol stability; the B2 op-registry rename is a follow-up.)
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -16,8 +16,8 @@
 #include <cstddef>
 #include <cstdint>
 
-// LFP (wave 3): FP4 weight decode to F16 for the Flash-Next F16 WMMA GEMMs.
-// Shared by the dense FP4 kernel (LFP) and the routed FP4 kernel (LFQ).
+// FP4 weight decode to F16 for the Flash-Next F16 WMMA GEMMs.
+// Shared by the dense FP4 kernel and the routed FP4 kernel.
 //
 // Types 100 (ROCMFP4, 18-byte blocks, one ue4m3 scale per 16-value half) and
 // 101 (ROCMFP4_FAST, 17-byte blocks, one scale per 32-value block). Layout:
@@ -41,7 +41,7 @@
 
 #include <cstdint>
 
-// SPEC2 unification (LFQ): the routed kernel's scalar twins live here
+// Unification: the routed kernel's scalar twins live here
 // so this header is the single FP4->F16 decode source. The device-only
 // parts are gated for non-HIP translation units (the routed unit test
 // compiles as CXX and needs only the scalars).
@@ -94,7 +94,7 @@ constexpr Fp4ScaleTable Fp4BuildScaleTable() {
   return t;
 }
 // Scalar twins of the device decode (moved here verbatim from the retired
-// fp4_f16_routed.hpp, SPEC2 unification; the routed unit test checks them
+// fp4_f16_routed.hpp, unification; the routed unit test checks them
 // against the superroc_fp4 CPU oracle). Callable from host and device.
 
 // Unsigned E4M3 scale byte -> F16 bits. Exact everywhere: normal scales need
@@ -128,14 +128,23 @@ FP4_F16_HD inline std::uint8_t Fp4CodeBiased(std::uint32_t nib) {
 }
 
 #if FP4_F16_HAVE_HIP
-static const __device__ Fp4ScaleTable kFp4ScaleHalf = Fp4BuildScaleTable();
+// One scale byte -> F16 bits, the same values as Fp4ScaleByteToHalf with no
+// load and no branch. For exp == 0 the F16 low byte is zero, so the high byte
+// comes from an eight-entry byte lookup. Device only.
+__device__ __forceinline__ std::uint32_t Fp4ScaleHalfBits(std::uint32_t e) {
+  const std::uint32_t exp = (e >> 3) & 0xFU;
+  const std::uint32_t man = e & 7U;
+  const std::uint32_t tiny =
+      __builtin_amdgcn_perm(0x1F1E1D1CU, 0x1A181400U, man) << 8;
+  const std::uint32_t normal = ((exp + 7U) << 10) | (man << 7);
+  const std::uint32_t bits = exp == 0 ? tiny : normal;
+  return e > 0x7EU ? 0U : bits;
+}
 
-// Two scale bytes -> half2 from the table (s0 = elements 0..15, s1 = 16..31;
-// type 101 passes the same byte twice). Device only.
-__device__ __forceinline__ __half2 Fp4Scale2(std::uint8_t s0, std::uint8_t s1) {
-  const std::uint32_t lo = kFp4ScaleHalf.v[s0];
-  const std::uint32_t hi = kFp4ScaleHalf.v[s1];
-  return __builtin_bit_cast(__half2, lo | (hi << 16));
+// One scale byte for both halves of a half2. Device only.
+__device__ __forceinline__ __half2 Fp4Scale1(std::uint8_t e) {
+  const std::uint32_t bits = Fp4ScaleHalfBits(e);
+  return __builtin_bit_cast(__half2, bits | (bits << 16));
 }
 
 // Four nibbles (bits [3:0] of each byte of `nib`; upper bits ignored, so the
@@ -169,8 +178,8 @@ __device__ __forceinline__ void Fp4NibblesToCodes(std::uint32_t nib,
 __device__ __forceinline__ void Fp4DecodeBlock(const std::uint32_t code4[4],
                                                std::uint8_t s0, std::uint8_t s1,
                                                __half2 h[16]) {
-  const __half2 sc_lo = Fp4Scale2(s0, s0);
-  const __half2 sc_hi = Fp4Scale2(s1, s1);
+  const __half2 sc_lo = Fp4Scale1(s0);
+  const __half2 sc_hi = Fp4Scale1(s1);
   const __half2 zero2 = __floats2half2_rn(0.0F, 0.0F);
 #pragma unroll
   for (int i = 0; i < 4; ++i) {
@@ -187,7 +196,7 @@ __device__ __forceinline__ void Fp4DecodeBlock(const std::uint32_t code4[4],
 
 // Four nibbles (low 4 bits of each byte of nib) -> four biased code bytes
 // (code + 16, matching Fp4CodeBiased). Moved here verbatim from the retired
-// fp4_f16_routed.hpp (SPEC2 unification). The fork's Codebook10 shape: two
+// fp4_f16_routed.hpp. The fork's Codebook10 shape: two
 // 8-entry perm LUTs (sign 0 / sign 1) plus a perm blend on bit 3. The caller
 // feeds the bytes to the 1040 magic (0x6400 | q = 1024 + q, minus 1040),
 // so the FMA computes code * scale with a zero offset. Device only.
@@ -204,7 +213,7 @@ __device__ __forceinline__ std::uint32_t Fp4NibblesToBiased(std::uint32_t nib) {
   return __builtin_amdgcn_perm(v_high, v_low, mask);
 }
 
-// Contracts this header keeps (LFR DESIGN.md section 6, adopted SPEC2):
+// Contracts this header keeps:
 // 1. Every decode entry point returns the EXACT value: max_abs against the
 //    F32 oracle (superroc_fp4_quant.hpp) is 0 over all 256 scales x 16 codes x
 //    both types. The product has <= 8 significant bits (F16 has 11).
@@ -217,7 +226,7 @@ __device__ __forceinline__ std::uint32_t Fp4NibblesToBiased(std::uint32_t nib) {
 // 5. Determinism: no atomics, no cross-lane reductions; K-order staging.
 
 // ue4m3 scale byte -> F32 scale. Value-identical to superroc_fp4_ue4m3_half for
-// the int8 route's per-block float scale (SPEC2 item 3): e > 0x7e -> +0;
+// the int8 route's per-block float scale: e > 0x7e -> +0;
 // exp == 0 -> man / 1024; else 2^(exp-8) * (1 + man/8). Host + device.
 constexpr float Fp4ScaleByteToFloat(std::uint8_t e) {
   if (e > 0x7e) {
@@ -261,27 +270,33 @@ __device__ __forceinline__ void Fp4NibblesToInt8(std::uint32_t nib,
 
 namespace superroc::models::qwen38_flash_next::rocm {
 
-/// W8A8 WMMA GEMM over FP4 FAST weights (LFP SPEC2 item 3): the same
+/// W8A8 WMMA GEMM over FP4 FAST weights: the same
 /// tiled-Q8 activation side as W8A8Gemm; weights decode to int8 codes plus
 /// the ue4m3 block scale. FAST only (fast == false returns false).
 bool Fp4Int8Gemm(const void* w, const void* x_tiled, float* out,
                  std::size_t batch, std::size_t m, std::size_t k, bool fast,
                  hipStream_t stream);
 
+/// The mixer down projection [320,10240] over FP4 FAST weights with the
+/// epilogue of HcDownF16Gemm: SiLU(x / 4), then F16 output. Supports at
+/// least 96 tokens.
+bool Fp4HcDownF16Gemm(const void* w, const void* x_tiled, __half* out,
+                      std::uint32_t n_tokens, hipStream_t stream);
+
 /// F16 activation rows [batch][k], ROCmFP4 weights (type 100 when fast is
 /// false, 101 when true) dequantized to F16 in LDS, F32 accumulation.
 /// out is [batch][m]. Same tile plan as DenseF16Gemm, plain row mapping.
-/// Unsupported shapes launch nothing. (LFP.)
+/// Unsupported shapes launch nothing.
 bool Fp4DenseF16Gemm(const void* w, const __half* x, float* out,
                      std::size_t batch, std::size_t m, std::size_t k, bool fast,
                      hipStream_t stream);
 
-/// Fused FP4 SSM projection (LFP SPEC2 item 1b): rows [0,10240) from the
+/// Fused FP4 SSM projection: rows [0,10240) from the
 /// type-100 qkv tensor, rows [10240,16384) from the type-101 gate tensor,
 /// one activation pass, with the SsmConv epilogue (raw rows to `qkvz`,
 /// convolved qkv to `convolved`, tile edges via SsmConvBoundaryKernel).
 /// Wide batches only (n_tokens >= 1024); anything else returns false.
-/// Split-output FP4 GEMM (LFP SPEC2 item 1b): rows [h*512, h*512+256)
+/// Split-output FP4 GEMM: rows [h*512, h*512+256)
 /// to `q`, rows [h*512+256, h*512+512) to `gate` (the 24-head x d256
 /// interleave); q/gate are [batch][m/2]. Exact geometry (m == 12288,
 /// k == 2560) and wide batches only; anything else returns false.
@@ -293,9 +308,10 @@ bool Fp4SsmF16Gemm(const void* w0, const void* w1, const __half* x,
                    const float* conv_w, const float* history, float* qkvz,
                    float* convolved, std::uint32_t n_tokens, std::uint32_t m,
                    std::uint32_t k, std::uint32_t channels,
-                   std::uint32_t kernel, hipStream_t stream);
+                   std::uint32_t kernel, hipStream_t stream,
+                   bool fast_qkv = false);
 
-// SQ1 occupancy proof hook (rd1 section 2.4): every ported
+// Occupancy proof hook: every ported
 // instantiation must hold >= 2 waves/SIMD. Returns the minimum
 // waves/SIMD x100 over all 15 instantiations, or -1 when a HIP query
 // fails; writes one line per instantiation into report (truncated to

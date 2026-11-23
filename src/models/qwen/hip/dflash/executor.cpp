@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/hip/snapshot_transfer.hpp"
 #include "src/models/qwen/dflash_weights.hpp"
@@ -33,18 +33,18 @@ constexpr std::uint32_t kDFlashGpuPersistentVersion = 2;
 constexpr std::size_t kDFlashGpuPersistentHeaderBytes = 64;
 
 [[nodiscard]] bool DsparkEnvOn(const char* name) {
-  const char* value = ::superroc::core::GetEnvCompat(name);
+  const char* value = ::superroc::core::GetEnv(name);
   return value != nullptr && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
 
 [[nodiscard]] bool DsparkEnvOff(const char* name) {
-  const char* value = ::superroc::core::GetEnvCompat(name);
+  const char* value = ::superroc::core::GetEnv(name);
   return value != nullptr && value[0] == '0' && value[1] == '\0';
 }
 
 [[nodiscard]] float DsparkEnvFloat(const char* name, float fallback) {
-  const char* value = ::superroc::core::GetEnvCompat(name);
+  const char* value = ::superroc::core::GetEnv(name);
   if (value == nullptr || value[0] == '\0') {
     return fallback;
   }
@@ -64,7 +64,7 @@ constexpr std::size_t kDFlashGpuPersistentHeaderBytes = 64;
          !DsparkEnvOff("SUPERROC_DSPARK_ANCHOR_LAYOUT");
 }
 
-// SPEC3: GPU spans inside one ForwardBlock, behind SUPERROC_DSPARK_STEP_PROF=1.
+// GPU spans inside one ForwardBlock, behind SUPERROC_DSPARK_STEP_PROF=1.
 // Events sit on the drafter stream; elapsed times are taken after the existing
 // hipStreamSynchronize so the default path (env unset) is unchanged.
 void DsparkProfAtexit();
@@ -197,6 +197,10 @@ void AllocateBuffer(T*& pointer, std::size_t elements) {
 
 /// Widest proposal block; BF16 context injection also uses sixteen rows.
 constexpr std::size_t kDFlashMaxSharedBatch = 8;
+
+/// Prompt-sized injection blocks switch from the 8/16-row weight-sharing loop
+/// to one batched launch per projection.
+constexpr std::size_t kDFlashBatchedInjectRows = 64;
 
 void NormalizeAndRotateQK(float* query, float* key, const float* query_weight,
                           const float* key_weight,
@@ -337,6 +341,114 @@ QwenDFlashGpuExecutor::~QwenDFlashGpuExecutor() {
   Free();
 }
 
+// The drafter's unembed and the DSpark markov scan are both
+// linear in the drafter vocab, and the target verifies every drafted token,
+// so greedy blocks may draft over the frequent head rows
+// [0, H) plus the special-token tail [T, V) only. Mirrors the MTP trim
+// (mtp/executor.cpp ConfigureDraftVocab) on the DFlash weights; the tail
+// keeps every special token the passed list knows about.
+void QwenDFlashGpuExecutor::ConfigureDraftVocab(
+    const std::vector<std::uint32_t>& special_ids) {
+  draft_head_rows_ = 0;
+  draft_tail_start_ = 0;
+  draft_rows_ = 0;
+  draft_row_bytes_ = 0;
+  const auto& weights = model_->GetWeights();
+  const auto& df_cfg = model_->GetDFlashConfig();
+  const std::size_t vocab = weights.config.vocab_size;
+  const std::size_t hidden = weights.config.hidden_size;
+  const char* reason = nullptr;
+  long requested = 98304L;
+  const char* env = ::superroc::core::GetEnv("SUPERROC_DFLASH_DRAFT_VOCAB");
+  const bool env_set = env != nullptr && env[0] != '\0';
+  // The default head was measured on the Qwen3.5 BPE vocabulary (frequent
+  // tokens at low ids): 248,320 rows on the Qwen3.5 export, 248,144 on the
+  // MiniCPM-V-4.7 drafter. Any other vocab trims only when
+  // SUPERROC_DFLASH_DRAFT_VOCAB asks for it.
+  constexpr std::array<std::size_t, 2> kDefaultTrimVocabs{248320, 248144};
+  bool default_measured = false;
+  for (const std::size_t measured : kDefaultTrimVocabs) {
+    default_measured = default_measured || vocab == measured;
+  }
+  if (!env_set && !default_measured) {
+    reason =
+        "the default trim is measured on the Qwen3.5-family vocab "
+        "(248320 or 248144 rows) only";
+  } else if (env_set) {
+    char* parsed_end = nullptr;
+    requested = std::strtol(env, &parsed_end, 10);
+    if (parsed_end == env || *parsed_end != '\0') {
+      reason = "SUPERROC_DFLASH_DRAFT_VOCAB is not a whole number";
+    }
+  }
+  std::size_t head = 0;
+  std::size_t tail = vocab;
+  if (reason == nullptr &&
+      (requested <= 0 || static_cast<std::size_t>(requested) >= vocab)) {
+    reason = env_set ? "SUPERROC_DFLASH_DRAFT_VOCAB keeps the full head"
+                     : "the default covers the whole vocab";
+  }
+  if (reason == nullptr) {
+    const std::size_t row_bytes =
+        superroc::quant::EncodedSizeBytes(weights.output.type, hidden);
+    const char* refused = nullptr;
+    if (requested < 1024) {
+      refused = "below 1024 rows";
+    } else if (row_bytes == 0 || weights.output.data == nullptr) {
+      refused = "the LM head type has no row size here";
+    } else if ((hidden % 256) != 0) {
+      refused = "hidden size is not a multiple of 256";
+    }
+    if (refused != nullptr) {
+      reason = refused;
+    } else {
+      // Rows in multiples of 256: a whole number of GEMV row groups and a
+      // whole number of K/IQ super-blocks for every row size the encoder
+      // knows, so a row prefix and a row tail stay valid matrices.
+      head = (static_cast<std::size_t>(requested) + 255) / 256 * 256;
+      tail = vocab;
+      for (const std::uint32_t id : special_ids) {
+        const std::size_t row = static_cast<std::size_t>(id);
+        if (row >= head && row < vocab) {
+          tail = std::min(tail, row / 256 * 256);
+        }
+      }
+      if (tail < head) {
+        tail = head;
+      }
+      if (head >= vocab || head + (vocab - tail) >= vocab) {
+        reason = "the trim saves no rows";
+      } else {
+        draft_row_bytes_ = row_bytes;
+      }
+    }
+  }
+  if (reason != nullptr) {
+    std::fprintf(stderr, "DFlash draft vocab: full head (%s)\n", reason);
+    return;
+  }
+  draft_head_rows_ = static_cast<std::uint32_t>(head);
+  draft_tail_start_ = static_cast<std::uint32_t>(tail);
+  draft_rows_ = static_cast<std::uint32_t>(head + (vocab - tail));
+  // Allocate() runs before the trim is known (the backend configures the
+  // executor once it exists), so the tail scratch is sized here.
+  if (d_logits_tail_ != nullptr) {
+    (void)hipFree(d_logits_tail_);
+    d_logits_tail_ = nullptr;
+  }
+  const std::size_t tail_columns = vocab - draft_tail_start_;
+  const std::size_t tail_elements =
+      static_cast<std::size_t>(df_cfg.block_size) * tail_columns;
+  AllocateBuffer(d_logits_tail_, tail_elements);
+  scratch_bytes_ += tail_elements * sizeof(float);
+  std::fprintf(
+      stderr,
+      "DFlash draft vocab: rows [0, %zu) + [%zu, %zu) = %u of %zu "
+      "(%.1f %%)\n",
+      head, tail, vocab, draft_rows_, vocab,
+      100.0 * static_cast<double>(draft_rows_) / static_cast<double>(vocab));
+}
+
 std::unique_ptr<QwenDFlashGpuExecutor> QwenDFlashGpuExecutor::Create(
     std::shared_ptr<const QwenDFlashGpuModel> model, std::uint32_t max_context,
     std::string* error_msg) {
@@ -376,15 +488,12 @@ void QwenDFlashGpuExecutor::Allocate() {
   if (error != hipSuccess) {
     throw std::runtime_error("DFlash hipStreamCreate failed");
   }
-  // NBFAST A2: the batched injection route needs the BLAS handles even when
-  // the block path never takes its wide branch (block_size <= 8); the
-  // capacity below mirrors the injection_capacity_ assignment underneath.
-  if (block_size > kDFlashMaxSharedBatch ||
-      std::min(max_context_, std::uint32_t{256}) > 16) {
-    HIPBLAS_CHECK(hipblasCreate(&hipblas_handle_));
-    HIPBLAS_CHECK(hipblasSetStream(hipblas_handle_, stream_));
-    hipblaslt_gemm_ = std::make_unique<HipblasLtGemm>();
-  }
+  // Batched context injection uses the BLAS BF16 GEMM for the projections no
+  // exact grouped launcher covers, even when decode blocks stay within the
+  // shared-batch width.
+  HIPBLAS_CHECK(hipblasCreate(&hipblas_handle_));
+  HIPBLAS_CHECK(hipblasSetStream(hipblas_handle_, stream_));
+  hipblaslt_gemm_ = std::make_unique<HipblasLtGemm>();
 
   // Attention only reads the sliding window. Preserve FP32 values and global
   // RoPE positions, but reuse physical slots as history advances.
@@ -418,12 +527,6 @@ void QwenDFlashGpuExecutor::Allocate() {
   allocate_scratch(
       d_v_block_,
       std::max<std::size_t>(injection_capacity_, block_size) * kv_dim);
-  // NBFAST A2: BF16 activation staging for the batched injection GEMMs. One
-  // full injection chunk of target features is the widest operand; the k/v
-  // projections (input = hidden) fit inside the same buffer.
-  if (injection_capacity_ > 16) {
-    allocate_scratch(d_inject_bf16_, injection_capacity_ * enc_in_dim);
-  }
 
   // Scratch buffers for block drafting (size = block_size)
   allocate_scratch(d_block_hidden_, block_size * hidden_size);
@@ -455,8 +558,11 @@ void QwenDFlashGpuExecutor::Allocate() {
   allocate_scratch(d_selector_uniforms_, block_size);
   allocate_scratch(d_confidences_, block_size);
   allocate_scratch(d_out_token_, block_size);
-  if (block_size > kDFlashMaxSharedBatch)
-    allocate_scratch(d_bf16_input_, block_size * intermediate_size);
+  // BF16 conversion scratch: large decode blocks round-trip FFN activations,
+  // batched context injection converts whole prompt-sized feature blocks.
+  allocate_scratch(d_bf16_input_,
+                   std::max<std::size_t>(injection_capacity_ * enc_in_dim,
+                                         block_size * intermediate_size));
 
   PrewarmBlockGemms();
 }
@@ -587,7 +693,8 @@ void QwenDFlashGpuExecutor::RunInjectGemm(const models::QwenTensorRef& weight,
                                           const float* input, float* output,
                                           std::size_t num_tokens,
                                           std::size_t output_size,
-                                          std::size_t input_size) {
+                                          std::size_t input_size,
+                                          bool allow_batched) {
   if (weight.data == nullptr || num_tokens == 0) {
     return;
   }
@@ -603,10 +710,53 @@ void QwenDFlashGpuExecutor::RunInjectGemm(const models::QwenTensorRef& weight,
     return;
   }
 
-  if (is_bf16 && num_tokens > 16 && d_inject_bf16_ != nullptr) {
-    RunInjectGemmWide(weight, input, output, num_tokens, output_size,
-                      input_size);
-    return;
+  // One batched launch per projection for prompt-sized blocks: every 8/16-row
+  // launch re-reads the whole weight matrix, which dominates prefill once a
+  // block spans hundreds of rows. Only the single-request injection path may
+  // take this: the shared multi-request projection must stay numerically
+  // identical to injecting each request alone. Decode keeps the small-row
+  // paths below.
+  if (allow_batched && num_tokens >= kDFlashBatchedInjectRows) {
+    if (is_bf16) {
+      // These are the shapes the prefill BF16 route groups into one exact
+      // FP32-activation launch (TryLaunchBf16SmallBatchWave64); other shapes
+      // would fall back inside that launcher to the 16-row loop, so route
+      // them through the batched BF16 GEMM with a converted activation
+      // buffer instead.
+      const bool grouped_exact =
+          (input_size == 5120 &&
+           (output_size == 1024 || output_size == 12288 ||
+            output_size == 17408 || output_size == 248320)) ||
+          (output_size == 5120 && input_size == 6144);
+      if (grouped_exact) {
+        LaunchExactBf16GEMMFp32SmallBatch(weight.data, input, output,
+                                          num_tokens, output_size, input_size,
+                                          stream_);
+        return;
+      }
+      LaunchFloatToBfloat16(input, d_bf16_input_, num_tokens * input_size,
+                            stream_);
+      if (hipblaslt_gemm_ != nullptr &&
+          hipblaslt_gemm_->RunBf16(weight.data, d_bf16_input_, output,
+                                   num_tokens, output_size, input_size,
+                                   stream_)) {
+        return;
+      }
+      LaunchHipblasGEMMBF16(hipblas_handle_, weight.data, d_bf16_input_, output,
+                            num_tokens, output_size, input_size, stream_);
+      return;
+    }
+    if (weight.type == core::GgmlType::kQ8_0) {
+      // No FP32-activation launcher shares Q8_0 weight reads across a whole
+      // block for these shapes; convert the block's activations to BF16 and
+      // use the target prefill's quant route.
+      LaunchFloatToBfloat16(input, d_bf16_input_, num_tokens * input_size,
+                            stream_);
+      LaunchBatchedQuantGEMM(weight.type, weight.data, d_bf16_input_, output,
+                             num_tokens, output_size, input_size, stream_);
+      return;
+    }
+    // Other packed quants keep the shared 8-row loop below.
   }
 
   for (std::size_t offset = 0; offset < num_tokens;) {
@@ -627,26 +777,6 @@ void QwenDFlashGpuExecutor::RunInjectGemm(const models::QwenTensorRef& weight,
     }
     offset += chunk;
   }
-}
-
-// NBFAST A2: large injections (the drafter prime over a full prompt) paid one
-// whole-BF16-matrix read per sixteen rows, so a 256-token chunk re-read the
-// 308 MB fc projection sixteen times (~0.125 ms/token of prime at 8K context).
-// Route wide batches through the one-read hipBLASLt path the block GEMMs
-// already use; the verifier keeps the emitted greedy tokens exact regardless
-// of drafter numerics.
-void QwenDFlashGpuExecutor::RunInjectGemmWide(
-    const models::QwenTensorRef& weight, const float* input, float* output,
-    std::size_t num_tokens, std::size_t output_size, std::size_t input_size) {
-  LaunchFloatToBfloat16(input, d_inject_bf16_, num_tokens * input_size,
-                        stream_);
-  if (hipblaslt_gemm_ != nullptr &&
-      hipblaslt_gemm_->RunBf16(weight.data, d_inject_bf16_, output, num_tokens,
-                               output_size, input_size, stream_)) {
-    return;
-  }
-  LaunchHipblasGEMMBF16(hipblas_handle_, weight.data, d_inject_bf16_, output,
-                        num_tokens, output_size, input_size, stream_);
 }
 
 void QwenDFlashGpuExecutor::Free() noexcept {
@@ -693,6 +823,8 @@ void QwenDFlashGpuExecutor::Free() noexcept {
     (void)hipFree(d_ffn_down_);
   if (d_logits_ != nullptr)
     (void)hipFree(d_logits_);
+  if (d_logits_tail_ != nullptr)
+    (void)hipFree(d_logits_tail_);
   if (d_selector_hidden_ != nullptr)
     (void)hipFree(d_selector_hidden_);
   if (d_selector_candidate_ids_ != nullptr) {
@@ -710,8 +842,6 @@ void QwenDFlashGpuExecutor::Free() noexcept {
     (void)hipFree(d_out_token_);
   if (d_bf16_input_ != nullptr)
     (void)hipFree(d_bf16_input_);
-  if (d_inject_bf16_ != nullptr)
-    (void)hipFree(d_inject_bf16_);
   if (d_batch_scratch_ != nullptr)
     (void)hipFree(d_batch_scratch_);
   hipblaslt_gemm_.reset();
@@ -751,7 +881,10 @@ QwenGpuMemoryUsage QwenDFlashGpuExecutor::EstimateMemoryUsage(
   const std::size_t block = draft.block_size;
   const std::size_t injection = std::min(max_context, std::uint32_t{256});
   const std::size_t shared = std::max(injection, block);
-  const std::size_t dynamic = draft.DynamicCoefficientCount(hidden);
+  // Allocate() floors the dynamic-coefficient scratch at one element for
+  // drafters without a dynamic convolution; mirror that here.
+  const std::size_t dynamic =
+      std::max<std::size_t>(1, draft.DynamicCoefficientCount(hidden));
   const auto ffn_scratch_width = std::max<std::size_t>(
       config.intermediate_size,
       kernels::DFlashSelectorScratchElements(config.vocab_size));
@@ -760,7 +893,9 @@ QwenGpuMemoryUsage QwenDFlashGpuExecutor::EstimateMemoryUsage(
       shared * (2U * hidden + 2U * kv) +
       block * (3U * hidden + dynamic + 2U * config.AttentionSize() +
                2U * ffn_scratch_width + config.vocab_size +
-               draft.selector_rank + 2U * draft.selector_top_k + 3U) +
+               // Allocate() floors the selector scratch at one element.
+               std::max<std::uint32_t>(draft.selector_rank, 1U) +
+               2U * std::max<std::uint32_t>(draft.selector_top_k, 1U) + 3U) +
       kernels::DFlashAttentionSplitScratchElements(
           static_cast<std::uint32_t>(block), config.num_attention_heads,
           config.head_dim);
@@ -773,9 +908,13 @@ QwenGpuMemoryUsage QwenDFlashGpuExecutor::EstimateMemoryUsage(
           kv * sizeof(float),
       .temporary_scratch_bytes = scratch_elements * sizeof(float),
   };
-  if (block > kDFlashMaxSharedBatch)
-    usage.temporary_scratch_bytes +=
-        block * config.intermediate_size * sizeof(hip_bfloat16);
+  // The BF16 conversion scratch always exists: large decode blocks round-trip
+  // FFN activations, batched context injection converts whole prompt-sized
+  // feature blocks.
+  usage.temporary_scratch_bytes +=
+      std::max<std::size_t>(injection * draft.target_layer_ids.size() * hidden,
+                            block * config.intermediate_size) *
+      sizeof(hip_bfloat16);
   if (max_batch_width > 1 && config.head_dim <= 256)
     usage.temporary_scratch_bytes += BatchScratchBytes(
         model, max_batch_width * std::min<std::size_t>(block, max_context));
@@ -783,12 +922,16 @@ QwenGpuMemoryUsage QwenDFlashGpuExecutor::EstimateMemoryUsage(
 }
 
 std::size_t QwenDFlashGpuExecutor::SnapshotPayloadBytes() const noexcept {
+  return SnapshotPayloadBytesAt(injected_context_len_);
+}
+
+std::size_t QwenDFlashGpuExecutor::SnapshotPayloadBytesAt(
+    std::uint32_t position) const noexcept {
   const std::size_t kv_width =
       static_cast<std::size_t>(model_->GetConfig().num_key_value_heads) *
       model_->GetConfig().head_dim;
   return 2U * model_->GetDFlashConfig().num_layers *
-         std::min(injected_context_len_, history_capacity_) * kv_width *
-         sizeof(float);
+         std::min(position, history_capacity_) * kv_width * sizeof(float);
 }
 
 std::unique_ptr<QwenDFlashGpuSnapshot> QwenDFlashGpuExecutor::SaveSnapshot()
@@ -813,62 +956,6 @@ std::unique_ptr<QwenDFlashGpuSnapshot> QwenDFlashGpuExecutor::SaveSnapshot()
   snapshot->valid_context_ = injected_context_len_;
   snapshot->history_capacity_ = history_capacity_;
   snapshot->payload_bytes_ = SnapshotPayloadBytes();
-
-  if (bytes == 0) {
-    return snapshot;
-  }
-  HIP_CHECK(hipMalloc(&snapshot->d_k_, bytes));
-  HIP_CHECK(hipMalloc(&snapshot->d_v_, bytes));
-  auto* snapshot_k = static_cast<float*>(snapshot->d_k_);
-  auto* snapshot_v = static_cast<float*>(snapshot->d_v_);
-  for (std::size_t layer = 0; layer < snapshot->num_layers_; ++layer) {
-    HIP_CHECK(hipMemcpyAsync(
-        snapshot_k + layer * elements_per_layer, d_injected_k_[layer],
-        elements_per_layer * sizeof(float), hipMemcpyDeviceToDevice, stream_));
-    HIP_CHECK(hipMemcpyAsync(
-        snapshot_v + layer * elements_per_layer, d_injected_v_[layer],
-        elements_per_layer * sizeof(float), hipMemcpyDeviceToDevice, stream_));
-  }
-  HIP_CHECK(hipStreamSynchronize(stream_));
-  return snapshot;
-}
-
-std::size_t QwenDFlashGpuExecutor::SnapshotPayloadBytesAt(
-    std::uint32_t valid_context) const {
-  if (valid_context > injected_context_len_ ||
-      injected_context_len_ > history_capacity_) {
-    throw std::logic_error("DFlash snapshot position is not truncatable");
-  }
-  const std::size_t kv_width =
-      static_cast<std::size_t>(model_->GetConfig().num_key_value_heads) *
-      model_->GetConfig().head_dim;
-  return 2U * model_->GetDFlashConfig().num_layers *
-         static_cast<std::size_t>(valid_context) * kv_width * sizeof(float);
-}
-
-std::unique_ptr<QwenDFlashGpuSnapshot> QwenDFlashGpuExecutor::SaveSnapshotAt(
-    std::uint32_t valid_context) const {
-  // Rows sit at absolute slots only while the whole context fits the ring;
-  // a wrapped cache cannot be truncated by copying a prefix.
-  const std::size_t truncated_bytes = SnapshotPayloadBytesAt(valid_context);
-  const std::size_t kv_width =
-      static_cast<std::size_t>(model_->GetConfig().num_key_value_heads) *
-      model_->GetConfig().head_dim;
-  const std::size_t elements_per_layer =
-      static_cast<std::size_t>(valid_context) * kv_width;
-  const std::size_t total_elements =
-      model_->GetDFlashConfig().num_layers * elements_per_layer;
-  const std::size_t bytes = total_elements * sizeof(float);
-
-  auto snapshot =
-      std::unique_ptr<QwenDFlashGpuSnapshot>(new QwenDFlashGpuSnapshot());
-  snapshot->elements_per_layer_ = elements_per_layer;
-  snapshot->num_layers_ = model_->GetDFlashConfig().num_layers;
-  snapshot->kv_width_ = static_cast<std::uint32_t>(kv_width);
-  snapshot->max_context_ = max_context_;
-  snapshot->valid_context_ = valid_context;
-  snapshot->history_capacity_ = history_capacity_;
-  snapshot->payload_bytes_ = truncated_bytes;
 
   if (bytes == 0) {
     return snapshot;
@@ -1013,6 +1100,43 @@ void QwenDFlashGpuExecutor::Reset() noexcept {
   injected_context_len_ = 0;
 }
 
+bool QwenDFlashGpuExecutor::SkipTargetContext(std::uint32_t position,
+                                              std::uint32_t num_tokens) {
+  // Same contiguity and bounds contract as InjectTargetContext, minus the
+  // feature payload: only the committed context length advances.
+  if (position != injected_context_len_ || position > max_context_ ||
+      num_tokens > max_context_ - position) {
+    return false;
+  }
+  if (num_tokens == 0) {
+    return true;
+  }
+  // The skipped rows can never enter the attention window while the request
+  // that computed the skip is live, but a snapshot taken mid-prompt can be
+  // restored into a shorter continuation whose window reaches them. Zero the
+  // skipped ring slots so a restored drafter attends defined values instead
+  // of stale memory.
+  const std::size_t kv_dim =
+      static_cast<std::size_t>(model_->GetConfig().num_key_value_heads) *
+      model_->GetConfig().head_dim;
+  for (std::size_t layer = 0; layer < d_injected_k_.size(); ++layer) {
+    for (std::uint32_t offset = 0; offset < num_tokens;) {
+      const auto slot = (position + offset) % history_capacity_;
+      const auto count =
+          std::min(num_tokens - offset, history_capacity_ - slot);
+      const std::size_t bytes =
+          static_cast<std::size_t>(count) * kv_dim * sizeof(float);
+      HIP_CHECK(hipMemsetAsync(d_injected_k_[layer] + slot * kv_dim, 0, bytes,
+                               stream_));
+      HIP_CHECK(hipMemsetAsync(d_injected_v_[layer] + slot * kv_dim, 0, bytes,
+                               stream_));
+      offset += count;
+    }
+  }
+  injected_context_len_ = position + num_tokens;
+  return true;
+}
+
 bool QwenDFlashGpuExecutor::InjectTargetContext(
     std::span<const float> target_features, std::uint32_t position,
     std::uint32_t num_tokens, const DFlashTrace& trace) {
@@ -1068,7 +1192,7 @@ bool QwenDFlashGpuExecutor::InjectTargetContextChunk(
 
   // FC Projection & Norm
   RunInjectGemm(weights.fc_projection, d_target_features_, d_fused_features_,
-                num_tokens, hidden_size, enc_in_dim);
+                num_tokens, hidden_size, enc_in_dim, /*allow_batched=*/true);
 
   LaunchBatchedRMSNorm(d_fused_features_,
                        static_cast<const float*>(weights.fc_norm.data),
@@ -1085,9 +1209,9 @@ bool QwenDFlashGpuExecutor::InjectTargetContextChunk(
     const auto& layer = weights.layers[i].transformer;
     if (layer.attn_k.data != nullptr && layer.attn_v.data != nullptr) {
       RunInjectGemm(layer.attn_k, d_block_normed_, d_k_block_, num_tokens,
-                    kv_dim, hidden_size);
+                    kv_dim, hidden_size, /*allow_batched=*/true);
       RunInjectGemm(layer.attn_v, d_block_normed_, d_v_block_, num_tokens,
-                    kv_dim, hidden_size);
+                    kv_dim, hidden_size, /*allow_batched=*/true);
     }
 
     if (layer.attn_k_norm.data != nullptr) {
@@ -1339,8 +1463,32 @@ std::vector<tokenization::TokenId> QwenDFlashGpuExecutor::ForwardBlock(
   std::vector<tokenization::TokenId> tokens(draft_count, 0);
   const float* logit_hidden =
       dspark_anchor ? d_block_normed_ : d_block_normed_ + hidden_size;
-  RunBlockGemm(weights.output, logit_hidden, d_logits_, draft_count, vocab_size,
-               hidden_size);
+  // Greedy, untraced blocks draft over the trimmed vocabulary; every other
+  // block keeps the full unembed. The head
+  // rows land slot-major with stride H in d_logits_, the tail rows
+  // slot-major with stride (V - T) in d_logits_tail_.
+  const bool trimmed =
+      draft_rows_ != 0 && temperature == 0.0F && trace == nullptr;
+  if (trimmed) {
+    RunBlockGemm(weights.output, logit_hidden, d_logits_, draft_count,
+                 draft_head_rows_, hidden_size);
+    models::QwenTensorRef tail_weight = weights.output;
+    const std::size_t tail_offset =
+        static_cast<std::size_t>(draft_tail_start_) * draft_row_bytes_;
+    tail_weight.data =
+        static_cast<const std::uint8_t*>(weights.output.data) + tail_offset;
+    tail_weight.num_elements -=
+        static_cast<std::size_t>(draft_tail_start_) * hidden_size;
+    if (tail_weight.available_bytes !=
+        std::numeric_limits<std::size_t>::max()) {
+      tail_weight.available_bytes -= tail_offset;
+    }
+    RunBlockGemm(tail_weight, logit_hidden, d_logits_tail_, draft_count,
+                 vocab_size - draft_tail_start_, hidden_size);
+  } else {
+    RunBlockGemm(weights.output, logit_hidden, d_logits_, draft_count,
+                 vocab_size, hidden_size);
+  }
   TraceTensor(trace, "logits", d_logits_, draft_count * vocab_size, stream_);
   if (g_dspark_prof.on) {
     HIP_CHECK(hipEventRecord(g_dspark_prof.ev[2], stream_));
@@ -1372,40 +1520,26 @@ std::vector<tokenization::TokenId> QwenDFlashGpuExecutor::ForwardBlock(
             ? d_selector_candidate_probabilities_
             : nullptr,
         sequences, vocab_size, df_cfg.selector_rank, df_cfg.selector_top_k,
-        stream_);
+        stream_, trimmed ? draft_head_rows_ : 0U,
+        trimmed ? d_logits_tail_ : nullptr, trimmed ? draft_tail_start_ : 0U);
   } else {
     const float slot_temperature =
         df_cfg.sample_from_anchor ? temperature : 0.0F;
     const float* markov_hidden =
         dspark_anchor ? d_block_normed_ : d_block_normed_ + hidden_size;
-    if (DsparkEnvOn("SUPERROC_DSPARK_FUSED")) {
-      kernels::LaunchDSparkMarkovChain(
-          d_logits_, markov_hidden, weights.markov_w1.data,
-          weights.markov_w2.data,
-          weights.conf_proj.empty()
-              ? nullptr
-              : static_cast<const float*>(weights.conf_proj.data),
-          weights.conf_proj_bias.empty()
-              ? nullptr
-              : static_cast<const float*>(weights.conf_proj_bias.data),
-          d_out_token_, d_confidences_, d_ffn_gate_,
-          reinterpret_cast<std::uint32_t*>(d_ffn_up_),
-          slot_temperature > 0.0F ? d_selector_uniforms_ : nullptr,
-          out_candidate_ids != nullptr ? d_selector_candidate_ids_ : nullptr,
-          out_candidate_probabilities != nullptr
-              ? d_selector_candidate_probabilities_
-              : nullptr,
-          draft_count, static_cast<std::uint32_t>(vocab_size),
-          static_cast<std::uint32_t>(hidden_size), df_cfg.markov_rank,
-          df_cfg.selector_top_k, slot_temperature, stream_);
-    } else {
+    {
       const float p_min = df_cfg.has_confidence_head
                               ? DsparkEnvFloat("SUPERROC_DSPARK_CONF_MIN", 0.5F)
                               : 0.0F;
       std::uint32_t kept = 0;
       for (std::uint32_t slot = 0; slot < draft_count; ++slot) {
         kernels::LaunchDSparkMarkovSelect(
-            d_logits_ + static_cast<std::size_t>(slot) * vocab_size,
+            d_logits_ + static_cast<std::size_t>(slot) *
+                            (trimmed ? draft_head_rows_ : vocab_size),
+            trimmed ? draft_head_rows_ : 0U, trimmed ? draft_tail_start_ : 0U,
+            trimmed ? d_logits_tail_ + static_cast<std::size_t>(slot) *
+                                           (vocab_size - draft_tail_start_)
+                    : nullptr,
             markov_hidden + slot * hidden_size, weights.markov_w1.data,
             weights.markov_w2.data,
             weights.conf_proj.empty()

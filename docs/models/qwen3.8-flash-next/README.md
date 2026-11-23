@@ -5,8 +5,6 @@ Supported target: `unsloth/Qwen3.8-Flash-Next-GGUF`, **UD-Q4_K_XL** (four shards
 Optional shared-Q8 MTP predictor; optional BF16 vision projector.
 Original unquantized-model and GGUF-conversion parity remain unqualified.
 
-[Benchmarks](BENCHMARKS.md) · [Quality](QUALITY.md) · [Experiments](EXPERIMENTS.md)
-
 ## Load and run
 
 ```sh
@@ -42,7 +40,6 @@ exact sampled acceptance and residual correction. Sampled text can differ
 across builds when proposals change. All-greedy C>1 batches retain their shared
 planner and may use measured cycle costs. Each request keeps private caches,
 rollback and RNG; snapshots preserve the learned acceptance history.
-See [MTP qualification](QUALITY.md).
 
 MTP decoding also proposes copies from the context, with one to eight sessions.
 The context (committed tokens plus the chain so far) is matched against the
@@ -99,7 +96,7 @@ hidden states and mRoPE. Image snapshots require matching prompt attachment.
 ## Tools and artifacts
 
 Model tests are in `tests/models/qwen38_flash_next`, focused microbenchmarks in
-`tools/qwen-flash`. [Quality](QUALITY.md) summarizes qualification and focused checks.
+`tools/qwen-flash`.
 Build a microbenchmark with
 `nix develop -c tools/bench/build.sh tools/qwen-flash/projection_plans.hip`;
 `dense_blaslt_sweep.hip` times hipBLASLt on the dense prefill shapes.

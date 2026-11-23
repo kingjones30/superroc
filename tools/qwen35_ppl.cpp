@@ -1,4 +1,4 @@
-// lqw:qwen35_ppl. Teacher-forced perplexity on the GPU executor, scored the
+// Teacher-forced perplexity on the GPU executor, scored the
 // way llama.cpp tools/perplexity/perplexity.cpp scores a chunk:
 //   first = n_ctx/2
 //   logits at position p (p >= first) score token p+1
@@ -7,7 +7,7 @@
 //   with the BOS id for the forward (the corpus token is not what is scored)
 // Prints the running PPL after each chunk, which is what llama-perplexity
 // prints as [1]…,[2]…. Usage: qwen35_ppl <model.gguf> <corpus.txt> [n_ctx]
-// SQ18 dual mode: qwen35_ppl <model.gguf> <corpus.txt> [n_ctx] dual
+// Dual mode: qwen35_ppl <model.gguf> <corpus.txt> [n_ctx] dual
 // [max_chunks] [n_prefill]: per chunk, score every position through the
 // decode path exactly as the gate loop does, then re-score n_prefill evenly
 // spaced positions (default 32) through the pure prefill path (Reset +
@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "src/core/gguf_reader.hpp"
+#include "tools/ppl_ref.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 
 namespace {
@@ -55,7 +56,7 @@ double ScoreToken(std::span<const float> view,
   return nll;
 }
 
-// SQ18: scored-position record shared by both paths (paired comparison).
+// Scored-position record shared by both paths (paired comparison).
 struct ScoredPos {
   double nll = 0.0;
   double logp_true = 0.0;
@@ -99,7 +100,7 @@ int main(int argc, char** argv) {
     if (n_ctx < 2 || (n_ctx % 2) != 0)
       throw std::runtime_error("n_ctx must be even and at least 2");
     const std::size_t first = n_ctx / 2;
-    // SQ18: mode switch. Absent (or anything but "dual") keeps the gate loop
+    // Mode switch. Absent (or anything but "dual") keeps the gate loop
     // below byte-identical; "dual" adds the prefill-path pass + comparison.
     const bool dual = argc > 4 && std::string(argv[4]) == "dual";
     std::size_t max_chunks = 0;
@@ -159,9 +160,11 @@ int main(int argc, char** argv) {
 
     double nll = 0.0;
     std::size_t scored = 0, argmax_hits = 0, vocab = 0;
-    // SQ18 dual accumulators (paired positions only for the _p side).
+    // Dual accumulators (paired positions only for the _p side).
     double nll_d = 0.0, nll_p = 0.0, abs_dlogp = 0.0;
     std::size_t scored_paired = 0, agree = 0, hits_d = 0, hits_p = 0;
+    superroc::tools::PplRef ppl_ref;
+    ppl_ref.Open();
     for (std::size_t chunk = 0; chunk < n_chunk; ++chunk) {
       executor->Reset();
       std::vector<superroc::tokenization::TokenId> window(
@@ -170,7 +173,7 @@ int main(int argc, char** argv) {
       if (add_bos)
         window[0] = bos;
       if (!dual) {
-        // SQ18 step 3: phase timing on stderr only (stdout unchanged).
+        // Phase timing on stderr only (stdout unchanged).
         const auto t0 = std::chrono::steady_clock::now();
         (void)executor->ForwardPromptBatch(std::span<const superroc::tokenization::TokenId>(
             window.data(), first + 1));
@@ -185,6 +188,7 @@ int main(int argc, char** argv) {
           const auto view = executor->CopyLastLogits();
           vocab = view.size();
           const double one = ScoreToken(view, window[pos + 1], &argmax_hits);
+          ppl_ref.Add(view, one);
           chunk_nll += one;
           nll += one;
           ++chunk_scored;
@@ -207,7 +211,7 @@ int main(int argc, char** argv) {
                   << " decode_step_s=" << dec_s << "\n";
         continue;
       }
-      // SQ18 dual mode. Decode pass first: identical call sequence to the
+      // Dual mode. Decode pass first: identical call sequence to the
       // gate loop (same prefill + same ForwardToken steps), so its PPL must
       // reproduce the gate number; per-position records are kept for pairing.
       std::vector<ScoredPos> dec(scored_per);
@@ -256,7 +260,7 @@ int main(int argc, char** argv) {
         chunk_hits_p += pre.top == window[pos + 1] ? 1 : 0;
         hits_p += pre.top == window[pos + 1] ? 1 : 0;
         ++scored_paired;
-        // SQ18 SPEC2 (a): per-paired-position NLLs for the d/p standard
+        // Per-paired-position NLLs for the d/p standard
         // error (delta method over per-position deltas). stderr keeps the
         // DUAL/stdout contract untouched.
         std::cerr << "DPOS chunk=" << (chunk + 1) << " j=" << j << " pos=" << pos
@@ -284,6 +288,7 @@ int main(int argc, char** argv) {
                 << std::flush;
     }
     if (!dual) {
+      ppl_ref.Report();
       std::cout << "PPL " << std::exp(nll / static_cast<double>(scored))
                 << " scored_tokens=" << scored << " vocab=" << vocab
                 << " argmax_hits=" << argmax_hits << " n_ctx=" << n_ctx

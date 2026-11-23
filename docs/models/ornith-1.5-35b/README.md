@@ -20,7 +20,7 @@ The base model is described in its Hugging Face card as a 35B mixture-of-experts
 GPU_MAX_HW_QUEUES=2 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Ornith-1.5-35B-A3B-Q4_0_ROCMFP4_LEAN-v1.gguf --served-model-name ornith-1.5-35b --context 32768 --think off --speculative mtp -d 2 --min-draft-tokens 1
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.13.0. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 
@@ -34,7 +34,7 @@ AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.13.0. One request 
 
 ## Quality
 
-Perplexity 10.2407 on a 96-chunk corpus at 512 context, against 10.0714 for the stock Unsloth UD-Q4_K_XL file (quality ratio 1.01727 with 95% interval [1.01073, 1.02385]), measured on an earlier Super ROC build. KL divergence against a Q8_0 reference is 0.08350 with 85.83 % top-1 agreement (the stock file: 0.02707 and 91.79 %).
+Perplexity 10.2407 on a 96-chunk corpus at 512 context, against 10.0714 for the stock Unsloth UD-Q4_K_XL file (quality ratio 1.01727 with 95% interval [1.01073, 1.02385]), measured on an earlier Super Roc build. KL divergence against a Q8_0 reference is 0.08350 with 85.83 % top-1 agreement (the stock file: 0.02707 and 91.79 %).
 
 ## Notes
 

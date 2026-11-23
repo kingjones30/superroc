@@ -1,4 +1,4 @@
-// LFM2: chat render equality against ~/ls/lfm/ref_render/<name>.txt.
+// LFM2: chat render equality against the reference render files.
 // Builds ChatMessage/ChatTool values from LFM2_CASES JSON, calls Lfm2Render
 // and compares byte for byte. Case c09 additionally checks tokenization keeps
 // spelled specials as text. Exits 77 (SKIP) when LFM2_GGUF is unset.

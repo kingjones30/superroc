@@ -13,6 +13,17 @@
 #include "src/models/qwen38_flash_next/kernels/rocm/lfn_launch.hpp"
 #include "src/models/qwen38_flash_next/mtp_sampling.hpp"
 
+// These kernels exchange data between waves through LDS only. Global inputs are
+// read-only and output stores follow the final exchange, so a barrier needs no
+// global read cache invalidate, which would also drop the L0 lines of every
+// other group on the compute unit.
+__device__ __forceinline__ __attribute__((convergent)) void LfnLdsBarrier() {
+  asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
+  __builtin_amdgcn_s_barrier();
+  asm volatile("" ::: "memory");
+}
+#define __syncthreads LfnLdsBarrier
+
 // FLASHNEXT: count hipLaunchKernelGGL while LFN_DECODE_PROFILE arms the
 // counter.
 #undef hipLaunchKernelGGL
@@ -115,6 +126,41 @@ __device__ __forceinline__ void QuantizeQ8_1Lane(float v, void* y,
   blocks[i / 32].qs[i % 32] = q;
   if (i % 32 == 0) {
     blocks[i / 32].ds = make_half2(d, d * sumq);
+  }
+}
+
+/// superroc_fp4_k_q8_1_quant for element `i` of contiguous rows (row width
+/// a multiple of 32): codes in qs[i], one float scale per 32 in ds[i / 32].
+/// The scale is the block's signed maximum over 127, as in that kernel.
+/// The shuffle keeps the larger magnitude and, on a magnitude tie, the
+/// larger value, so every lane ends with the same winner; that winner can
+/// differ in sign from the serial kernel's first maximum only on an exact
+/// magnitude tie, which negates the scale and every code together and so
+/// leaves each integer dot, and its product with the scale, unchanged.
+/// All 32 lanes of an aligned group call this together, as with
+/// QuantizeQ8_1Lane.
+__device__ __forceinline__ void QuantizeFp4Q8Lane(float v, std::int8_t* qs,
+                                                  float* ds, std::size_t i) {
+  const float xi = Materialize(v);
+  float best = xi;
+  float amax = fabsf(xi);
+#pragma unroll
+  for (int offset = 16; offset > 0; offset >>= 1) {
+    const float other_amax = XorLane(amax, offset);
+    const float other = XorLane(best, offset);
+    if (other_amax > amax || (other_amax == amax && other > best)) {
+      amax = other_amax;
+      best = other;
+    }
+  }
+  // This file is built with -ffast-math, which would turn these divisions
+  // into reciprocal multiplies; the reference quantizer is not, so spell
+  // out round-to-nearest division and multiplication.
+  const float d = __fdiv_rn(best, 127.0f);
+  const float id = d != 0.0f ? __fdiv_rn(1.0f, d) : 0.0f;
+  qs[i] = static_cast<std::int8_t>(roundf(__fmul_rn(xi, id)));
+  if (i % 32 == 0) {
+    ds[i / 32] = d;
   }
 }
 
@@ -330,7 +376,9 @@ template<std::uint32_t kStreams>
 __global__ void HcMixEpilogueKernel(const float* xn, const float* gate,
                                     const float* inject_w, float* mixed,
                                     float* inject, std::uint32_t hidden,
-                                    std::uint32_t streams, void* mixed_q8) {
+                                    std::uint32_t streams, void* mixed_q8,
+                                    std::int8_t* mixed_fp4_q,
+                                    float* mixed_fp4_d) {
   constexpr std::uint32_t kMaxStreams = 8;
   constexpr std::uint32_t kSlots = kStreams != 0 ? kStreams : kMaxStreams;
   if constexpr (kStreams != 0) {
@@ -374,6 +422,10 @@ __global__ void HcMixEpilogueKernel(const float* xn, const float* gate,
     // hidden % 32 == 0, so whole 32-lane groups take this branch together.
     if (mixed_q8 != nullptr) {
       QuantizeQ8_1Lane(out, mixed_q8, static_cast<std::size_t>(t) * hidden + i);
+    }
+    if (mixed_fp4_q != nullptr) {
+      QuantizeFp4Q8Lane(out, mixed_fp4_q, mixed_fp4_d,
+                        static_cast<std::size_t>(t) * hidden + i);
     }
   }
   if (inject_w == nullptr) {
@@ -695,6 +747,16 @@ struct InjectParts {
   }
 };
 
+/// MoeEpilogueKernel's one-slot result (weights all 1.0f) for one element,
+/// in that kernel's expression and Materialize points, so a combine that
+/// forms the block output this way leaves the same floats behind.
+__device__ __forceinline__ float MoeFusedBlockValue(float down, float shared,
+                                                    float sg) {
+  float acc = Materialize(0.0f);
+  acc = Materialize(acc + 1.0f * down);
+  return acc + sg * shared;
+}
+
 /// grid (tokens, streams): one block owns one residual stream, so the
 /// grouped norm of the next mixer reduces over exactly its own elements.
 /// `XnT` is float for the reference route and __half for the F16 mixer
@@ -705,7 +767,10 @@ __global__ void HcCombineKernel(float* res, const float* block_out,
                                 const float* inject, std::uint32_t inject_parts,
                                 const float* gamma, XnT* xn, void* xn_q8,
                                 std::uint32_t hidden, std::uint32_t streams,
-                                float eps, void* xn_q8_1) {
+                                float eps, void* xn_q8_1,
+                                const float* shared_out = nullptr,
+                                const float* moe_gate = nullptr,
+                                std::uint32_t gate_stride = 0) {
   __shared__ float shared[32];
   const std::uint32_t t = blockIdx.x;
   const std::uint32_t s = blockIdx.y;
@@ -715,6 +780,16 @@ __global__ void HcCombineKernel(float* res, const float* block_out,
   float* dst = res + base;
   const float* src = block_out + static_cast<std::size_t>(t) * hidden;
   const float* g = gamma + static_cast<std::size_t>(s) * hidden;
+  // With moe_gate, block_out is the routed experts' output and the block
+  // output is MoeFusedBlockValue over it and the gated shared expert (the
+  // decode MoE epilogue, formed here instead of in its own launch).
+  const float* moe_shared =
+      shared_out != nullptr ? shared_out + static_cast<std::size_t>(t) * hidden
+                            : nullptr;
+  const float moe_sg =
+      moe_gate != nullptr
+          ? SigmoidF(moe_gate[static_cast<std::size_t>(t) * gate_stride])
+          : 0.0f;
   // A row of up to kHeld elements per thread stays in registers between the
   // two passes, every read issued up front (a strided loop of loads behind
   // stores to `res` would wait out each one): the inject partials first, as
@@ -733,7 +808,9 @@ __global__ void HcCombineKernel(float* res, const float* block_out,
       const std::uint32_t i = threadIdx.x + c * blockDim.x;
       const std::uint32_t k = i < hidden ? i : hidden - 1;
       r[c] = dst[k];
-      b[c] = src[k];
+      b[c] = moe_gate != nullptr
+                 ? MoeFusedBlockValue(src[k], moe_shared[k], moe_sg)
+                 : src[k];
       gv[c] = gamma != nullptr ? g[k] : 0.0f;
     }
     const float w =
@@ -773,7 +850,10 @@ __global__ void HcCombineKernel(float* res, const float* block_out,
                                   static_cast<float>(streams));
   float ss = 0.0f;
   for (std::uint32_t i = threadIdx.x; i < hidden; i += blockDim.x) {
-    const float v = dst[i] + src[i] * w;
+    const float b = moe_gate != nullptr
+                        ? MoeFusedBlockValue(src[i], moe_shared[i], moe_sg)
+                        : src[i];
+    const float v = dst[i] + b * w;
     dst[i] = v;
     ss += v * v;
   }
@@ -1671,7 +1751,6 @@ __device__ __forceinline__ void GdnRowReduce(float& u, float& p) {
   p = GdnXorAddDpp<2>(p);
 }
 
-// Two-row LDS reuse adapted from mikealanni/gufo f450218743bc (MIT).
 /// Qwen row-split recurrence specialized to the model's 128x128 state. Four
 /// lanes own the 32-key slices of a row, eight row groups share a wave and
 /// each lane carries kRows state rows. The q/k slices of a token are read from
@@ -1692,7 +1771,8 @@ __launch_bounds__(kGdnWaves * 32) __global__
     void GdnRowSplitKernel(const float* conv_out, const float* scales,
                            const float* ab, float* state, float* raw,
                            std::uint32_t n_tokens, std::uint32_t k_heads,
-                           std::uint32_t v_heads, GdnCheckpoint checkpoint) {
+                           std::uint32_t v_heads, GdnCheckpoint checkpoint,
+                           GdnCheckpoint checkpoint2) {
   constexpr int kRows = kGdnRows;
   constexpr int kWaves = kGdnWaves;
   constexpr int d = kGdnDim;
@@ -1720,7 +1800,7 @@ __launch_bounds__(kGdnWaves * 32) __global__
   const int vec0 = segment * kVec;
   const int channels = 2 * k_heads * d + v_heads * d;
 
-  // Row rr of this lane within the block.
+  // Row rr of this thread's lane within the block.
   const auto row_local = [&](int rr) {
     return wave * kRowsPerWave + rr * (32 / kLanesPerRow) + row_group;
   };
@@ -1836,6 +1916,21 @@ __launch_bounds__(kGdnWaves * 32) __global__
   float* out_base = raw + h * d;
   // `cur` held window w (committed already) and takes window w + 3;
   // `next` holds window w + 1, committed after this window's tokens.
+#if defined(__gfx1151__)
+  // The token body in hand-allocated dual-issue instructions: register
+  // allocation leaves three quarters of these FMAs unpaired, and this kernel
+  // is limited by instruction issue. Every chain keeps its operations in
+  // their order: decay, then u and p over keys 0..31, then the state update.
+  // Banks: state element e is reg % 4 == e, key e + 1, query e + 2.
+  using GdnRows = __attribute__((ext_vector_type(32))) float;
+  static_assert(kRows == 2 && kVec == 8 && kW == 4 && d == 128);
+  GdnRows s0;
+  GdnRows s1;
+  __builtin_memcpy(&s0, s[0], sizeof(s0));
+  __builtin_memcpy(&s1, s[1], sizeof(s1));
+  const auto qk_base = static_cast<std::uint32_t>(
+      reinterpret_cast<std::uintptr_t>(&s_qk[0][0][0][segment]));
+#endif
   const auto window = [&](int w, Window& cur, const Window& next) {
     if (w >= n_windows) {
       return;
@@ -1846,6 +1941,286 @@ __launch_bounds__(kGdnWaves * 32) __global__
     }
     const int t_end = min(kW, static_cast<int>(n_tokens) - (w * kW));
     for (int tl = 0; tl < t_end; ++tl) {
+#if defined(__gfx1151__)
+      const float decay = s_misc[lds][tl][3];
+      const float inv_k = s_misc[lds][tl][0];
+      const float q_scale = s_misc[lds][tl][1];
+      const float kq = s_misc[lds][tl][2];
+      const float beta = s_misc[lds][tl][4];
+      const std::uint32_t qk_addr = qk_base + lds * 4096U + tl * 512U;
+      GdnRows kc_rows;
+      GdnRows q_rows;
+      float u0;
+      float p0;
+      float u1;
+      float p1;
+      asm volatile(
+          "ds_load_b128 v[162:165], %[a], offset:0\n"
+          "ds_load_b128 v[129:132], %[a], offset:2048\n"
+          "ds_load_b128 v[166:169], %[a], offset:64\n"
+          "ds_load_b128 v[133:136], %[a], offset:2112\n"
+          "ds_load_b128 v[170:173], %[a], offset:128\n"
+          "ds_load_b128 v[137:140], %[a], offset:2176\n"
+          "ds_load_b128 v[174:177], %[a], offset:192\n"
+          "ds_load_b128 v[141:144], %[a], offset:2240\n"
+          "ds_load_b128 v[178:181], %[a], offset:256\n"
+          "ds_load_b128 v[145:148], %[a], offset:2304\n"
+          "ds_load_b128 v[182:185], %[a], offset:320\n"
+          "ds_load_b128 v[149:152], %[a], offset:2368\n"
+          "ds_load_b128 v[186:189], %[a], offset:384\n"
+          "ds_load_b128 v[153:156], %[a], offset:2432\n"
+          "ds_load_b128 v[190:193], %[a], offset:448\n"
+          "ds_load_b128 v[157:160], %[a], offset:2496\n"
+          "v_dual_mul_f32 v64, v198, v64 :: v_dual_mul_f32 v97, v97, v198\n"
+          "v_dual_mul_f32 v65, v198, v65 :: v_dual_mul_f32 v96, v96, v198\n"
+          "v_dual_mul_f32 v66, v196, v66 :: v_dual_mul_f32 v99, v99, v196\n"
+          "v_dual_mul_f32 v67, v196, v67 :: v_dual_mul_f32 v98, v98, v196\n"
+          "v_dual_mul_f32 v68, v198, v68 :: v_dual_mul_f32 v101, v101, v198\n"
+          "v_dual_mul_f32 v69, v198, v69 :: v_dual_mul_f32 v100, v100, v198\n"
+          "v_dual_mul_f32 v70, v196, v70 :: v_dual_mul_f32 v103, v103, v196\n"
+          "v_dual_mul_f32 v71, v196, v71 :: v_dual_mul_f32 v102, v102, v196\n"
+          "v_dual_mul_f32 v72, v198, v72 :: v_dual_mul_f32 v105, v105, v198\n"
+          "v_dual_mul_f32 v73, v198, v73 :: v_dual_mul_f32 v104, v104, v198\n"
+          "v_dual_mul_f32 v74, v196, v74 :: v_dual_mul_f32 v107, v107, v196\n"
+          "v_dual_mul_f32 v75, v196, v75 :: v_dual_mul_f32 v106, v106, v196\n"
+          "v_dual_mul_f32 v76, v198, v76 :: v_dual_mul_f32 v109, v109, v198\n"
+          "v_dual_mul_f32 v77, v198, v77 :: v_dual_mul_f32 v108, v108, v198\n"
+          "v_dual_mul_f32 v78, v196, v78 :: v_dual_mul_f32 v111, v111, v196\n"
+          "v_dual_mul_f32 v79, v196, v79 :: v_dual_mul_f32 v110, v110, v196\n"
+          "v_dual_mul_f32 v80, v198, v80 :: v_dual_mul_f32 v113, v113, v198\n"
+          "v_dual_mul_f32 v81, v198, v81 :: v_dual_mul_f32 v112, v112, v198\n"
+          "v_dual_mul_f32 v82, v196, v82 :: v_dual_mul_f32 v115, v115, v196\n"
+          "v_dual_mul_f32 v83, v196, v83 :: v_dual_mul_f32 v114, v114, v196\n"
+          "v_dual_mul_f32 v84, v198, v84 :: v_dual_mul_f32 v117, v117, v198\n"
+          "v_dual_mul_f32 v85, v198, v85 :: v_dual_mul_f32 v116, v116, v198\n"
+          "v_dual_mul_f32 v86, v196, v86 :: v_dual_mul_f32 v119, v119, v196\n"
+          "v_dual_mul_f32 v87, v196, v87 :: v_dual_mul_f32 v118, v118, v196\n"
+          "v_dual_mul_f32 v88, v198, v88 :: v_dual_mul_f32 v121, v121, v198\n"
+          "v_dual_mul_f32 v89, v198, v89 :: v_dual_mul_f32 v120, v120, v198\n"
+          "v_dual_mul_f32 v90, v196, v90 :: v_dual_mul_f32 v123, v123, v196\n"
+          "v_dual_mul_f32 v91, v196, v91 :: v_dual_mul_f32 v122, v122, v196\n"
+          "v_dual_mul_f32 v92, v198, v92 :: v_dual_mul_f32 v125, v125, v198\n"
+          "v_dual_mul_f32 v93, v198, v93 :: v_dual_mul_f32 v124, v124, v198\n"
+          "v_dual_mul_f32 v94, v196, v94 :: v_dual_mul_f32 v127, v127, v196\n"
+          "v_dual_mul_f32 v95, v196, v95 :: v_dual_mul_f32 v126, v126, v196\n"
+          "s_waitcnt lgkmcnt(14)\n"
+          "v_dual_mul_f32 v200, v64, v129 :: v_dual_mul_f32 v201, v162, v64\n"
+          "v_dual_mul_f32 v202, v96, v129 :: v_dual_mul_f32 v203, v162, v96\n"
+          "v_dual_fmac_f32 v200, v65, v130 :: v_dual_fmac_f32 v201, v163, v65\n"
+          "v_dual_fmac_f32 v202, v97, v130 :: v_dual_fmac_f32 v203, v163, v97\n"
+          "v_dual_fmac_f32 v200, v66, v131 :: v_dual_fmac_f32 v201, v164, v66\n"
+          "v_dual_fmac_f32 v202, v98, v131 :: v_dual_fmac_f32 v203, v164, v98\n"
+          "v_dual_fmac_f32 v200, v67, v132 :: v_dual_fmac_f32 v201, v165, v67\n"
+          "v_dual_fmac_f32 v202, v99, v132 :: v_dual_fmac_f32 v203, v165, v99\n"
+          "s_waitcnt lgkmcnt(12)\n"
+          "v_dual_fmac_f32 v200, v68, v133 :: v_dual_fmac_f32 v201, v166, v68\n"
+          "v_dual_fmac_f32 v202, v100, v133 :: v_dual_fmac_f32 v203, v166, "
+          "v100\n"
+          "v_dual_fmac_f32 v200, v69, v134 :: v_dual_fmac_f32 v201, v167, v69\n"
+          "v_dual_fmac_f32 v202, v101, v134 :: v_dual_fmac_f32 v203, v167, "
+          "v101\n"
+          "v_dual_fmac_f32 v200, v70, v135 :: v_dual_fmac_f32 v201, v168, v70\n"
+          "v_dual_fmac_f32 v202, v102, v135 :: v_dual_fmac_f32 v203, v168, "
+          "v102\n"
+          "v_dual_fmac_f32 v200, v71, v136 :: v_dual_fmac_f32 v201, v169, v71\n"
+          "v_dual_fmac_f32 v202, v103, v136 :: v_dual_fmac_f32 v203, v169, "
+          "v103\n"
+          "s_waitcnt lgkmcnt(10)\n"
+          "v_dual_fmac_f32 v200, v72, v137 :: v_dual_fmac_f32 v201, v170, v72\n"
+          "v_dual_fmac_f32 v202, v104, v137 :: v_dual_fmac_f32 v203, v170, "
+          "v104\n"
+          "v_dual_fmac_f32 v200, v73, v138 :: v_dual_fmac_f32 v201, v171, v73\n"
+          "v_dual_fmac_f32 v202, v105, v138 :: v_dual_fmac_f32 v203, v171, "
+          "v105\n"
+          "v_dual_fmac_f32 v200, v74, v139 :: v_dual_fmac_f32 v201, v172, v74\n"
+          "v_dual_fmac_f32 v202, v106, v139 :: v_dual_fmac_f32 v203, v172, "
+          "v106\n"
+          "v_dual_fmac_f32 v200, v75, v140 :: v_dual_fmac_f32 v201, v173, v75\n"
+          "v_dual_fmac_f32 v202, v107, v140 :: v_dual_fmac_f32 v203, v173, "
+          "v107\n"
+          "s_waitcnt lgkmcnt(8)\n"
+          "v_dual_fmac_f32 v200, v76, v141 :: v_dual_fmac_f32 v201, v174, v76\n"
+          "v_dual_fmac_f32 v202, v108, v141 :: v_dual_fmac_f32 v203, v174, "
+          "v108\n"
+          "v_dual_fmac_f32 v200, v77, v142 :: v_dual_fmac_f32 v201, v175, v77\n"
+          "v_dual_fmac_f32 v202, v109, v142 :: v_dual_fmac_f32 v203, v175, "
+          "v109\n"
+          "v_dual_fmac_f32 v200, v78, v143 :: v_dual_fmac_f32 v201, v176, v78\n"
+          "v_dual_fmac_f32 v202, v110, v143 :: v_dual_fmac_f32 v203, v176, "
+          "v110\n"
+          "v_dual_fmac_f32 v200, v79, v144 :: v_dual_fmac_f32 v201, v177, v79\n"
+          "v_dual_fmac_f32 v202, v111, v144 :: v_dual_fmac_f32 v203, v177, "
+          "v111\n"
+          "s_waitcnt lgkmcnt(6)\n"
+          "v_dual_fmac_f32 v200, v80, v145 :: v_dual_fmac_f32 v201, v178, v80\n"
+          "v_dual_fmac_f32 v202, v112, v145 :: v_dual_fmac_f32 v203, v178, "
+          "v112\n"
+          "v_dual_fmac_f32 v200, v81, v146 :: v_dual_fmac_f32 v201, v179, v81\n"
+          "v_dual_fmac_f32 v202, v113, v146 :: v_dual_fmac_f32 v203, v179, "
+          "v113\n"
+          "v_dual_fmac_f32 v200, v82, v147 :: v_dual_fmac_f32 v201, v180, v82\n"
+          "v_dual_fmac_f32 v202, v114, v147 :: v_dual_fmac_f32 v203, v180, "
+          "v114\n"
+          "v_dual_fmac_f32 v200, v83, v148 :: v_dual_fmac_f32 v201, v181, v83\n"
+          "v_dual_fmac_f32 v202, v115, v148 :: v_dual_fmac_f32 v203, v181, "
+          "v115\n"
+          "s_waitcnt lgkmcnt(4)\n"
+          "v_dual_fmac_f32 v200, v84, v149 :: v_dual_fmac_f32 v201, v182, v84\n"
+          "v_dual_fmac_f32 v202, v116, v149 :: v_dual_fmac_f32 v203, v182, "
+          "v116\n"
+          "v_dual_fmac_f32 v200, v85, v150 :: v_dual_fmac_f32 v201, v183, v85\n"
+          "v_dual_fmac_f32 v202, v117, v150 :: v_dual_fmac_f32 v203, v183, "
+          "v117\n"
+          "v_dual_fmac_f32 v200, v86, v151 :: v_dual_fmac_f32 v201, v184, v86\n"
+          "v_dual_fmac_f32 v202, v118, v151 :: v_dual_fmac_f32 v203, v184, "
+          "v118\n"
+          "v_dual_fmac_f32 v200, v87, v152 :: v_dual_fmac_f32 v201, v185, v87\n"
+          "v_dual_fmac_f32 v202, v119, v152 :: v_dual_fmac_f32 v203, v185, "
+          "v119\n"
+          "s_waitcnt lgkmcnt(2)\n"
+          "v_dual_fmac_f32 v200, v88, v153 :: v_dual_fmac_f32 v201, v186, v88\n"
+          "v_dual_fmac_f32 v202, v120, v153 :: v_dual_fmac_f32 v203, v186, "
+          "v120\n"
+          "v_dual_fmac_f32 v200, v89, v154 :: v_dual_fmac_f32 v201, v187, v89\n"
+          "v_dual_fmac_f32 v202, v121, v154 :: v_dual_fmac_f32 v203, v187, "
+          "v121\n"
+          "v_dual_fmac_f32 v200, v90, v155 :: v_dual_fmac_f32 v201, v188, v90\n"
+          "v_dual_fmac_f32 v202, v122, v155 :: v_dual_fmac_f32 v203, v188, "
+          "v122\n"
+          "v_dual_fmac_f32 v200, v91, v156 :: v_dual_fmac_f32 v201, v189, v91\n"
+          "v_dual_fmac_f32 v202, v123, v156 :: v_dual_fmac_f32 v203, v189, "
+          "v123\n"
+          "s_waitcnt lgkmcnt(0)\n"
+          "v_dual_fmac_f32 v200, v92, v157 :: v_dual_fmac_f32 v201, v190, v92\n"
+          "v_dual_fmac_f32 v202, v124, v157 :: v_dual_fmac_f32 v203, v190, "
+          "v124\n"
+          "v_dual_fmac_f32 v200, v93, v158 :: v_dual_fmac_f32 v201, v191, v93\n"
+          "v_dual_fmac_f32 v202, v125, v158 :: v_dual_fmac_f32 v203, v191, "
+          "v125\n"
+          "v_dual_fmac_f32 v200, v94, v159 :: v_dual_fmac_f32 v201, v192, v94\n"
+          "v_dual_fmac_f32 v202, v126, v159 :: v_dual_fmac_f32 v203, v192, "
+          "v126\n"
+          "v_dual_fmac_f32 v200, v95, v160 :: v_dual_fmac_f32 v201, v193, v95\n"
+          "v_dual_fmac_f32 v202, v127, v160 :: v_dual_fmac_f32 v203, v193, "
+          "v127\n"
+          : "+{v[64:95]}"(s0), "+{v[96:127]}"(s1), "=&{v[129:160]}"(kc_rows),
+            "=&{v[162:193]}"(q_rows), "=&{v200}"(u0), "=&{v201}"(p0),
+            "=&{v202}"(u1), "=&{v203}"(p1)
+          : [a] "v"(qk_addr), "{v196}"(decay), "{v198}"(decay)
+          : "memory");
+      (void)q_rows;
+      GdnRowReduce(u0, p0);
+      GdnRowReduce(u1, p1);
+      float update0;
+      float update1;
+      const auto row_out = [&](int rr, float u, float p, float& update) {
+        // (v - u * inv_k) * beta with the product fused into the subtract.
+        float delta =
+            __builtin_fmaf(-u, inv_k, s_v[lds][tl][row_local(rr)]) * beta;
+        // Keeps fast-math from folding beta * inv_k across the two products.
+        asm volatile("" : "+v"(delta));
+        update = delta * inv_k;
+        if (segment == 0) {
+          out_base[blockIdx.x * kRowsPerBlock + row_local(rr)] =
+              __builtin_fmaf(kq, update, p) * q_scale;
+        }
+      };
+      row_out(0, u0, p0, update0);
+      row_out(1, u1, p1, update1);
+      asm volatile(
+          "v_dual_fmac_f32 v64, v204, v129 :: v_dual_fmac_f32 v97, v205, v130\n"
+          "v_dual_fmac_f32 v65, v204, v130 :: v_dual_fmac_f32 v96, v205, v129\n"
+          "v_dual_fmac_f32 v66, v204, v131 :: v_dual_fmac_f32 v99, v205, v132\n"
+          "v_dual_fmac_f32 v67, v204, v132 :: v_dual_fmac_f32 v98, v205, v131\n"
+          "v_dual_fmac_f32 v68, v204, v133 :: v_dual_fmac_f32 v101, v205, "
+          "v134\n"
+          "v_dual_fmac_f32 v69, v204, v134 :: v_dual_fmac_f32 v100, v205, "
+          "v133\n"
+          "v_dual_fmac_f32 v70, v204, v135 :: v_dual_fmac_f32 v103, v205, "
+          "v136\n"
+          "v_dual_fmac_f32 v71, v204, v136 :: v_dual_fmac_f32 v102, v205, "
+          "v135\n"
+          "v_dual_fmac_f32 v72, v204, v137 :: v_dual_fmac_f32 v105, v205, "
+          "v138\n"
+          "v_dual_fmac_f32 v73, v204, v138 :: v_dual_fmac_f32 v104, v205, "
+          "v137\n"
+          "v_dual_fmac_f32 v74, v204, v139 :: v_dual_fmac_f32 v107, v205, "
+          "v140\n"
+          "v_dual_fmac_f32 v75, v204, v140 :: v_dual_fmac_f32 v106, v205, "
+          "v139\n"
+          "v_dual_fmac_f32 v76, v204, v141 :: v_dual_fmac_f32 v109, v205, "
+          "v142\n"
+          "v_dual_fmac_f32 v77, v204, v142 :: v_dual_fmac_f32 v108, v205, "
+          "v141\n"
+          "v_dual_fmac_f32 v78, v204, v143 :: v_dual_fmac_f32 v111, v205, "
+          "v144\n"
+          "v_dual_fmac_f32 v79, v204, v144 :: v_dual_fmac_f32 v110, v205, "
+          "v143\n"
+          "v_dual_fmac_f32 v80, v204, v145 :: v_dual_fmac_f32 v113, v205, "
+          "v146\n"
+          "v_dual_fmac_f32 v81, v204, v146 :: v_dual_fmac_f32 v112, v205, "
+          "v145\n"
+          "v_dual_fmac_f32 v82, v204, v147 :: v_dual_fmac_f32 v115, v205, "
+          "v148\n"
+          "v_dual_fmac_f32 v83, v204, v148 :: v_dual_fmac_f32 v114, v205, "
+          "v147\n"
+          "v_dual_fmac_f32 v84, v204, v149 :: v_dual_fmac_f32 v117, v205, "
+          "v150\n"
+          "v_dual_fmac_f32 v85, v204, v150 :: v_dual_fmac_f32 v116, v205, "
+          "v149\n"
+          "v_dual_fmac_f32 v86, v204, v151 :: v_dual_fmac_f32 v119, v205, "
+          "v152\n"
+          "v_dual_fmac_f32 v87, v204, v152 :: v_dual_fmac_f32 v118, v205, "
+          "v151\n"
+          "v_dual_fmac_f32 v88, v204, v153 :: v_dual_fmac_f32 v121, v205, "
+          "v154\n"
+          "v_dual_fmac_f32 v89, v204, v154 :: v_dual_fmac_f32 v120, v205, "
+          "v153\n"
+          "v_dual_fmac_f32 v90, v204, v155 :: v_dual_fmac_f32 v123, v205, "
+          "v156\n"
+          "v_dual_fmac_f32 v91, v204, v156 :: v_dual_fmac_f32 v122, v205, "
+          "v155\n"
+          "v_dual_fmac_f32 v92, v204, v157 :: v_dual_fmac_f32 v125, v205, "
+          "v158\n"
+          "v_dual_fmac_f32 v93, v204, v158 :: v_dual_fmac_f32 v124, v205, "
+          "v157\n"
+          "v_dual_fmac_f32 v94, v204, v159 :: v_dual_fmac_f32 v127, v205, "
+          "v160\n"
+          "v_dual_fmac_f32 v95, v204, v160 :: v_dual_fmac_f32 v126, v205, "
+          "v159\n"
+          : "+{v[64:95]}"(s0), "+{v[96:127]}"(s1)
+          : "{v204}"(update0), "{v205}"(update1), "{v[129:160]}"(kc_rows));
+      if (checkpoint.state != nullptr && w * kW + tl + 1 == checkpoint.tokens) {
+#pragma unroll
+        for (int rr = 0; rr < kRows; ++rr) {
+          const int row = blockIdx.x * kRowsPerBlock + row_local(rr);
+          auto* target = reinterpret_cast<float4*>(
+              checkpoint.state + (static_cast<std::size_t>(h) * d + row) * d);
+          const GdnRows state = rr == 0 ? s0 : s1;
+#pragma unroll
+          for (int i = 0; i < kVec; ++i) {
+            target[vec0 + i] = float4{state[i * 4], state[i * 4 + 1],
+                                      state[i * 4 + 2], state[i * 4 + 3]};
+          }
+        }
+      }
+      if (checkpoint2.state != nullptr &&
+          w * kW + tl + 1 == checkpoint2.tokens) {
+#pragma unroll
+        for (int rr = 0; rr < kRows; ++rr) {
+          const int row = blockIdx.x * kRowsPerBlock + row_local(rr);
+          auto* target = reinterpret_cast<float4*>(
+              checkpoint2.state + (static_cast<std::size_t>(h) * d + row) * d);
+          const GdnRows state = rr == 0 ? s0 : s1;
+#pragma unroll
+          for (int i = 0; i < kVec; ++i) {
+            target[vec0 + i] = float4{state[i * 4], state[i * 4 + 1],
+                                      state[i * 4 + 2], state[i * 4 + 3]};
+          }
+        }
+      }
+      out_base += v_heads * d;
+#else
       const float4* q4 = s_qk[lds][0][tl];
       const float4* k4 = s_qk[lds][1][tl];
       const float decay = s_misc[lds][tl][3];
@@ -1913,8 +2288,18 @@ __launch_bounds__(kGdnWaves * 32) __global__
           for (int i = 0; i < kVec; ++i)
             target[vec0 + i] = s[rr][i];
         }
+        if (checkpoint2.state != nullptr &&
+            w * kW + tl + 1 == checkpoint2.tokens) {
+          const int row = blockIdx.x * kRowsPerBlock + row_local(rr);
+          auto* target = reinterpret_cast<float4*>(
+              checkpoint2.state + (static_cast<std::size_t>(h) * d + row) * d);
+#pragma unroll
+          for (int i = 0; i < kVec; ++i)
+            target[vec0 + i] = s[rr][i];
+        }
       }
       out_base += v_heads * d;
+#endif
     }
     // The other slot was last read one window ago (before the previous
     // barrier), so window w + 1 goes in without a second barrier.
@@ -1928,6 +2313,10 @@ __launch_bounds__(kGdnWaves * 32) __global__
     window(w + 1, r1, r2);
     window(w + 2, r2, r0);
   }
+#if defined(__gfx1151__)
+  __builtin_memcpy(s[0], &s0, sizeof(s0));
+  __builtin_memcpy(s[1], &s1, sizeof(s1));
+#endif
 #pragma unroll
   for (int rr = 0; rr < kRows; ++rr) {
     const int row = blockIdx.x * kRowsPerBlock + row_local(rr);
@@ -1974,7 +2363,8 @@ __global__ void GdnKernel(const float* conv_out, const float* qn,
                           float* raw, RollbackRows snapshots,
                           std::uint32_t n_tokens, std::uint32_t k_heads,
                           std::uint32_t v_heads, const GdnBatchItem* batch,
-                          std::uint32_t active, GdnCheckpoint checkpoint) {
+                          std::uint32_t active, GdnCheckpoint checkpoint,
+                          GdnCheckpoint checkpoint2) {
   if constexpr (kBatch) {
     if ((active & (1U << blockIdx.z)) == 0)
       return;
@@ -2055,6 +2445,13 @@ __global__ void GdnKernel(const float* conv_out, const float* qn,
         for (std::uint32_t i = 0; i < slice; ++i)
           target[i] = row[i];
       }
+      if (checkpoint2.state != nullptr && t + 1 == checkpoint2.tokens) {
+        float* target = checkpoint2.state +
+                        static_cast<std::size_t>(h) * d * d + j * d + i0;
+#pragma unroll
+        for (std::uint32_t i = 0; i < slice; ++i)
+          target[i] = row[i];
+      }
     }
     if ((kBatch ? batch[blockIdx.z].state_snapshots.rows[0]
                 : snapshots.rows[0]) != nullptr &&
@@ -2126,7 +2523,9 @@ __global__ void GdnEpilogueKernel(const float* raw, const float* z,
                                   std::uint32_t n_rows, std::uint32_t v_heads,
                                   float eps, const GdnBatchItem* batch,
                                   std::uint32_t active, void* out_q8_1,
-                                  std::uint32_t out_half_stride = 0) {
+                                  std::uint32_t out_half_stride = 0,
+                                  std::int8_t* out_fp4_q = nullptr,
+                                  float* out_fp4_d = nullptr) {
   if constexpr (kBatch) {
     if ((active & (1U << blockIdx.z)) == 0)
       return;
@@ -2170,6 +2569,8 @@ __global__ void GdnEpilogueKernel(const float* raw, const float* z,
         out[row * d + i] = value;
         if (out_q8_1 != nullptr)
           QuantizeQ8_1Lane(value, out_q8_1, row * d + i);
+        if (out_fp4_q != nullptr)
+          QuantizeFp4Q8Lane(value, out_fp4_q, out_fp4_d, row * d + i);
       }
     }
     return;
@@ -2346,6 +2747,14 @@ __global__ void UnpackQGateKernel(const float* qg, std::uint32_t qg_stride,
 
 // Keep each head's original eight-wave reduction. Heads in a block share
 // rotary angles; normalization statistics remain independent.
+// With k_in/v_in the K/V rows come from separate projections (token-major
+// [t][kv_width]) instead of the packed row, so the split route matches
+// UnpackQGate + RmsNorm + Rope + StoreKv element for element. The rotary
+// keeps the __fmaf_rn form: under -ffast-math RopeKernel's plain
+// `a*cos - b*sin` compiles to exactly that (the first product fused into
+// the add, the second left as a rounded multiply with its sign folded in),
+// and spelling it out pins this site to the same rounding instead of
+// leaving the contraction decision to this kernel's surrounding code.
 template<std::uint32_t kHeadsPerBlock>
 __global__ void PrepareAttentionKernel(
     const float* __restrict__ packed, std::uint32_t stride,
@@ -2354,7 +2763,9 @@ __global__ void PrepareAttentionKernel(
     __half* __restrict__ k_cache, __half* __restrict__ v_cache,
     std::uint32_t heads, std::uint32_t kv_heads, std::uint32_t d,
     std::uint32_t rotary, const std::uint32_t* start_pos, float theta,
-    float eps, const qwen::vision::DeviceRope* rope) {
+    float eps, const qwen::vision::DeviceRope* rope,
+    const float* __restrict__ k_in = nullptr,
+    const float* __restrict__ v_in = nullptr) {
   __shared__ float partial[kHeadsPerBlock][8];
   __shared__ float norm[kHeadsPerBlock][256];
   const std::uint32_t t = blockIdx.x, first = blockIdx.y * kHeadsPerBlock,
@@ -2371,7 +2782,10 @@ __global__ void PrepareAttentionKernel(
     const bool query = h < heads;
     const std::uint32_t head = query ? h : h - heads;
     values[j] = j < live && tid < d
-                    ? row[(query ? head * 2 * d : 2 * width + head * d) + tid]
+                    ? (query ? row[head * 2 * d + tid]
+                       : k_in != nullptr
+                           ? k_in[std::size_t(t) * kv_width + head * d + tid]
+                           : row[2 * width + head * d + tid])
                     : 0.0f;
     float ss = values[j] * values[j];
     // Match the separate RMS kernel's rounded square before its reduction.
@@ -2401,7 +2815,9 @@ __global__ void PrepareAttentionKernel(
             row[head * 2 * d + d + tid];
       else
         v_cache[std::size_t(*start_pos + t) * kv_width + head * d + tid] =
-            __float2half(row[2 * width + kv_width + head * d + tid]);
+            __float2half(v_in != nullptr
+                             ? v_in[std::size_t(t) * kv_width + head * d + tid]
+                             : row[2 * width + kv_width + head * d + tid]);
     }
   }
   __syncthreads();
@@ -2623,6 +3039,620 @@ __global__ void SelectScoreKernel(const float* q, const __half* blocks,
     total += fmaxf(partial[0], 0.0F);
   }
   scores[std::size_t{t0} * max_blocks + b] = total;
+}
+
+// A wide batch's scores: eight tokens of a group share one load and one
+// conversion of each key, and the FMAs pair up. This kernel is limited by
+// instruction issue. Every score keeps its operations and their order, so its
+// bits do not change: same products, same chains, same reduction tree.
+constexpr std::uint32_t kSelectGroupTokens = 8;
+__launch_bounds__(256) __global__ void SelectScoreGroupKernel(
+    const float* q, const __half* blocks, float* scores, std::uint32_t n_tokens,
+    const std::uint32_t* start_pos, std::uint32_t first_token,
+    std::uint32_t ratio, std::uint32_t budget, std::uint32_t max_blocks) {
+#pragma clang fp reassociate(off)
+  const std::uint32_t t_first = blockIdx.x * kSelectGroupTokens;
+  const std::uint32_t t_end = min(n_tokens, t_first + kSelectGroupTokens);
+  const std::uint32_t base = *start_pos + first_token + 1;
+  const std::uint32_t last_complete = (base + t_end - 1) / ratio;
+  const std::uint32_t b = blockIdx.y * blockDim.x + threadIdx.x;
+  if (last_complete <= budget || b >= last_complete)
+    return;
+#if defined(__gfx1151__)
+  using KeyRow = __attribute__((ext_vector_type(32))) float;
+  KeyRow k0;
+  KeyRow k1;
+  KeyRow k2;
+  KeyRow k3;
+  const __half* key = blocks + std::size_t{b} * kSelectDim;
+  asm volatile(
+      "global_load_b128 v[32:35], %[a], off offset:0\n"
+      "global_load_b128 v[36:39], %[a], off offset:16\n"
+      "global_load_b128 v[40:43], %[a], off offset:32\n"
+      "global_load_b128 v[44:47], %[a], off offset:48\n"
+      "global_load_b128 v[48:51], %[a], off offset:64\n"
+      "global_load_b128 v[52:55], %[a], off offset:80\n"
+      "global_load_b128 v[56:59], %[a], off offset:96\n"
+      "global_load_b128 v[60:63], %[a], off offset:112\n"
+      "global_load_b128 v[64:67], %[a], off offset:128\n"
+      "global_load_b128 v[68:71], %[a], off offset:144\n"
+      "global_load_b128 v[72:75], %[a], off offset:160\n"
+      "global_load_b128 v[76:79], %[a], off offset:176\n"
+      "global_load_b128 v[80:83], %[a], off offset:192\n"
+      "global_load_b128 v[84:87], %[a], off offset:208\n"
+      "global_load_b128 v[88:91], %[a], off offset:224\n"
+      "global_load_b128 v[92:95], %[a], off offset:240\n"
+      "s_waitcnt vmcnt(0)\n"
+      "v_cvt_f32_f16_e32 v96, v32.l\n"
+      "v_cvt_f32_f16_e32 v97, v32.h\n"
+      "v_cvt_f32_f16_e32 v98, v33.l\n"
+      "v_cvt_f32_f16_e32 v99, v33.h\n"
+      "v_cvt_f32_f16_e32 v100, v34.l\n"
+      "v_cvt_f32_f16_e32 v101, v34.h\n"
+      "v_cvt_f32_f16_e32 v102, v35.l\n"
+      "v_cvt_f32_f16_e32 v103, v35.h\n"
+      "v_cvt_f32_f16_e32 v104, v36.l\n"
+      "v_cvt_f32_f16_e32 v105, v36.h\n"
+      "v_cvt_f32_f16_e32 v106, v37.l\n"
+      "v_cvt_f32_f16_e32 v107, v37.h\n"
+      "v_cvt_f32_f16_e32 v108, v38.l\n"
+      "v_cvt_f32_f16_e32 v109, v38.h\n"
+      "v_cvt_f32_f16_e32 v110, v39.l\n"
+      "v_cvt_f32_f16_e32 v111, v39.h\n"
+      "v_cvt_f32_f16_e32 v112, v40.l\n"
+      "v_cvt_f32_f16_e32 v113, v40.h\n"
+      "v_cvt_f32_f16_e32 v114, v41.l\n"
+      "v_cvt_f32_f16_e32 v115, v41.h\n"
+      "v_cvt_f32_f16_e32 v116, v42.l\n"
+      "v_cvt_f32_f16_e32 v117, v42.h\n"
+      "v_cvt_f32_f16_e32 v118, v43.l\n"
+      "v_cvt_f32_f16_e32 v119, v43.h\n"
+      "v_cvt_f32_f16_e32 v120, v44.l\n"
+      "v_cvt_f32_f16_e32 v121, v44.h\n"
+      "v_cvt_f32_f16_e32 v122, v45.l\n"
+      "v_cvt_f32_f16_e32 v123, v45.h\n"
+      "v_cvt_f32_f16_e32 v124, v46.l\n"
+      "v_cvt_f32_f16_e32 v125, v46.h\n"
+      "v_cvt_f32_f16_e32 v126, v47.l\n"
+      "v_cvt_f32_f16_e32 v127, v47.h\n"
+      "v_cvt_f32_f16_e32 v128, v48.l\n"
+      "v_cvt_f32_f16_e32 v129, v48.h\n"
+      "v_cvt_f32_f16_e32 v130, v49.l\n"
+      "v_cvt_f32_f16_e32 v131, v49.h\n"
+      "v_cvt_f32_f16_e32 v132, v50.l\n"
+      "v_cvt_f32_f16_e32 v133, v50.h\n"
+      "v_cvt_f32_f16_e32 v134, v51.l\n"
+      "v_cvt_f32_f16_e32 v135, v51.h\n"
+      "v_cvt_f32_f16_e32 v136, v52.l\n"
+      "v_cvt_f32_f16_e32 v137, v52.h\n"
+      "v_cvt_f32_f16_e32 v138, v53.l\n"
+      "v_cvt_f32_f16_e32 v139, v53.h\n"
+      "v_cvt_f32_f16_e32 v140, v54.l\n"
+      "v_cvt_f32_f16_e32 v141, v54.h\n"
+      "v_cvt_f32_f16_e32 v142, v55.l\n"
+      "v_cvt_f32_f16_e32 v143, v55.h\n"
+      "v_cvt_f32_f16_e32 v144, v56.l\n"
+      "v_cvt_f32_f16_e32 v145, v56.h\n"
+      "v_cvt_f32_f16_e32 v146, v57.l\n"
+      "v_cvt_f32_f16_e32 v147, v57.h\n"
+      "v_cvt_f32_f16_e32 v148, v58.l\n"
+      "v_cvt_f32_f16_e32 v149, v58.h\n"
+      "v_cvt_f32_f16_e32 v150, v59.l\n"
+      "v_cvt_f32_f16_e32 v151, v59.h\n"
+      "v_cvt_f32_f16_e32 v152, v60.l\n"
+      "v_cvt_f32_f16_e32 v153, v60.h\n"
+      "v_cvt_f32_f16_e32 v154, v61.l\n"
+      "v_cvt_f32_f16_e32 v155, v61.h\n"
+      "v_cvt_f32_f16_e32 v156, v62.l\n"
+      "v_cvt_f32_f16_e32 v157, v62.h\n"
+      "v_cvt_f32_f16_e32 v158, v63.l\n"
+      "v_cvt_f32_f16_e32 v159, v63.h\n"
+      "v_cvt_f32_f16_e32 v160, v64.l\n"
+      "v_cvt_f32_f16_e32 v161, v64.h\n"
+      "v_cvt_f32_f16_e32 v162, v65.l\n"
+      "v_cvt_f32_f16_e32 v163, v65.h\n"
+      "v_cvt_f32_f16_e32 v164, v66.l\n"
+      "v_cvt_f32_f16_e32 v165, v66.h\n"
+      "v_cvt_f32_f16_e32 v166, v67.l\n"
+      "v_cvt_f32_f16_e32 v167, v67.h\n"
+      "v_cvt_f32_f16_e32 v168, v68.l\n"
+      "v_cvt_f32_f16_e32 v169, v68.h\n"
+      "v_cvt_f32_f16_e32 v170, v69.l\n"
+      "v_cvt_f32_f16_e32 v171, v69.h\n"
+      "v_cvt_f32_f16_e32 v172, v70.l\n"
+      "v_cvt_f32_f16_e32 v173, v70.h\n"
+      "v_cvt_f32_f16_e32 v174, v71.l\n"
+      "v_cvt_f32_f16_e32 v175, v71.h\n"
+      "v_cvt_f32_f16_e32 v176, v72.l\n"
+      "v_cvt_f32_f16_e32 v177, v72.h\n"
+      "v_cvt_f32_f16_e32 v178, v73.l\n"
+      "v_cvt_f32_f16_e32 v179, v73.h\n"
+      "v_cvt_f32_f16_e32 v180, v74.l\n"
+      "v_cvt_f32_f16_e32 v181, v74.h\n"
+      "v_cvt_f32_f16_e32 v182, v75.l\n"
+      "v_cvt_f32_f16_e32 v183, v75.h\n"
+      "v_cvt_f32_f16_e32 v184, v76.l\n"
+      "v_cvt_f32_f16_e32 v185, v76.h\n"
+      "v_cvt_f32_f16_e32 v186, v77.l\n"
+      "v_cvt_f32_f16_e32 v187, v77.h\n"
+      "v_cvt_f32_f16_e32 v188, v78.l\n"
+      "v_cvt_f32_f16_e32 v189, v78.h\n"
+      "v_cvt_f32_f16_e32 v190, v79.l\n"
+      "v_cvt_f32_f16_e32 v191, v79.h\n"
+      "v_cvt_f32_f16_e32 v192, v80.l\n"
+      "v_cvt_f32_f16_e32 v193, v80.h\n"
+      "v_cvt_f32_f16_e32 v194, v81.l\n"
+      "v_cvt_f32_f16_e32 v195, v81.h\n"
+      "v_cvt_f32_f16_e32 v196, v82.l\n"
+      "v_cvt_f32_f16_e32 v197, v82.h\n"
+      "v_cvt_f32_f16_e32 v198, v83.l\n"
+      "v_cvt_f32_f16_e32 v199, v83.h\n"
+      "v_cvt_f32_f16_e32 v200, v84.l\n"
+      "v_cvt_f32_f16_e32 v201, v84.h\n"
+      "v_cvt_f32_f16_e32 v202, v85.l\n"
+      "v_cvt_f32_f16_e32 v203, v85.h\n"
+      "v_cvt_f32_f16_e32 v204, v86.l\n"
+      "v_cvt_f32_f16_e32 v205, v86.h\n"
+      "v_cvt_f32_f16_e32 v206, v87.l\n"
+      "v_cvt_f32_f16_e32 v207, v87.h\n"
+      "v_cvt_f32_f16_e32 v208, v88.l\n"
+      "v_cvt_f32_f16_e32 v209, v88.h\n"
+      "v_cvt_f32_f16_e32 v210, v89.l\n"
+      "v_cvt_f32_f16_e32 v211, v89.h\n"
+      "v_cvt_f32_f16_e32 v212, v90.l\n"
+      "v_cvt_f32_f16_e32 v213, v90.h\n"
+      "v_cvt_f32_f16_e32 v214, v91.l\n"
+      "v_cvt_f32_f16_e32 v215, v91.h\n"
+      "v_cvt_f32_f16_e32 v216, v92.l\n"
+      "v_cvt_f32_f16_e32 v217, v92.h\n"
+      "v_cvt_f32_f16_e32 v218, v93.l\n"
+      "v_cvt_f32_f16_e32 v219, v93.h\n"
+      "v_cvt_f32_f16_e32 v220, v94.l\n"
+      "v_cvt_f32_f16_e32 v221, v94.h\n"
+      "v_cvt_f32_f16_e32 v222, v95.l\n"
+      "v_cvt_f32_f16_e32 v223, v95.h\n"
+      : "=&{v[96:127]}"(k0), "=&{v[128:159]}"(k1), "=&{v[160:191]}"(k2),
+        "=&{v[192:223]}"(k3)
+      : [a] "v"(key)
+      : "v32", "v33", "v34", "v35", "v36", "v37", "v38", "v39", "v40", "v41",
+        "v42", "v43", "v44", "v45", "v46", "v47", "v48", "v49", "v50", "v51",
+        "v52", "v53", "v54", "v55", "v56", "v57", "v58", "v59", "v60", "v61",
+        "v62", "v63", "v64", "v65", "v66", "v67", "v68", "v69", "v70", "v71",
+        "v72", "v73", "v74", "v75", "v76", "v77", "v78", "v79", "v80", "v81",
+        "v82", "v83", "v84", "v85", "v86", "v87", "v88", "v89", "v90", "v91",
+        "v92", "v93", "v94", "v95", "memory");
+  for (std::uint32_t t0 = t_first; t0 < t_end; ++t0) {
+    const std::uint32_t complete = (base + t0) / ratio;
+    if (complete <= budget)
+      continue;
+    const float* row = q + std::size_t{t0} * kSelectHeads * kSelectDim;
+    float p0;
+    float p1;
+    float p2;
+    float p3;
+    asm volatile(
+        "s_load_b512 s[32:47], %[q], 0x0\n"
+        "s_load_b512 s[48:63], %[q], 0x40\n"
+        "s_load_b512 s[64:79], %[q], 0x80\n"
+        "s_load_b512 s[80:95], %[q], 0xc0\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        "v_dual_mul_f32 v32, s32, v96 :: v_dual_mul_f32 v33, s33, v97\n"
+        "v_dual_mul_f32 v34, s34, v98 :: v_dual_mul_f32 v35, s35, v99\n"
+        "v_dual_mul_f32 v36, s36, v100 :: v_dual_mul_f32 v37, s37, v101\n"
+        "v_dual_mul_f32 v38, s38, v102 :: v_dual_mul_f32 v39, s39, v103\n"
+        "v_dual_mul_f32 v40, s40, v104 :: v_dual_mul_f32 v41, s41, v105\n"
+        "v_dual_mul_f32 v42, s42, v106 :: v_dual_mul_f32 v43, s43, v107\n"
+        "v_dual_mul_f32 v44, s44, v108 :: v_dual_mul_f32 v45, s45, v109\n"
+        "v_dual_mul_f32 v46, s46, v110 :: v_dual_mul_f32 v47, s47, v111\n"
+        "v_dual_mul_f32 v48, s48, v112 :: v_dual_mul_f32 v49, s49, v113\n"
+        "v_dual_mul_f32 v50, s50, v114 :: v_dual_mul_f32 v51, s51, v115\n"
+        "v_dual_mul_f32 v52, s52, v116 :: v_dual_mul_f32 v53, s53, v117\n"
+        "v_dual_mul_f32 v54, s54, v118 :: v_dual_mul_f32 v55, s55, v119\n"
+        "v_dual_mul_f32 v56, s56, v120 :: v_dual_mul_f32 v57, s57, v121\n"
+        "v_dual_mul_f32 v58, s58, v122 :: v_dual_mul_f32 v59, s59, v123\n"
+        "v_dual_mul_f32 v60, s60, v124 :: v_dual_mul_f32 v61, s61, v125\n"
+        "v_dual_mul_f32 v62, s62, v126 :: v_dual_mul_f32 v63, s63, v127\n"
+        "v_dual_fmac_f32 v32, s64, v128 :: v_dual_fmac_f32 v33, s65, v129\n"
+        "v_dual_fmac_f32 v34, s66, v130 :: v_dual_fmac_f32 v35, s67, v131\n"
+        "v_dual_fmac_f32 v36, s68, v132 :: v_dual_fmac_f32 v37, s69, v133\n"
+        "v_dual_fmac_f32 v38, s70, v134 :: v_dual_fmac_f32 v39, s71, v135\n"
+        "v_dual_fmac_f32 v40, s72, v136 :: v_dual_fmac_f32 v41, s73, v137\n"
+        "v_dual_fmac_f32 v42, s74, v138 :: v_dual_fmac_f32 v43, s75, v139\n"
+        "v_dual_fmac_f32 v44, s76, v140 :: v_dual_fmac_f32 v45, s77, v141\n"
+        "v_dual_fmac_f32 v46, s78, v142 :: v_dual_fmac_f32 v47, s79, v143\n"
+        "v_dual_fmac_f32 v48, s80, v144 :: v_dual_fmac_f32 v49, s81, v145\n"
+        "v_dual_fmac_f32 v50, s82, v146 :: v_dual_fmac_f32 v51, s83, v147\n"
+        "v_dual_fmac_f32 v52, s84, v148 :: v_dual_fmac_f32 v53, s85, v149\n"
+        "v_dual_fmac_f32 v54, s86, v150 :: v_dual_fmac_f32 v55, s87, v151\n"
+        "v_dual_fmac_f32 v56, s88, v152 :: v_dual_fmac_f32 v57, s89, v153\n"
+        "v_dual_fmac_f32 v58, s90, v154 :: v_dual_fmac_f32 v59, s91, v155\n"
+        "v_dual_fmac_f32 v60, s92, v156 :: v_dual_fmac_f32 v61, s93, v157\n"
+        "v_dual_fmac_f32 v62, s94, v158 :: v_dual_fmac_f32 v63, s95, v159\n"
+        "s_load_b512 s[32:47], %[q], 0x100\n"
+        "s_load_b512 s[48:63], %[q], 0x140\n"
+        "s_load_b512 s[64:79], %[q], 0x180\n"
+        "s_load_b512 s[80:95], %[q], 0x1c0\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        "v_dual_fmac_f32 v32, s32, v160 :: v_dual_fmac_f32 v33, s33, v161\n"
+        "v_dual_fmac_f32 v34, s34, v162 :: v_dual_fmac_f32 v35, s35, v163\n"
+        "v_dual_fmac_f32 v36, s36, v164 :: v_dual_fmac_f32 v37, s37, v165\n"
+        "v_dual_fmac_f32 v38, s38, v166 :: v_dual_fmac_f32 v39, s39, v167\n"
+        "v_dual_fmac_f32 v40, s40, v168 :: v_dual_fmac_f32 v41, s41, v169\n"
+        "v_dual_fmac_f32 v42, s42, v170 :: v_dual_fmac_f32 v43, s43, v171\n"
+        "v_dual_fmac_f32 v44, s44, v172 :: v_dual_fmac_f32 v45, s45, v173\n"
+        "v_dual_fmac_f32 v46, s46, v174 :: v_dual_fmac_f32 v47, s47, v175\n"
+        "v_dual_fmac_f32 v48, s48, v176 :: v_dual_fmac_f32 v49, s49, v177\n"
+        "v_dual_fmac_f32 v50, s50, v178 :: v_dual_fmac_f32 v51, s51, v179\n"
+        "v_dual_fmac_f32 v52, s52, v180 :: v_dual_fmac_f32 v53, s53, v181\n"
+        "v_dual_fmac_f32 v54, s54, v182 :: v_dual_fmac_f32 v55, s55, v183\n"
+        "v_dual_fmac_f32 v56, s56, v184 :: v_dual_fmac_f32 v57, s57, v185\n"
+        "v_dual_fmac_f32 v58, s58, v186 :: v_dual_fmac_f32 v59, s59, v187\n"
+        "v_dual_fmac_f32 v60, s60, v188 :: v_dual_fmac_f32 v61, s61, v189\n"
+        "v_dual_fmac_f32 v62, s62, v190 :: v_dual_fmac_f32 v63, s63, v191\n"
+        "v_dual_fmac_f32 v32, s64, v192 :: v_dual_fmac_f32 v33, s65, v193\n"
+        "v_dual_fmac_f32 v34, s66, v194 :: v_dual_fmac_f32 v35, s67, v195\n"
+        "v_dual_fmac_f32 v36, s68, v196 :: v_dual_fmac_f32 v37, s69, v197\n"
+        "v_dual_fmac_f32 v38, s70, v198 :: v_dual_fmac_f32 v39, s71, v199\n"
+        "v_dual_fmac_f32 v40, s72, v200 :: v_dual_fmac_f32 v41, s73, v201\n"
+        "v_dual_fmac_f32 v42, s74, v202 :: v_dual_fmac_f32 v43, s75, v203\n"
+        "v_dual_fmac_f32 v44, s76, v204 :: v_dual_fmac_f32 v45, s77, v205\n"
+        "v_dual_fmac_f32 v46, s78, v206 :: v_dual_fmac_f32 v47, s79, v207\n"
+        "v_dual_fmac_f32 v48, s80, v208 :: v_dual_fmac_f32 v49, s81, v209\n"
+        "v_dual_fmac_f32 v50, s82, v210 :: v_dual_fmac_f32 v51, s83, v211\n"
+        "v_dual_fmac_f32 v52, s84, v212 :: v_dual_fmac_f32 v53, s85, v213\n"
+        "v_dual_fmac_f32 v54, s86, v214 :: v_dual_fmac_f32 v55, s87, v215\n"
+        "v_dual_fmac_f32 v56, s88, v216 :: v_dual_fmac_f32 v57, s89, v217\n"
+        "v_dual_fmac_f32 v58, s90, v218 :: v_dual_fmac_f32 v59, s91, v219\n"
+        "v_dual_fmac_f32 v60, s92, v220 :: v_dual_fmac_f32 v61, s93, v221\n"
+        "v_dual_fmac_f32 v62, s94, v222 :: v_dual_fmac_f32 v63, s95, v223\n"
+        "v_dual_add_f32 v32, v32, v48 :: v_dual_add_f32 v33, v33, v49\n"
+        "v_dual_add_f32 v34, v34, v50 :: v_dual_add_f32 v35, v35, v51\n"
+        "v_dual_add_f32 v36, v36, v52 :: v_dual_add_f32 v37, v37, v53\n"
+        "v_dual_add_f32 v38, v38, v54 :: v_dual_add_f32 v39, v39, v55\n"
+        "v_dual_add_f32 v40, v40, v56 :: v_dual_add_f32 v41, v41, v57\n"
+        "v_dual_add_f32 v42, v42, v58 :: v_dual_add_f32 v43, v43, v59\n"
+        "v_dual_add_f32 v44, v44, v60 :: v_dual_add_f32 v45, v45, v61\n"
+        "v_dual_add_f32 v46, v46, v62 :: v_dual_add_f32 v47, v47, v63\n"
+        "v_dual_add_f32 v32, v32, v40 :: v_dual_add_f32 v33, v33, v41\n"
+        "v_dual_add_f32 v34, v34, v42 :: v_dual_add_f32 v35, v35, v43\n"
+        "v_dual_add_f32 v36, v36, v44 :: v_dual_add_f32 v37, v37, v45\n"
+        "v_dual_add_f32 v38, v38, v46 :: v_dual_add_f32 v39, v39, v47\n"
+        "v_dual_add_f32 v32, v32, v36 :: v_dual_add_f32 v33, v33, v37\n"
+        "v_dual_add_f32 v34, v34, v38 :: v_dual_add_f32 v35, v35, v39\n"
+        "s_delay_alu instid0(VALU_DEP_2)\n"
+        "v_dual_add_f32 v32, v32, v34 :: v_dual_add_f32 v33, v33, v35\n"
+        "s_delay_alu instid0(VALU_DEP_1)\n"
+        "v_add_f32_e32 v28, v32, v33\n"
+        "s_load_b512 s[32:47], %[q], 0x200\n"
+        "s_load_b512 s[48:63], %[q], 0x240\n"
+        "s_load_b512 s[64:79], %[q], 0x280\n"
+        "s_load_b512 s[80:95], %[q], 0x2c0\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        "v_dual_mul_f32 v32, s32, v96 :: v_dual_mul_f32 v33, s33, v97\n"
+        "v_dual_mul_f32 v34, s34, v98 :: v_dual_mul_f32 v35, s35, v99\n"
+        "v_dual_mul_f32 v36, s36, v100 :: v_dual_mul_f32 v37, s37, v101\n"
+        "v_dual_mul_f32 v38, s38, v102 :: v_dual_mul_f32 v39, s39, v103\n"
+        "v_dual_mul_f32 v40, s40, v104 :: v_dual_mul_f32 v41, s41, v105\n"
+        "v_dual_mul_f32 v42, s42, v106 :: v_dual_mul_f32 v43, s43, v107\n"
+        "v_dual_mul_f32 v44, s44, v108 :: v_dual_mul_f32 v45, s45, v109\n"
+        "v_dual_mul_f32 v46, s46, v110 :: v_dual_mul_f32 v47, s47, v111\n"
+        "v_dual_mul_f32 v48, s48, v112 :: v_dual_mul_f32 v49, s49, v113\n"
+        "v_dual_mul_f32 v50, s50, v114 :: v_dual_mul_f32 v51, s51, v115\n"
+        "v_dual_mul_f32 v52, s52, v116 :: v_dual_mul_f32 v53, s53, v117\n"
+        "v_dual_mul_f32 v54, s54, v118 :: v_dual_mul_f32 v55, s55, v119\n"
+        "v_dual_mul_f32 v56, s56, v120 :: v_dual_mul_f32 v57, s57, v121\n"
+        "v_dual_mul_f32 v58, s58, v122 :: v_dual_mul_f32 v59, s59, v123\n"
+        "v_dual_mul_f32 v60, s60, v124 :: v_dual_mul_f32 v61, s61, v125\n"
+        "v_dual_mul_f32 v62, s62, v126 :: v_dual_mul_f32 v63, s63, v127\n"
+        "v_dual_fmac_f32 v32, s64, v128 :: v_dual_fmac_f32 v33, s65, v129\n"
+        "v_dual_fmac_f32 v34, s66, v130 :: v_dual_fmac_f32 v35, s67, v131\n"
+        "v_dual_fmac_f32 v36, s68, v132 :: v_dual_fmac_f32 v37, s69, v133\n"
+        "v_dual_fmac_f32 v38, s70, v134 :: v_dual_fmac_f32 v39, s71, v135\n"
+        "v_dual_fmac_f32 v40, s72, v136 :: v_dual_fmac_f32 v41, s73, v137\n"
+        "v_dual_fmac_f32 v42, s74, v138 :: v_dual_fmac_f32 v43, s75, v139\n"
+        "v_dual_fmac_f32 v44, s76, v140 :: v_dual_fmac_f32 v45, s77, v141\n"
+        "v_dual_fmac_f32 v46, s78, v142 :: v_dual_fmac_f32 v47, s79, v143\n"
+        "v_dual_fmac_f32 v48, s80, v144 :: v_dual_fmac_f32 v49, s81, v145\n"
+        "v_dual_fmac_f32 v50, s82, v146 :: v_dual_fmac_f32 v51, s83, v147\n"
+        "v_dual_fmac_f32 v52, s84, v148 :: v_dual_fmac_f32 v53, s85, v149\n"
+        "v_dual_fmac_f32 v54, s86, v150 :: v_dual_fmac_f32 v55, s87, v151\n"
+        "v_dual_fmac_f32 v56, s88, v152 :: v_dual_fmac_f32 v57, s89, v153\n"
+        "v_dual_fmac_f32 v58, s90, v154 :: v_dual_fmac_f32 v59, s91, v155\n"
+        "v_dual_fmac_f32 v60, s92, v156 :: v_dual_fmac_f32 v61, s93, v157\n"
+        "v_dual_fmac_f32 v62, s94, v158 :: v_dual_fmac_f32 v63, s95, v159\n"
+        "s_load_b512 s[32:47], %[q], 0x300\n"
+        "s_load_b512 s[48:63], %[q], 0x340\n"
+        "s_load_b512 s[64:79], %[q], 0x380\n"
+        "s_load_b512 s[80:95], %[q], 0x3c0\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        "v_dual_fmac_f32 v32, s32, v160 :: v_dual_fmac_f32 v33, s33, v161\n"
+        "v_dual_fmac_f32 v34, s34, v162 :: v_dual_fmac_f32 v35, s35, v163\n"
+        "v_dual_fmac_f32 v36, s36, v164 :: v_dual_fmac_f32 v37, s37, v165\n"
+        "v_dual_fmac_f32 v38, s38, v166 :: v_dual_fmac_f32 v39, s39, v167\n"
+        "v_dual_fmac_f32 v40, s40, v168 :: v_dual_fmac_f32 v41, s41, v169\n"
+        "v_dual_fmac_f32 v42, s42, v170 :: v_dual_fmac_f32 v43, s43, v171\n"
+        "v_dual_fmac_f32 v44, s44, v172 :: v_dual_fmac_f32 v45, s45, v173\n"
+        "v_dual_fmac_f32 v46, s46, v174 :: v_dual_fmac_f32 v47, s47, v175\n"
+        "v_dual_fmac_f32 v48, s48, v176 :: v_dual_fmac_f32 v49, s49, v177\n"
+        "v_dual_fmac_f32 v50, s50, v178 :: v_dual_fmac_f32 v51, s51, v179\n"
+        "v_dual_fmac_f32 v52, s52, v180 :: v_dual_fmac_f32 v53, s53, v181\n"
+        "v_dual_fmac_f32 v54, s54, v182 :: v_dual_fmac_f32 v55, s55, v183\n"
+        "v_dual_fmac_f32 v56, s56, v184 :: v_dual_fmac_f32 v57, s57, v185\n"
+        "v_dual_fmac_f32 v58, s58, v186 :: v_dual_fmac_f32 v59, s59, v187\n"
+        "v_dual_fmac_f32 v60, s60, v188 :: v_dual_fmac_f32 v61, s61, v189\n"
+        "v_dual_fmac_f32 v62, s62, v190 :: v_dual_fmac_f32 v63, s63, v191\n"
+        "v_dual_fmac_f32 v32, s64, v192 :: v_dual_fmac_f32 v33, s65, v193\n"
+        "v_dual_fmac_f32 v34, s66, v194 :: v_dual_fmac_f32 v35, s67, v195\n"
+        "v_dual_fmac_f32 v36, s68, v196 :: v_dual_fmac_f32 v37, s69, v197\n"
+        "v_dual_fmac_f32 v38, s70, v198 :: v_dual_fmac_f32 v39, s71, v199\n"
+        "v_dual_fmac_f32 v40, s72, v200 :: v_dual_fmac_f32 v41, s73, v201\n"
+        "v_dual_fmac_f32 v42, s74, v202 :: v_dual_fmac_f32 v43, s75, v203\n"
+        "v_dual_fmac_f32 v44, s76, v204 :: v_dual_fmac_f32 v45, s77, v205\n"
+        "v_dual_fmac_f32 v46, s78, v206 :: v_dual_fmac_f32 v47, s79, v207\n"
+        "v_dual_fmac_f32 v48, s80, v208 :: v_dual_fmac_f32 v49, s81, v209\n"
+        "v_dual_fmac_f32 v50, s82, v210 :: v_dual_fmac_f32 v51, s83, v211\n"
+        "v_dual_fmac_f32 v52, s84, v212 :: v_dual_fmac_f32 v53, s85, v213\n"
+        "v_dual_fmac_f32 v54, s86, v214 :: v_dual_fmac_f32 v55, s87, v215\n"
+        "v_dual_fmac_f32 v56, s88, v216 :: v_dual_fmac_f32 v57, s89, v217\n"
+        "v_dual_fmac_f32 v58, s90, v218 :: v_dual_fmac_f32 v59, s91, v219\n"
+        "v_dual_fmac_f32 v60, s92, v220 :: v_dual_fmac_f32 v61, s93, v221\n"
+        "v_dual_fmac_f32 v62, s94, v222 :: v_dual_fmac_f32 v63, s95, v223\n"
+        "v_dual_add_f32 v32, v32, v48 :: v_dual_add_f32 v33, v33, v49\n"
+        "v_dual_add_f32 v34, v34, v50 :: v_dual_add_f32 v35, v35, v51\n"
+        "v_dual_add_f32 v36, v36, v52 :: v_dual_add_f32 v37, v37, v53\n"
+        "v_dual_add_f32 v38, v38, v54 :: v_dual_add_f32 v39, v39, v55\n"
+        "v_dual_add_f32 v40, v40, v56 :: v_dual_add_f32 v41, v41, v57\n"
+        "v_dual_add_f32 v42, v42, v58 :: v_dual_add_f32 v43, v43, v59\n"
+        "v_dual_add_f32 v44, v44, v60 :: v_dual_add_f32 v45, v45, v61\n"
+        "v_dual_add_f32 v46, v46, v62 :: v_dual_add_f32 v47, v47, v63\n"
+        "v_dual_add_f32 v32, v32, v40 :: v_dual_add_f32 v33, v33, v41\n"
+        "v_dual_add_f32 v34, v34, v42 :: v_dual_add_f32 v35, v35, v43\n"
+        "v_dual_add_f32 v36, v36, v44 :: v_dual_add_f32 v37, v37, v45\n"
+        "v_dual_add_f32 v38, v38, v46 :: v_dual_add_f32 v39, v39, v47\n"
+        "v_dual_add_f32 v32, v32, v36 :: v_dual_add_f32 v33, v33, v37\n"
+        "v_dual_add_f32 v34, v34, v38 :: v_dual_add_f32 v35, v35, v39\n"
+        "s_delay_alu instid0(VALU_DEP_2)\n"
+        "v_dual_add_f32 v32, v32, v34 :: v_dual_add_f32 v33, v33, v35\n"
+        "s_delay_alu instid0(VALU_DEP_1)\n"
+        "v_add_f32_e32 v29, v32, v33\n"
+        "s_load_b512 s[32:47], %[q], 0x400\n"
+        "s_load_b512 s[48:63], %[q], 0x440\n"
+        "s_load_b512 s[64:79], %[q], 0x480\n"
+        "s_load_b512 s[80:95], %[q], 0x4c0\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        "v_dual_mul_f32 v32, s32, v96 :: v_dual_mul_f32 v33, s33, v97\n"
+        "v_dual_mul_f32 v34, s34, v98 :: v_dual_mul_f32 v35, s35, v99\n"
+        "v_dual_mul_f32 v36, s36, v100 :: v_dual_mul_f32 v37, s37, v101\n"
+        "v_dual_mul_f32 v38, s38, v102 :: v_dual_mul_f32 v39, s39, v103\n"
+        "v_dual_mul_f32 v40, s40, v104 :: v_dual_mul_f32 v41, s41, v105\n"
+        "v_dual_mul_f32 v42, s42, v106 :: v_dual_mul_f32 v43, s43, v107\n"
+        "v_dual_mul_f32 v44, s44, v108 :: v_dual_mul_f32 v45, s45, v109\n"
+        "v_dual_mul_f32 v46, s46, v110 :: v_dual_mul_f32 v47, s47, v111\n"
+        "v_dual_mul_f32 v48, s48, v112 :: v_dual_mul_f32 v49, s49, v113\n"
+        "v_dual_mul_f32 v50, s50, v114 :: v_dual_mul_f32 v51, s51, v115\n"
+        "v_dual_mul_f32 v52, s52, v116 :: v_dual_mul_f32 v53, s53, v117\n"
+        "v_dual_mul_f32 v54, s54, v118 :: v_dual_mul_f32 v55, s55, v119\n"
+        "v_dual_mul_f32 v56, s56, v120 :: v_dual_mul_f32 v57, s57, v121\n"
+        "v_dual_mul_f32 v58, s58, v122 :: v_dual_mul_f32 v59, s59, v123\n"
+        "v_dual_mul_f32 v60, s60, v124 :: v_dual_mul_f32 v61, s61, v125\n"
+        "v_dual_mul_f32 v62, s62, v126 :: v_dual_mul_f32 v63, s63, v127\n"
+        "v_dual_fmac_f32 v32, s64, v128 :: v_dual_fmac_f32 v33, s65, v129\n"
+        "v_dual_fmac_f32 v34, s66, v130 :: v_dual_fmac_f32 v35, s67, v131\n"
+        "v_dual_fmac_f32 v36, s68, v132 :: v_dual_fmac_f32 v37, s69, v133\n"
+        "v_dual_fmac_f32 v38, s70, v134 :: v_dual_fmac_f32 v39, s71, v135\n"
+        "v_dual_fmac_f32 v40, s72, v136 :: v_dual_fmac_f32 v41, s73, v137\n"
+        "v_dual_fmac_f32 v42, s74, v138 :: v_dual_fmac_f32 v43, s75, v139\n"
+        "v_dual_fmac_f32 v44, s76, v140 :: v_dual_fmac_f32 v45, s77, v141\n"
+        "v_dual_fmac_f32 v46, s78, v142 :: v_dual_fmac_f32 v47, s79, v143\n"
+        "v_dual_fmac_f32 v48, s80, v144 :: v_dual_fmac_f32 v49, s81, v145\n"
+        "v_dual_fmac_f32 v50, s82, v146 :: v_dual_fmac_f32 v51, s83, v147\n"
+        "v_dual_fmac_f32 v52, s84, v148 :: v_dual_fmac_f32 v53, s85, v149\n"
+        "v_dual_fmac_f32 v54, s86, v150 :: v_dual_fmac_f32 v55, s87, v151\n"
+        "v_dual_fmac_f32 v56, s88, v152 :: v_dual_fmac_f32 v57, s89, v153\n"
+        "v_dual_fmac_f32 v58, s90, v154 :: v_dual_fmac_f32 v59, s91, v155\n"
+        "v_dual_fmac_f32 v60, s92, v156 :: v_dual_fmac_f32 v61, s93, v157\n"
+        "v_dual_fmac_f32 v62, s94, v158 :: v_dual_fmac_f32 v63, s95, v159\n"
+        "s_load_b512 s[32:47], %[q], 0x500\n"
+        "s_load_b512 s[48:63], %[q], 0x540\n"
+        "s_load_b512 s[64:79], %[q], 0x580\n"
+        "s_load_b512 s[80:95], %[q], 0x5c0\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        "v_dual_fmac_f32 v32, s32, v160 :: v_dual_fmac_f32 v33, s33, v161\n"
+        "v_dual_fmac_f32 v34, s34, v162 :: v_dual_fmac_f32 v35, s35, v163\n"
+        "v_dual_fmac_f32 v36, s36, v164 :: v_dual_fmac_f32 v37, s37, v165\n"
+        "v_dual_fmac_f32 v38, s38, v166 :: v_dual_fmac_f32 v39, s39, v167\n"
+        "v_dual_fmac_f32 v40, s40, v168 :: v_dual_fmac_f32 v41, s41, v169\n"
+        "v_dual_fmac_f32 v42, s42, v170 :: v_dual_fmac_f32 v43, s43, v171\n"
+        "v_dual_fmac_f32 v44, s44, v172 :: v_dual_fmac_f32 v45, s45, v173\n"
+        "v_dual_fmac_f32 v46, s46, v174 :: v_dual_fmac_f32 v47, s47, v175\n"
+        "v_dual_fmac_f32 v48, s48, v176 :: v_dual_fmac_f32 v49, s49, v177\n"
+        "v_dual_fmac_f32 v50, s50, v178 :: v_dual_fmac_f32 v51, s51, v179\n"
+        "v_dual_fmac_f32 v52, s52, v180 :: v_dual_fmac_f32 v53, s53, v181\n"
+        "v_dual_fmac_f32 v54, s54, v182 :: v_dual_fmac_f32 v55, s55, v183\n"
+        "v_dual_fmac_f32 v56, s56, v184 :: v_dual_fmac_f32 v57, s57, v185\n"
+        "v_dual_fmac_f32 v58, s58, v186 :: v_dual_fmac_f32 v59, s59, v187\n"
+        "v_dual_fmac_f32 v60, s60, v188 :: v_dual_fmac_f32 v61, s61, v189\n"
+        "v_dual_fmac_f32 v62, s62, v190 :: v_dual_fmac_f32 v63, s63, v191\n"
+        "v_dual_fmac_f32 v32, s64, v192 :: v_dual_fmac_f32 v33, s65, v193\n"
+        "v_dual_fmac_f32 v34, s66, v194 :: v_dual_fmac_f32 v35, s67, v195\n"
+        "v_dual_fmac_f32 v36, s68, v196 :: v_dual_fmac_f32 v37, s69, v197\n"
+        "v_dual_fmac_f32 v38, s70, v198 :: v_dual_fmac_f32 v39, s71, v199\n"
+        "v_dual_fmac_f32 v40, s72, v200 :: v_dual_fmac_f32 v41, s73, v201\n"
+        "v_dual_fmac_f32 v42, s74, v202 :: v_dual_fmac_f32 v43, s75, v203\n"
+        "v_dual_fmac_f32 v44, s76, v204 :: v_dual_fmac_f32 v45, s77, v205\n"
+        "v_dual_fmac_f32 v46, s78, v206 :: v_dual_fmac_f32 v47, s79, v207\n"
+        "v_dual_fmac_f32 v48, s80, v208 :: v_dual_fmac_f32 v49, s81, v209\n"
+        "v_dual_fmac_f32 v50, s82, v210 :: v_dual_fmac_f32 v51, s83, v211\n"
+        "v_dual_fmac_f32 v52, s84, v212 :: v_dual_fmac_f32 v53, s85, v213\n"
+        "v_dual_fmac_f32 v54, s86, v214 :: v_dual_fmac_f32 v55, s87, v215\n"
+        "v_dual_fmac_f32 v56, s88, v216 :: v_dual_fmac_f32 v57, s89, v217\n"
+        "v_dual_fmac_f32 v58, s90, v218 :: v_dual_fmac_f32 v59, s91, v219\n"
+        "v_dual_fmac_f32 v60, s92, v220 :: v_dual_fmac_f32 v61, s93, v221\n"
+        "v_dual_fmac_f32 v62, s94, v222 :: v_dual_fmac_f32 v63, s95, v223\n"
+        "v_dual_add_f32 v32, v32, v48 :: v_dual_add_f32 v33, v33, v49\n"
+        "v_dual_add_f32 v34, v34, v50 :: v_dual_add_f32 v35, v35, v51\n"
+        "v_dual_add_f32 v36, v36, v52 :: v_dual_add_f32 v37, v37, v53\n"
+        "v_dual_add_f32 v38, v38, v54 :: v_dual_add_f32 v39, v39, v55\n"
+        "v_dual_add_f32 v40, v40, v56 :: v_dual_add_f32 v41, v41, v57\n"
+        "v_dual_add_f32 v42, v42, v58 :: v_dual_add_f32 v43, v43, v59\n"
+        "v_dual_add_f32 v44, v44, v60 :: v_dual_add_f32 v45, v45, v61\n"
+        "v_dual_add_f32 v46, v46, v62 :: v_dual_add_f32 v47, v47, v63\n"
+        "v_dual_add_f32 v32, v32, v40 :: v_dual_add_f32 v33, v33, v41\n"
+        "v_dual_add_f32 v34, v34, v42 :: v_dual_add_f32 v35, v35, v43\n"
+        "v_dual_add_f32 v36, v36, v44 :: v_dual_add_f32 v37, v37, v45\n"
+        "v_dual_add_f32 v38, v38, v46 :: v_dual_add_f32 v39, v39, v47\n"
+        "v_dual_add_f32 v32, v32, v36 :: v_dual_add_f32 v33, v33, v37\n"
+        "v_dual_add_f32 v34, v34, v38 :: v_dual_add_f32 v35, v35, v39\n"
+        "s_delay_alu instid0(VALU_DEP_2)\n"
+        "v_dual_add_f32 v32, v32, v34 :: v_dual_add_f32 v33, v33, v35\n"
+        "s_delay_alu instid0(VALU_DEP_1)\n"
+        "v_add_f32_e32 v30, v32, v33\n"
+        "s_load_b512 s[32:47], %[q], 0x600\n"
+        "s_load_b512 s[48:63], %[q], 0x640\n"
+        "s_load_b512 s[64:79], %[q], 0x680\n"
+        "s_load_b512 s[80:95], %[q], 0x6c0\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        "v_dual_mul_f32 v32, s32, v96 :: v_dual_mul_f32 v33, s33, v97\n"
+        "v_dual_mul_f32 v34, s34, v98 :: v_dual_mul_f32 v35, s35, v99\n"
+        "v_dual_mul_f32 v36, s36, v100 :: v_dual_mul_f32 v37, s37, v101\n"
+        "v_dual_mul_f32 v38, s38, v102 :: v_dual_mul_f32 v39, s39, v103\n"
+        "v_dual_mul_f32 v40, s40, v104 :: v_dual_mul_f32 v41, s41, v105\n"
+        "v_dual_mul_f32 v42, s42, v106 :: v_dual_mul_f32 v43, s43, v107\n"
+        "v_dual_mul_f32 v44, s44, v108 :: v_dual_mul_f32 v45, s45, v109\n"
+        "v_dual_mul_f32 v46, s46, v110 :: v_dual_mul_f32 v47, s47, v111\n"
+        "v_dual_mul_f32 v48, s48, v112 :: v_dual_mul_f32 v49, s49, v113\n"
+        "v_dual_mul_f32 v50, s50, v114 :: v_dual_mul_f32 v51, s51, v115\n"
+        "v_dual_mul_f32 v52, s52, v116 :: v_dual_mul_f32 v53, s53, v117\n"
+        "v_dual_mul_f32 v54, s54, v118 :: v_dual_mul_f32 v55, s55, v119\n"
+        "v_dual_mul_f32 v56, s56, v120 :: v_dual_mul_f32 v57, s57, v121\n"
+        "v_dual_mul_f32 v58, s58, v122 :: v_dual_mul_f32 v59, s59, v123\n"
+        "v_dual_mul_f32 v60, s60, v124 :: v_dual_mul_f32 v61, s61, v125\n"
+        "v_dual_mul_f32 v62, s62, v126 :: v_dual_mul_f32 v63, s63, v127\n"
+        "v_dual_fmac_f32 v32, s64, v128 :: v_dual_fmac_f32 v33, s65, v129\n"
+        "v_dual_fmac_f32 v34, s66, v130 :: v_dual_fmac_f32 v35, s67, v131\n"
+        "v_dual_fmac_f32 v36, s68, v132 :: v_dual_fmac_f32 v37, s69, v133\n"
+        "v_dual_fmac_f32 v38, s70, v134 :: v_dual_fmac_f32 v39, s71, v135\n"
+        "v_dual_fmac_f32 v40, s72, v136 :: v_dual_fmac_f32 v41, s73, v137\n"
+        "v_dual_fmac_f32 v42, s74, v138 :: v_dual_fmac_f32 v43, s75, v139\n"
+        "v_dual_fmac_f32 v44, s76, v140 :: v_dual_fmac_f32 v45, s77, v141\n"
+        "v_dual_fmac_f32 v46, s78, v142 :: v_dual_fmac_f32 v47, s79, v143\n"
+        "v_dual_fmac_f32 v48, s80, v144 :: v_dual_fmac_f32 v49, s81, v145\n"
+        "v_dual_fmac_f32 v50, s82, v146 :: v_dual_fmac_f32 v51, s83, v147\n"
+        "v_dual_fmac_f32 v52, s84, v148 :: v_dual_fmac_f32 v53, s85, v149\n"
+        "v_dual_fmac_f32 v54, s86, v150 :: v_dual_fmac_f32 v55, s87, v151\n"
+        "v_dual_fmac_f32 v56, s88, v152 :: v_dual_fmac_f32 v57, s89, v153\n"
+        "v_dual_fmac_f32 v58, s90, v154 :: v_dual_fmac_f32 v59, s91, v155\n"
+        "v_dual_fmac_f32 v60, s92, v156 :: v_dual_fmac_f32 v61, s93, v157\n"
+        "v_dual_fmac_f32 v62, s94, v158 :: v_dual_fmac_f32 v63, s95, v159\n"
+        "s_load_b512 s[32:47], %[q], 0x700\n"
+        "s_load_b512 s[48:63], %[q], 0x740\n"
+        "s_load_b512 s[64:79], %[q], 0x780\n"
+        "s_load_b512 s[80:95], %[q], 0x7c0\n"
+        "s_waitcnt lgkmcnt(0)\n"
+        "v_dual_fmac_f32 v32, s32, v160 :: v_dual_fmac_f32 v33, s33, v161\n"
+        "v_dual_fmac_f32 v34, s34, v162 :: v_dual_fmac_f32 v35, s35, v163\n"
+        "v_dual_fmac_f32 v36, s36, v164 :: v_dual_fmac_f32 v37, s37, v165\n"
+        "v_dual_fmac_f32 v38, s38, v166 :: v_dual_fmac_f32 v39, s39, v167\n"
+        "v_dual_fmac_f32 v40, s40, v168 :: v_dual_fmac_f32 v41, s41, v169\n"
+        "v_dual_fmac_f32 v42, s42, v170 :: v_dual_fmac_f32 v43, s43, v171\n"
+        "v_dual_fmac_f32 v44, s44, v172 :: v_dual_fmac_f32 v45, s45, v173\n"
+        "v_dual_fmac_f32 v46, s46, v174 :: v_dual_fmac_f32 v47, s47, v175\n"
+        "v_dual_fmac_f32 v48, s48, v176 :: v_dual_fmac_f32 v49, s49, v177\n"
+        "v_dual_fmac_f32 v50, s50, v178 :: v_dual_fmac_f32 v51, s51, v179\n"
+        "v_dual_fmac_f32 v52, s52, v180 :: v_dual_fmac_f32 v53, s53, v181\n"
+        "v_dual_fmac_f32 v54, s54, v182 :: v_dual_fmac_f32 v55, s55, v183\n"
+        "v_dual_fmac_f32 v56, s56, v184 :: v_dual_fmac_f32 v57, s57, v185\n"
+        "v_dual_fmac_f32 v58, s58, v186 :: v_dual_fmac_f32 v59, s59, v187\n"
+        "v_dual_fmac_f32 v60, s60, v188 :: v_dual_fmac_f32 v61, s61, v189\n"
+        "v_dual_fmac_f32 v62, s62, v190 :: v_dual_fmac_f32 v63, s63, v191\n"
+        "v_dual_fmac_f32 v32, s64, v192 :: v_dual_fmac_f32 v33, s65, v193\n"
+        "v_dual_fmac_f32 v34, s66, v194 :: v_dual_fmac_f32 v35, s67, v195\n"
+        "v_dual_fmac_f32 v36, s68, v196 :: v_dual_fmac_f32 v37, s69, v197\n"
+        "v_dual_fmac_f32 v38, s70, v198 :: v_dual_fmac_f32 v39, s71, v199\n"
+        "v_dual_fmac_f32 v40, s72, v200 :: v_dual_fmac_f32 v41, s73, v201\n"
+        "v_dual_fmac_f32 v42, s74, v202 :: v_dual_fmac_f32 v43, s75, v203\n"
+        "v_dual_fmac_f32 v44, s76, v204 :: v_dual_fmac_f32 v45, s77, v205\n"
+        "v_dual_fmac_f32 v46, s78, v206 :: v_dual_fmac_f32 v47, s79, v207\n"
+        "v_dual_fmac_f32 v48, s80, v208 :: v_dual_fmac_f32 v49, s81, v209\n"
+        "v_dual_fmac_f32 v50, s82, v210 :: v_dual_fmac_f32 v51, s83, v211\n"
+        "v_dual_fmac_f32 v52, s84, v212 :: v_dual_fmac_f32 v53, s85, v213\n"
+        "v_dual_fmac_f32 v54, s86, v214 :: v_dual_fmac_f32 v55, s87, v215\n"
+        "v_dual_fmac_f32 v56, s88, v216 :: v_dual_fmac_f32 v57, s89, v217\n"
+        "v_dual_fmac_f32 v58, s90, v218 :: v_dual_fmac_f32 v59, s91, v219\n"
+        "v_dual_fmac_f32 v60, s92, v220 :: v_dual_fmac_f32 v61, s93, v221\n"
+        "v_dual_fmac_f32 v62, s94, v222 :: v_dual_fmac_f32 v63, s95, v223\n"
+        "v_dual_add_f32 v32, v32, v48 :: v_dual_add_f32 v33, v33, v49\n"
+        "v_dual_add_f32 v34, v34, v50 :: v_dual_add_f32 v35, v35, v51\n"
+        "v_dual_add_f32 v36, v36, v52 :: v_dual_add_f32 v37, v37, v53\n"
+        "v_dual_add_f32 v38, v38, v54 :: v_dual_add_f32 v39, v39, v55\n"
+        "v_dual_add_f32 v40, v40, v56 :: v_dual_add_f32 v41, v41, v57\n"
+        "v_dual_add_f32 v42, v42, v58 :: v_dual_add_f32 v43, v43, v59\n"
+        "v_dual_add_f32 v44, v44, v60 :: v_dual_add_f32 v45, v45, v61\n"
+        "v_dual_add_f32 v46, v46, v62 :: v_dual_add_f32 v47, v47, v63\n"
+        "v_dual_add_f32 v32, v32, v40 :: v_dual_add_f32 v33, v33, v41\n"
+        "v_dual_add_f32 v34, v34, v42 :: v_dual_add_f32 v35, v35, v43\n"
+        "v_dual_add_f32 v36, v36, v44 :: v_dual_add_f32 v37, v37, v45\n"
+        "v_dual_add_f32 v38, v38, v46 :: v_dual_add_f32 v39, v39, v47\n"
+        "v_dual_add_f32 v32, v32, v36 :: v_dual_add_f32 v33, v33, v37\n"
+        "v_dual_add_f32 v34, v34, v38 :: v_dual_add_f32 v35, v35, v39\n"
+        "s_delay_alu instid0(VALU_DEP_2)\n"
+        "v_dual_add_f32 v32, v32, v34 :: v_dual_add_f32 v33, v33, v35\n"
+        "s_delay_alu instid0(VALU_DEP_1)\n"
+        "v_add_f32_e32 v31, v32, v33\n"
+        : "=&{v28}"(p0), "=&{v29}"(p1), "=&{v30}"(p2), "=&{v31}"(p3)
+        : [q] "s"(row), "{v[96:127]}"(k0), "{v[128:159]}"(k1),
+          "{v[160:191]}"(k2), "{v[192:223]}"(k3)
+        : "v32", "v33", "v34", "v35", "v36", "v37", "v38", "v39", "v40", "v41",
+          "v42", "v43", "v44", "v45", "v46", "v47", "v48", "v49", "v50", "v51",
+          "v52", "v53", "v54", "v55", "v56", "v57", "v58", "v59", "v60", "v61",
+          "v62", "v63", "s32", "s33", "s34", "s35", "s36", "s37", "s38", "s39",
+          "s40", "s41", "s42", "s43", "s44", "s45", "s46", "s47", "s48", "s49",
+          "s50", "s51", "s52", "s53", "s54", "s55", "s56", "s57", "s58", "s59",
+          "s60", "s61", "s62", "s63", "s64", "s65", "s66", "s67", "s68", "s69",
+          "s70", "s71", "s72", "s73", "s74", "s75", "s76", "s77", "s78", "s79",
+          "s80", "s81", "s82", "s83", "s84", "s85", "s86", "s87", "s88", "s89",
+          "s90", "s91", "s92", "s93", "s94", "s95", "memory");
+    float total = 0.0F;
+    total += fmaxf(p0, 0.0F);
+    total += fmaxf(p1, 0.0F);
+    total += fmaxf(p2, 0.0F);
+    total += fmaxf(p3, 0.0F);
+    if (b < complete)
+      scores[std::size_t{t0} * max_blocks + b] = total;
+  }
+#else
+  std::uint32_t key[kSelectDim / 2];
+#pragma unroll
+  for (unsigned i = 0; i < kSelectDim / 2; ++i)
+    key[i] = reinterpret_cast<const std::uint32_t*>(
+        blocks)[std::size_t{b} * kSelectDim / 2 + i];
+  for (std::uint32_t t0 = t_first; t0 < t_end; ++t0) {
+    const std::uint32_t complete = (base + t0) / ratio;
+    if (complete <= budget || b >= complete)
+      continue;
+    float total = 0.0F;
+    for (unsigned h = 0; h < kSelectHeads; ++h) {
+      const auto* query = q + (std::size_t{t0} * kSelectHeads + h) * kSelectDim;
+      float partial[32];
+      for (unsigned lane = 0; lane < 32; ++lane) {
+        float dot = 0.0F;
+        for (unsigned i = 0; i < 4; ++i) {
+          const auto bits = static_cast<unsigned short>(
+              key[(lane + i * 32) / 2] >> ((lane & 1) * 16));
+          dot = fmaf(query[lane + i * 32], __half2float(__ushort_as_half(bits)),
+                     dot);
+        }
+        partial[lane] = dot;
+      }
+      for (unsigned delta = 16; delta; delta >>= 1) {
+        for (unsigned lane = 0; lane < delta; ++lane)
+          partial[lane] += partial[lane + delta];
+      }
+      total += fmaxf(partial[0], 0.0F);
+    }
+    scores[std::size_t{t0} * max_blocks + b] = total;
+  }
+#endif
 }
 
 /// Locate a descending histogram rank cooperatively over kBins bins with a
@@ -3388,12 +4418,355 @@ __global__ void AttentionMergeKernel(const float* partials, float* out,
   }
 }
 
+/// Dense-sweep variant of AttentionKernel for a whole narrow verify batch:
+/// one block serves kGroup query heads of one KV head for all kRows query
+/// rows and its split `blockIdx.z`, so each 256-key K/V tile is read once and
+/// feeds every (head, row) pair. Today one block per (row, split) reads the
+/// same cache again for each row.
+/// Bitwise identical by construction: every (head, row) pair keeps
+/// AttentionKernel's own state and reduction (its q row, m/l/acc, lane tree
+/// then the eight waves in order), visits the same tiles in the same order
+/// (tile = (split + slot*splits)*256, the per-row loop's sequence for the
+/// slots in which that row is still live), and consumes a tile's keys in the
+/// same ascending order. A key past a row's causal limit carries the same
+/// -INFINITY score and a zero weight, so the address the block picks for a
+/// shared tile row cannot reach any pair's result. A tile or 4-key batch that
+/// only a later row still sees leaves an earlier row's state untouched: it
+/// rescales by exactly 1.0 and adds exactly 0.0.
+// Launched with 256 threads: the bound lets the compiler use the full
+// register file instead of the 1024-thread default, so the per-pair
+// accumulators stay in registers (no scratch).
+template<std::uint32_t kRows, std::uint32_t kGroup>
+__launch_bounds__(256) __global__
+    void AttentionSharedRowsKernel(const float* q, const __half* k_cache,
+                                   const __half* v_cache, float* out,
+                                   float* partials,
+                                   const std::uint32_t* start_pos,
+                                   std::uint32_t heads, std::uint32_t kv_heads,
+                                   std::uint32_t d) {
+  constexpr std::uint32_t kTile = 256;
+  constexpr std::uint32_t kBatch = 4;
+  const std::uint32_t split = blockIdx.z;
+  const std::uint32_t splits = gridDim.z;
+  const std::uint32_t h0 = blockIdx.x * kGroup;
+  __shared__ float qs[kGroup][kRows][kTile];
+  __shared__ float p[kGroup][kRows][kTile];
+  __shared__ float shared[kGroup][kRows][8];
+  __shared__ float red[8][kTile];
+  const std::uint32_t i = threadIdx.x;
+  const std::uint32_t lane = i & 31u;
+  const std::uint32_t wave = i >> 5u;
+  const std::uint32_t pos = *start_pos;
+  const std::uint32_t kvh = h0 / (heads / kv_heads);
+  const std::size_t kv_stride = static_cast<std::size_t>(kv_heads) * d;
+  const __half* k_head = k_cache + kvh * d;
+  const __half* v_head = v_cache + kvh * d;
+  const float scale = rsqrtf(static_cast<float>(d));
+  // Batch row r sits at position pos + r, so its causal limit is pos + r + 1.
+  // The largest limit bounds the tiles the block walks and the keys it loads.
+  std::uint32_t n_kv[kRows];
+#pragma unroll
+  for (std::uint32_t r = 0; r < kRows; ++r) {
+    n_kv[r] = pos + r + 1;
+  }
+  const std::uint32_t n_kv_max = pos + kRows;
+#pragma unroll
+  for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+    for (std::uint32_t r = 0; r < kRows; ++r) {
+      qs[g][r][i] =
+          i < d ? q[(static_cast<std::size_t>(r) * heads + h0 + g) * d + i]
+                : 0.0f;
+    }
+  }
+  __syncthreads();
+  float m[kGroup][kRows];
+  float l[kGroup][kRows];
+  float acc[kGroup][kRows][8];
+#pragma unroll
+  for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+    for (std::uint32_t r = 0; r < kRows; ++r) {
+      m[g][r] = -INFINITY;
+      l[g][r] = 0.0f;
+#pragma unroll
+      for (std::uint32_t x = 0; x < 8; ++x) {
+        acc[g][r][x] = 0.0f;
+      }
+    }
+  }
+
+  // Rows are read eight contiguous halves per lane, one 16-byte load, exactly
+  // as the per-row kernel does; a batch whose keys all sit past every row's
+  // limit is skipped. Slots past every row's limit are never loaded. A slot
+  // past the limit of the shorter rows alone holds the last key any row sees,
+  // and reaches those rows only with a zero weight.
+  const auto load_batch = [&](const __half* head, std::uint32_t base,
+                              std::uint32_t tile, uint4* rows) {
+    if (tile + base >= n_kv_max) {
+      return false;
+    }
+#pragma unroll
+    for (std::uint32_t b = 0; b < kBatch; ++b) {
+      const std::uint32_t j = min(tile + base + b, n_kv_max - 1);
+      rows[b] = *reinterpret_cast<const uint4*>(
+          head + (static_cast<std::size_t>(j) * kv_stride) + (lane * 8));
+    }
+    return true;
+  };
+  const auto unpack8 = [](const uint4& packed, float* out8) {
+    const auto* h2 = reinterpret_cast<const __half2*>(&packed);
+#pragma unroll
+    for (std::uint32_t j = 0; j < 4; ++j) {
+      const float2 f = __half22float2(h2[j]);
+      out8[2 * j] = f.x;
+      out8[2 * j + 1] = f.y;
+    }
+  };
+
+  // Each (head, row) pair keeps AttentionKernel's reduction order: the lane
+  // tree, then the eight wave partials in order.
+  const auto group_max = [&](float (&v)[kGroup][kRows]) {
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+#pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+          v[g][r] = fmaxf(v[g][r], XorLane(v[g][r], offset));
+        }
+      }
+    }
+    __syncthreads();
+    if (lane == 0) {
+#pragma unroll
+      for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+        for (std::uint32_t r = 0; r < kRows; ++r) {
+          shared[g][r][wave] = v[g][r];
+        }
+      }
+    }
+    __syncthreads();
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+        float total = -INFINITY;
+        for (std::uint32_t w = 0; w < 8; ++w) {
+          total = fmaxf(total, shared[g][r][w]);
+        }
+        v[g][r] = total;
+      }
+    }
+  };
+  const auto group_sum = [&](float (&v)[kGroup][kRows]) {
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+#pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1) {
+          v[g][r] += XorLane(v[g][r], offset);
+        }
+      }
+    }
+    __syncthreads();
+    if (lane == 0) {
+#pragma unroll
+      for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+        for (std::uint32_t r = 0; r < kRows; ++r) {
+          shared[g][r][wave] = v[g][r];
+        }
+      }
+    }
+    __syncthreads();
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+        float total = 0.0f;
+        for (std::uint32_t w = 0; w < 8; ++w) {
+          total += shared[g][r][w];
+        }
+        v[g][r] = total;
+      }
+    }
+  };
+
+  const auto tile_step = [&](std::uint32_t tile) {
+    float qv[kGroup][kRows][8];
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+#pragma unroll
+        for (std::uint32_t j = 0; j < 8; ++j) {
+          qv[g][r][j] = qs[g][r][(lane * 8) + j];
+        }
+      }
+    }
+    float s_mine[kGroup][kRows];
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+        s_mine[g][r] = -INFINITY;
+      }
+    }
+    // Scores: the tile's K rows are loaded once; every (head, row) pair runs
+    // its own dot in the fixed eight-product order the per-row kernel uses.
+    for (std::uint32_t k0 = 0; k0 < 32; k0 += kBatch) {
+      uint4 rows[kBatch];
+      if (!load_batch(k_head, (wave * 32) + k0, tile, rows)) {
+        continue;
+      }
+#pragma unroll
+      for (std::uint32_t b = 0; b < kBatch; ++b) {
+        const std::uint32_t key = tile + (wave * 32) + k0 + b;
+        float kv[8];
+        unpack8(rows[b], kv);
+#pragma unroll
+        for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+          for (std::uint32_t r = 0; r < kRows; ++r) {
+            float dot = qv[g][r][7] * kv[7];
+            dot = fmaf(qv[g][r][3], kv[3], dot);
+            dot = fmaf(qv[g][r][5], kv[5], dot);
+            dot = fmaf(qv[g][r][1], kv[1], dot);
+            dot = fmaf(qv[g][r][6], kv[6], dot);
+            dot = fmaf(qv[g][r][2], kv[2], dot);
+            dot = fmaf(qv[g][r][4], kv[4], dot);
+            dot = fmaf(qv[g][r][0], kv[0], dot);
+            dot = WaveSum(dot);
+            if (lane == k0 + b) {
+              s_mine[g][r] = key < n_kv[r] ? dot * scale : -INFINITY;
+            }
+          }
+        }
+      }
+    }
+    float tile_max[kGroup][kRows];
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+        tile_max[g][r] = s_mine[g][r];
+      }
+    }
+    group_max(tile_max);
+    float rescale[kGroup][kRows];
+    float tile_sum[kGroup][kRows];
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+        const float m_new = fmaxf(m[g][r], tile_max[g][r]);
+        rescale[g][r] = m[g][r] == -INFINITY ? 0.0f : __expf(m[g][r] - m_new);
+        const float pj =
+            s_mine[g][r] == -INFINITY ? 0.0f : __expf(s_mine[g][r] - m_new);
+        p[g][r][i] = pj;
+        tile_sum[g][r] = pj;
+        m[g][r] = m_new;
+      }
+    }
+    group_sum(tile_sum);
+#pragma unroll
+    for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+      for (std::uint32_t r = 0; r < kRows; ++r) {
+        l[g][r] = l[g][r] * rescale[g][r] + tile_sum[g][r];
+#pragma unroll
+        for (std::uint32_t x = 0; x < 8; ++x) {
+          acc[g][r][x] *= rescale[g][r];
+        }
+      }
+    }
+    __syncthreads();
+    // Values: the same tile rows, loaded once, weighted per (head, row).
+    for (std::uint32_t k0 = 0; k0 < 32; k0 += kBatch) {
+      uint4 rows[kBatch];
+      if (!load_batch(v_head, (wave * 32) + k0, tile, rows)) {
+        continue;
+      }
+#pragma unroll
+      for (std::uint32_t b = 0; b < kBatch; ++b) {
+        float vv[8];
+        unpack8(rows[b], vv);
+#pragma unroll
+        for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+          for (std::uint32_t r = 0; r < kRows; ++r) {
+            const float w = p[g][r][(wave * 32) + k0 + b];
+            if (w != 0.0f) {
+#pragma unroll
+              for (std::uint32_t x = 0; x < 8; ++x) {
+                acc[g][r][x] = fmaf(w, vv[x], acc[g][r][x]);
+              }
+            }
+          }
+        }
+      }
+    }
+    __syncthreads();
+  };
+
+  // Slot `slot` is the per-row loop's split + slot*splits tile. Rows that
+  // stopped earlier still walk it; for them it is the exact no-op above.
+  for (std::uint32_t slot = 0;; ++slot) {
+    const std::uint32_t tile = (split + slot * splits) * kTile;
+    if (tile >= n_kv_max) {
+      break;
+    }
+    tile_step(tile);
+  }
+  // Sum the eight wave partials of each pair in order, as the per-row kernel
+  // does for each head group.
+#pragma unroll
+  for (std::uint32_t g = 0; g < kGroup; ++g) {
+#pragma unroll
+    for (std::uint32_t r = 0; r < kRows; ++r) {
+      const std::uint32_t h = h0 + g;
+#pragma unroll
+      for (std::uint32_t x = 0; x < 8; ++x) {
+        red[wave][(lane * 8) + x] = acc[g][r][x];
+      }
+      __syncthreads();
+      float total = 0.0f;
+      for (std::uint32_t w = 0; w < 8; ++w) {
+        total += red[w][i];
+      }
+      if (splits == 1) {
+        if (i < d) {
+          out[(static_cast<std::size_t>(r) * heads + h) * d + i] =
+              total / l[g][r];
+        }
+      } else {
+        float* part =
+            partials +
+            ((static_cast<std::size_t>(r) * heads + h) * splits + split) *
+                (d + 2);
+        if (i < d) {
+          part[2 + i] = total;
+        }
+        if (i == 0) {
+          part[0] = m[g][r];
+          part[1] = l[g][r];
+        }
+      }
+      __syncthreads();  // red is rewritten by the next pair
+    }
+  }
+}
+
 // Keep the original block-wide softmax reduction. Selection then stays in
 // one wave's registers, retaining probability ordering and lowest-index ties.
 template<unsigned MaxExperts>
 __global__ void RouterTopKKernel(const float* logits, std::uint32_t stride,
                                  std::int32_t* ids, float* weights,
-                                 std::uint32_t n_experts, std::uint32_t k) {
+                                 std::uint32_t n_experts, std::uint32_t k,
+                                 std::uint32_t k_select) {
   __shared__ float probs[1024];
   __shared__ float shared[32];
   __shared__ std::uint32_t chosen[32];
@@ -3425,7 +4798,7 @@ __global__ void RouterTopKKernel(const float* logits, std::uint32_t stride,
     unsigned e = threadIdx.x + j * 32;
     values[j] = e < n_experts ? probs[e] : -1.0f;
   }
-  for (unsigned slot = 0; slot < k; ++slot) {
+  for (unsigned slot = 0; slot < k_select; ++slot) {
     float best = -1.0f;
     unsigned index = 0xffffffffu;
 #pragma unroll
@@ -3456,8 +4829,10 @@ __global__ void RouterTopKKernel(const float* logits, std::uint32_t stride,
     }
   }
   if (threadIdx.x == 0) {
+    // The sum runs over k_select, so routing fewer experts does not amplify the
+    // ones it keeps.
     float sum = 0.0f;
-    for (std::uint32_t slot = 0; slot < k; ++slot) {
+    for (std::uint32_t slot = 0; slot < k_select; ++slot) {
       sum += chosen_p[slot];
     }
     sum = fmaxf(sum, 6.103515625e-5f);
@@ -3868,6 +5243,9 @@ constexpr std::uint32_t kWmmaMaxMaskWords = 2048;
 /// tiles are gathered from the union of the block's query selections and
 /// four selections overlap far less than 32 (measured at 16k depth: 846
 /// versus 2,478 selected blocks against 512 per query).
+// Attention keeps the full barrier: the light one loses prefill speed at depth.
+#pragma push_macro("__syncthreads")
+#undef __syncthreads
 template<std::uint32_t kQueryRows, std::uint32_t kKeys, bool kPackHeads>
 __launch_bounds__(256, 2) __global__ void WmmaCausalAttentionKernel(
     const float* __restrict__ q, const float* __restrict__ gate,
@@ -3909,11 +5287,13 @@ __launch_bounds__(256, 2) __global__ void WmmaCausalAttentionKernel(
   // Keep the two KV heads of nearby queries together in the launch order.
   // This improves cache reuse without changing any query's key sweep.
   const std::uint32_t linear = blockIdx.y * gridDim.x + blockIdx.x;
+  const std::uint32_t pack_group = linear / 2;
+  const std::uint32_t pack_head = linear & 1u;
   const std::uint32_t query_group =
-      first_query_group + (kPackHeads ? linear / kWmmaKvHeads : blockIdx.x);
+      first_query_group + (kPackHeads ? pack_group : blockIdx.x);
   const std::uint32_t query_start = query_group * kQueryRows;
   const std::uint32_t kv_head =
-      kPackHeads ? linear % kWmmaKvHeads : blockIdx.y / (kWmmaGqa / kWmmaHeads);
+      kPackHeads ? pack_head : blockIdx.y / (kWmmaGqa / kWmmaHeads);
   const std::uint32_t first_query_head =
       kPackHeads ? kv_head * kWmmaGqa
                  : (kv_head * kWmmaGqa) +
@@ -4549,6 +5929,7 @@ __launch_bounds__(256, 2) __global__ void WmmaCausalAttentionKernel(
     }
   }
 }
+#pragma pop_macro("__syncthreads")
 
 // W8A8 int8 WMMA GEMM over the GGUF Q8_0 weights, ported from the Qwen 27B
 // route (src/models/qwen/hip/kernels/prefill_quant_gemm.hip,
@@ -4671,7 +6052,8 @@ __device__ __forceinline__ float HcScaledSilu(float value) {
 /// 32-element K blocks per LDS stage, waves = WM row groups x WN token groups.
 /// Out-of-range rows and K blocks are clamped and their scale zeroed, so
 /// they contribute exactly zero without divergence. y is [batch][m].
-template<int BM, int BN, int BK, int WM, int WN, bool kHcDown = false>
+template<int BM, int BN, int BK, int WM, int WN, bool kHcDown = false,
+         int kRowGroup = 1>
 __launch_bounds__(256) __global__ void W8A8BlockedWmmaGEMMKernel(
     const void* __restrict__ w, const void* __restrict__ x_blocks,
     std::conditional_t<kHcDown, __half, float>* __restrict__ y,
@@ -4713,8 +6095,11 @@ __launch_bounds__(256) __global__ void W8A8BlockedWmmaGEMMKernel(
   const int wave_row = wave_id / WN;
   const int wave_tok = wave_id % WN;
 
-  const std::size_t r_block = static_cast<std::size_t>(blockIdx.y) * BM;
-  const std::size_t t_block = static_cast<std::size_t>(blockIdx.x) * BN;
+  const unsigned row_group = blockIdx.y / kRowGroup;
+  const unsigned within = (blockIdx.y % kRowGroup) * gridDim.x + blockIdx.x;
+  const std::size_t r_block =
+      static_cast<std::size_t>(row_group * kRowGroup + within % kRowGroup) * BM;
+  const std::size_t t_block = static_cast<std::size_t>(within / kRowGroup) * BN;
   const std::size_t tt_block = t_block / kQ8ActTileTokens;
 
   float acc[kWaveRowTiles][kWaveTokTiles][8];
@@ -4731,12 +6116,16 @@ __launch_bounds__(256) __global__ void W8A8BlockedWmmaGEMMKernel(
 
   // Staging registers for the next K stage, fetched one stage ahead so the
   // scattered 34-byte block reads overlap the WMMA work.
+  // Results stay raw until the commit: arithmetic on a load result here would
+  // make the stage wait for every outstanding load before its matrix work.
   constexpr int kPrefetch = (BM * BK) / 256;
   int32x4_t r_q0[kPrefetch];
   int32x4_t r_q1[kPrefetch];
-  float r_dw[kPrefetch];
+  std::uint32_t r_d[kPrefetch];
+  float r_d_live[kPrefetch];
   int32x4_t r_b[BK];
   float r_dx[BK];
+  float r_dx_live[BK];
   const int b_tile = wave_id;  // one wave per token subtile
 
   const int num_kb = static_cast<int>(num_blocks);
@@ -4763,7 +6152,9 @@ __launch_bounds__(256) __global__ void W8A8BlockedWmmaGEMMKernel(
       const Q8_0Block& blk = w_row[p][kb_clamped];
       __builtin_memcpy(&r_q0[p], blk.qs + 0, 16);
       __builtin_memcpy(&r_q1[p], blk.qs + 16, 16);
-      r_dw[p] = __half2float(blk.d) * ((kb < num_kb) ? row_live[p] : 0.0F);
+      // The block starts with its F16 scale; a word load overlaps the codes.
+      __builtin_memcpy(&r_d[p], &blk, 4);
+      r_d_live[p] = (kb < num_kb) ? row_live[p] : 0.0F;
     }
     if (b_live) {
 #pragma unroll
@@ -4773,9 +6164,9 @@ __launch_bounds__(256) __global__ void W8A8BlockedWmmaGEMMKernel(
         const auto* tile =
             b_base + (static_cast<std::size_t>(kb_clamped) * kQ8ActTileBytes);
         r_b[i] = reinterpret_cast<const int32x4_t*>(tile)[lane_id];
-        r_dx[i] = ((kb < num_kb) ? 1.0F : 0.0F) *
-                  reinterpret_cast<const float*>(
-                      tile + kQ8ActScaleOffset)[lane_id & 15];
+        r_dx[i] = reinterpret_cast<const float*>(
+            tile + kQ8ActScaleOffset)[lane_id & 15];
+        r_dx_live[i] = (kb < num_kb) ? 1.0F : 0.0F;
       }
     }
   };
@@ -4790,14 +6181,17 @@ __launch_bounds__(256) __global__ void W8A8BlockedWmmaGEMMKernel(
       const int rl = rr % 16;
       s_a[kk][rs][rl] = r_q0[p];
       s_a[kk][rs][16 + rl] = r_q1[p];
-      s_dw[kk][rs][(rl % 2 == 0) ? (rl / 2) : (8 + (rl / 2))] = r_dw[p];
+      const auto d =
+          __builtin_bit_cast(__half, static_cast<std::uint16_t>(r_d[p]));
+      s_dw[kk][rs][(rl % 2 == 0) ? (rl / 2) : (8 + (rl / 2))] =
+          __half2float(d) * r_d_live[p];
     }
     if (b_live) {
 #pragma unroll
       for (int i = 0; i < BK; ++i) {
         s_b[i][b_tile][lane_id] = r_b[i];
         if (lane_id < 16) {
-          s_dx[i][b_tile][lane_id] = r_dx[i];
+          s_dx[i][b_tile][lane_id] = r_dx_live[i] * r_dx[i];
         }
       }
     }
@@ -4993,7 +6387,7 @@ constexpr std::size_t kQ5KBlockBytes = 176;
 
 template<WeightType kType>
 __device__ __forceinline__ std::size_t RoutedF16RowBytes(std::size_t k) {
-  // LFQ: FP4 blocks are 32 elements in 17 (type 101) or 18 (type 100) bytes.
+  // FP4 blocks are 32 elements in 17 (type 101) or 18 (type 100) bytes.
   return kType == WeightType::kQ4_K           ? (k / 256) * sizeof(Q4KBlock)
          : kType == WeightType::kQ5_K         ? (k / 256) * kQ5KBlockBytes
          : kType == WeightType::kQ5_1         ? (k / 32) * sizeof(Q5_1Block)
@@ -5031,7 +6425,8 @@ __device__ __forceinline__ void CodesToHalves(std::uint32_t codes,
   hi = __hfma2(__hadd2(__builtin_bit_cast(__half2, p1), magic), scale2, bias2);
 }
 
-template<WeightType kType, int BM, int BN, int BK, bool kPair = false>
+template<WeightType kType, int BM, int BN, int BK, bool kPair = false,
+         bool kBlockMap = false, bool kRegDown = false>
 __launch_bounds__(256) __global__
     void RoutedF16GEMMKernel(const void* __restrict__ w,
                              const __half* __restrict__ x,
@@ -5042,9 +6437,11 @@ __launch_bounds__(256) __global__
                              const float* __restrict__ swiglu_gate,
                              float* __restrict__ out,
                              __half* __restrict__ out_half, std::size_t m,
-                             std::size_t k, const void* __restrict__ w_up) {
+                             std::size_t k, const void* __restrict__ w_up,
+                             int row_group) {
   static_assert(BM == 128 || BM == 256, "eight waves, 16-row tiles");
-  static_assert(!kPair || BM == 128);
+  static_assert(!kPair || BM == 128 || kType == WeightType::kQ4_0_ROCMFP4 ||
+                kType == WeightType::kQ4_0_ROCMFP4_FAST);
   static_assert(BN % 16 == 0 && BN / 16 <= 8);
   static_assert(BK == 2, "one stage is two 32-element K blocks");
   constexpr int kTokTiles = BN / 16;
@@ -5053,12 +6450,16 @@ __launch_bounds__(256) __global__
   constexpr bool kQ5K = kType == WeightType::kQ5_K;
   constexpr bool kQ8 = kType == WeightType::kQ8_0;
   constexpr bool kKQuant = kType == WeightType::kQ4_K || kQ5K;
-  // LFQ: ROCmFP4 pair (GGUF types 100/101). One stage is two 32-element
+  // ROCmFP4 pair (GGUF types 100/101). One stage is two 32-element
   // blocks -- two code chunks plus their scale bytes -- so BK stays 2 and
   // the LDS plan below is unchanged (kChunks = BK, no high bytes).
   constexpr bool kFP4 = kType == WeightType::kQ4_0_ROCMFP4 ||
                         kType == WeightType::kQ4_0_ROCMFP4_FAST;
   constexpr bool kFP4Fast = kType == WeightType::kQ4_0_ROCMFP4_FAST;
+  // Weights stay in registers: each wave half fetches its own K block of the
+  // rows its lanes multiply, and no weight data passes through LDS.
+  static_assert(!kRegDown || (kFP4 && !kPair));
+  constexpr bool kRegWeights = kPair || kRegDown;
   // 16-byte code chunks per row and stage: Q4_K's nibble pair and Q5_1's
   // two nibble blocks are two, Q8_0's two byte blocks are four.
   constexpr int kChunks = kQ8 ? 2 * BK : BK;
@@ -5073,11 +6474,11 @@ __launch_bounds__(256) __global__
   // aligned, so whole 16-byte chunks load coalesced and each wave reads its
   // rows' scale, high bits and codes from LDS.
   constexpr int kQ5Bytes = BK * 24;  // one row's blocks per stage
-  constexpr int kCodeBytes = kPair ? 0
-                             : kQ5 ? BM * kQ5Bytes
-                                   : BM * kChunks * 16;
-  constexpr int kHighBytes = !kPair && kQ5K ? BK * BM * 4 : 0;
-  constexpr int kScaleBytes = kPair || kQ5 ? 0 : BK * BM * 4;
+  constexpr int kCodeBytes = kRegWeights ? 0
+                             : kQ5       ? BM * kQ5Bytes
+                                         : BM * kChunks * 16;
+  constexpr int kHighBytes = !kRegWeights && kQ5K ? BK * BM * 4 : 0;
+  constexpr int kScaleBytes = kRegWeights || kQ5 ? 0 : BK * BM * 4;
   // One slot of padding per activation quarter plane: the eight chunks of
   // a token then land on eight bank groups when they are written.
   constexpr int kActStride = BN + 1;
@@ -5096,8 +6497,10 @@ __launch_bounds__(256) __global__
   auto* s_act =
       reinterpret_cast<uint4*>(lds + kCodeBytes + kHighBytes + kScaleBytes);
 
-  const std::int32_t tile = tiles[blockIdx.y];
-  const int expert = tile & 0xFFFF;
+  // With a block map, one entry per block: expert | row tile << 10 | tile
+  // << 16.
+  const std::int32_t tile = kBlockMap ? tiles[blockIdx.x] : tiles[blockIdx.y];
+  const int expert = kBlockMap ? tile & 0x3FF : tile & 0xFFFF;
   const int t_local = (tile >> 16) * BN;
   const int bucket_begin = pad_bounds[expert];
   const int bucket_rows = pad_bounds[expert + 1] - bucket_begin;
@@ -5115,20 +6518,29 @@ __launch_bounds__(256) __global__
   const int sub_lane = lane_id & 15;
   const int half_id = lane_id >> 4;
   constexpr int kRows = kPair ? BM / 2 : BM;
-  const int r_block = static_cast<int>(blockIdx.x) * kRows;
+  const int r_block =
+      (kBlockMap ? (tile >> 10) & 0x3F : static_cast<int>(blockIdx.x)) * kRows;
 
   // A paired wave owns eight gate rows and their matching eight up rows.
   // Its halves load the two 16-byte chunks of each row's nibble group;
   // each chunk carries one K16 fragment in both K32 blocks. Separate
   // projections use row=tid/2+128u and chunk=tid%2 instead.
-  const int f_c = kPair ? half_id : tid & 1;
+  // WMMA reads A only in the lanes whose half equals the row's parity. With
+  // FP4 in registers those lanes hold the stage's first K block and their
+  // partners across the wave the second, so each lane decodes one block.
+  const int f_c =
+      kRegWeights
+          ? (kFP4 ? static_cast<int>((sub_lane & 1) != half_id) : half_id)
+          : tid & 1;
   const std::uint8_t* f_ptr[kWaveRowTiles];
   bool f_live[kWaveRowTiles];
   uint4 f_header[kWaveRowTiles];
 #pragma unroll
   for (int u = 0; u < kWaveRowTiles; ++u) {
     const int r =
-        r_block + (kPair ? wave_id * 8 + sub_lane % 8 : (tid >> 1) + (u * 128));
+        r_block + (kPair ? wave_id * 8 * kWaveRowTiles + u * 8 + sub_lane % 8
+                   : kRegDown ? (wave_id * 16) + (u * 128) + sub_lane
+                              : (tid >> 1) + (u * 128));
     f_live[u] = r < m_i;
     const std::uint8_t* weights = w_expert;
     if constexpr (kPair) {
@@ -5137,25 +6549,34 @@ __launch_bounds__(256) __global__
                   static_cast<std::size_t>(expert) * m * row_bytes;
       }
     }
+    // Grouped FP4 experts interleave K blocks inside each group of rows.
+    const int f_row = f_live[u] ? r : (m_i - 1);
     f_ptr[u] = weights +
-               static_cast<std::size_t>(f_live[u] ? r : (m_i - 1)) * row_bytes;
+               static_cast<std::size_t>(f_row & -row_group) * row_bytes +
+               static_cast<std::size_t>(f_row & (row_group - 1)) *
+                   (kFP4Fast ? 17 : 18);
     f_header[u] = make_uint4(0u, 0u, 0u, 0u);
   }
   // The next stage's weights and activations, fetched one stage ahead. The
   // (scale, bias) pair is derived from the raw header word only when the
   // stage is committed, so nothing waits on the loads before the compute.
-  uint4 f_codes[kWaveRowTiles];
+  constexpr int kSets = 1;
+  uint4 f_codes_set[kSets][kWaveRowTiles];
   // Paired gate/up tiles reuse the full quantized block over four stages.
   // Keep its remaining codes in registers alongside the cached header.
   uint4 code_cache[kWaveRowTiles][4];
   uint4 f_codes_hi[kWaveRowTiles];  ///< Q8_0: the block's second 16 codes
   uint4 f_qh[kWaveRowTiles][2];     ///< Q5_K: the superblock's high bits
   std::uint32_t f_high[kWaveRowTiles];
-  std::uint32_t f_dm[kWaveRowTiles];   ///< Q5_1: d | m; Q8_0: d
-  std::uint32_t f_scl[kWaveRowTiles];  ///< LFQ FP4: scale byte 0 | byte 1 << 8
-  int f_sb32[kWaveRowTiles];           ///< Q4_K: the K block in its superblock
+  std::uint32_t f_dm[kWaveRowTiles];  ///< Q5_1: d | m; Q8_0: d
+  // FP4 scale byte(s) as loaded, in the top of a 32-bit word that overlaps the
+  // codes. Touching a load result before the stage commits (arithmetic, or a
+  // register copy after a narrow load) would make the stage wait for every
+  // outstanding load before its matrix work.
+  std::uint32_t f_scl_set[kSets][kWaveRowTiles];
+  int f_sb32[kWaveRowTiles];  ///< Q4_K: the K block in its superblock
   constexpr int kActFetch = BN <= 64 ? 2 : 4;
-  uint4 a_data[kActFetch];
+  uint4 a_data_set[kSets][kActFetch];
   // Q5_1 chunk c is part c % kQ5Parts of row c / kQ5Parts.
   constexpr int kQ5Parts = kQ5Bytes / 16;
   constexpr int kQ5Chunks = BM * kQ5Parts;
@@ -5204,7 +6625,10 @@ __launch_bounds__(256) __global__
            (c ^ (kChunks == 4 ? ((row >> 1) & 3) : ((row >> 2) & 1)));
   };
 
-  const auto fetch_stage = [&](int kb0, int code_group) {
+  const auto fetch_stage = [&]<int kSet>(int kb0, int code_group) {
+    auto& f_codes = f_codes_set[kSet];
+    auto& f_scl = f_scl_set[kSet];
+    auto& a_data = a_data_set[kSet];
     if constexpr (kQ5) {
 #pragma unroll
       for (int i = 0; i < kQ5Fetch; ++i) {
@@ -5228,14 +6652,9 @@ __launch_bounds__(256) __global__
         // the absent byte 17 (the next row at best, past the tensor at worst).
         const int kb = kb0 + f_c;
         constexpr int kStride = kFP4Fast ? 17 : 18;
-        const std::uint8_t* blk = f_ptr[u] + (kb * kStride);
+        const std::uint8_t* blk = f_ptr[u] + (kb * kStride * row_group);
         __builtin_memcpy(&f_codes[u], blk, 16);
-        const std::uint32_t s0 = blk[16];
-        std::uint32_t s1 = s0;
-        if constexpr (!kFP4Fast) {
-          s1 = blk[17];
-        }
-        f_scl[u] = s0 | (s1 << 8);
+        __builtin_memcpy(&f_scl[u], blk + (kStride - 4), 4);
       } else {
         constexpr int kBlockChunks = kQ5K ? 11 : 9;
         constexpr int kCodeChunk = kQ5K ? 3 : 1;
@@ -5291,7 +6710,10 @@ __launch_bounds__(256) __global__
   uint4 own_codes[kWaveRowTiles];
   std::uint32_t own_scale[kWaveRowTiles];
   std::uint32_t own_high[kWaveRowTiles];
-  const auto commit_stage = [&]() {
+  const auto commit_stage = [&]<int kSet>() {
+    auto& f_codes = f_codes_set[kSet];
+    auto& f_scl = f_scl_set[kSet];
+    auto& a_data = a_data_set[kSet];
     if constexpr (kQ5) {
 #pragma unroll
       for (int i = 0; i < kQ5Fetch; ++i) {
@@ -5303,7 +6725,7 @@ __launch_bounds__(256) __global__
     for (int u = 0; u < (kQ5 ? 0 : kWaveRowTiles); ++u) {
       const int row = (tid >> 1) + (u * 128);
       std::uint32_t scale_bias = 0;
-      if constexpr (kPair) {
+      if constexpr (kRegWeights) {
         own_codes[u] = f_codes[u];
         if constexpr (kQ5K)
           own_high[u] = f_high[u];
@@ -5323,11 +6745,10 @@ __launch_bounds__(256) __global__
         // (type 101 sets both from its one scale byte). A dead row still
         // decodes its clamped codes, so its scales zero out here.
         const std::uint32_t scl = f_live[u] ? f_scl[u] : 0U;
-        scale_bias = static_cast<std::uint32_t>(fp4_f16::Fp4Ue4m3ToHalfU16(
-                         static_cast<std::uint8_t>(scl & 0xFFU))) |
-                     (static_cast<std::uint32_t>(fp4_f16::Fp4Ue4m3ToHalfU16(
-                          static_cast<std::uint8_t>((scl >> 8) & 0xFFU)))
-                      << 16);
+        const std::uint32_t s1 = scl >> 24;
+        const std::uint32_t s0 = kFP4Fast ? s1 : ((scl >> 16) & 0xFFU);
+        scale_bias = fp4_f16::Fp4ScaleHalfBits(s0) |
+                     (fp4_f16::Fp4ScaleHalfBits(s1) << 16);
       } else {
         const int sb32 = f_sb32[u];
         // The first four scale/min bytes live in y/z. Their remaining
@@ -5355,7 +6776,7 @@ __launch_bounds__(256) __global__
         scale_bias = __builtin_bit_cast(std::uint32_t,
                                         __floats2half2_rn(scale, -offset));
       }
-      if constexpr (kPair)
+      if constexpr (kRegWeights)
         own_scale[u] = scale_bias;
       else
         s_scale[(f_c * BM) + row] = scale_bias;
@@ -5377,12 +6798,12 @@ __launch_bounds__(256) __global__
     }
   }
 
-  // LFQ: FP4 codes ride biased by +16, so the magic is -1040.
+  // FP4 codes ride biased by +16, so the magic is -1040.
   const float kMagicValue = kFP4 ? -1040.0F : (kQ8 ? -1152.0F : -1024.0F);
   const __half2 magic = __floats2half2_rn(kMagicValue, kMagicValue);
   const auto compute_stage = [&]() {
     uint4 raw[kWaveRowTiles][BK];
-    if constexpr (!kQ8 && !kQ5 && !kPair) {
+    if constexpr (!kQ8 && !kQ5 && !kRegWeights) {
 #pragma unroll
       for (int u = 0; u < kWaveRowTiles; ++u) {
         const int row = (wave_id * 16) + (u * 128) + sub_lane;
@@ -5394,7 +6815,7 @@ __launch_bounds__(256) __global__
     }
     std::uint32_t peer_scale[kWaveRowTiles];
     std::uint32_t peer_high[kWaveRowTiles];
-    if constexpr (kPair) {
+    if constexpr (kRegWeights && !kFP4) {
 #pragma unroll
       for (int u = 0; u < kWaveRowTiles; ++u) {
         peer_scale[u] = XorLane(own_scale[u], 16);
@@ -5402,58 +6823,69 @@ __launch_bounds__(256) __global__
           peer_high[u] = XorLane(own_high[u], 16);
       }
     }
+    __half2 own_h[kWaveRowTiles][16];
+    if constexpr (kRegWeights && kFP4) {
+      const __half2 zero2 = __floats2half2_rn(0.0F, 0.0F);
+#pragma unroll
+      for (int u = 0; u < kWaveRowTiles; ++u) {
+        const __half2 sb = __builtin_bit_cast(__half2, own_scale[u]);
+        const __half2 scale2 = __low2half2(sb);
+        const __half2 bias2 = __high2half2(sb);
+        const uint4 codes = own_codes[u];
+        const std::uint32_t words[4] = {codes.x, codes.y, codes.z, codes.w};
+#pragma unroll
+        for (int i = 0; i < 4; ++i) {
+          std::uint32_t c0 = 0;
+          std::uint32_t c1 = 0;
+          fp4_f16::Fp4NibblesToCodes(words[i], c0, c1);
+          own_h[u][2 * i] =
+              __hfma2(__builtin_bit_cast(__half2, c0), scale2, zero2);
+          own_h[u][2 * i + 1] =
+              __hfma2(__builtin_bit_cast(__half2, c1), scale2, zero2);
+          fp4_f16::Fp4NibblesToCodes(words[i] >> 4U, c0, c1);
+          own_h[u][8 + 2 * i] =
+              __hfma2(__builtin_bit_cast(__half2, c0), bias2, zero2);
+          own_h[u][8 + 2 * i + 1] =
+              __hfma2(__builtin_bit_cast(__half2, c1), bias2, zero2);
+        }
+      }
+    }
 #pragma unroll
     for (int kb = 0; kb < BK; ++kb) {
       v16h a_lo[kWaveRowTiles];
       v16h a_hi[kWaveRowTiles];
-      if constexpr (kPair) {
+      if constexpr (kRegWeights) {
         // Decode each K16 fragment once, then duplicate its packed F16 bits
         // across the wave halves for WMMA. No weight data passes through LDS.
         using v8u = __attribute__((__vector_size__(32))) std::uint32_t;
 #pragma unroll
         for (int u = 0; u < kWaveRowTiles; ++u) {
-          const __half2 sb = __builtin_bit_cast(
-              __half2, half_id == kb ? own_scale[u] : peer_scale[u]);
-          const __half2 scale2 = __low2half2(sb);
-          const __half2 bias2 = __high2half2(sb);
-          const uint4 codes = own_codes[u];
-          const std::uint32_t own_w[4] = {codes.x, codes.y, codes.z, codes.w};
-          const std::uint32_t high =
-              kQ5K ? ((half_id == kb ? own_high[u] : peer_high[u]) >>
-                      (16U * half_id))
-                   : 0U;
-          __half2 h[8];
           if constexpr (kFP4) {
-            std::uint32_t peer_w[4];
+            if (kb == 0) {
+              __builtin_memcpy(&a_lo[u], &own_h[u][0], 32);
+              __builtin_memcpy(&a_hi[u], &own_h[u][8], 32);
+            } else {
+              std::uint32_t peer[16];
 #pragma unroll
-            for (int i = 0; i < 4; ++i)
-              peer_w[i] = XorLane(own_w[i], 16);
-            std::uint32_t words[4];
-#pragma unroll
-            for (int i = 0; i < 4; ++i)
-              words[i] = (half_id == kb) ? own_w[i] : peer_w[i];
-            std::uint32_t nib[8];
-#pragma unroll
-            for (int i = 0; i < 4; ++i) {
-              nib[i] = fp4_f16::Fp4NibblesToBiased(words[i] & 0x0F0F0F0FU);
-              nib[4 + i] =
-                  fp4_f16::Fp4NibblesToBiased((words[i] >> 4U) & 0x0F0F0F0FU);
+              for (int i = 0; i < 16; ++i) {
+                peer[i] =
+                    XorLane(__builtin_bit_cast(std::uint32_t, own_h[u][i]), 16);
+              }
+              __builtin_memcpy(&a_lo[u], &peer[0], 32);
+              __builtin_memcpy(&a_hi[u], &peer[8], 32);
             }
-            __half2 h16[16];
-            const __half2 zero2 = __floats2half2_rn(0.0F, 0.0F);
-#pragma unroll
-            for (int i = 0; i < 4; ++i) {
-              CodesToHalves(nib[i], magic, scale2, zero2, h16[2 * i],
-                            h16[2 * i + 1]);
-            }
-#pragma unroll
-            for (int i = 4; i < 8; ++i) {
-              CodesToHalves(nib[i], magic, bias2, zero2, h16[2 * i],
-                            h16[2 * i + 1]);
-            }
-            __builtin_memcpy(&a_lo[u], &h16[0], 32);
-            __builtin_memcpy(&a_hi[u], &h16[8], 32);
           } else {
+            const __half2 sb = __builtin_bit_cast(
+                __half2, half_id == kb ? own_scale[u] : peer_scale[u]);
+            const __half2 scale2 = __low2half2(sb);
+            const __half2 bias2 = __high2half2(sb);
+            const uint4 codes = own_codes[u];
+            const std::uint32_t own_w[4] = {codes.x, codes.y, codes.z, codes.w};
+            const std::uint32_t high =
+                kQ5K ? ((half_id == kb ? own_high[u] : peer_high[u]) >>
+                        (16U * half_id))
+                     : 0U;
+            __half2 h[8];
 #pragma unroll
             for (int i = 0; i < 4; ++i) {
               std::uint32_t nib = (own_w[i] >> (4U * kb)) & 0x0F0F0F0FU;
@@ -5502,9 +6934,7 @@ __launch_bounds__(256) __global__
             const std::uint32_t words[4] = {r.x, r.y, r.z, r.w};
 #pragma unroll
             for (int i = 0; i < 4; ++i) {
-              nib[i] = fp4_f16::Fp4NibblesToBiased(words[i] & 0x0F0F0F0FU);
-              nib[4 + i] =
-                  fp4_f16::Fp4NibblesToBiased((words[i] >> 4U) & 0x0F0F0F0FU);
+              nib[i] = words[i];
             }
           } else if constexpr (kQ8) {
             // Q8_0: the block's 32 signed bytes are chunks 2 kb and 2 kb + 1;
@@ -5553,13 +6983,18 @@ __launch_bounds__(256) __global__
             const __half2 zero2 = __floats2half2_rn(0.0F, 0.0F);
 #pragma unroll
             for (int i = 0; i < 4; ++i) {
-              CodesToHalves(nib[i], magic, scale2, zero2, h[2 * i],
-                            h[2 * i + 1]);
-            }
-#pragma unroll
-            for (int i = 4; i < 8; ++i) {
-              CodesToHalves(nib[i], magic, bias2, zero2, h[2 * i],
-                            h[2 * i + 1]);
+              std::uint32_t c0 = 0;
+              std::uint32_t c1 = 0;
+              fp4_f16::Fp4NibblesToCodes(nib[i], c0, c1);
+              h[2 * i] =
+                  __hfma2(__builtin_bit_cast(__half2, c0), scale2, zero2);
+              h[2 * i + 1] =
+                  __hfma2(__builtin_bit_cast(__half2, c1), scale2, zero2);
+              fp4_f16::Fp4NibblesToCodes(nib[i] >> 4U, c0, c1);
+              h[8 + 2 * i] =
+                  __hfma2(__builtin_bit_cast(__half2, c0), bias2, zero2);
+              h[8 + 2 * i + 1] =
+                  __hfma2(__builtin_bit_cast(__half2, c1), bias2, zero2);
             }
           } else {
 #pragma unroll
@@ -5574,7 +7009,7 @@ __launch_bounds__(256) __global__
       }
 #pragma unroll
       for (int j = 0; j < kTokTiles; ++j) {
-        if constexpr (kPair || ((kQ5 || kQ8) && BN >= 48)) {
+        if constexpr (kPair || ((kQ5 || kQ8 || kFP4) && BN >= 48)) {
           // Keep one token tile's LDS fragments live at a time. Hoisting
           // all eight tiles spills registers and defeats the wider tile's
           // reuse of each weight decode. This is a compiler barrier only.
@@ -5582,7 +7017,8 @@ __launch_bounds__(256) __global__
         }
         // A short expert bucket has no output in the remaining token
         // tiles, so omit their WMMA work.
-        if constexpr ((kPair || ((kQ5 || kQ8) && BN >= 48)) && kTokTiles > 1) {
+        if constexpr ((kPair || ((kQ5 || kQ8 || kFP4) && BN >= 48)) &&
+                      kTokTiles > 1) {
           if (j >= live_tok_tiles)
             continue;
         }
@@ -5607,16 +7043,16 @@ __launch_bounds__(256) __global__
   };
 
   const auto run_stage = [&](int kb0, int next_group) {
-    commit_stage();
+    commit_stage.template operator()<0>();
     __syncthreads();
     if (kb0 + BK < num_kb) {
-      fetch_stage(kb0 + BK, next_group);
+      fetch_stage.template operator()<0>(kb0 + BK, next_group);
     }
     compute_stage();
     __syncthreads();
   };
-  fetch_stage(0, 0);
   if constexpr (kPair) {
+    fetch_stage.template operator()<0>(0, 0);
     // K-quant launchers require complete 256-element blocks. Expose their
     // four stages so cached code selection and scale shifts are constant.
     for (int kb0 = 0; kb0 < num_kb; kb0 += 8) {
@@ -5626,6 +7062,7 @@ __launch_bounds__(256) __global__
       run_stage(kb0 + 6, 0);
     }
   } else {
+    fetch_stage.template operator()<0>(0, 0);
     for (int kb0 = 0; kb0 < num_kb; kb0 += BK) {
       run_stage(kb0, 0);
     }
@@ -5640,17 +7077,21 @@ __launch_bounds__(256) __global__
     static_assert(BN * kPairStride * sizeof(__half) <= kLdsBytes);
     __half* scratch = reinterpret_cast<__half*>(lds);
 #pragma unroll
-    for (int j = 0; j < kTokTiles; ++j) {
-      if (j >= live_tok_tiles)
-        continue;
+    for (int u = 0; u < kWaveRowTiles; ++u) {
 #pragma unroll
-      for (int l = 0; l < 4; ++l) {
-        float product = acc[0][j][l + 4] * acc[0][j][l];
-        asm volatile("" : "+v"(product));
-        float value = product * SigmoidF(acc[0][j][l]);
-        asm volatile("" : "+v"(value));
-        scratch[(j * 16 + sub_lane) * kPairStride + wave_id * 8 + 2 * l +
-                half_id] = __float2half(value);
+      for (int j = 0; j < kTokTiles; ++j) {
+        if (j >= live_tok_tiles)
+          continue;
+#pragma unroll
+        for (int l = 0; l < 4; ++l) {
+          float product = acc[u][j][l + 4] * acc[u][j][l];
+          asm volatile("" : "+v"(product));
+          float value = product * SigmoidF(acc[u][j][l]);
+          asm volatile("" : "+v"(value));
+          scratch[(j * 16 + sub_lane) * kPairStride +
+                  wave_id * 8 * kWaveRowTiles + u * 8 + 2 * l + half_id] =
+              __float2half(value);
+        }
       }
     }
     __syncthreads();
@@ -5867,19 +7308,24 @@ std::uint32_t HcInjectPartsVec4(std::uint32_t hidden) {
 void HcMixEpilogue(const float* xn, const float* gate, const float* inject_w,
                    float* mixed, float* inject, std::uint32_t n_tokens,
                    std::uint32_t hidden, std::uint32_t streams,
-                   hipStream_t stream, void* mixed_q8) {
+                   hipStream_t stream, void* mixed_q8, std::int8_t* mixed_fp4_q,
+                   float* mixed_fp4_d) {
   if (hidden % 32 != 0) {
     mixed_q8 = nullptr;
+    mixed_fp4_q = nullptr;
+    mixed_fp4_d = nullptr;
   }
   if (streams == 4) {
     hipLaunchKernelGGL(HcMixEpilogueKernel<4>, dim3(n_tokens, Blocks(hidden)),
                        dim3(kThreads), 0, stream, xn, gate, inject_w, mixed,
-                       inject, hidden, streams, mixed_q8);
+                       inject, hidden, streams, mixed_q8, mixed_fp4_q,
+                       mixed_fp4_d);
     return;
   }
   hipLaunchKernelGGL(HcMixEpilogueKernel<0>, dim3(n_tokens, Blocks(hidden)),
                      dim3(kThreads), 0, stream, xn, gate, inject_w, mixed,
-                     inject, hidden, streams, mixed_q8);
+                     inject, hidden, streams, mixed_q8, mixed_fp4_q,
+                     mixed_fp4_d);
 }
 
 void HcMixEpilogueVec4(const float* xn, const float* gate,
@@ -5952,6 +7398,18 @@ bool HcCombineQ8_1(float* res, const float* block_out, const float* inject,
                      inject_parts, gamma, xn, nullptr, hidden, streams, eps,
                      xn_q8);
   return true;
+}
+
+void HcCombineMoeQ8_1(float* res, const float* down_e, const float* shared_out,
+                      const float* moe_gate, std::uint32_t gate_stride,
+                      const float* inject, std::uint32_t inject_parts,
+                      const float* gamma, float* xn, void* xn_q8,
+                      std::uint32_t n_tokens, std::uint32_t hidden,
+                      std::uint32_t streams, float eps, hipStream_t stream) {
+  hipLaunchKernelGGL(HcCombineKernel<float>, dim3(n_tokens, streams),
+                     dim3(kThreads), 0, stream, res, down_e, inject,
+                     inject_parts, gamma, xn, nullptr, hidden, streams, eps,
+                     xn_q8, shared_out, moe_gate, gate_stride);
 }
 
 bool HcCombineMoeF16(float* res, const __half* expert_out, const float* weights,
@@ -6240,6 +7698,10 @@ bool HcDownF16Gemm(const void* w, const void* x_tiled, __half* out,
   return true;
 }
 
+// Batches from here on take the fused and row-grouped F16 shapes. Only the
+// launch order and the fusion change, so the text does not.
+constexpr std::size_t kF16WideRows = 128;
+
 bool W8A8Gemm(const void* w, const void* x_tiled, float* out, std::size_t batch,
               std::size_t m, std::size_t k, hipStream_t stream) {
   if (m == 0 || k == 0 || batch == 0 || k % 32 != 0) {
@@ -6247,7 +7709,7 @@ bool W8A8Gemm(const void* w, const void* x_tiled, float* out, std::size_t batch,
   }
   // Qwen's wave64 matrix kernel with four row groups improves the model's
   // large output projections while preserving every K32 accumulator update.
-  if (batch >= 1024 && m == 2560 && k == 6144) {
+  if (batch >= kF16WideRows && m == 2560 && k == 6144) {
     W8A8GemmWave64(w, x_tiled, out, batch, m, k, stream);
     return true;
   }
@@ -6302,61 +7764,75 @@ void RoutedCompact(const std::int32_t* ids, const std::uint32_t* counts,
                      static_cast<std::uint32_t>(slots), k);
 }
 
-template<int BN>
+template<int BN, int kBM = 128>
 bool LaunchRoutedF16(const void* w, WeightType type, const __half* x,
                      const std::int32_t* tiles, std::uint32_t n_tiles,
                      const std::int32_t* pad_bounds,
                      const std::int32_t* rows_in, const std::int32_t* rows_out,
                      const float* swiglu_gate, float* out, __half* out_half,
-                     std::size_t m, std::size_t k, hipStream_t stream) {
-  constexpr int kBM = 128;
+                     std::size_t m, std::size_t k, hipStream_t stream,
+                     int row_group) {
   constexpr int kBK = 2;
   const dim3 grid(static_cast<unsigned int>((m + kBM - 1) / kBM), n_tiles);
+  if constexpr (kBM != 128) {
+    if (type != WeightType::kQ4_0_ROCMFP4 &&
+        type != WeightType::kQ4_0_ROCMFP4_FAST) {
+      return false;
+    }
+  }
   switch (type) {
     case WeightType::kQ4_K:
-      if constexpr (BN > 48) {
+      if constexpr (kBM != 128 || BN > 48) {
         return false;
       } else {
         hipLaunchKernelGGL(
             (RoutedF16GEMMKernel<WeightType::kQ4_K, kBM, BN, kBK>), grid,
             dim3(kThreads), 0, stream, w, x, tiles, pad_bounds, rows_in,
-            rows_out, swiglu_gate, out, out_half, m, k, nullptr);
+            rows_out, swiglu_gate, out, out_half, m, k, nullptr, row_group);
         return true;
       }
     case WeightType::kQ5_1:
-      hipLaunchKernelGGL((RoutedF16GEMMKernel<WeightType::kQ5_1, kBM, BN, kBK>),
-                         grid, dim3(kThreads), 0, stream, w, x, tiles,
-                         pad_bounds, rows_in, rows_out, swiglu_gate, out,
-                         out_half, m, k, nullptr);
-      return true;
+      if constexpr (kBM != 128 || BN > 64) {
+        return false;
+      } else {
+        hipLaunchKernelGGL(
+            (RoutedF16GEMMKernel<WeightType::kQ5_1, kBM, BN, kBK>), grid,
+            dim3(kThreads), 0, stream, w, x, tiles, pad_bounds, rows_in,
+            rows_out, swiglu_gate, out, out_half, m, k, nullptr, row_group);
+        return true;
+      }
     case WeightType::kQ8_0:
-      hipLaunchKernelGGL((RoutedF16GEMMKernel<WeightType::kQ8_0, kBM, BN, kBK>),
-                         grid, dim3(kThreads), 0, stream, w, x, tiles,
-                         pad_bounds, rows_in, rows_out, swiglu_gate, out,
-                         out_half, m, k, nullptr);
-      return true;
+      if constexpr (kBM != 128 || BN > 64) {
+        return false;
+      } else {
+        hipLaunchKernelGGL(
+            (RoutedF16GEMMKernel<WeightType::kQ8_0, kBM, BN, kBK>), grid,
+            dim3(kThreads), 0, stream, w, x, tiles, pad_bounds, rows_in,
+            rows_out, swiglu_gate, out, out_half, m, k, nullptr, row_group);
+        return true;
+      }
     case WeightType::kQ5_K:
-      if constexpr (BN > 48) {
+      if constexpr (kBM != 128 || BN > 48) {
         return false;
       } else {
         hipLaunchKernelGGL(
             (RoutedF16GEMMKernel<WeightType::kQ5_K, kBM, BN, kBK>), grid,
             dim3(kThreads), 0, stream, w, x, tiles, pad_bounds, rows_in,
-            rows_out, swiglu_gate, out, out_half, m, k, nullptr);
+            rows_out, swiglu_gate, out, out_half, m, k, nullptr, row_group);
         return true;
       }
-    // LFQ: FP4 takes every tile width (no superblock constraint).
+    // FP4 takes every tile width (no superblock constraint).
     case WeightType::kQ4_0_ROCMFP4:
       hipLaunchKernelGGL(
           (RoutedF16GEMMKernel<WeightType::kQ4_0_ROCMFP4, kBM, BN, kBK>), grid,
           dim3(kThreads), 0, stream, w, x, tiles, pad_bounds, rows_in, rows_out,
-          swiglu_gate, out, out_half, m, k, nullptr);
+          swiglu_gate, out, out_half, m, k, nullptr, row_group);
       return true;
     case WeightType::kQ4_0_ROCMFP4_FAST:
       hipLaunchKernelGGL(
           (RoutedF16GEMMKernel<WeightType::kQ4_0_ROCMFP4_FAST, kBM, BN, kBK>),
           grid, dim3(kThreads), 0, stream, w, x, tiles, pad_bounds, rows_in,
-          rows_out, swiglu_gate, out, out_half, m, k, nullptr);
+          rows_out, swiglu_gate, out, out_half, m, k, nullptr, row_group);
       return true;
     default:
       return false;
@@ -6368,7 +7844,8 @@ bool RoutedF16Gemm(const void* w, WeightType type, const __half* x,
                    std::uint32_t tile_rows, const std::int32_t* pad_bounds,
                    const std::int32_t* rows_in, const std::int32_t* rows_out,
                    const float* swiglu_gate, float* out, __half* out_half,
-                   std::size_t m, std::size_t k, hipStream_t stream) {
+                   std::size_t m, std::size_t k, hipStream_t stream,
+                   int row_group) {
   const std::size_t block_elems =
       (type == WeightType::kQ4_K || type == WeightType::kQ5_K) ? 256 : 64;
   if (m == 0 || k == 0 || k % block_elems != 0 || n_tiles == 0 ||
@@ -6379,18 +7856,69 @@ bool RoutedF16Gemm(const void* w, WeightType type, const __half* x,
     case 16:
       return LaunchRoutedF16<16>(w, type, x, tiles, n_tiles, pad_bounds,
                                  rows_in, rows_out, swiglu_gate, out, out_half,
-                                 m, k, stream);
+                                 m, k, stream, row_group);
     case 48:
       return LaunchRoutedF16<48>(w, type, x, tiles, n_tiles, pad_bounds,
                                  rows_in, rows_out, swiglu_gate, out, out_half,
-                                 m, k, stream);
-    case 64:
+                                 m, k, stream, row_group);
+    case 64: {
+      if (type == WeightType::kQ4_0_ROCMFP4_FAST) {
+        const dim3 grid(static_cast<unsigned int>((m + 127) / 128), n_tiles);
+        hipLaunchKernelGGL(
+            (RoutedF16GEMMKernel<WeightType::kQ4_0_ROCMFP4_FAST, 128, 64, 2,
+                                 false, false, true>),
+            grid, dim3(kThreads), 0, stream, w, x, tiles, pad_bounds, rows_in,
+            rows_out, swiglu_gate, out, out_half, m, k, nullptr, row_group);
+        return true;
+      }
       return LaunchRoutedF16<64>(w, type, x, tiles, n_tiles, pad_bounds,
                                  rows_in, rows_out, swiglu_gate, out, out_half,
-                                 m, k, stream);
+                                 m, k, stream, row_group);
+    }
+    case 128:
+      return LaunchRoutedF16<128>(w, type, x, tiles, n_tiles, pad_bounds,
+                                  rows_in, rows_out, swiglu_gate, out, out_half,
+                                  m, k, stream, row_group);
     default:
       return false;
   }
+}
+
+bool RoutedMappedF16Gemm(const void* w, WeightType type, const __half* x,
+                         const std::int32_t* blocks, std::uint32_t n_blocks,
+                         const std::int32_t* pad_bounds,
+                         const std::int32_t* rows_in,
+                         const std::int32_t* rows_out, __half* out_half,
+                         std::size_t m, std::size_t k, hipStream_t stream,
+                         int row_group) {
+  if (type != WeightType::kQ4_0_ROCMFP4_FAST || n_blocks == 0) {
+    return false;
+  }
+  hipLaunchKernelGGL((RoutedF16GEMMKernel<WeightType::kQ4_0_ROCMFP4_FAST, 128,
+                                          64, 2, false, true, true>),
+                     dim3(n_blocks), dim3(kThreads), 0, stream, w, x, blocks,
+                     pad_bounds, rows_in, rows_out, nullptr, nullptr, out_half,
+                     m, k, nullptr, row_group);
+  return true;
+}
+
+bool RoutedMappedGatedF16Gemm(const void* gate, const void* up, WeightType type,
+                              const __half* x, const std::int32_t* blocks,
+                              std::uint32_t n_blocks,
+                              const std::int32_t* pad_bounds,
+                              const std::int32_t* rows_in,
+                              const std::int32_t* rows_out, __half* out,
+                              std::size_t m, std::size_t k, hipStream_t stream,
+                              int row_group) {
+  if (type != WeightType::kQ4_0_ROCMFP4_FAST || n_blocks == 0) {
+    return false;
+  }
+  hipLaunchKernelGGL((RoutedF16GEMMKernel<WeightType::kQ4_0_ROCMFP4_FAST, 128,
+                                          128, 2, true, true>),
+                     dim3(n_blocks), dim3(kThreads), 0, stream, gate, x, blocks,
+                     pad_bounds, rows_in, rows_out, nullptr, nullptr, out, m, k,
+                     up, row_group);
+  return true;
 }
 
 bool RoutedGatedF16Gemm(const void* gate, const void* up, WeightType type,
@@ -6398,12 +7926,13 @@ bool RoutedGatedF16Gemm(const void* gate, const void* up, WeightType type,
                         std::uint32_t n_tiles, const std::int32_t* pad_bounds,
                         const std::int32_t* rows_in,
                         const std::int32_t* rows_out, __half* out,
-                        std::size_t m, std::size_t k, hipStream_t stream) {
+                        std::size_t m, std::size_t k, hipStream_t stream,
+                        int row_group) {
   // 128-token tiles decode each expert's weights once per wide bucket; at
   // 1024+ batch rows they also beat 64-token tiles on short buckets.
   constexpr int BN = 128;
   // The stock K-quant contract (k % 256) stays as in main; only the FP4 types
-  // (32-element blocks) relax to 64 (RV-LFQ1-final F2, Jay at merge).
+  // (32-element blocks) relax to 64.
   const std::size_t block_elems = (type == WeightType::kQ4_0_ROCMFP4 ||
                                    type == WeightType::kQ4_0_ROCMFP4_FAST)
                                       ? 64
@@ -6418,27 +7947,27 @@ bool RoutedGatedF16Gemm(const void* gate, const void* up, WeightType type,
       hipLaunchKernelGGL(
           (RoutedF16GEMMKernel<WeightType::kQ4_K, 128, BN, 2, true>), grid,
           dim3(kThreads), 0, stream, gate, x, tiles, pad_bounds, rows_in,
-          rows_out, nullptr, nullptr, out, m, k, up);
+          rows_out, nullptr, nullptr, out, m, k, up, row_group);
       return true;
     case WeightType::kQ5_K:
       hipLaunchKernelGGL(
           (RoutedF16GEMMKernel<WeightType::kQ5_K, 128, BN, 2, true>), grid,
           dim3(kThreads), 0, stream, gate, x, tiles, pad_bounds, rows_in,
-          rows_out, nullptr, nullptr, out, m, k, up);
+          rows_out, nullptr, nullptr, out, m, k, up, row_group);
       return true;
-    // LFQ: FP4 gate/up pair (SwiGLU in the epilogue, F16 out).
+    // FP4 gate/up pair (SwiGLU in the epilogue, F16 out).
     case WeightType::kQ4_0_ROCMFP4:
       hipLaunchKernelGGL(
           (RoutedF16GEMMKernel<WeightType::kQ4_0_ROCMFP4, 128, BN, 2, true>),
           grid, dim3(kThreads), 0, stream, gate, x, tiles, pad_bounds, rows_in,
-          rows_out, nullptr, nullptr, out, m, k, up);
+          rows_out, nullptr, nullptr, out, m, k, up, row_group);
       return true;
     case WeightType::kQ4_0_ROCMFP4_FAST:
       hipLaunchKernelGGL((RoutedF16GEMMKernel<WeightType::kQ4_0_ROCMFP4_FAST,
                                               128, BN, 2, true>),
                          grid, dim3(kThreads), 0, stream, gate, x, tiles,
                          pad_bounds, rows_in, rows_out, nullptr, nullptr, out,
-                         m, k, up);
+                         m, k, up, row_group);
       return true;
     default:
       return false;
@@ -6527,7 +8056,8 @@ struct AttentionProjectionOutput {
 /// skip decoding and use the same ordered K16 products. y is [batch][m].
 template<int BM, int BN, int BK, int WM, int WN, int kRowGroup = 1,
          bool kHcMix = false, bool kSsmConv = false, bool kAttention = false,
-         bool kHalfWeights = false, bool kBf16 = false, bool kStrided = false>
+         bool kHalfWeights = false, bool kBf16 = false, bool kStrided = false,
+         bool kFixedOrder = false>
 __launch_bounds__(256) __global__ void DenseF16GEMMKernel(
     const void* __restrict__ w, const __half* __restrict__ x,
     float* __restrict__ y, std::size_t batch, std::size_t m, std::size_t k,
@@ -6592,7 +8122,9 @@ __launch_bounds__(256) __global__ void DenseF16GEMMKernel(
   // rotation class, one per token wave, so every dot product keeps the
   // library's order.
   const int bf16_class = kBf16 ? static_cast<int>(blockIdx.x % 4) : 0;
-  const int k_rotation = kBf16 ? (bf16_class * 4) % num_kb : 0;
+  // kFixedOrder: every token starts its K loop at block 0, so a token's
+  // result does not depend on its place in the batch.
+  const int k_rotation = kBf16 && !kFixedOrder ? (bf16_class * 4) % num_kb : 0;
   const auto token_of = [&](int local) {
     if constexpr (kBf16) {
       static_assert(BN == 128 && WN == 4 && kRowGroup == 1);
@@ -7150,7 +8682,7 @@ bool AttentionF16Gemm(const void* weights, const __half* input,
                       std::uint32_t n_tokens, const std::uint32_t* position,
                       float theta, float eps, hipStream_t stream,
                       const qwen::vision::DeviceRope* rope) {
-  if (n_tokens < 1024 || weights == nullptr || input == nullptr ||
+  if (n_tokens < kF16WideRows || weights == nullptr || input == nullptr ||
       q_gamma == nullptr || k_gamma == nullptr || query == nullptr ||
       gate == nullptr || keys == nullptr || values == nullptr ||
       position == nullptr)
@@ -7202,7 +8734,7 @@ bool UnquantizedF16Gemm(const void* w, const __half* x, float* out,
   // Wide batches reuse each staged fragment across twice the rows and
   // tokens (router 0.61 to 0.52 ms, GDN alpha/beta 0.14 to 0.09 ms at 4,096
   // tokens). Every output keeps its two K16 chains in K order.
-  if (batch >= 1024) {
+  if (batch >= kF16WideRows) {
     hipLaunchKernelGGL(
         (DenseF16GEMMKernel<128, 128, 2, 2, 4, 1, false, false, false, true>),
         dim3((batch + 127) / 128, (m + 127) / 128), dim3(kThreads), 0, stream,
@@ -7217,9 +8749,18 @@ bool UnquantizedF16Gemm(const void* w, const __half* x, float* out,
 }
 
 bool DenseBf16Gemm(const void* w, const void* x, float* out, std::size_t batch,
-                   std::size_t m, std::size_t k, hipStream_t stream) {
+                   std::size_t m, std::size_t k, hipStream_t stream,
+                   bool fixed_order) {
   if (m == 0 || batch == 0 || k == 0 || k % 32 != 0)
     return false;
+  if (fixed_order) {
+    hipLaunchKernelGGL((DenseF16GEMMKernel<64, 128, 2, 2, 4, 1, false, false,
+                                           false, false, true, false, true>),
+                       dim3(((batch + 511) / 512) * 4, (m + 63) / 64),
+                       dim3(kThreads), 0, stream, w,
+                       static_cast<const __half*>(x), out, batch, m, k);
+    return true;
+  }
   // Four blocks, one per K rotation class, cover each 512 tokens.
   hipLaunchKernelGGL((DenseF16GEMMKernel<64, 128, 2, 2, 4, 1, false, false,
                                          false, false, true>),
@@ -7236,7 +8777,7 @@ bool DenseF16Gemm(const void* w, const __half* x, float* out, std::size_t batch,
     return false;
   }
   if (input_stride != 0 && input_stride != k) {
-    if (batch < 1024 || m != 2560 || k != 6144 || input_stride < k ||
+    if (batch < kF16WideRows || m != 2560 || k != 6144 || input_stride < k ||
         input_stride % 8 != 0)
       return false;
     hipLaunchKernelGGL((DenseF16GEMMKernel<256, 128, 2, 8, 1, 5, false, false,
@@ -7264,10 +8805,10 @@ bool DenseF16Gemm(const void* w, const __half* x, float* out, std::size_t batch,
     constexpr int kBN = 128;
     const dim3 grid(static_cast<unsigned int>((batch + kBN - 1) / kBN),
                     static_cast<unsigned int>((m + kWideBM - 1) / kWideBM));
-    if (m == 10240 && k == 320 && batch >= 1024) {
+    if (m == 10240 && k == 320 && batch >= kF16WideRows) {
       hipLaunchKernelGGL((DenseF16GEMMKernel<kWideBM, kBN, 1, 4, 2, 8>), grid,
                          dim3(kThreads), 0, stream, w, x, out, batch, m, k);
-    } else if (batch >= 1024 && m == 2560 && k == 6144) {
+    } else if (batch >= kF16WideRows && m == 2560 && k == 6144) {
       // The output projection's activation is 50 MB at 4,096 tokens. In
       // grid order the resident blocks each walk a different token tile of
       // it; walking five row tiles of a token tile first shares each
@@ -7275,12 +8816,13 @@ bool DenseF16Gemm(const void* w, const __half* x, float* out, std::size_t batch,
       // changes.
       hipLaunchKernelGGL((DenseF16GEMMKernel<kWideBM, kBN, 2, 8, 1, 5>), grid,
                          dim3(kThreads), 0, stream, w, x, out, batch, m, k);
-    } else if (batch >= 1024 && (m == 16384 || m == 13312) && k == 2560) {
+    } else if (batch >= kF16WideRows && (m == 16384 || m == 13312) &&
+               k == 2560) {
       // Eight row groups reuse each weight fragment across all token tiles
       // and keep fewer weight fragments live. K accumulation is unchanged.
       hipLaunchKernelGGL((DenseF16GEMMKernel<kWideBM, kBN, 2, 8, 1>), grid,
                          dim3(kThreads), 0, stream, w, x, out, batch, m, k);
-    } else if (batch >= 1024 && m == 2560) {
+    } else if (batch >= kF16WideRows && m == 2560) {
       // Shared-expert down: pairs of row tiles per token tile (-11 %).
       hipLaunchKernelGGL((DenseF16GEMMKernel<kWideBM, kBN, 1, 4, 2, 2>), grid,
                          dim3(kThreads), 0, stream, w, x, out, batch, m, k);
@@ -7303,7 +8845,7 @@ bool DenseF16SsmGemm(const void* w, const __half* x, const float* conv_w,
                      std::uint32_t n_tokens, std::uint32_t m, std::uint32_t k,
                      std::uint32_t channels, std::uint32_t kernel,
                      hipStream_t stream, std::uint32_t checkpoint_tokens) {
-  if (n_tokens < 1024 || m != 16384 || k != 2560 || channels != 10240 ||
+  if (n_tokens < kF16WideRows || m != 16384 || k != 2560 || channels != 10240 ||
       kernel != kSsmConvTaps) {
     return false;
   }
@@ -7480,11 +9022,16 @@ void GatedDeltaNet(const float* qkv, std::uint32_t qkv_stride, const float* z,
                    std::uint32_t d, std::uint32_t kernel, bool row_split,
                    bool convolved, float eps, hipStream_t stream,
                    __half* out_half, GdnCheckpoint checkpoint,
-                   std::uint32_t out_half_stride, void* out_q8_1) {
+                   std::uint32_t out_half_stride, void* out_q8_1,
+                   GdnCheckpoint checkpoint2, std::int8_t* out_fp4_q,
+                   float* out_fp4_d) {
   const std::uint32_t channels = 2 * k_heads * d + v_heads * d;
   const std::size_t count = static_cast<std::size_t>(n_tokens) * channels;
   const bool saved_history = !convolved && kernel == kSsmConvTaps &&
                              n_tokens <= kSsmConvTokensPerThread;
+  if (checkpoint2.history != nullptr)
+    HistoryPrefix(qkv, qkv_stride, conv_state, checkpoint2.history,
+                  checkpoint2.tokens, channels, kernel - 1, stream);
   if (checkpoint.history != nullptr)
     HistoryPrefix(qkv, qkv_stride, conv_state, checkpoint.history,
                   checkpoint.tokens, channels, kernel - 1, stream);
@@ -7535,10 +9082,10 @@ void GatedDeltaNet(const float* qkv, std::uint32_t qkv_stride, const float* z,
         dim3(Blocks(static_cast<std::size_t>(n_tokens) * v_heads)),
         dim3(kThreads), 0, stream, alpha_beta, a, dt, kn,
         static_cast<std::size_t>(n_tokens) * v_heads, v_heads);
-    hipLaunchKernelGGL(GdnRowSplitKernel,
-                       dim3(kGdnDim / kGdnRowSplitRowsPerBlock, v_heads),
-                       dim3(kGdnWaves * 32), 0, stream, conv_scratch, qn, kn,
-                       state, raw, n_tokens, k_heads, v_heads, checkpoint);
+    hipLaunchKernelGGL(
+        GdnRowSplitKernel, dim3(kGdnDim / kGdnRowSplitRowsPerBlock, v_heads),
+        dim3(kGdnWaves * 32), 0, stream, conv_scratch, qn, kn, state, raw,
+        n_tokens, k_heads, v_heads, checkpoint, checkpoint2);
   } else {
     hipLaunchKernelGGL(GdnPrepKernel<false>,
                        dim3((n_tokens * k_heads + waves - 1) / waves),
@@ -7548,7 +9095,7 @@ void GatedDeltaNet(const float* qkv, std::uint32_t qkv_stride, const float* z,
         GdnKernel<false>, dim3(v_heads, kGdnDim / kGdnRowsPerBlock),
         dim3(kGdnRowsPerBlock * kGdnLanes), 0, stream, conv_scratch, qn, kn,
         alpha_beta, a, dt, state, raw, state_snapshots, n_tokens, k_heads,
-        v_heads, nullptr, 0, checkpoint);
+        v_heads, nullptr, 0, checkpoint, checkpoint2);
   }
   hipLaunchKernelGGL(
       GdnEpilogueKernel<false>, dim3((n_tokens * v_heads + waves - 1) / waves),
@@ -7556,7 +9103,11 @@ void GatedDeltaNet(const float* qkv, std::uint32_t qkv_stride, const float* z,
       out_half, n_tokens * v_heads, v_heads, eps, nullptr, 0,
       out_q8 == nullptr && out_half == nullptr && d == kGdnDim ? out_q8_1
                                                                : nullptr,
-      out_half_stride);
+      out_half_stride,
+      out_q8 == nullptr && out_half == nullptr && d == kGdnDim ? out_fp4_q
+                                                               : nullptr,
+      out_q8 == nullptr && out_half == nullptr && d == kGdnDim ? out_fp4_d
+                                                               : nullptr);
 }
 
 bool GatedDeltaNetBatch(const GdnBatchItem* items, std::uint32_t count,
@@ -7583,7 +9134,7 @@ bool GatedDeltaNetBatch(const GdnBatchItem* items, std::uint32_t count,
       GdnKernel<true>, dim3(v_heads, kGdnDim / kGdnRowsPerBlock, count),
       dim3(kGdnRowsPerBlock * kGdnLanes), 0, stream, nullptr, nullptr, nullptr,
       nullptr, a, dt, nullptr, nullptr, RollbackRows{}, max_tokens, k_heads,
-      v_heads, items, active, GdnCheckpoint{});
+      v_heads, items, active, GdnCheckpoint{}, GdnCheckpoint{});
   hipLaunchKernelGGL(GdnEpilogueKernel<true>,
                      dim3((max_tokens * v_heads + waves - 1) / waves, 1, count),
                      dim3(kThreads), 0, stream, nullptr, nullptr, z_stride,
@@ -7628,6 +9179,28 @@ bool PrepareAttention(const float* packed, std::uint32_t stride,
                        k_gamma, q, gate, k_cache, v_cache, heads, kv_heads, d,
                        rotary_dim, start_pos, theta, eps, rope);
   }
+  return true;
+}
+
+bool PrepareAttentionSplit(
+    const float* qg, std::uint32_t qg_stride, const float* k_in,
+    const float* v_in, const float* q_gamma, const float* k_gamma, float* q,
+    float* gate, __half* k_cache, __half* v_cache, std::uint32_t n_tokens,
+    std::uint32_t heads, std::uint32_t kv_heads, std::uint32_t d,
+    std::uint32_t rotary_dim, const std::uint32_t* start_pos, float theta,
+    float eps, hipStream_t stream, const qwen::vision::DeviceRope* rope) {
+  if (d == 0 || d > 256 || rotary_dim == 0 || rotary_dim > d ||
+      rotary_dim % 2 != 0 || kv_heads == 0 ||
+      qg_stride < static_cast<std::size_t>(2) * heads * d) {
+    return false;
+  }
+  if (n_tokens == 0)
+    return true;
+  hipLaunchKernelGGL((PrepareAttentionKernel<1>),
+                     dim3(n_tokens, heads + kv_heads), dim3(kThreads), 0,
+                     stream, qg, qg_stride, q_gamma, k_gamma, q, gate, k_cache,
+                     v_cache, heads, kv_heads, d, rotary_dim, start_pos, theta,
+                     eps, rope, k_in, v_in);
   return true;
 }
 
@@ -7684,10 +9257,19 @@ void SelectBlocks(const float* q, const __half* blocks, std::uint32_t* mask,
   // launch passes its live range, sparing the empty workgroups.
   const std::uint32_t grid_blocks =
       live_blocks != 0 ? std::min(live_blocks, max_blocks) : max_blocks;
-  const dim3 grid(n_tokens, (grid_blocks + kThreads - 1) / kThreads);
-  hipLaunchKernelGGL(SelectScoreKernel, grid, dim3(kThreads), 0, stream, q,
-                     blocks, scores, n_tokens, start_pos, first_token, ratio,
-                     budget, max_blocks);
+  const std::uint32_t key_groups = (grid_blocks + kThreads - 1) / kThreads;
+  if (live_blocks != 0 && n_tokens >= kSelectGroupTokens) {
+    hipLaunchKernelGGL(
+        SelectScoreGroupKernel,
+        dim3((n_tokens + kSelectGroupTokens - 1) / kSelectGroupTokens,
+             key_groups),
+        dim3(kThreads), 0, stream, q, blocks, scores, n_tokens, start_pos,
+        first_token, ratio, budget, max_blocks);
+  } else {
+    hipLaunchKernelGGL(SelectScoreKernel, dim3(n_tokens, key_groups),
+                       dim3(kThreads), 0, stream, q, blocks, scores, n_tokens,
+                       start_pos, first_token, ratio, budget, max_blocks);
+  }
   constexpr std::uint32_t kNarrowMarkThreads = 1024;
   const auto mark = n_tokens <= 4 ? SelectMarkKernel<kNarrowMarkThreads>
                                   : SelectMarkKernel<kThreads>;
@@ -7703,7 +9285,7 @@ void Attention(const float* q, const __half* k_cache, const __half* v_cache,
                const std::uint32_t* start_pos, std::uint32_t heads,
                std::uint32_t kv_heads, std::uint32_t d, std::uint32_t ratio,
                hipStream_t stream, std::uint32_t* lists, std::uint32_t* counts,
-               std::uint32_t list_capacity) {
+               std::uint32_t list_capacity, bool shared_rows) {
   if (d != 256) {
     return;  // the kernel is written for the model's 256-wide heads
   }
@@ -7720,6 +9302,55 @@ void Attention(const float* q, const __half* k_cache, const __half* v_cache,
     hipLaunchKernelGGL(CompactSelectionKernel, dim3(n_tokens), dim3(kThreads),
                        0, stream, mask, mask_words, start_pos, ratio, lists,
                        counts, list_capacity);
+  }
+  // A narrow batch that sweeps the whole cache reads each K/V tile once for
+  // every row with the shared-row kernel (LFN_VERIFY_ATTN_SHARED). Only the
+  // dense sweep qualifies: the selected-block walk hands each row its own key
+  // list, which one tile stream cannot serve without changing the arithmetic.
+  // Rows and query heads split the register budget (kRows * kGroup <= 8 keeps
+  // the per-pair accumulators near the per-row kernel's): two rows keep four
+  // heads per block, three or four rows keep two, wider batches one. The
+  // per-row guard below does not apply: this kernel sizes its own group.
+  const std::uint32_t heads_per_block =
+      n_tokens <= 2 ? 4u : (n_tokens <= 4 ? 2u : 1u);
+  if (shared_rows && mask == nullptr && lists == nullptr && n_tokens >= 2 &&
+      n_tokens <= 8 && kv_heads != 0 && heads % kv_heads == 0 && d == 256 &&
+      heads_per_block <= heads / kv_heads &&
+      (heads / kv_heads) % heads_per_block == 0 &&
+      heads % heads_per_block == 0) {
+    const auto launch_shared = [&](auto kernel) {
+      hipLaunchKernelGGL(kernel, dim3(heads / heads_per_block, 1, z),
+                         dim3(kThreads), 0, stream, q, k_cache, v_cache, out,
+                         partials, start_pos, heads, kv_heads, d);
+    };
+    switch (n_tokens) {
+      case 2:
+        launch_shared(AttentionSharedRowsKernel<2, 4>);
+        break;
+      case 3:
+        launch_shared(AttentionSharedRowsKernel<3, 2>);
+        break;
+      case 4:
+        launch_shared(AttentionSharedRowsKernel<4, 2>);
+        break;
+      case 5:
+        launch_shared(AttentionSharedRowsKernel<5, 1>);
+        break;
+      case 6:
+        launch_shared(AttentionSharedRowsKernel<6, 1>);
+        break;
+      case 7:
+        launch_shared(AttentionSharedRowsKernel<7, 1>);
+        break;
+      default:
+        launch_shared(AttentionSharedRowsKernel<8, 1>);
+        break;
+    }
+    if (z > 1) {
+      hipLaunchKernelGGL(AttentionMergeKernel, dim3(heads, n_tokens),
+                         dim3(kThreads), 0, stream, partials, out, heads, d, z);
+    }
+    return;
   }
   // Query heads sharing a KV head share each block's K/V loads. Two per
   // block keep enough blocks in flight for one or two rows; four suit wider
@@ -7793,13 +9424,15 @@ __global__ void ExpertCountsKernel(const std::int32_t* ids,
 
 void RouterTopK(const float* logits, std::uint32_t stride, std::int32_t* ids,
                 float* weights, std::uint32_t n_tokens, std::uint32_t n_experts,
-                std::uint32_t k, hipStream_t stream) {
+                std::uint32_t k, std::uint32_t k_select, hipStream_t stream) {
   if (n_experts <= 512) {
     hipLaunchKernelGGL((RouterTopKKernel<512>), dim3(n_tokens), dim3(kThreads),
-                       0, stream, logits, stride, ids, weights, n_experts, k);
+                       0, stream, logits, stride, ids, weights, n_experts, k,
+                       k_select);
   } else {
     hipLaunchKernelGGL((RouterTopKKernel<1024>), dim3(n_tokens), dim3(kThreads),
-                       0, stream, logits, stride, ids, weights, n_experts, k);
+                       0, stream, logits, stride, ids, weights, n_experts, k,
+                       k_select);
   }
 }
 

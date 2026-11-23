@@ -30,7 +30,7 @@ TEXT = (
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
-        "--reference-root", default="/home/fbozzo/projects/Qwen3-TTS"
+        "--reference-root", default="/path/to/Qwen3-TTS"
     )
     ap.add_argument(
         "--dependency-root",
@@ -39,8 +39,8 @@ def main():
             "Torch and NumPy are imported from the selected interpreter first"
         ),
     )
-    ap.add_argument("--model", default="/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-CustomVoice")
-    ap.add_argument("--out", default="/home/fbozzo/projects/superroc/artifacts/qwen3_tts")
+    ap.add_argument("--model", default="/path/to/Qwen3-TTS-12Hz-1.7B-CustomVoice")
+    ap.add_argument("--out", default="/path/to/superroc/artifacts/qwen3_tts")
     ap.add_argument("--speaker", default="vivian")
     ap.add_argument("--language", default="english")
     ap.add_argument(

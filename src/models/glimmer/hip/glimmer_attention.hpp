@@ -12,24 +12,24 @@
 
 namespace superroc::hip {
 
-// LGA: the fp16 KV plane layout. The fp32 cache stays head-major
+// The fp16 KV plane layout. The fp32 cache stays head-major
 // ((layer*nkv+kv)*maxctx+pos)*hd+d (decode and the reference read it). The
 // fp16 plane is TOKEN-major ((layer*maxctx+pos)*nkv+kv)*hd+d, K then V, so
 // the WMMA canonical and packed paths read it directly. Same element count;
 // only the index changes.
-/// LGA: GLIMMER_ATTN=0 keeps the fp32 reference path. Unset or 1 uses the
+/// GLIMMER_ATTN=0 keeps the fp32 reference path. Unset or 1 uses the
 /// WMMA kernel first, then the shared kernel. Fixed for the process.
 [[nodiscard]] bool GlimmerSharedAttnOn() noexcept;
 
-/// LGA: cast the fp32 KV reference rows [0, valid_rows) into the token-major
+/// Cast the fp32 KV reference rows [0, valid_rows) into the token-major
 /// fp16 plane. Used after a snapshot restore, which writes only the fp32
 /// plane. Rows past valid_rows are stale in both planes until a dual-write
 /// overwrites them.
-/// PGA: `layer_base` casts a single layer of a many-layer plane, and
+/// `layer_base` casts a single layer of a many-layer plane, and
 /// `plane_layers` says how many layers the WHOLE plane holds -- the K/V half
 /// stride is the full per-half plane, not the block being cast, because V
 /// always starts one whole K plane past K. Passing 0 for `plane_layers` keeps
-/// LGA's original behaviour (stride = `layers`), so arena.cpp's two
+/// The original behaviour (stride = `layers`), so arena.cpp's two
 /// snapshot-restore calls, which pass neither, are byte-for-byte unchanged.
 [[nodiscard]] GlimmerLaunchStatus LaunchGlimmerCastKvFp16(
     const float* src, void* dst, std::uint32_t layers,
@@ -47,7 +47,7 @@ namespace superroc::hip {
     hipStream_t stream, std::uint32_t layer_base = 0,
     std::uint32_t plane_layers = 0);
 
-/// LGA: GQA-shared windowed attention over the token-major fp16 plane. One
+/// GQA-shared windowed attention over the token-major fp16 plane. One
 /// block owns one KV head and up to 4 query rows, reads each fp16 K/V row
 /// once, and serves all 16 query heads of that KV head. Q stays fp32.
 /// fp32 accumulate, online softmax. Window 0 is full attention. Refuses any
@@ -61,7 +61,7 @@ namespace superroc::hip {
     std::size_t q_elems, std::size_t gate_elems, std::size_t cache_elems,
     std::size_t out_elems, hipStream_t stream);
 
-/// LGA: WMMA matrix-core prefill attention over the token-major fp16 plane.
+/// WMMA matrix-core prefill attention over the token-major fp16 plane.
 /// The KV cache is assumed already written (the prefill dual-write did it).
 /// Window 0 selects the full-attention instantiation, nonzero the windowed
 /// one. Returns ok=false (before any launch) when the shape is unsupported

@@ -34,7 +34,7 @@
 #include "src/core/sampling.hpp"
 #include "src/models/flint/flint_chat.hpp"
 #include "src/models/glimmer/glimmer_chat.hpp"
-#include "src/models/lfm2/lfm2_chat.hpp"  // LFM2
+#include "src/models/lfm2/lfm2_chat.hpp"
 #include "src/models/qwen/chat_template.hpp"
 #include "src/models/qwen/control_tokens.hpp"
 #include "src/models/qwen/generator.hpp"
@@ -51,12 +51,15 @@
 #include "src/models/ling3/weights.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)
+#include "src/core/canonical.hpp"
+#include "src/core/env.hpp"
 #include "src/core/hip/committed_backing.hpp"
 #include "src/core/hip/heap_placement.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/hip/host_allocations.hpp"
-#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10: slot sets.
-#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"  // SQ10 SPEC2 (R4): codes.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // Slot sets.
+#include "src/core/rocm_fp4/superroc_fp4_quant.hpp"    // codes.
+#include "src/core/speculative/lookup_draft_backend.hpp"
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/deepseek_v4_flash/dspark_sampler.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
@@ -94,7 +97,7 @@ void SetError(std::string* error, std::string message) {
 }
 
 #if defined(ENGINE_ENABLE_HIP)
-// SQ10 SPEC3 (S3-5): the FP4 slot refusal counter in the server log, at load
+// The FP4 slot refusal counter in the server log, at load
 // end and at shutdown. A refusal falls back to the eager kernels (a valid
 // result from the same weights), so the counter is the operator's only sign
 // that a set was under-provisioned or a registration dropped.
@@ -107,17 +110,17 @@ void LogFp4SlotRefusals(const char* phase) {
 #if defined(ENGINE_ENABLE_HIP)
 
 // KAT-MTP: /health summary of the speculative draft configuration. The MTP
-// draft head reports no lossless sampled proposals, so sampled
-// (temperature > 0), penalized and constrained requests run WITHOUT
-// drafting; /health states that instead of leaving it silent.
-[[nodiscard]] std::string SpeculativeStatus(
-    const TextSpeculativeConfig& config) {
+// draft head reports lossless sampled proposals, so sampled
+// (temperature > 0), penalized and constrained requests keep drafting;
+// /health states that instead of leaving it silent.
+[[nodiscard]] std::string SpeculativeStatus(const TextSpeculativeConfig& config,
+                                            bool moe_block) {
   if (config.backend == TextSpeculativeBackend::kMtp) {
     char buffer[96];
     std::snprintf(buffer, sizeof(buffer),
-                  "mtp depth=%u p_min=%.2f sampled_requests=no_draft",
+                  "mtp depth=%u p_min=%.2f sampled_requests=draft",
                   config.max_draft_tokens,
-                  static_cast<double>(hip::MtpPMinFromEnv()));
+                  static_cast<double>(hip::MtpEffectivePMin(moe_block)));
     return buffer;
   }
   if (config.backend == TextSpeculativeBackend::kDFlash)
@@ -137,7 +140,7 @@ tokenization::ChatTemplateOptions QwenChatOptions(const ChatRequest& request,
                                                       request.add_vision_id);
   options.require_tool_call =
       request.tool_choice == ChatRequest::ToolChoice::kRequired;
-  // superroc #285: the rendered prompt may be as long as the context can hold.
+  // The rendered prompt may be as long as the context can hold.
   options.max_output_bytes =
       tokenization::RenderedPromptBoundBytes(max_context);
   return options;
@@ -344,6 +347,10 @@ std::vector<std::uint8_t> DeepSeekCompatibilityIdentity(
            << support_fingerprint << '\n'
            << "max_draft_tokens=" << max_draft_tokens << '\n'
            << "draft_policy=dspark-cost-v5-window128\n";
+  // A cache written with the canonical cache holds other checkpoints, and
+  // prompt rows from other kernel routes, than one written without it.
+  if (::superroc::core::CanonicalCacheOn())
+    identity << "prompt_cache=canonical-v1\n";
   const std::string canonical = identity.str();
   return {canonical.begin(), canonical.end()};
 }
@@ -384,6 +391,10 @@ std::vector<std::uint8_t> QwenFlashNextCompatibilityIdentity(
              << "draft_max_tokens=" << max_draft_tokens << '\n'
              << "draft_cost_concurrency=" << decode_concurrency << '\n';
   }
+  // A cache written with the canonical cache holds other checkpoints, and
+  // prompt rows from other kernel routes, than one written without it.
+  if (::superroc::core::CanonicalCacheOn())
+    identity << "prompt_cache=canonical-v1\n";
   const std::string canonical = identity.str();
   return {canonical.begin(), canonical.end()};
 }
@@ -392,14 +403,18 @@ std::vector<std::uint8_t> QwenCompatibilityIdentity(
     std::string_view artifact_fingerprint,
     std::string_view draft_artifact_fingerprint, std::uint32_t max_context,
     const hip::QwenExecutionPolicy& execution_policy, bool speculative,
-    const speculative::SpeculativeOptions& speculative_options,
-    bool lfm2,  // LFM2
+    const speculative::SpeculativeOptions& speculative_options, bool lfm2,
     bool flint, bool mtp) {
   if (!IsSha256Hex(artifact_fingerprint)) {
     throw std::invalid_argument(
         "Qwen disk cache requires an artifact fingerprint");
   }
-  if (speculative && !IsSha256Hex(draft_artifact_fingerprint)) {
+  // Prompt lookup with no drafter has no draft artifact to name and no draft
+  // state to persist.
+  const bool lookup_only = speculative && !mtp &&
+                           speculative_options.prompt_lookup &&
+                           draft_artifact_fingerprint.empty();
+  if (speculative && !lookup_only && !IsSha256Hex(draft_artifact_fingerprint)) {
     throw std::invalid_argument(
         "Qwen DFlash disk cache requires a draft artifact fingerprint");
   }
@@ -412,52 +427,50 @@ std::vector<std::uint8_t> QwenCompatibilityIdentity(
              : QwenStateAbi(speculative, execution_policy.UsesFp16AttentionKv(),
                             execution_policy.UsesBf16RecurrentState());
   std::ostringstream identity;
-  identity << "schema=superroc-text-continuation-v2\n"
-           << "model_kind="
-           << (flint  ? std::string_view("flint")
-               : lfm2 ? superroc::core::ModelFamilyArch(
-                            superroc::core::ModelFamilyId::kLfm2Moe)
-                      : std::string_view("qwen3.8"))  // LFM2
-           << "\n"
-           << "artifact_id=" << core::kGgufIdentityScheme << ':'
-           << artifact_fingerprint << '\n'
-           << "tokenizer=embedded-in-artifact\n"
-           << "chat_template="
-           << (flint  ? "flint-roles-v1"
-               : lfm2 ? "lfm2-chatml-think-v1"
-                      : "qwen38-reasoning-compiled-v3")
-           << "\n"
-           << "chat_template_reference_sha256="
-           << (flint ? tokenization::kFlintChatTemplateSha256
-               : lfm2
-                   ? tokenization::QwenChatTemplate::Lfm2TemplateSha256()
-                   : tokenization::QwenChatTemplate::OfficialTemplateSha256())
-           << '\n'
-           << "state_abi=" << state_abi << '\n'
-           << "payload_layout="  // LFM2
-           << (lfm2 ? "lfm2-gfx1151-live-prefix-v1"
-                    : "qwen-gfx1151-live-prefix-v3")
-           << "\n"
-           // Older learned boundaries could keep logits from an earlier
-           // prefix. Their payload has no readiness tag to distinguish them.
-           << "checkpoint_frontier=complete-prefix-v1\n"
-           << "numerics="  // LFM2
-           << (lfm2 ? "lfm2-fp32-v1" : "qwen-bf16-fp32-prefill-v1") << "\n"
-           << "rmsnorm=fused-square-sum-v1\n"
-           << "prefill_attention=visible-causal-tail-v1\n"
-           << "attention_split_min_context="
-           << hip::detail::kSplitKDecodeAttentionMinContext << '\n'
-           << "attention_split_count="
-           << hip::detail::kSplitKDecodeAttentionMaxSplits << '\n'
-           << "kv_storage="
-           << (execution_policy.UsesFp16AttentionKv() ? "fp16" : "fp32") << '\n'
-           << "recurrent_storage="
-           << (execution_policy.UsesBf16RecurrentState() ? "bf16" : "fp32")
-           << '\n'
-           << "context_tokens=" << max_context << '\n'
-           << "position_policy=absolute-v1\n"
-           << "rope_window_policy=qwen-gguf-config-v1\n"
-           << "adapters=none\n";
+  identity
+      << "schema=superroc-text-continuation-v2\n"
+      << "model_kind="
+      << (flint  ? std::string_view("flint")
+          : lfm2 ? superroc::core::ModelFamilyArch(
+                       superroc::core::ModelFamilyId::kLfm2Moe)
+                 : std::string_view("qwen3.8"))
+      << "\n"
+      << "artifact_id=" << core::kGgufIdentityScheme << ':'
+      << artifact_fingerprint << '\n'
+      << "tokenizer=embedded-in-artifact\n"
+      << "chat_template="
+      << (flint  ? "flint-roles-v1"
+          : lfm2 ? "lfm2-chatml-think-v1"
+                 : "qwen38-reasoning-compiled-v3")
+      << "\n"
+      << "chat_template_reference_sha256="
+      << (flint  ? tokenization::kFlintChatTemplateSha256
+          : lfm2 ? tokenization::QwenChatTemplate::Lfm2TemplateSha256()
+                 : tokenization::QwenChatTemplate::OfficialTemplateSha256())
+      << '\n'
+      << "state_abi=" << state_abi << '\n'
+      << "payload_layout="
+      << (lfm2 ? "lfm2-gfx1151-live-prefix-v1" : "qwen-gfx1151-live-prefix-v3")
+      << "\n"
+      // Older learned boundaries could keep logits from an earlier
+      // prefix. Their payload has no readiness tag to distinguish them.
+      << "checkpoint_frontier=complete-prefix-v1\n"
+      << "numerics=" << (lfm2 ? "lfm2-fp32-v1" : "qwen-bf16-fp32-prefill-v1")
+      << "\n"
+      << "rmsnorm=fused-square-sum-v1\n"
+      << "prefill_attention=visible-causal-tail-v1\n"
+      << "attention_split_min_context="
+      << hip::detail::kSplitKDecodeAttentionMinContext << '\n'
+      << "attention_split_count="
+      << hip::detail::kSplitKDecodeAttentionMaxSplits << '\n'
+      << "kv_storage="
+      << (execution_policy.UsesFp16AttentionKv() ? "fp16" : "fp32") << '\n'
+      << "recurrent_storage="
+      << (execution_policy.UsesBf16RecurrentState() ? "bf16" : "fp32") << '\n'
+      << "context_tokens=" << max_context << '\n'
+      << "position_policy=absolute-v1\n"
+      << "rope_window_policy=qwen-gguf-config-v1\n"
+      << "adapters=none\n";
   if (speculative && mtp) {
     identity << "draft_backend=mtp-gfx1151-v1\n"
              << "draft_artifact_id=" << core::kGgufIdentityScheme << ':'
@@ -468,7 +481,11 @@ std::vector<std::uint8_t> QwenCompatibilityIdentity(
              << "draft_min_tokens=" << speculative_options.min_draft_tokens
              << '\n';
   }
-  if (speculative && !mtp) {
+  if (lookup_only) {
+    identity << "draft_backend=prompt-lookup-v1\n"
+             << "draft_state_layout=none\n";
+  }
+  if (speculative && !mtp && !lookup_only) {
     identity
         << "draft_backend=dflash2-gfx1151-v1\n"
         << "draft_artifact_id=" << core::kGgufIdentityScheme << ':'
@@ -490,9 +507,14 @@ std::vector<std::uint8_t> QwenCompatibilityIdentity(
         << '\n'
         << "draft_batched_verification="
         << (speculative_options.use_batched_verification ? "true" : "false")
-        << '\n'
+        << " prompt_lookup="
+        << (speculative_options.prompt_lookup ? "true" : "false") << '\n'
         << "draft_target_verification=decode-equivalent-v1\n";
   }
+  // A cache written with the canonical cache holds other checkpoints, and
+  // prompt rows from other kernel routes, than one written without it.
+  if (::superroc::core::CanonicalCacheOn())
+    identity << "prompt_cache=canonical-v1\n";
   const std::string canonical = identity.str();
   return {canonical.begin(), canonical.end()};
 }
@@ -537,7 +559,13 @@ std::size_t PersistentSizeFromU64(std::uint64_t value) {
   return static_cast<std::size_t>(value);
 }
 
-class QwenTextRunnerState final : public TextRunnerState {
+struct QwenRunnerStateHooks {
+  virtual ~QwenRunnerStateHooks() = default;
+  virtual void ArmTargetLogitsHook(const std::function<void()>* hook) = 0;
+};
+
+class QwenTextRunnerState final : public TextRunnerState,
+                                  public QwenRunnerStateHooks {
 public:
   QwenTextRunnerState(
       std::shared_ptr<const hip::QwenGpuModel> model, std::uint32_t max_context,
@@ -554,6 +582,14 @@ public:
     if (executor_ == nullptr) {
       throw std::runtime_error("Failed to create GPU session: " + error);
     }
+    const auto wrap_lookup =
+        [&](std::unique_ptr<speculative::IDraftBackend> inner)
+        -> std::unique_ptr<speculative::IDraftBackend> {
+      if (!speculative_options.prompt_lookup)
+        return inner;
+      return std::make_unique<speculative::LookupDraftBackend>(
+          std::move(inner));
+    };
     if (dflash_model != nullptr && mtp_model != nullptr) {
       throw std::invalid_argument(
           "Qwen sessions accept one speculative draft backend");
@@ -572,7 +608,8 @@ public:
       }
       draft_backend_ = draft_backend.get();
       verifier_ = std::make_unique<speculative::SpeculativeVerifier>(
-          *executor_, std::move(draft_backend), speculative_options);
+          *executor_, wrap_lookup(std::move(draft_backend)),
+          speculative_options);
     } else if (mtp_model != nullptr) {
       auto draft_backend = hip::QwenMtpGpuDraftBackend::Create(
           std::move(mtp_model),
@@ -588,16 +625,20 @@ public:
       if (draft_backend == nullptr) {
         throw std::runtime_error("Failed to create MTP session: " + error);
       }
-      // SQ10 SPEC2 (R1): the drafter's stream uses this session's slot
+      // The drafter's stream uses this session's slot
       // set (the host alternates the two streams, so they never collide).
-      // The MTP dtor removes the alias (R3).
+      // The MTP dtor removes the alias.
       if (superroc_fp4_slot_stream_alias(draft_backend->DraftStream(),
                                          executor_->ArenaStream()) < 0) {
         throw std::runtime_error("Failed to alias MTP draft stream");
       }
       mtp_backend_ = draft_backend.get();
       verifier_ = std::make_unique<speculative::SpeculativeVerifier>(
-          *executor_, std::move(draft_backend), speculative_options);
+          *executor_, wrap_lookup(std::move(draft_backend)),
+          speculative_options);
+    } else if (speculative_options.prompt_lookup) {
+      verifier_ = std::make_unique<speculative::SpeculativeVerifier>(
+          *executor_, wrap_lookup(nullptr), speculative_options);
     }
   }
 
@@ -648,12 +689,40 @@ public:
     return verifier_ != nullptr;
   }
 
+  /// The prompt's first token can be published when the target's logits are
+  /// readable: the drafter's prompt pass that follows does not change it.
+  struct TargetLogitsHook {
+    QwenRunnerStateHooks& state;
+    TargetLogitsHook(QwenRunnerStateHooks& s, const std::function<void()>* hook)
+        : state(s) {
+      state.ArmTargetLogitsHook(hook);
+    }
+    ~TargetLogitsHook() { state.ArmTargetLogitsHook(nullptr); }
+  };
+
+  void ArmTargetLogitsHook(const std::function<void()>* hook) override {
+    if (hook == nullptr || !*hook) {
+      verifier_->SetTargetLogitsHook({});
+      return;
+    }
+    verifier_->SetTargetLogitsHook([this, hook](tokenization::TokenId first) {
+      frontier_ = first;
+      const auto logits = verifier_->CopyLastTargetLogits();
+      frontier_logits_.assign(logits.begin(), logits.end());
+      (*hook)();
+    });
+  }
+
   void PrimeSpeculative(std::span<const TextRunnerToken> prompt,
-                        bool decode_ready) {
+                        bool decode_ready, std::uint32_t total_prompt_tokens,
+                        const std::function<void()>* logits_hook = nullptr) {
     if (verifier_ == nullptr) {
       throw std::logic_error("Qwen state has no speculative verifier");
     }
-    frontier_ = verifier_->Prime(prompt, decode_ready);
+    // Cleared first: the hook leaves the first token pending during the pass.
+    resume_tokens_.clear();
+    const TargetLogitsHook armed{*this, decode_ready ? logits_hook : nullptr};
+    frontier_ = verifier_->Prime(prompt, decode_ready, total_prompt_tokens);
     frontier_logits_.clear();
     if (decode_ready) {
       const auto logits = verifier_->CopyLastTargetLogits();
@@ -662,7 +731,90 @@ public:
     sequence_.assign(prompt.begin(), prompt.end());
     position_ = prompt.size();
     frontier_published_ = false;
+    rollback_position_.reset();
+  }
+
+  /// Bytes of the snapshot PrefillThroughCheckpoint will build at `boundary`,
+  /// when this state can hold its cache boundary inside one prompt pass.
+  [[nodiscard]] std::optional<std::size_t> PromptCheckpointBytes(
+      std::uint32_t boundary) const {
+    if (!executor_->CanCheckpointPromptInPass()) {
+      return std::nullopt;
+    }
+    // A state restored without its frontier token (a disk checkpoint), or
+    // whose verifier history was not rebuilt, cannot run the rest of the
+    // prompt as one pass. The caller then stops at the boundary as usual.
+    if (position_ != 0 &&
+        (!frontier_.has_value() ||
+         (verifier_ != nullptr && sequence_.size() != position_))) {
+      return std::nullopt;
+    }
+    std::size_t bytes = executor_->SnapshotPayloadBytes(boundary) +
+                        model_->GetConfig().vocab_size * sizeof(float);
+    if (verifier_ != nullptr) {
+      const auto verifier =
+          verifier_->SnapshotPayloadBytesAt(boundary, position_ == 0);
+      if (!verifier.has_value()) {
+        return std::nullopt;
+      }
+      bytes += *verifier;
+    }
+    return bytes;
+  }
+
+  /// Runs the rest of the prompt as one pass. The first token goes out from
+  /// the hook; the boundary's state is captured after it.
+  void PrefillThroughCheckpoint(
+      std::span<const TextRunnerToken> tokens, std::uint32_t boundary,
+      std::uint32_t total_prompt_tokens,
+      const std::function<void()>* logits_hook,
+      std::unique_ptr<hip::QwenGpuSnapshot>* target,
+      std::optional<TextRunnerToken>* boundary_frontier,
+      std::vector<float>* boundary_logits,
+      std::unique_ptr<speculative::SpeculativeVerifierSnapshot>* verifier) {
+    const auto position = static_cast<std::uint32_t>(position_);
+    if (position != 0 &&
+        (!frontier_.has_value() ||
+         (verifier_ != nullptr && sequence_.size() != position_))) {
+      throw std::logic_error("Qwen prompt checkpoint has no retained prefix");
+    }
+    // Any token still pending goes through this pass with the rest. The hook
+    // below may leave the first token of this request pending.
     resume_tokens_.clear();
+    executor_->ArmPromptCheckpoint(boundary);
+    struct Disarm {
+      hip::QwenGpuExecutor& executor;
+      ~Disarm() { executor.DisarmPromptCheckpoint(); }
+    } disarm{*executor_};
+    const auto save_target = [&]() -> tokenization::TokenId {
+      *target = executor_->SavePromptCheckpoint();
+      *boundary_frontier = executor_->PromptCheckpointFrontier();
+      *boundary_logits = executor_->TakePromptCheckpointLogits();
+      return executor_->PromptCheckpointFrontier();
+    };
+    if (verifier_ != nullptr) {
+      const TargetLogitsHook armed{*this, logits_hook};
+      frontier_ =
+          verifier_->PromptThrough(tokens, position, boundary,
+                                   total_prompt_tokens, save_target, verifier);
+      const auto logits = verifier_->CopyLastTargetLogits();
+      frontier_logits_.assign(logits.begin(), logits.end());
+      if (position == 0) {
+        sequence_.assign(tokens.begin(), tokens.end());
+      } else {
+        sequence_.insert(sequence_.end(), tokens.begin(), tokens.end());
+      }
+    } else {
+      frontier_ = executor_->ForwardPromptBatch(tokens, position, true);
+      const auto logits = executor_->CopyLastLogits();
+      frontier_logits_.assign(logits.begin(), logits.end());
+      if (logits_hook != nullptr && *logits_hook) {
+        (*logits_hook)();
+      }
+      (void)save_target();
+    }
+    position_ += tokens.size();
+    frontier_published_ = false;
     rollback_position_.reset();
   }
 
@@ -713,16 +865,19 @@ public:
   }
 
   void ExtendSpeculative(std::span<const TextRunnerToken> suffix,
-                         bool decode_ready) {
+                         bool decode_ready, std::uint32_t total_prompt_tokens,
+                         const std::function<void()>* logits_hook = nullptr) {
     if (verifier_ == nullptr || !frontier_.has_value()) {
       throw std::logic_error("Qwen speculative prefix is not initialized");
     }
+    const TargetLogitsHook armed{*this, decode_ready ? logits_hook : nullptr};
     if (sequence_.size() != position_) {
       throw std::logic_error(
           "Qwen speculative sequence does not match retained position");
     }
-    frontier_ = verifier_->ExtendPrompt(
-        suffix, static_cast<std::uint32_t>(position_), decode_ready);
+    frontier_ =
+        verifier_->ExtendPrompt(suffix, static_cast<std::uint32_t>(position_),
+                                decode_ready, total_prompt_tokens);
     sequence_.insert(sequence_.end(), suffix.begin(), suffix.end());
     position_ += suffix.size();
     frontier_logits_.clear();
@@ -738,9 +893,22 @@ public:
     if (!frontier_.has_value()) {
       throw std::logic_error("Qwen state has no next-token frontier");
     }
-    if (sampler.config().can_use_unmodified_argmax() ||
+    // A fired loop guard forces its end sequence even though the config still
+    // reports the raw-argmax path; CanSelectArgmax already admits only the
+    // forced token, and the cached-logits path below defers to the sampler.
+    // A banned frontier diverts the same way: one lookup on the raw argmax,
+    // then a masked host selection from this row (no device resample, which
+    // would draw the banned token again).
+    if ((sampler.config().can_use_unmodified_argmax() &&
+         !sampler.ForcedToken().has_value() && !sampler.IsBanned(*frontier_)) ||
         (verifier_ == nullptr && sampler.CanSelectArgmax(*frontier_))) {
       return *frontier_;
+    }
+    if (sampler.IsBanned(*frontier_)) {
+      if (frontier_logits_.empty()) {
+        return sampler.Sample(executor_->CopyLastLogits());
+      }
+      return sampler.Sample(std::span<const float>(frontier_logits_));
     }
     if (frontier_logits_.empty()) {
       return executor_->SampleLastLogits(sampler);
@@ -760,9 +928,22 @@ public:
     }
     resume_tokens_.clear();
     if (!frontier_published_) {
-      if (!sampler.config().can_use_unmodified_argmax())
+      if (!sampler.config().can_use_unmodified_argmax() ||
+          sampler.ForcedToken().has_value() || sampler.IsBanned(*frontier_))
         frontier_ = SelectFrontier(sampler);
-      if (!AppendSpeculativeSelection(*frontier_, sampler, result))
+      // The frontier drew from these logits (prefill-final or the verified
+      // next row); report them when the request armed logprobs.
+      std::optional<sampling::CapturedTokenLogprobs> frontier_logprobs;
+      if (sampler.logprobs_enabled()) {
+        const auto top_n = sampler.logprobs_top_n();
+        const auto row = CopyFrontierLogits();
+        if (!row.empty()) {
+          frontier_logprobs = sampler.CaptureLogprobs(
+              row, static_cast<sampling::TokenId>(*frontier_), top_n);
+        }
+      }
+      if (!AppendSpeculativeSelection(*frontier_, sampler, result,
+                                      std::move(frontier_logprobs)))
         return false;
       frontier_published_ = true;
     }
@@ -791,7 +972,9 @@ public:
             eos_id,
             static_cast<std::uint32_t>(std::min<std::size_t>(
                 remaining, std::numeric_limits<std::uint32_t>::max())),
-            sampler};
+            sampler,
+            sampler.logprobs_enabled(),
+            sampler.logprobs_top_n()};
   }
 
   void FinishSpeculativeDecode(
@@ -806,13 +989,21 @@ public:
                     : TextExecutionPlanKind::kSerial,
         .physical_width = verification.physical_width,
     };
+    std::size_t emitted_index = 0;
     for (const TextRunnerToken token : verification.emitted_tokens) {
       // Each prediction consumes one input, including a terminal prediction.
       // EOS itself remains the unconsumed frontier and is not published.
       ++position_;
-      if (!AppendSpeculativeSelection(token, sampler, result))
+      std::optional<sampling::CapturedTokenLogprobs> emitted_logprobs;
+      if (emitted_index < verification.emitted_target_logprobs.size()) {
+        emitted_logprobs = verification.emitted_target_logprobs[emitted_index];
+        emitted_logprobs->token = token;
+      }
+      if (!AppendSpeculativeSelection(token, sampler, result,
+                                      std::move(emitted_logprobs)))
         break;
       rollback_tokens_.push_back(token);
+      ++emitted_index;
     }
     frontier_ = verification.next_token;
     frontier_logits_ = std::move(verification.next_token_logits);
@@ -852,19 +1043,9 @@ public:
 
   [[nodiscard]] TextDecodeStep DecodeSpeculative(
       std::size_t max_tokens, sampling::SamplerState& sampler) {
-    if (verifier_->SpeculationDisabled()) {
-      return DecodePlainRound(max_tokens, sampler);
-    }
     TextDecodeStep result;
     sampling::SamplerState working_sampler = sampler;
-    const auto started = std::chrono::steady_clock::now();
-    // A round that drains the deferred drafter prime carries
-    // time-to-first-token work, not steady decode throughput: the guard
-    // must not bill it.
-    const bool drains_prime = verifier_->HasPendingDraftContext();
-    bool verified = false;
     if (PrepareSpeculativeDecode(max_tokens, working_sampler, result)) {
-      verified = true;
       const auto request = VerificationRequest(
           max_tokens - result.selections.size(), working_sampler);
       auto verification = verifier_->VerifyStep(
@@ -873,64 +1054,6 @@ public:
       FinishSpeculativeDecode(std::move(verification), working_sampler, result);
     }
     sampler.SetRngState(working_sampler.rng_state());
-    if (verified && !drains_prime) {
-      const bool was_disabled = verifier_->SpeculationDisabled();
-      const double seconds = std::chrono::duration<double>(
-                                 std::chrono::steady_clock::now() - started)
-                                 .count();
-      verifier_->RecordDecodeRound(result.selections.size(), seconds,
-                                   static_cast<std::uint32_t>(position_));
-      if (!was_disabled && verifier_->SpeculationDisabled()) {
-        Logger::Info("spec", "event=spec_guard_plain_switch context=" +
-                                 std::to_string(position_) + " published=" +
-                                 std::to_string(result.selections.size()) +
-                                 " round_seconds=" + std::to_string(seconds));
-      }
-    }
-    return result;
-  }
-
-  /// Plain single-token steps, used once the guard switched this request
-  /// off speculation. It keeps the spec flow's publication contract: every
-  /// step publishes its own selections and leaves exactly one published
-  /// frontier unforwarded. The greedy frontier is the same token
-  /// verification would commit, so greedy output does not change.
-  [[nodiscard]] TextDecodeStep DecodePlainRound(
-      std::size_t max_tokens, sampling::SamplerState& sampler) {
-    if (max_tokens == 0) {
-      throw std::invalid_argument(
-          "Qwen speculative decode budget must be at least one token");
-    }
-    if (!frontier_.has_value()) {
-      throw std::logic_error("Qwen speculative state has no frontier");
-    }
-    TextDecodeStep result;
-    resume_tokens_.clear();
-    if (!frontier_published_) {
-      if (!sampler.config().can_use_unmodified_argmax())
-        frontier_ = SelectFrontier(sampler);
-      if (!AppendSpeculativeSelection(*frontier_, sampler, result))
-        return result;
-      frontier_published_ = true;
-      if (result.selections.size() >= max_tokens)
-        return result;
-    }
-    // Forward the published frontier through the target, keeping the
-    // drafter's committed context in sync, then publish the next frontier.
-    const auto token = *frontier_;
-    frontier_ = verifier_->AdvanceCommittedToken(
-        token, static_cast<std::uint32_t>(position_));
-    ++position_;
-    frontier_logits_.clear();
-    // The forwarded token is committed, so nothing speculative is in
-    // flight and the rollback frontier is the committed state itself.
-    frontier_published_ = false;
-    rollback_position_.reset();
-    if (!sampler.config().can_use_unmodified_argmax())
-      frontier_ = SelectFrontier(sampler);
-    if (!AppendSpeculativeSelection(*frontier_, sampler, result))
-      return result;
-    frontier_published_ = true;
     return result;
   }
 
@@ -974,73 +1097,6 @@ public:
   SaveVerifierSnapshot() const {
     return verifier_ != nullptr ? verifier_->Snapshot() : nullptr;
   }
-  /// R1: prompt-boundary captures deferred while the drafter is unprimed.
-  /// The drafter primes with the first decoded token, so the serve layer
-  /// copies the boundary's frontier here and retries the capture at request
-  /// end against device state truncated back to the boundary.
-  [[nodiscard]] bool HasPendingSpeculativePrime() const {
-    return verifier_ != nullptr && verifier_->HasPendingDraftContext();
-  }
-  void DrainSpeculativePrime() {
-    if (verifier_ != nullptr) {
-      verifier_->FlushPendingDraftContext();
-    }
-  }
-  [[nodiscard]] TextDeferredPromptBoundary CaptureDeferredPromptBoundary()
-      const {
-    if (!frontier_.has_value()) {
-      throw std::logic_error("Qwen state has no exact frontier to snapshot");
-    }
-    TextDeferredPromptBoundary boundary;
-    boundary.position = position_;
-    boundary.frontier = frontier_;
-    boundary.frontier_logits = CopyFrontierLogits();
-    boundary.pending_tokens = pending_tokens();
-    return boundary;
-  }
-  void CheckDeferredPromptBoundary(
-      const TextDeferredPromptBoundary& boundary) const {
-    // Recurrent state is position-coupled and cannot be truncated: only
-    // attention-only models (llama) support deferred boundary captures.
-    if (model_->GetConfig().SsmLayerCount() != 0) {
-      throw std::logic_error(
-          "recurrent state cannot be truncated to a prompt boundary");
-    }
-    if (!boundary.frontier.has_value() || boundary.position > position_) {
-      throw std::logic_error(
-          "deferred prompt boundary is outside the committed context");
-    }
-  }
-  [[nodiscard]] std::size_t SnapshotPayloadBytesAtBoundary(
-      const TextDeferredPromptBoundary& boundary) const {
-    CheckDeferredPromptBoundary(boundary);
-    std::size_t bytes = executor_->SnapshotPayloadBytes(
-        static_cast<std::uint32_t>(boundary.position));
-    const auto checked_add = [&bytes](std::size_t value) {
-      if (value > std::numeric_limits<std::size_t>::max() - bytes) {
-        throw std::overflow_error("Qwen snapshot size overflows");
-      }
-      bytes += value;
-    };
-    if (boundary.frontier_logits.size() >
-        std::numeric_limits<std::size_t>::max() / sizeof(float)) {
-      throw std::overflow_error("Qwen snapshot size overflows");
-    }
-    checked_add(boundary.frontier_logits.size() * sizeof(float));
-    checked_add(boundary.pending_tokens.size() * sizeof(TextRunnerToken));
-    checked_add(std::ranges::count_if(executor_->VisionLayout().images,
-                                      [&boundary](const auto& image) {
-                                        return image.offset < boundary.position;
-                                      }) *
-                sizeof(models::qwen::vision::ImageGrid));
-    if (verifier_ != nullptr) {
-      checked_add(verifier_->SnapshotPayloadBytesAtPosition(
-          static_cast<std::uint32_t>(boundary.position)));
-    }
-    return bytes;
-  }
-  [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> SnapshotAtBoundary(
-      const TextDeferredPromptBoundary& boundary) const;
   // F7: refuse an MTP capture unless the draft prefix covers exactly the
   // target's committed context. A lagging draft would restore at the wrong
   // position and every later Propose would throw (an HTTP 500 in serve),
@@ -1096,9 +1152,10 @@ public:
   }
 
 private:
-  bool AppendSpeculativeSelection(TextRunnerToken token,
-                                  sampling::SamplerState& sampler,
-                                  TextDecodeStep& result) {
+  bool AppendSpeculativeSelection(
+      TextRunnerToken token, sampling::SamplerState& sampler,
+      TextDecodeStep& result,
+      std::optional<sampling::CapturedTokenLogprobs> logprobs = {}) {
     const bool stop =
         model_->GetConfig().llama
             ? (stop_at_eos() && model_->GetLlamaTokenizer() != nullptr &&
@@ -1117,10 +1174,14 @@ private:
     } else {
       piece = std::string(model_->GetTokenizer().DecodeToken(token));
     }
+    if (logprobs.has_value() && logprobs->text.empty()) {
+      logprobs->text = piece;
+    }
     result.selections.push_back({
         .stop = false,
         .token = token,
         .piece = std::move(piece),
+        .logprobs = std::move(logprobs),
     });
     sequence_.push_back(token);
     set_pending_token(token);
@@ -1179,20 +1240,6 @@ public:
   std::vector<TextRunnerToken> pending_tokens;
   std::unique_ptr<speculative::SpeculativeVerifierSnapshot> verifier_snapshot;
 };
-
-std::unique_ptr<TextRunnerSnapshot> QwenTextRunnerState::SnapshotAtBoundary(
-    const TextDeferredPromptBoundary& boundary) const {
-  CheckDeferredPromptBoundary(boundary);
-  return std::make_unique<QwenTextRunnerSnapshot>(
-      model_,
-      executor_->SaveSnapshot(static_cast<std::uint32_t>(boundary.position)),
-      boundary.position, boundary.frontier,
-      std::vector<float>(boundary.frontier_logits),
-      std::vector<TextRunnerToken>(boundary.pending_tokens),
-      verifier_ != nullptr ? verifier_->SnapshotAtPosition(
-                                 static_cast<std::uint32_t>(boundary.position))
-                           : nullptr);
-}
 
 QwenTextRunnerState& RequireQwenState(TextRunnerState& state) {
   auto* qwen = dynamic_cast<QwenTextRunnerState*>(&state);
@@ -1306,7 +1353,7 @@ public:
     if (model_->GetConfig().attention_only) {
       execution_policy_.kv_cache_storage = hip::QwenKvCacheStorage::kFp32;
       execution_policy_.fuse_qk_norm_rope_kv = false;
-      execution_policy_.glimmer_fp16_kv = true;  // LGA: Glimmer fp16-KV plane
+      execution_policy_.glimmer_fp16_kv = true;  // Glimmer fp16-KV plane
     }
     // LFM2: fp16 KV (SUPERROC_LFM2_KV=fp32 for the reference), no fused
     // QK-RoPE-KV (NOT glimmer_fp16_kv).
@@ -1329,14 +1376,14 @@ public:
       // encodes the draft artifact, and each draft backend persists its draft
       // KV prefix next to the target state, so a file written without a
       // drafter never restores into a drafter session and vice versa.
-      const bool speculative =
-          dflash_model_ != nullptr || mtp_model_ != nullptr;
+      const bool speculative = dflash_model_ != nullptr ||
+                               mtp_model_ != nullptr ||
+                               speculative_options_.prompt_lookup;
       persistence_ = TextRunnerPersistenceDescriptor{
           .compatibility_identity = QwenCompatibilityIdentity(
               artifact_fingerprint, draft_artifact_fingerprint, max_context_,
               execution_policy_, speculative, speculative_options_,
-              superroc::core::IsLfm2Family(
-                  model_->GetConfig().architecture),  // LFM2
+              superroc::core::IsLfm2Family(model_->GetConfig().architecture),
               model_->GetConfig().flint, mtp_model_ != nullptr),
           .payload_version = kQwenPersistentPayloadVersion,
       };
@@ -1344,7 +1391,8 @@ public:
   }
 
   [[nodiscard]] bool SpeculationEnabled() const noexcept {
-    return dflash_model_ != nullptr || mtp_model_ != nullptr;
+    return dflash_model_ != nullptr || mtp_model_ != nullptr ||
+           speculative_options_.prompt_lookup;
   }
 
   [[nodiscard]] TextRunnerDescriptor Descriptor() const override {
@@ -1354,8 +1402,7 @@ public:
         .state_abi =
             model_->GetConfig().flint
                 ? std::string(FlintStateAbi(execution_policy_.glimmer_fp16_kv))
-            : superroc::core::IsLfm2Family(
-                  model_->GetConfig().architecture)  // LFM2
+            : superroc::core::IsLfm2Family(model_->GetConfig().architecture)
                 ? std::string(
                       Lfm2StateAbi(speculative_enabled,
                                    execution_policy_.UsesFp16AttentionKv()))
@@ -1388,6 +1435,7 @@ public:
                         ? MaximumDecodeBatchWidth()
                         : 0,
                 .prefix_reuse = true,
+                .in_pass_checkpoint = true,
                 // Each prompt copy is a real device copy (27B, KAT, Ornith
                 // MoE and their MTP / DFlash2 drafters): the host floor
                 // governs this runner. DeepSeek and Flash-Next share
@@ -1525,6 +1573,16 @@ public:
     return model_->GetTokenizer().Encode(text);
   }
 
+  // LLAMA: SpmTokenizer::Encode(add_special) already prepends the BOS its
+  // GGUF asks for, so Tokenize is complete here and RawPromptBos stays
+  // nullopt. Every other family encodes flag-blind and reports the GGUF BOS.
+  [[nodiscard]] std::optional<TextRunnerToken> RawPromptBos() const override {
+    if (model_->GetConfig().llama) {
+      return std::nullopt;
+    }
+    return model_->GetTokenizer().RawPromptBos();
+  }
+
   [[nodiscard]] std::optional<std::vector<TextRunnerToken>> RenderAndTokenize(
       const ChatRequest& request) const override {
     // GLIMMER: pinned Onyx ATEM template, including tool definitions.
@@ -1571,11 +1629,33 @@ public:
     if (model_->GetConfig().llama) {
       // LLAMA (F13): content plus framing_suffix (structured-output
       // instructions); tool requests are refused, not silently dropped.
-      const auto rendered = LlamaRenderPrompt(request);
+      // SR-03: client content overlapping a control spelling is encoded with
+      // special parsing off; otherwise the render encodes exactly as before.
+      std::vector<core::TextSpan> spans;
+      const auto rendered = LlamaRenderPrompt(request, &spans);
       if (!rendered.has_value()) {
         return std::nullopt;
       }
-      return Tokenize(*rendered);
+      const auto* tok = model_->GetLlamaTokenizer();
+      if (tok == nullptr) {
+        return std::vector<TextRunnerToken>{};
+      }
+      const auto spellings = tok->SpecialSpellings();
+      return core::EncodeWithContentSpans<TextRunnerToken>(
+          *rendered, spans, spellings,
+          [&](std::size_t offset, std::string_view piece, bool parse_special) {
+            models::llama::SpmTokenizer::EncodeOptions options;
+            // BOS once, at the very start only.
+            options.add_special = (offset == 0);
+            options.parse_special = parse_special;
+            const auto ids = tok->Encode(piece, options);
+            std::vector<TextRunnerToken> out;
+            out.reserve(ids.size());
+            for (const std::int32_t id : ids) {
+              out.push_back(static_cast<TextRunnerToken>(id));
+            }
+            return out;
+          });
     }
     return tokenization::QwenChatTemplate::RenderAndTokenize(
         model_->GetTokenizer(), request.messages,
@@ -1587,7 +1667,7 @@ public:
 
   [[nodiscard]] std::optional<TextPreparedPrompt> PreparePrompt(
       const ChatRequest& request) const override {
-    // GLM: the Qwen vision prompt renders ChatML. Glimmer chat has to use
+    // The Qwen vision prompt renders ChatML. Glimmer chat has to use
     // GlimmerRender or the model never opens to=self / ATEM turns.
     if (model_->GetConfig().attention_only) {
       auto tokens = RenderAndTokenize(request);
@@ -1664,7 +1744,7 @@ public:
     }
     if (model_->GetConfig().flint)
       return TextGenerationBackend::InitialOutputState::kAuto;
-    // GLM: thinking on means the first Glimmer channel is reasoning. The
+    // Thinking on means the first Glimmer channel is reasoning. The
     // OpenAI layer splits to=self / to=user; it does not look for <think>.
     // LFM2: a required tool call prefills past </think>, so parsing starts
     // in content even when thinking is on.
@@ -1672,7 +1752,7 @@ public:
         request.tool_choice == ChatRequest::ToolChoice::kRequired) {
       return TextGenerationBackend::InitialOutputState::kContent;
     }
-    // LFM2 (Super ROC): the 8B-A1B and 1.2B templates do not open <think> in
+    // LFM2 (Super Roc): the 8B-A1B and 1.2B templates do not open <think> in
     // the generation prompt; those models open it themselves when they think.
     // Auto starts in content and switches on a leading <think>.
     if (model_->GetConfig().lfm2 &&
@@ -1741,11 +1821,21 @@ public:
     }
     max_input_tokens = std::min<std::size_t>(
         max_input_tokens, qwen.executor().GetMaxPromptBatch());
-    if (max_input_tokens != 0 && offset != 0 &&
-        qwen.ResumeGeneratedToken(prompt[offset],
-                                  offset + 1 == prompt.size())) {
-      return {.consumed_tokens = 1,
-              .decode_ready = offset + 1 == prompt.size()};
+    // A pending token that ends the prompt takes its own step. With more prompt
+    // behind it, it goes in their chunk: a step of its own would read every
+    // weight once more for one token, on each turn of an agent.
+    // With the canonical cache every prompt token goes through the prompt
+    // path: a token consumed with decode arithmetic leaves another state than
+    // the same token read in a request that holds the whole history.
+    if (max_input_tokens != 0 && offset != 0) {
+      if (offset + 1 == prompt.size() &&
+          !::superroc::core::CanonicalCacheOn()) {
+        if (qwen.ResumeGeneratedToken(prompt[offset], true)) {
+          return {.consumed_tokens = 1, .decode_ready = true};
+        }
+      } else {
+        qwen.set_pending_token(std::nullopt);
+      }
     }
     if (qwen.speculative()) {
       if (offset == 0) {
@@ -1754,8 +1844,11 @@ public:
           throw std::logic_error(
               "Qwen prefill requires a nonzero token budget");
         }
-        qwen.PrimeSpeculative(prompt.first(consumed),
-                              consumed == prompt.size());
+        // The whole prompt is in scope here; its final length lets the
+        // drafter skip rows that can never enter its attention window.
+        qwen.PrimeSpeculative(prompt.first(consumed), consumed == prompt.size(),
+                              static_cast<std::uint32_t>(prompt.size()),
+                              state.prompt_logits_hook());
         return {.consumed_tokens = consumed,
                 .decode_ready = consumed == prompt.size()};
       }
@@ -1766,7 +1859,9 @@ public:
             "Qwen DFlash retained prefix has no suffix to prefill");
       }
       qwen.ExtendSpeculative(prompt.subspan(offset, consumed),
-                             offset + consumed == prompt.size());
+                             offset + consumed == prompt.size(),
+                             static_cast<std::uint32_t>(prompt.size()),
+                             state.prompt_logits_hook());
       return {
           .consumed_tokens = consumed,
           .decode_ready = offset + consumed == prompt.size(),
@@ -1786,6 +1881,54 @@ public:
     return {
         .consumed_tokens = consumed,
         .decode_ready = decode_ready,
+    };
+  }
+
+  [[nodiscard]] std::optional<std::size_t> PrefillCheckpointBytes(
+      const TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget,
+      std::size_t boundary) const override {
+    static const bool enabled = [] {
+      const char* e = ::superroc::core::GetEnv("SUPERROC_INPASS_CHECKPOINT");
+      return e == nullptr || e[0] != '0';
+    }();
+    const auto& qwen = RequireQwenState(state);
+    const std::size_t consumed = std::min<std::size_t>(
+        {budget, prompt.size() - offset, qwen.executor().GetMaxPromptBatch()});
+    if (!enabled || offset != qwen.position() ||
+        offset + consumed != prompt.size() || boundary <= offset ||
+        boundary >= prompt.size()) {
+      return std::nullopt;
+    }
+    return qwen.PromptCheckpointBytes(static_cast<std::uint32_t>(boundary));
+  }
+
+  [[nodiscard]] TextPrefillStep PrefillThrough(
+      TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget, std::size_t boundary,
+      std::unique_ptr<TextRunnerSnapshot>* checkpoint,
+      const std::function<std::unique_ptr<TextRunnerSnapshot>()>&)
+      const override {
+    auto& qwen = RequireQwenState(state);
+    if (checkpoint == nullptr || offset != qwen.position()) {
+      throw std::logic_error("invalid Qwen in-pass checkpoint request");
+    }
+    const std::size_t consumed = std::min<std::size_t>(
+        {budget, prompt.size() - offset, qwen.executor().GetMaxPromptBatch()});
+    std::unique_ptr<hip::QwenGpuSnapshot> target;
+    std::optional<TextRunnerToken> frontier;
+    std::vector<float> logits;
+    std::unique_ptr<speculative::SpeculativeVerifierSnapshot> verifier;
+    qwen.PrefillThroughCheckpoint(
+        prompt.subspan(offset, consumed), static_cast<std::uint32_t>(boundary),
+        static_cast<std::uint32_t>(prompt.size()), state.prompt_logits_hook(),
+        &target, &frontier, &logits, &verifier);
+    *checkpoint = std::make_unique<QwenTextRunnerSnapshot>(
+        model_, std::move(target), boundary, frontier, std::move(logits),
+        std::vector<TextRunnerToken>{}, std::move(verifier));
+    return {
+        .consumed_tokens = consumed,
+        .decode_ready = offset + consumed == prompt.size(),
     };
   }
 
@@ -1817,10 +1960,24 @@ public:
     } else {
       piece = std::string(model_->GetTokenizer().DecodeToken(token));
     }
+    // The frontier drew from this row (prefill-final, a verified next row,
+    // or the device's last row); report it when the request armed logprobs.
+    std::optional<sampling::CapturedTokenLogprobs> logprobs;
+    if (sampler.logprobs_enabled()) {
+      const auto top_n = sampler.logprobs_top_n();
+      const auto row = qwen.CopyFrontierLogits();
+      if (!row.empty()) {
+        logprobs = sampler.CaptureLogprobs(
+            row, static_cast<sampling::TokenId>(token), top_n);
+        if (!piece.empty())
+          logprobs->text = piece;
+      }
+    }
     return {
         .stop = false,
         .token = token,
         .piece = std::move(piece),
+        .logprobs = std::move(logprobs),
     };
   }
 
@@ -1964,33 +2121,6 @@ public:
         qwen.pending_tokens(), qwen.SaveVerifierSnapshot());
   }
 
-  [[nodiscard]] bool HasPendingSpeculativePrime(
-      const TextRunnerState& state) const override {
-    return RequireQwenState(state).HasPendingSpeculativePrime();
-  }
-
-  void DrainSpeculativePrime(TextRunnerState& state) const override {
-    RequireQwenState(state).DrainSpeculativePrime();
-  }
-
-  [[nodiscard]] TextDeferredPromptBoundary CaptureDeferredPromptBoundary(
-      const TextRunnerState& state) const override {
-    return RequireQwenState(state).CaptureDeferredPromptBoundary();
-  }
-
-  [[nodiscard]] std::size_t DeferredPromptSnapshotPayloadBytes(
-      const TextRunnerState& state,
-      const TextDeferredPromptBoundary& boundary) const override {
-    return RequireQwenState(state).SnapshotPayloadBytesAtBoundary(boundary);
-  }
-
-  [[nodiscard]] std::unique_ptr<TextRunnerSnapshot>
-  SnapshotDeferredPromptBoundary(
-      const TextRunnerState& state,
-      const TextDeferredPromptBoundary& boundary) const override {
-    return RequireQwenState(state).SnapshotAtBoundary(boundary);
-  }
-
   void RestoreOrFork(TextRunnerState& state,
                      const TextRunnerSnapshot& snapshot) const override {
     const auto* qwen_snapshot =
@@ -2022,7 +2152,7 @@ public:
       const TextRunnerSnapshot& snapshot) const override {
     const auto* qwen_snapshot =
         dynamic_cast<const QwenTextRunnerSnapshot*>(&snapshot);
-    const bool speculative = dflash_model_ != nullptr || mtp_model_ != nullptr;
+    const bool speculative = SpeculationEnabled();
     if (qwen_snapshot == nullptr ||
         qwen_snapshot->model.get() != model_.get() ||
         qwen_snapshot->snapshot == nullptr ||
@@ -2636,6 +2766,8 @@ public:
       return {.stop = true, .piece = {}};
     // A sampled DSpark cycle may have drawn the next token already.
     int token = deepseek.session().TakePendingDsparkToken();
+    const bool pending_dspark = token >= 0;
+    std::optional<sampling::CapturedTokenLogprobs> logprobs;
     if (token < 0) {
       std::string error;
       const auto logits = deepseek.session().CopyLogits(&error);
@@ -2643,6 +2775,11 @@ public:
         throw std::runtime_error("DeepSeek token selection failed: " + error);
       }
       token = static_cast<int>(sampler.Sample(logits));
+      if (sampler.logprobs_enabled()) {
+        const auto top_n = sampler.logprobs_top_n();
+        logprobs = sampler.CaptureLogprobs(
+            logits, static_cast<sampling::TokenId>(token), top_n);
+      }
     }
     if (deepseek.stop_at_eos() && model_->IsStopToken(token)) {
       return {
@@ -2651,10 +2788,23 @@ public:
           .piece = {},
       };
     }
+    if (logprobs.has_value()) {
+      logprobs->text = model_->DecodeToken(token);
+    } else if (pending_dspark && sampler.logprobs_enabled()) {
+      // The sampled DSpark cycle drew this token without the sampler, so
+      // there is no distribution to quote: report a placeholder, only when
+      // armed, so streaming and non-streaming stay parallel.
+      const std::string piece = model_->DecodeToken(token);
+      logprobs = sampling::CapturedTokenLogprobs{
+          .token = static_cast<sampling::TokenId>(token),
+          .logprob = std::numeric_limits<double>::quiet_NaN(),
+          .text = piece};
+    }
     return {
         .stop = false,
         .token = static_cast<TextRunnerToken>(token),
         .piece = model_->DecodeToken(token),
+        .logprobs = std::move(logprobs),
     };
   }
 
@@ -2680,11 +2830,18 @@ public:
     if (logits.empty())
       throw std::runtime_error("DeepSeek token preview failed: " + error);
     const auto token = sampler.Sample(logits);
+    std::optional<sampling::CapturedTokenLogprobs> logprobs;
+    if (sampler.logprobs_enabled()) {
+      const auto top_n = sampler.logprobs_top_n();
+      logprobs = sampler.CaptureLogprobs(logits, token, top_n);
+      logprobs->text = model_->DecodeToken(static_cast<int>(token));
+    }
     return TextDecodeSelection{
         .stop = deepseek.stop_at_eos() &&
                 model_->IsStopToken(static_cast<int>(token)),
         .token = token,
         .piece = model_->DecodeToken(static_cast<int>(token)),
+        .logprobs = std::move(logprobs),
     };
   }
 
@@ -2704,7 +2861,14 @@ public:
       return {.selections = {}, .stop = true};
     const auto stats_before = deepseek.session().DsparkStatistics();
     std::optional<models::deepseek_v4_flash::DsparkSamplerBridge> bridge;
-    if (!sampler.config().can_use_unmodified_argmax()) {
+    // A fired loop guard forces its end through the bridge's sampler, exactly
+    // as a spent reasoning budget would; the bridge already defers to the
+    // host sampler while ForcedToken() is set. An armed word ban installs the
+    // bridge too, so a banned device proposal is rejected through
+    // CanSelectArgmax and redrawn masked; unbanned steps keep the device
+    // argmax with one lookup per token and no row download.
+    if (!sampler.config().can_use_unmodified_argmax() ||
+        sampler.ForcedToken().has_value() || sampler.ReasoningBanActive()) {
       bridge.emplace(sampler);
     }
     std::vector<int> emitted;
@@ -2729,10 +2893,22 @@ public:
         step.stop = true;
         break;
       }
+      const std::string piece = model_->DecodeToken(token);
+      std::optional<sampling::CapturedTokenLogprobs> block_logprobs;
+      if (sampler.logprobs_enabled()) {
+        // A sampled DSpark cycle drew these tokens without the sampler, so
+        // there is no distribution to quote: report a placeholder per token,
+        // only when armed, so streaming and non-streaming stay parallel.
+        block_logprobs = sampling::CapturedTokenLogprobs{
+            .token = static_cast<sampling::TokenId>(token),
+            .logprob = std::numeric_limits<double>::quiet_NaN(),
+            .text = piece};
+      }
       step.selections.push_back({
           .stop = false,
           .token = static_cast<TextRunnerToken>(token),
-          .piece = model_->DecodeToken(token),
+          .piece = piece,
+          .logprobs = std::move(block_logprobs),
       });
     }
     const auto stats_after = deepseek.session().DsparkStatistics();
@@ -2786,7 +2962,8 @@ public:
       states[index] = &deepseek;
       stats_before[index] = deepseek.session().DsparkStatistics();
       auto& sampler = decodes[index].sampler.get();
-      if (!sampler.config().can_use_unmodified_argmax()) {
+      if (!sampler.config().can_use_unmodified_argmax() ||
+          sampler.ForcedToken().has_value() || sampler.ReasoningBanActive()) {
         bridges[index].emplace(sampler);
       }
       items[index] = {
@@ -3032,8 +3209,10 @@ bool FingerprintArtifact(std::string_view label, const core::GgufReader& reader,
 bool FingerprintArtifactFile(std::string_view label,
                              const std::filesystem::path& path,
                              std::string* fingerprint, std::string* error) {
+  // Only draft files are fingerprinted here, and a draft is read as it is.
   std::string open_error;
-  const auto reader = core::GgufReader::OpenFile(path, &open_error);
+  const auto reader = core::GgufReader::OpenFile(
+      path, &open_error, core::GgufReader::FileRole::kSidecar);
   if (reader == nullptr) {
     SetError(error, std::string("Failed to open ") + std::string(label) +
                         " GGUF for fingerprinting: " + open_error);
@@ -3067,6 +3246,17 @@ std::vector<std::int32_t> QwenFlashNextEngineTokens(
   }
   return converted;
 }
+
+/// Arms the session's logits hook for one Sync.
+struct QwenFlashNextLogitsHook {
+  QwenFlashNextSession& session;
+  QwenFlashNextLogitsHook(QwenFlashNextSession& s,
+                          const std::function<void()>* hook) noexcept
+      : session(s) {
+    session.SetLogitsHook(hook);
+  }
+  ~QwenFlashNextLogitsHook() { session.SetLogitsHook(nullptr); }
+};
 
 class QwenFlashNextTextRunnerState final : public TextRunnerState {
 public:
@@ -3382,6 +3572,12 @@ public:
                 .prefix_reuse = true,
                 .in_pass_checkpoint = true,
                 .partial_prefill_retention = true,
+                // Measured with qwen38_flash_next_split_probe: the session
+                // state is the same bits for every split whose cuts fall on
+                // multiples of 4 rows (the sparse attention's key blocks)
+                // and whose passes hold 16 rows or more (below that the
+                // projections take other kernels).
+                .canonical_min_pass_rows = 16,
             },
         .persistence = persistence_,
     };
@@ -3446,6 +3642,10 @@ public:
   [[nodiscard]] std::vector<TextRunnerToken> Tokenize(
       std::string_view text) const override {
     return model_->tokenizer().Encode(text);
+  }
+
+  [[nodiscard]] std::optional<TextRunnerToken> RawPromptBos() const override {
+    return model_->tokenizer().RawPromptBos();
   }
 
   [[nodiscard]] std::optional<std::vector<TextRunnerToken>> RenderAndTokenize(
@@ -3540,6 +3740,9 @@ public:
                                       ? model_->PrefillThroughCapacity()
                                       : model_->PrefillCapacity()})));
     std::string error;
+    const QwenFlashNextLogitsHook logits_hook{
+        qfn.session(),
+        next_position == prompt.size() ? state.prompt_logits_hook() : nullptr};
     if (!qfn.session().Sync(prefix, &error, next)) {
       qfn.set_position(0);
       throw std::runtime_error("Qwen3.8-Flash-Next prefill failed: " + error);
@@ -3580,6 +3783,9 @@ public:
     const auto next_position = offset + consumed;
     const auto prefix = QwenFlashNextEngineTokens(prompt.first(next_position));
     double capture_ms = 0;
+    const QwenFlashNextLogitsHook logits_hook{
+        qfn.session(),
+        next_position == prompt.size() ? state.prompt_logits_hook() : nullptr};
     try {
       qfn.adapter().PrefillThrough(
           qfn.slot(), prefix, static_cast<std::uint32_t>(boundary), [&] {
@@ -3605,19 +3811,170 @@ public:
             .checkpoint_ms = capture_ms};
   }
 
+  // Dual in-pass checkpoints: the
+  // stable S keeps the text-tail-8 rule; the earlier P must sit at least 64
+  // rows into the pass, at least 64 rows below S, and within the widened
+  // 256-row tail of the pass end.
+  [[nodiscard]] std::optional<PrefillCheckpointPair> PrefillCheckpointPairBytes(
+      const TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget, std::size_t boundary_first,
+      std::size_t boundary) const override {
+    const auto& qfn = RequireQwenFlashNextState(state);
+    const auto consumed = std::min<std::size_t>(
+        {budget, prompt.size() - offset, model_->PrefillThroughCapacity()});
+    if (boundary_first <= offset + 1 || boundary_first + 64 > boundary ||
+        boundary >= offset + consumed || offset + consumed - boundary > 8 ||
+        boundary_first < offset + 64 ||
+        offset + consumed - boundary_first > 256)
+      return std::nullopt;
+    const auto bytes_first = qfn.session().PrefillCheckpointBytes(
+        static_cast<std::uint32_t>(boundary_first));
+    const auto bytes_second = qfn.session().PrefillCheckpointBytes(
+        static_cast<std::uint32_t>(boundary));
+    if (!bytes_first || !bytes_second)
+      return std::nullopt;
+    return PrefillCheckpointPair{static_cast<std::size_t>(bytes_first),
+                                 static_cast<std::size_t>(bytes_second)};
+  }
+
+  [[nodiscard]] TextPrefillStep PrefillThroughPair(
+      TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget, std::size_t boundary_first,
+      std::size_t boundary,
+      std::unique_ptr<TextRunnerSnapshot>* checkpoint_first,
+      std::unique_ptr<TextRunnerSnapshot>* checkpoint,
+      const std::function<std::unique_ptr<TextRunnerSnapshot>(std::size_t)>&
+          capture) const override {
+    auto& qfn = RequireQwenFlashNextState(state);
+    if (!checkpoint_first || !checkpoint || !capture ||
+        offset != qfn.position())
+      throw std::logic_error("invalid dual in-pass checkpoint request");
+    const auto consumed = std::min<std::size_t>(
+        {budget, prompt.size() - offset, model_->PrefillThroughCapacity()});
+    const auto next_position = offset + consumed;
+    const auto prefix = QwenFlashNextEngineTokens(prompt.first(next_position));
+    double capture_ms = 0;
+    const QwenFlashNextLogitsHook logits_hook{
+        qfn.session(),
+        next_position == prompt.size() ? state.prompt_logits_hook() : nullptr};
+    try {
+      qfn.adapter().PrefillThroughPair(
+          qfn.slot(), prefix, static_cast<std::uint32_t>(boundary_first),
+          static_cast<std::uint32_t>(boundary), [&](std::uint32_t at) {
+            const auto started = std::chrono::steady_clock::now();
+            try {
+              if (at == boundary_first)
+                *checkpoint_first = capture(at);
+              else
+                *checkpoint = capture(at);
+            } catch (...) {
+              // Optional retention may refuse; the complete live prefill
+              // stays valid and only the affected snapshot is dropped.
+              if (at == boundary_first)
+                checkpoint_first->reset();
+              else
+                checkpoint->reset();
+            }
+            capture_ms += std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - started)
+                              .count();
+          });
+    } catch (...) {
+      qfn.set_position(0);
+      throw;
+    }
+    qfn.set_position(next_position);
+    return {.consumed_tokens = consumed,
+            .decode_ready = next_position == prompt.size(),
+            .checkpoint_ms = capture_ms};
+  }
+
+  // One in-pass checkpoint at a canonical boundary: P must take at least one
+  // row of its own pass, sit inside the widened 256-row tail of the pass
+  // end, and never be a chunk end of it (the engine refuses that: a pass
+  // end is today's split capture, not an in-pass view).
+  [[nodiscard]] std::optional<std::size_t> PrefillCheckpointBoundaryBytes(
+      const TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget,
+      std::size_t boundary) const override {
+    const auto& qfn = RequireQwenFlashNextState(state);
+    const auto consumed = std::min<std::size_t>(
+        {budget, prompt.size() - offset, model_->PrefillThroughCapacity()});
+    if (boundary <= offset || boundary >= offset + consumed ||
+        offset + consumed - boundary > 256 ||
+        (boundary - offset) % model_->PrefillCapacity() == 0)
+      return std::nullopt;
+    const auto bytes = qfn.session().PrefillCheckpointBytes(
+        static_cast<std::uint32_t>(boundary));
+    return bytes ? std::optional<std::size_t>(bytes) : std::nullopt;
+  }
+
+  [[nodiscard]] TextPrefillStep PrefillThroughBoundary(
+      TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget, std::size_t boundary,
+      std::unique_ptr<TextRunnerSnapshot>* checkpoint,
+      const std::function<std::unique_ptr<TextRunnerSnapshot>()>& capture)
+      const override {
+    auto& qfn = RequireQwenFlashNextState(state);
+    if (!checkpoint || !capture || offset != qfn.position())
+      throw std::logic_error("invalid component in-pass boundary request");
+    const auto consumed = std::min<std::size_t>(
+        {budget, prompt.size() - offset, model_->PrefillThroughCapacity()});
+    const auto next_position = offset + consumed;
+    const auto prefix = QwenFlashNextEngineTokens(prompt.first(next_position));
+    double capture_ms = 0;
+    const QwenFlashNextLogitsHook logits_hook{
+        qfn.session(),
+        next_position == prompt.size() ? state.prompt_logits_hook() : nullptr};
+    try {
+      qfn.adapter().PrefillThroughBoundary(
+          qfn.slot(), prefix, static_cast<std::uint32_t>(boundary),
+          [&](std::uint32_t) {
+            const auto started = std::chrono::steady_clock::now();
+            try {
+              *checkpoint = capture();
+            } catch (...) {
+              // Optional retention may refuse; the complete live prefill
+              // stays valid and the snapshot is dropped.
+              checkpoint->reset();
+            }
+            capture_ms += std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - started)
+                              .count();
+          });
+    } catch (...) {
+      qfn.set_position(0);
+      throw;
+    }
+    qfn.set_position(next_position);
+    return {.consumed_tokens = consumed,
+            .decode_ready = next_position == prompt.size(),
+            .checkpoint_ms = capture_ms};
+  }
+
   // The engine stops before committing EOS when the request enables it.
   // Every returned token is committed work and is emitted exactly once.
-  void ResolveStepTokens(QwenFlashNextTextRunnerState&, bool engine_stopped,
-                         std::span<const std::int32_t> tokens,
+  // Logprobs ride parallel to tokens; entries carry their top-N ids here
+  // and the scheduler fills any missing surface text from the runner.
+  void ResolveStepTokens(QwenFlashNextTextRunnerState&,
+                         const QwenFlashNextSession::DecodeResult& decoded,
                          TextDecodeStep* step) const {
-    step->stop = engine_stopped;
-    step->selections.reserve(tokens.size());
-    for (const std::int32_t token : tokens) {
-      step->selections.push_back({
+    step->stop = decoded.stop;
+    step->selections.reserve(decoded.tokens.size());
+    for (std::size_t i = 0; i < decoded.tokens.size(); ++i) {
+      const std::int32_t token = decoded.tokens[i];
+      TextDecodeSelection selection{
           .stop = false,
           .token = static_cast<TextRunnerToken>(token),
           .piece = model_->TokenText(token),
-      });
+      };
+      if (i < decoded.logprobs.size()) {
+        auto logged = decoded.logprobs[i];
+        logged.token = selection.token;
+        logged.text = selection.piece;
+        selection.logprobs = std::move(logged);
+      }
+      step->selections.push_back(std::move(selection));
     }
   }
 
@@ -3633,6 +3990,13 @@ public:
           "Qwen3.8-Flash-Next token selection has no logits");
     }
     const auto token = static_cast<std::int32_t>(sampler.Sample(logits));
+    std::optional<sampling::CapturedTokenLogprobs> logprobs;
+    if (sampler.logprobs_enabled()) {
+      const auto top_n = sampler.logprobs_top_n();
+      logprobs = sampler.CaptureLogprobs(
+          logits, static_cast<sampling::TokenId>(token), top_n);
+      logprobs->text = model_->TokenText(token);
+    }
     if (EndsTurn(qfn, *model_, token)) {
       return {.stop = true, .token = 0, .piece = {}};
     }
@@ -3640,6 +4004,7 @@ public:
         .stop = false,
         .token = static_cast<TextRunnerToken>(token),
         .piece = model_->TokenText(token),
+        .logprobs = std::move(logprobs),
     };
   }
 
@@ -3680,11 +4045,10 @@ public:
     sampling::SamplerState working_sampler = sampler;
     QwenFlashNextSession::DecodeResult decoded;
     std::string error;
-    const auto budget =
-        std::min<std::size_t>(max_tokens, std::uint64_t{max_draft_tokens_} + 1);
     // Use the same request policy as SelectNext and the batched MTP path.
-    // The engine stops before committing EOS or work beyond it.
-    if (!qfn.session().DecodeStep(budget, working_sampler, &decoded, &error,
+    // The engine stops before committing EOS or work beyond it, and caps a
+    // step at the rows its verify serves.
+    if (!qfn.session().DecodeStep(max_tokens, working_sampler, &decoded, &error,
                                   qfn.stop_at_eos())) {
       throw std::runtime_error("Qwen3.8-Flash-Next MTP decode failed: " +
                                error);
@@ -3693,7 +4057,7 @@ public:
     // draw so the next batch retains the rejection-conditioned distribution.
     sampler.CopyDrawStateFrom(working_sampler);
     TextDecodeStep step;
-    ResolveStepTokens(qfn, decoded.stop, decoded.tokens, &step);
+    ResolveStepTokens(qfn, decoded, &step);
     qfn.set_position(qfn.session().Position());
     const auto stats_after = qfn.session().Statistics();
     step.draft_rounds = stats_after.cycles - stats_before.cycles;
@@ -3758,11 +4122,8 @@ public:
       auto& session = state.session();
       auto& sampler = samplers.emplace_back(decodes[i].sampler.get());
       before.push_back(session.Statistics());
-      requests.push_back(
-          {&session,
-           std::min<std::size_t>(decodes[i].max_tokens,
-                                 std::uint64_t{max_draft_tokens_} + 1),
-           &sampler, &results[i], state.stop_at_eos(), &outcomes[i]});
+      requests.push_back({&session, decodes[i].max_tokens, &sampler,
+                          &results[i], state.stop_at_eos(), &outcomes[i]});
     }
     std::string error;
     (void)QwenFlashNextSession::DecodeBatch(requests, &error);
@@ -3780,7 +4141,7 @@ public:
       decodes[i].sampler.get().CopyDrawStateFrom(samplers[i]);
       state.set_position(state.session().Position());
       auto& step = steps[i];
-      ResolveStepTokens(state, results[i].stop, results[i].tokens, &step);
+      ResolveStepTokens(state, results[i], &step);
       if (active_count > 1 && !results[i].tokens.empty()) {
         step.execution_plan = {.kind = TextExecutionPlanKind::kBatched,
                                .physical_width = active_count};
@@ -3822,6 +4183,52 @@ private:
 };
 #endif
 
+// The markers that end the reasoning span a chat reply opens with, for a
+// request that carries stop sequences; empty when the reply starts with the
+// answer. A reply whose start is decided by the model (kAuto) keeps matching
+// stop sequences in all of its text.
+[[maybe_unused]] std::vector<std::string> StopReasoningEnds(
+    const TextModelRunner& runner,
+    const std::vector<std::string>& stop_sequences,
+    TextGenerationBackend::InitialOutputState initial) {
+  std::vector<std::string> ends;
+  if (stop_sequences.empty() ||
+      initial != TextGenerationBackend::InitialOutputState::kReasoning) {
+    return ends;
+  }
+  for (const std::string_view end : runner.ReasoningBudgetTags().ends) {
+    ends.emplace_back(end);
+  }
+  return ends;
+}
+
+// Arms the opt-in reasoning loop guard for a request that starts in its
+// reasoning phase, beside the token budget. Unlike the budget the guard never
+// changes `can_use_unmodified_argmax()`: the request keeps the fast argmax
+// path until the sampler reports a forced token. A request may carry both; a
+// null build (tags the vocabulary cannot tokenize) leaves the guard off.
+void MaybeArmReasoningLoopGuard(const TextModelRunner& runner,
+                                sampling::SamplingConfig* sampling) {
+  if (sampling->reasoning_loop_guard != nullptr)
+    return;
+  const auto periods = SharedReasoningLoopGuardPeriods();
+  if (!periods.has_value())
+    return;
+  sampling->reasoning_loop_guard = runner.BuildReasoningLoopGuard(*periods);
+}
+
+// Arms the opt-in reasoning word ban for a request that starts in its
+// reasoning phase, beside the budget and the loop guard. Like the guard the
+// ban never changes `can_use_unmodified_argmax()`: the request keeps the fast
+// argmax path until a step's raw argmax is itself banned. A null build (no
+// word matches, or tags the vocabulary cannot tokenize) leaves the ban off.
+void MaybeArmReasoningWordBan(const TextModelRunner& runner,
+                              sampling::SamplingConfig* sampling) {
+  if (sampling->reasoning_word_ban != nullptr)
+    return;
+  sampling->reasoning_word_ban = runner.BuildReasoningWordBan();
+}
+
 }  // namespace
 
 struct InferenceBackend::Impl {
@@ -3834,6 +4241,7 @@ struct InferenceBackend::Impl {
     bool supports_images{false};
     ReasoningOptions reasoning_defaults;
     std::string speculative_status;
+    std::uint32_t speculative_draft_limit{0};
     std::string model_path;
     std::string build_info;
   };
@@ -3865,6 +4273,10 @@ struct InferenceBackend::Impl {
             static_cast<std::size_t>(end - result.tokens.begin());
       }
       return result;
+    }
+
+    void SetTokenMetaCallback(const TokenMetaCallback& callback) override {
+      request_.SetTokenMetaCallback(callback);
     }
 
     void Cancel() noexcept override { request_.Cancel(); }
@@ -3919,6 +4331,8 @@ struct InferenceBackend::Impl {
             .cache_prompt = cache_prompt,
             .cache_prefix_tokens = cache_prefix_tokens,
             .stop_sequences = stop_sequences,
+            .stop_reasoning_ends = StopReasoningEnds(
+                current->scheduler->runner(), stop_sequences, initial),
         });
     ScheduledGenerationRequest generation(std::move(current),
                                           std::move(request), initial);
@@ -3934,7 +4348,7 @@ InferenceBackend::InferenceBackend() : impl_(std::make_unique<Impl>()) {}
 
 InferenceBackend::~InferenceBackend() {
 #if defined(ENGINE_ENABLE_HIP)
-  LogFp4SlotRefusals("shutdown");  // SQ10 SPEC3 (S3-5).
+  LogFp4SlotRefusals("shutdown");
 #endif
 }
 
@@ -4202,7 +4616,7 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
                 prefill_policy, scheduler_policy, speculative_config,
                 std::move(resolved_disk_cache_config), ram_cache_config);
   }
-  // Super ROC M2 R1: the registry is the architecture gate. Unknown arches
+  // The registry is the architecture gate. Unknown arches
   // fail closed instead of falling through into the Qwen loader; the
   // per-family refusals come from the table.
   {
@@ -4234,7 +4648,7 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
                           "drafter (--dflash-model); it has no MTP head");
       return false;
     }
-    // NBFAST T1: plain Llama accepts only DFlash2 drafting, for the same
+    // plain Llama accepts only DFlash2 drafting, for the same
     // reason as LFM2 (no MTP head in the target file).
     if (superroc::core::IsModelFamily(arch,
                                       superroc::core::ModelFamilyId::kLlama) &&
@@ -4276,7 +4690,8 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
         !speculative_config.draft_model_path.empty()) {
       std::string peek_error;
       auto peek = core::GgufReader::OpenFile(
-          speculative_config.draft_model_path, &peek_error);
+          speculative_config.draft_model_path, &peek_error,
+          core::GgufReader::FileRole::kSidecar);
       if (peek != nullptr) {
         dflash_markov_sidecar = models::qwen::DflashSidecarIsMarkovKind(
             peek->FindTensor("markov_w1.weight") != nullptr,
@@ -4296,12 +4711,6 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
       SetError(error, "KAT qwen35moe refuses DSpark");
       return false;
     }
-    if (decision == models::qwen::KatDispatch::kRefuseSidecar) {
-      SetError(
-          error,
-          "KAT qwen35moe MTP is embedded; a sidecar draft model is refused");
-      return false;
-    }
     if (decision == models::qwen::KatDispatch::kRefuseOther ||
         decision == models::qwen::KatDispatch::kNotKat) {
       SetError(error, "KAT qwen35moe refuses this speculative backend");
@@ -4317,9 +4726,24 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
     if (reader->GetMetadataUint64("qwen35.embedding_length") == 5120) {
       vision = models::qwen::vision::Encoder::Open(model_path,
                                                    vision_model_path, 5120);
+    } else if (const auto moe =
+                   reader->GetMetadataUint64("qwen35moe.embedding_length");
+               !vision_model_path.empty() && (moe == 2048 || moe == 3072)) {
+      // Qwen3.5/3.6 MoE: same ViT; the merger is 2048 wide (35B-A3B) or 3072
+      // wide (122B-A10B).
+      vision = models::qwen::vision::Encoder::Open(
+          model_path, vision_model_path, static_cast<std::uint32_t>(*moe));
+    } else if (const auto dense =
+                   reader->GetMetadataUint64("qwen35.embedding_length");
+               !vision_model_path.empty() && (dense == 4096 || dense == 2048)) {
+      // Qwen3.5 dense 9B (4096) and the 2048-wide dense sizes: same ViT,
+      // narrower merger.
+      vision = models::qwen::vision::Encoder::Open(
+          model_path, vision_model_path, static_cast<std::uint32_t>(*dense));
     } else if (!vision_model_path.empty()) {
       throw std::invalid_argument(
-          "image input supports Qwen3.8-27B and Flash-Next");
+          "image input supports Qwen3.8-27B, Flash-Next, the Qwen3.5 dense "
+          "9B/2048 sizes and the Qwen3.5/3.6 MoE family");
     }
   } catch (const std::exception& e) {
     SetError(error, e.what());
@@ -4359,10 +4783,10 @@ bool InferenceBackend::load(const std::string& model_path, std::string* error,
 }
 
 #if defined(ENGINE_ENABLE_HIP)
-// SQ10 SPEC2 (R4): every serve load sizes the FP4 slot manager before its
+// Every serve load sizes the FP4 slot manager before its
 // pool is built (Qwen: one set per session stream; Flash-Next: one shared
 // executor stream; DeepSeek/Ling: no FP4 streams, the call only sizes the
-// vectors). SQ19-2: configure() only pre-sizes and never fails, so a second
+// vectors). Configure() only pre-sizes and never fails, so a second
 // backend (or a reload with another session count) grows the table instead
 // of failing the load; every load-time attach still gets a warmed set.
 bool ConfigureFp4SlotSets(std::size_t session_count, std::string* error) {
@@ -4402,9 +4826,47 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
       speculative_config.backend == TextSpeculativeBackend::kMtp &&
       speculative_config.draft_model_path.empty() &&
       model->GetConfig().is_moe && model->GetWeights().mtp.has_value();
+  // A dense file that carries its own MTP block is its own MTP file: it needs
+  // no --mtp-model, and when no speculative option was given at all the
+  // block is used. --speculative off keeps the model without a drafter.
+  bool own_file_mtp = false;
+  if (!model->GetConfig().is_moe &&
+      speculative_config.draft_model_path.empty() &&
+      (speculative_config.backend == TextSpeculativeBackend::kMtp ||
+       (speculative_config.backend == TextSpeculativeBackend::kDisabled &&
+        speculative_config.automatic))) {
+    std::string block_error;
+    own_file_mtp = speculative::QwenMtpWeights::LoadFromGguf(
+                       model->GetReader(), &block_error,
+                       /*require_tied_embeddings=*/false)
+                       .has_value();
+    if (own_file_mtp &&
+        speculative_config.backend == TextSpeculativeBackend::kDisabled) {
+      speculative_config.backend = TextSpeculativeBackend::kMtp;
+      Logger::Info("loader",
+                   "event=speculative_auto backend=mtp "
+                   "reason=model_file_mtp_block draft_limit=" +
+                       std::to_string(speculative_config.max_draft_tokens));
+    }
+  }
   if (speculative_config.backend == TextSpeculativeBackend::kMtp &&
-      speculative_config.draft_model_path.empty() && !embedded_mtp) {
+      speculative_config.draft_model_path.empty() && !embedded_mtp &&
+      !own_file_mtp) {
     SetError(error, "Qwen MTP HTTP decoding requires --mtp-model");
+    return false;
+  }
+  if (speculative_config.backend == TextSpeculativeBackend::kMtp &&
+      speculative_config.default_draft_tokens && !model->GetConfig().is_moe) {
+    speculative_config.max_draft_tokens = std::max(
+        hip::kMtpDenseDraftTokensDefault, speculative_config.min_draft_tokens);
+  }
+  // A longer draft would not fit one verification, and the request that first
+  // drafted to the limit would fail instead of the load.
+  if (speculative_config.backend == TextSpeculativeBackend::kMtp &&
+      speculative_config.max_draft_tokens > hip::kQwenMaxDraftTokens) {
+    SetError(error, "Qwen MTP drafts at most " +
+                        std::to_string(hip::kQwenMaxDraftTokens) +
+                        " tokens per step; lower --draft-tokens");
     return false;
   }
   if (session_count == 0) {
@@ -4438,6 +4900,7 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
     std::shared_ptr<const hip::QwenDFlashGpuModel> dflash_model;
     std::shared_ptr<const hip::QwenMtpGpuModel> mtp_model;
     speculative::SpeculativeOptions speculative_options;
+    speculative_options.prompt_lookup = speculative_config.prompt_lookup;
     if (speculative_config.backend == TextSpeculativeBackend::kDFlash) {
       if (speculative_config.draft_model_path.empty()) {
         SetError(error, "DFlash HTTP decoding requires --dflash-model");
@@ -4445,7 +4908,8 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
       }
       std::string dflash_error;
       auto dflash_reader_owner = core::GgufReader::OpenFile(
-          speculative_config.draft_model_path, &dflash_error);
+          speculative_config.draft_model_path, &dflash_error,
+          core::GgufReader::FileRole::kSidecar);
       if (dflash_reader_owner == nullptr) {
         SetError(error, "Failed to open DFlash GGUF: " + dflash_error);
         return false;
@@ -4498,9 +4962,19 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
           disk_cache_config.draft_model_artifact_fingerprint =
               disk_cache_config.model_artifact_fingerprint;
         }
+      } else if (own_file_mtp) {
+        // The block inside the model file, bound through the model's reader.
+        mtp_model = hip::QwenMtpGpuModel::Create(model->ShareReader(), model,
+                                                 &mtp_error);
+        if (DiskCacheEnabled(disk_cache_config) &&
+            disk_cache_config.draft_model_artifact_fingerprint.empty()) {
+          disk_cache_config.draft_model_artifact_fingerprint =
+              disk_cache_config.model_artifact_fingerprint;
+        }
       } else {
         auto mtp_reader_owner = core::GgufReader::OpenFile(
-            speculative_config.draft_model_path, &mtp_error);
+            speculative_config.draft_model_path, &mtp_error,
+            core::GgufReader::FileRole::kSidecar);
         if (mtp_reader_owner == nullptr) {
           SetError(error, "Failed to open MTP GGUF: " + mtp_error);
           return false;
@@ -4514,8 +4988,13 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
                 &disk_cache_config.draft_model_artifact_fingerprint, error)) {
           return false;
         }
-        mtp_model = hip::QwenMtpGpuModel::Create(std::move(mtp_reader), model,
-                                                 &mtp_error);
+        // A MoE target binds the sidecar's own nextn block; a dense target
+        // keeps the standalone-sidecar pack.
+        mtp_model = model->GetConfig().is_moe
+                        ? hip::QwenMtpGpuModel::CreateFromMoeSidecar(
+                              std::move(mtp_reader), model, &mtp_error)
+                        : hip::QwenMtpGpuModel::Create(std::move(mtp_reader),
+                                                       model, &mtp_error);
       }
       if (mtp_model == nullptr) {
         SetError(error, "Failed to create Qwen MTP model: " + mtp_error);
@@ -4535,15 +5014,25 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
       // mtp). DFlash2 diffuses a fixed block, so it pins the length instead.
       speculative_options.enable_adaptive_draft_length = true;
     }
-    speculative_options.plain_decode_rates =
-        speculative_config.plain_decode_rates;
+    if (speculative_config.prompt_lookup &&
+        speculative_config.backend == TextSpeculativeBackend::kDisabled) {
+      speculative_options.max_draft_tokens = 1;
+      speculative_options.min_draft_tokens = 1;
+      speculative_options.initial_draft_tokens = 1;
+      speculative_options.use_batched_verification = true;
+      speculative_options.retain_frontier_logits = true;
+      speculative_options.enable_adaptive_draft_length = false;
+    }
 
     PrepareVision(model->VisionEncoder());
     auto new_state = std::make_shared<Impl::State>();
     new_state->sampling_defaults.model =
         sampling::TextPreset(model->GetConfig());
     new_state->sampling_defaults.supplied = {};
-    new_state->speculative_status = SpeculativeStatus(speculative_config);
+    new_state->speculative_status =
+        SpeculativeStatus(speculative_config, model->GetConfig().is_moe);
+    if (speculative_config.backend != TextSpeculativeBackend::kDisabled)
+      new_state->speculative_draft_limit = speculative_config.max_draft_tokens;
     new_state->supports_images = model->VisionEncoder() != nullptr;
     auto runner = std::make_shared<QwenTextRunner>(
         std::move(model), max_context, std::move(dflash_model),
@@ -4562,7 +5051,7 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
     }
     Logger::Info("loader",
                  "event=load_phase phase=sessions " + Logger::MemoryStatus());
-    if (!ConfigureFp4SlotSets(session_count, error)) {  // SQ10: R4.
+    if (!ConfigureFp4SlotSets(session_count, error)) {
       return false;
     }
     auto runner_pool = std::make_shared<TextRunnerPool>(
@@ -4574,7 +5063,7 @@ bool InferenceBackend::load(std::shared_ptr<const hip::QwenGpuModel> model,
       const std::lock_guard<std::mutex> lock(impl_->state_mutex);
       impl_->state = std::move(new_state);
     }
-    LogFp4SlotRefusals("load_end");  // SQ10 SPEC3 (S3-5).
+    LogFp4SlotRefusals("load_end");
     return true;
   } catch (const std::exception& exception) {
     SetError(error, exception.what());
@@ -4653,7 +5142,7 @@ bool InferenceBackend::load(
           .staging_capacity_bytes = disk_cache_config.staging_capacity_bytes,
       };
     }
-    if (!ConfigureFp4SlotSets(session_count, error)) {  // SQ10: R4.
+    if (!ConfigureFp4SlotSets(session_count, error)) {
       return false;
     }
     auto runner_pool = std::make_shared<TextRunnerPool>(
@@ -4665,7 +5154,7 @@ bool InferenceBackend::load(
       const std::lock_guard<std::mutex> lock(impl_->state_mutex);
       impl_->state = std::move(new_state);
     }
-    LogFp4SlotRefusals("load_end");  // SQ10 SPEC3 (S3-5).
+    LogFp4SlotRefusals("load_end");
     return true;
   } catch (const std::exception& exception) {
     SetError(error, exception.what());
@@ -4744,7 +5233,7 @@ bool InferenceBackend::load(
           .staging_capacity_bytes = disk_cache_config.staging_capacity_bytes,
       };
     }
-    if (!ConfigureFp4SlotSets(session_count, error)) {  // SQ10: R4.
+    if (!ConfigureFp4SlotSets(session_count, error)) {
       return false;
     }
     auto runner_pool = std::make_shared<TextRunnerPool>(
@@ -4756,7 +5245,7 @@ bool InferenceBackend::load(
       const std::lock_guard<std::mutex> lock(impl_->state_mutex);
       impl_->state = std::move(new_state);
     }
-    LogFp4SlotRefusals("load_end");  // SQ10 SPEC3 (S3-5).
+    LogFp4SlotRefusals("load_end");
     return true;
   } catch (const std::exception& exception) {
     SetError(error, exception.what());
@@ -4818,7 +5307,7 @@ bool InferenceBackend::load(
           .staging_capacity_bytes = disk_cache_config.staging_capacity_bytes,
       };
     }
-    if (!ConfigureFp4SlotSets(session_count, error)) {  // SQ10: R4.
+    if (!ConfigureFp4SlotSets(session_count, error)) {
       return false;
     }
     auto runner_pool = std::make_shared<TextRunnerPool>(
@@ -4829,7 +5318,7 @@ bool InferenceBackend::load(
       const std::lock_guard<std::mutex> lock(impl_->state_mutex);
       impl_->state = std::move(new_state);
     }
-    LogFp4SlotRefusals("load_end");  // SQ10 SPEC3 (S3-5).
+    LogFp4SlotRefusals("load_end");
     return true;
   } catch (const std::exception& exception) {
     SetError(error, exception.what());
@@ -4923,6 +5412,15 @@ std::string InferenceBackend::speculative_status() const {
 #endif
 }
 
+std::uint32_t InferenceBackend::speculative_draft_limit() const {
+#if defined(ENGINE_ENABLE_HIP)
+  const auto state = impl_->Snapshot();
+  return state != nullptr ? state->speculative_draft_limit : 0;
+#else
+  return 0;
+#endif
+}
+
 std::vector<InferenceBackend::SessionState> InferenceBackend::session_states()
     const {
 #if defined(ENGINE_ENABLE_HIP)
@@ -4974,7 +5472,6 @@ bool InferenceBackend::muse_channel_parse() const {
 #endif
 }
 
-// LFM2
 bool InferenceBackend::lfm2_pythonic_tools() const {
 #if defined(ENGINE_ENABLE_HIP)
   const auto state = impl_->Snapshot();
@@ -5095,7 +5592,9 @@ InferenceBackend::Result InferenceBackend::complete(
   if (state == nullptr) {
     return {};
   }
-  auto prompt_tokens = state->scheduler->runner().Tokenize(prompt);
+  // Raw prompt, no chat template: the GGUF BOS the model asks for belongs
+  // here, and usage.prompt_tokens counts it.
+  auto prompt_tokens = state->scheduler->runner().TokenizeRawPrompt(prompt);
   return impl_->GenerateScheduled(
       state, std::move(prompt_tokens), request_start, max_tokens,
       sampling_config, is_cancelled, on_token, std::string(client_id), {},
@@ -5138,6 +5637,10 @@ InferenceBackend::Result InferenceBackend::chat(
     effective_sampling.reasoning_budget =
         state->scheduler->runner().BuildReasoningBudget(
             *request.reasoning.budget_tokens, prompt->tokens);
+  if (initial == TextGenerationBackend::InitialOutputState::kReasoning) {
+    MaybeArmReasoningLoopGuard(state->scheduler->runner(), &effective_sampling);
+    MaybeArmReasoningWordBan(state->scheduler->runner(), &effective_sampling);
+  }
   return impl_->GenerateScheduled(
       state, std::move(prompt->tokens), request_start, max_tokens,
       effective_sampling, is_cancelled, on_token, request.client_id,
@@ -5168,7 +5671,9 @@ InferenceBackend::start_complete(
         prompt, max_tokens, sampling_config, is_cancelled, stream_output,
         ignore_eos, client_id, stop_sequences, return_progress, cache_prompt);
   }
-  auto prompt_tokens = state->scheduler->runner().Tokenize(prompt);
+  // Raw prompt, no chat template: the GGUF BOS the model asks for belongs
+  // here, and usage.prompt_tokens counts it.
+  auto prompt_tokens = state->scheduler->runner().TokenizeRawPrompt(prompt);
   auto scheduled_request = state->scheduler->Submit(
       std::move(prompt_tokens), max_tokens, sampling_config, is_cancelled,
       stream_output,
@@ -5189,6 +5694,59 @@ InferenceBackend::start_complete(
   return TextGenerationBackend::start_complete(
       prompt, max_tokens, sampling_config, is_cancelled, stream_output,
       ignore_eos, client_id, stop_sequences, return_progress, cache_prompt);
+#endif
+}
+
+void InferenceBackend::WarmReasoningCaches() {
+#if defined(ENGINE_ENABLE_HIP)
+  const auto state = impl_->Snapshot();
+  if (state == nullptr || state->scheduler == nullptr)
+    return;
+  // Builds (and logs) the process-wide word-ban token set and the closing
+  // message tokens once, before serving, so process start carries the
+  // per-word counts. Each builder is a no-op when its option is unset.
+  (void)state->scheduler->runner().BuildReasoningWordBan();
+  (void)state->scheduler->runner().ReasoningCloseMessageTokens();
+#endif
+}
+
+std::size_t InferenceBackend::warm_up(std::size_t max_tokens) {
+#if defined(ENGINE_ENABLE_HIP)
+  const auto state = impl_->Snapshot();
+  if (state == nullptr || state->scheduler == nullptr || max_tokens == 0) {
+    return 0;
+  }
+  // Plain prose as a raw prompt: no chat template, so a chat request shares
+  // none of its tokens and starts like any new conversation, and ordinary
+  // text gives the drafter a mix of accepted and rejected rounds to run.
+  auto prompt_tokens = state->scheduler->runner().TokenizeRawPrompt(
+      "The following is a short note about the history of the bicycle.\n\n"
+      "The bicycle");
+  if (prompt_tokens.empty()) {
+    return 0;
+  }
+  sampling::SamplingConfig greedy;
+  greedy.temperature = 0.0F;
+  auto scheduled_request = state->scheduler->Submit(
+      std::move(prompt_tokens), max_tokens, greedy, {}, false,
+      TextRequestMetadata{
+          .client_id = "warmup",
+          .deadline = std::nullopt,
+          .request_start = Clock::now(),
+          .prompt_context = {},
+          .cache_prompt = false,
+          .cache_prefix_tokens = 0,
+          .stop_at_eos = false,
+          .stop_sequences = {},
+          .return_progress = false,
+          .warmup = true,
+      });
+  Impl::ScheduledGenerationRequest generation(state,
+                                              std::move(scheduled_request));
+  return generation.Wait({}, {}, {}).tokens.size();
+#else
+  (void)max_tokens;
+  return 0;
 #endif
 }
 
@@ -5223,6 +5781,10 @@ InferenceBackend::start_chat(const ChatRequest& request, std::size_t max_tokens,
     effective_sampling.reasoning_budget =
         state->scheduler->runner().BuildReasoningBudget(
             *request.reasoning.budget_tokens, prompt->tokens);
+  if (initial == TextGenerationBackend::InitialOutputState::kReasoning) {
+    MaybeArmReasoningLoopGuard(state->scheduler->runner(), &effective_sampling);
+    MaybeArmReasoningWordBan(state->scheduler->runner(), &effective_sampling);
+  }
   const std::string client_id =
       request.client_id.empty() ? "anonymous" : request.client_id;
   auto scheduled_request = state->scheduler->Submit(
@@ -5236,6 +5798,8 @@ InferenceBackend::start_chat(const ChatRequest& request, std::size_t max_tokens,
           .cache_prompt = request.cache_prompt,
           .cache_prefix_tokens = prompt->cache_prefix_tokens,
           .stop_sequences = request.stop_sequences,
+          .stop_reasoning_ends = StopReasoningEnds(
+              state->scheduler->runner(), request.stop_sequences, initial),
           .return_progress = request.return_progress,
       });
   return std::make_shared<Impl::ScheduledGenerationRequest>(
@@ -5259,7 +5823,8 @@ std::size_t InferenceBackend::count_tokens(std::string_view text) const {
   if (state == nullptr) {
     return 0;
   }
-  return state->scheduler->runner().Tokenize(text).size();
+  // Same tokens a raw generation would see, BOS included.
+  return state->scheduler->runner().TokenizeRawPrompt(text).size();
 #else
   (void)text;
   return 0;

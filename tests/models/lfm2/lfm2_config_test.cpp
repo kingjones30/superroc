@@ -42,10 +42,10 @@ const superroc::core::GgufReader* Open(const std::string& path,
 }  // namespace
 
 int main() {
-  const char* a_path = std::getenv("LFM2_A_GGUF");     // LFM2
-  const char* b_path = std::getenv("LFM2_BF16_GGUF");  // LFM2
-  const char* q_path = std::getenv("LFM2_Q4KM_GGUF");  // LFM2
-  const char* w_path = std::getenv("QWEN_GGUF");       // LFM2
+  const char* a_path = std::getenv("LFM2_A_GGUF");
+  const char* b_path = std::getenv("LFM2_BF16_GGUF");
+  const char* q_path = std::getenv("LFM2_Q4KM_GGUF");
+  const char* w_path = std::getenv("QWEN_GGUF");
   if (a_path == nullptr || b_path == nullptr || q_path == nullptr ||
       w_path == nullptr) {
     std::cout << "SKIP lfm2_config_test: LFM2_A_GGUF, LFM2_BF16_GGUF, "
@@ -181,7 +181,8 @@ int main() {
     }
   }
 
-  // ---- Qwen regression (minicpm LEAN): F02/F09 must not break qwen35moe ----
+  // ---- Qwen regression (minicpm LEAN): the layer and size limits must not
+  // break qwen35moe ----
   {
     std::string err;
     const auto* reader = Open(w_path, &err, "QWEN-open");

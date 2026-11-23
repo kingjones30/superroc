@@ -73,7 +73,7 @@ struct QwenGemmFormatCapabilities {
     // direct on the CPU and on both GPU paths. opt-q4kxl added Q3_K, Q4_K,
     // IQ4_NL, IQ4_XS and IQ3_S to this set so the mixed low-bit UD-Q4_K_XL
     // shard runs packed instead of being pre-expanded to BF16.
-    case core::GgmlType::kQ4_0_ROCMFP4:  // lqw:route
+    case core::GgmlType::kQ4_0_ROCMFP4:
     case core::GgmlType::kQ4_0_ROCMFP4_FAST:
     case core::GgmlType::kQ8_0:
     case core::GgmlType::kQ3_K:

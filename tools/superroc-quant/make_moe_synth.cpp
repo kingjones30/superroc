@@ -2,10 +2,10 @@
 // KV header and tensor roster of an MoE GGUF (read-only), so the recipe
 // ladder's MoE-specific categories (ffn_*_exps 3-D, ffn_*_shexp, ffn_gate_inp
 // router, MLA attn latent tensors, KDA tensors, MTP/NextN, hc_*, indexer,
-// ple_*, ...) are all exercised as they are in King's real models.
+// ple_*, ...) are all exercised as they are in real models.
 //
-// SPEC2 item 5: prove all 7 recipes MATCH the fork on two such fixtures:
-//   (a) King's Ling-3.0-flash (arch bailingmoe3, 512 experts)
+// Prove all 7 recipes MATCH the fork on two such fixtures:
+//   (a) Ling-3.0-flash (arch bailingmoe3, 512 experts)
 //   (b) Qwen3.8-Flash-Next (the superroc qwen38_flash_next / qwen4exp family)
 //
 // The fixture keeps the real tensor NAMES and the real ne[0] (so the recipe

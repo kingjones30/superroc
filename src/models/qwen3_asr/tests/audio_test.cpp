@@ -127,10 +127,10 @@ double Cosine(std::span<const float> left, std::span<const float> right) {
 
 int main() {
   const char* configured = std::getenv("QWEN3_ASR_ARTIFACTS");
-  const std::filesystem::path artifacts =
-      configured != nullptr ? configured
-                            : "/home/fbozzo/projects/strix-halo.cpp/"
-                              "artifacts/qwen3_asr/official";
+  const std::filesystem::path artifacts = configured != nullptr
+                                              ? configured
+                                              : "/path/to/strix-halo.cpp/"
+                                                "artifacts/qwen3_asr/official";
   if (!std::filesystem::is_regular_file(artifacts / "waveform.npy") ||
       !std::filesystem::is_regular_file(artifacts / "input_features.npy")) {
     std::cerr << "SKIP qwen3_asr_audio_test: reference artifacts unavailable\n";

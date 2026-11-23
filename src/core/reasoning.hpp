@@ -24,7 +24,7 @@ struct ReasoningOptions {
   std::optional<bool> enabled;
   std::optional<ReasoningEffort> effort;
   std::optional<bool> preserve_thinking;
-  /// GLM: jinja `reasoning_strength` (Muse Glimmer). Empty means the model
+  /// Jinja `reasoning_strength` (Muse Glimmer). Empty means the model
   /// formatter's own default. A request value wins over the serve default.
   std::optional<std::string> reasoning_strength;
   /// Reasoning tokens before the end of thinking is forced (#266).

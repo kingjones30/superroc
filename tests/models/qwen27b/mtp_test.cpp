@@ -14,7 +14,7 @@
 #include <string_view>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/mtp_reference.hpp"
@@ -28,6 +28,20 @@ void Expect(bool condition, std::string_view message) {
     throw std::runtime_error(std::string(message));
   }
 }
+
+/// Agreement of the GPU draft pass with the CPU reference.
+struct Bounds {
+  double rmse;
+  double cosine;
+  float max_abs;
+  float logit;
+};
+/// The draft reads the block at the file's precision.
+constexpr Bounds kFilePrecision{0.15, 0.999, 1.0F, 2.0F};
+/// The draft reads a Q4_0 re-encoding of the block. Measured on the Q6_K
+/// block of Qwen3.8-27B-UD-Q4_K_XL: RMSE 0.42, cosine 0.982, max abs 2.1,
+/// logit 0.64.
+constexpr Bounds kReencoded{0.85, 0.96, 4.5F, 2.0F};
 
 std::vector<float> MakeTargetHidden(std::size_t size) {
   std::vector<float> hidden(size);
@@ -75,11 +89,10 @@ Comparison Compare(std::span<const float> actual,
 int main(int argc, const char* const* argv) {
   try {
     const char* base_path =
-        argc > 1 ? argv[1]
-                 : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
+        argc > 1 ? argv[1] : ::superroc::core::GetEnv("SUPERROC_QWEN27B_MODEL");
     const char* draft_path =
         argc > 2 ? argv[2]
-                 : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MTP_MODEL");
+                 : ::superroc::core::GetEnv("SUPERROC_QWEN27B_MTP_MODEL");
     if (base_path == nullptr || draft_path == nullptr) {
       std::cout << "qwen_mtp_gpu_test: skipped "
                    "(pass base and MTP GGUF paths)\n";
@@ -128,10 +141,27 @@ int main(int argc, const char* const* argv) {
         executor->ForwardTargetHidden(17, target_hidden, 0, true);
     const auto gpu_hidden = executor->CopyLastHidden();
     const auto hidden_comparison = Compare(gpu_hidden, reference_copy);
+    // The reference reads the MTP block at the file's own precision. So does
+    // the draft when SUPERROC_MTP_DRAFT_Q4=0; by default a block that is not
+    // already in a packed 4/8-bit type is re-encoded to Q4_0 for the draft,
+    // and the pass is then compared within the error of that encoding.
+    const char* const draft_q4 =
+        ::superroc::core::GetEnv("SUPERROC_MTP_DRAFT_Q4");
+    const bool file_precision = draft_q4 != nullptr && draft_q4[0] == '0';
+    const Bounds bounds = file_precision ? kFilePrecision : kReencoded;
+    const auto measured = [&] {
+      return " (rmse " + std::to_string(hidden_comparison.rmse) + ", cosine " +
+             std::to_string(hidden_comparison.cosine) + ", max abs " +
+             std::to_string(hidden_comparison.max_abs) + ", " +
+             (file_precision ? "file precision" : "default draft encoding") +
+             ")";
+    };
     Expect(std::isfinite(hidden_comparison.rmse), "hidden RMSE is finite");
-    Expect(hidden_comparison.rmse < 0.15, "hidden RMSE");
-    Expect(hidden_comparison.cosine > 0.999, "hidden cosine");
-    Expect(hidden_comparison.max_abs < 1.0F, "hidden max absolute error");
+    Expect(hidden_comparison.rmse < bounds.rmse, "hidden RMSE" + measured());
+    Expect(hidden_comparison.cosine > bounds.cosine,
+           "hidden cosine" + measured());
+    Expect(hidden_comparison.max_abs < bounds.max_abs,
+           "hidden max absolute error" + measured());
 
     const auto logits = executor->CopyLastLogits();
     constexpr std::array<std::uint32_t, 6> kSelectedTokens{0,  1,   17,
@@ -142,7 +172,8 @@ int main(int argc, const char* const* argv) {
       max_logit_error =
           std::max(max_logit_error, std::abs(logits[selected] - expected));
     }
-    Expect(max_logit_error < 2.0F, "selected logit error");
+    Expect(max_logit_error < bounds.logit,
+           "selected logit error " + std::to_string(max_logit_error));
 
     const std::vector<float> first_gpu_hidden(gpu_hidden.begin(),
                                               gpu_hidden.end());
@@ -227,7 +258,9 @@ int main(int argc, const char* const* argv) {
               << " hidden_rmse=" << hidden_comparison.rmse
               << " hidden_cosine=" << hidden_comparison.cosine
               << " hidden_max_abs=" << hidden_comparison.max_abs
-              << " selected_logit_max_abs=" << max_logit_error << '\n';
+              << " selected_logit_max_abs=" << max_logit_error
+              << " draft_block="
+              << (file_precision ? "file-precision" : "default") << '\n';
     return 0;
   } catch (const std::exception& exception) {
     std::cerr << "qwen_mtp_gpu_test failed: " << exception.what() << '\n';

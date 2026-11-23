@@ -22,7 +22,7 @@ This file is a ROCmFP4 FAST build of a merged Qwen3.8-27B checkpoint, calibrated
 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-Q4_0-ROCmFP4-FAST-imatrix.gguf --served-model-name qwen3.8-27b-fable-heretic --context 32768 --think off --speculative mtp --mtp-model /path/to/mtp-Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-Q4_0.gguf -d 4 --min-draft-tokens 1 --mmproj /path/to/mmproj-Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-BF16.gguf
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 
@@ -36,7 +36,7 @@ AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request a
 
 ## Quality
 
-Perplexity (n_ctx 4096, 2 chunks of 4094 scored tokens): 5.92124 on Super ROC against 5.9535 ± 0.23374 on llama.cpp (ROCmFPX build) of the same file. On held-out WikiText-2 raw (-c 512), the FAST imatrix file reads 6.6577 ± 0.042 against 6.6959 ± 0.042 for the non-imatrix control, both on llama.cpp (ROCmFPX build).
+Perplexity (n_ctx 4096, 2 chunks of 4094 scored tokens): 5.92124 on Super Roc against 5.9535 ± 0.23374 on llama.cpp (ROCmFPX build) of the same file. On held-out WikiText-2 raw (-c 512), the FAST imatrix file reads 6.6577 ± 0.042 against 6.6959 ± 0.042 for the non-imatrix control, both on llama.cpp (ROCmFPX build).
 
 ## Notes
 

@@ -360,9 +360,9 @@ int main() {
     close(fd);
     auto reader = superroc::core::GgufReader::OpenFile(ok_path, &ok_error);
     Expect(reader != nullptr, "open ok gguf: " + ok_error);
-    // Audit J7 (2026-10-14): a qwen35moe trunk whose experts are not ROCmFP4
-    // is refused at bind (the GPU expert path reads ROCmFP4 only), so the BF16
-    // slice stride is checked on a hand-made ref instead of a bound layer.
+    // A qwen35moe trunk whose experts are not ROCmFP4 is refused at bind (the
+    // GPU expert path reads ROCmFP4 only), so the BF16 slice stride is checked
+    // on a hand-made ref instead of a bound layer.
     auto weights =
         superroc::models::QwenModelWeights::LoadFromGguf(*reader, &ok_error);
     Expect(

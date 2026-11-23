@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cerrno>
 #include <condition_variable>
 #include <cstring>
@@ -75,6 +76,7 @@ struct WeightUpload::State {
   std::size_t pending{0};
   bool stopping{false};
   std::string failure;
+  std::atomic<bool> direct_refused{false};
 
   ~State() {
     {
@@ -121,7 +123,8 @@ struct WeightUpload::State {
     const auto& shard = shards[task.shard];
     const void* payload = slot.buffer;
     bool read = false;
-    if (shard.direct_fd >= 0) {
+    if (shard.direct_fd >= 0 &&
+        !direct_refused.load(std::memory_order_relaxed)) {
       const auto begin = task.offset & ~(kAlignment - 1);
       const auto skip = static_cast<std::size_t>(task.offset - begin);
       const auto length =
@@ -129,8 +132,16 @@ struct WeightUpload::State {
       read = ReadFully(shard.direct_fd, slot.buffer, begin, length,
                        skip + task.size);
       payload = static_cast<const char*>(slot.buffer) + skip;
-      if (!read && errno != EINVAL && errno != EOPNOTSUPP) {
-        return "shard read failed: " + std::string(std::strerror(errno));
+      if (!read) {
+        // EFAULT: the buffer is host memory the driver owns
+        // (HSA_USERPTR_FOR_PAGED_MEM=0), whose pages direct I/O cannot take.
+        // That holds for every slot, so the direct descriptors are left
+        // alone from here on.
+        if (errno == EFAULT) {
+          direct_refused.store(true, std::memory_order_relaxed);
+        } else if (errno != EINVAL && errno != EOPNOTSUPP) {
+          return "shard read failed: " + std::string(std::strerror(errno));
+        }
       }
     }
     if (!read) {

@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "src/cli/serve/inference_backend.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/models/deepseek_v4_flash/dspark_sampler.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
 #include "src/models/qwen/chat_template.hpp"
@@ -492,7 +492,7 @@ void CheckDsparkServing(const char* model_path, const char* support_path) {
 int main(int argc, char** argv) {
   try {
     const char* model_path =
-        ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
+        ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
     if (model_path == nullptr || model_path[0] == '\0') {
       std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_MODEL is not set\n";
       return 77;
@@ -500,8 +500,8 @@ int main(int argc, char** argv) {
     if (argc > 1) {
       Expect(argc == 2 && std::string_view(argv[1]) == "--dspark-eos",
              "usage: ds4_serving_test [--dspark-eos]");
-      const char* support = ::superroc::core::GetEnvCompat(
-          "SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
+      const char* support =
+          ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
       if (support == nullptr || *support == '\0') {
         std::cout
             << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
@@ -763,8 +763,8 @@ int main(int argc, char** argv) {
       Expect(!recovered.cache_hit,
              "cancelled DeepSeek state must not remain cached");
     }
-    const char* support_path = ::superroc::core::GetEnvCompat(
-        "SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
+    const char* support_path =
+        ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL");
     if (support_path == nullptr || *support_path == '\0') {
       std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
       return 77;

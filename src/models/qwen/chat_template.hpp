@@ -53,12 +53,13 @@ struct ChatMessage {
 
   ChatRole role{ChatRole::kUser};
   std::string content;
-  /// Internal server-authored instructions following system/developer content.
-  /// These bytes are template framing, never supplied by the HTTP message API.
-  /// Invariant (HT2, Muse Wonder W6 A-3): server-generated only, never derived
-  /// from client bytes, and never containing a special-token spelling -- it is
-  /// tokenized as framing, so a spelling in it becomes a real special token.
+  /// Server-built instructions following system/developer content. They are
+  /// template framing (their tool-call delimiters must stay control tokens),
+  /// except the byte ranges in framing_client_ranges: those hold client text
+  /// (a response-format description, schema JSON) and are encoded as text.
   std::string framing_suffix;
+  /// {offset, size} ranges of framing_suffix that hold client text, sorted.
+  std::vector<std::pair<std::size_t, std::size_t>> framing_client_ranges;
   std::string name;     ///< Optional function/tool name
   std::string thought;  ///< Optional thinking/reasoning prefix
   std::string tool_call_id;
@@ -163,7 +164,7 @@ struct ChatTemplateOptions {
   bool add_generation_prompt{true};
   bool enable_thinking{true};
   QwenReasoningEffort reasoning_effort{QwenReasoningEffort::kXHigh};
-  /// GLM: pinned Glimmer template's `reasoning_strength`. Empty uses the
+  /// Pinned Glimmer template's `reasoning_strength`. Empty uses the
   /// effort map (xhigh -> "high", the template's own default).
   std::string reasoning_strength;
   bool preserve_thinking{true};
@@ -204,7 +205,7 @@ public:
     kLegacyChatMl,
     kQwen38Reasoning,
     kMuseGlimmer,  // GLIMMER
-    kLfm2,         // LFM2
+    kLfm2,
     kFlint,
   };
 

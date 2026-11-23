@@ -11,8 +11,7 @@
 int main(int argc, char** argv) {
   namespace tts = superroc::models::qwen3_tts;
   const std::string root =
-      argc > 1 ? argv[1]
-               : "/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+      argc > 1 ? argv[1] : "/path/to/Qwen3-TTS-12Hz-1.7B-CustomVoice";
   if (!std::filesystem::exists(root + "/model.safetensors"))
     return 77;
   const auto config = tts::LoadModelConfigFromPath(root);

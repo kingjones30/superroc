@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <stdexcept>
 
@@ -75,9 +76,12 @@ struct MtpVerification {
 
 /// The same FP64 target distribution drives AR draws, support, acceptance
 /// and residual correction. Only proposal q uses the compact F32 masses.
-inline MtpVerification VerifyMtpProposal(std::span<const float> logits,
-                                         const MtpProposal& proposal,
-                                         sampling::SamplerState& sampler) {
+/// When `capture` is non-null, it receives the target model's report for the
+/// emitted token (the accepted proposal or the residual correction).
+inline MtpVerification VerifyMtpProposal(
+    std::span<const float> logits, const MtpProposal& proposal,
+    sampling::SamplerState& sampler,
+    sampling::CapturedTokenLogprobs* capture = nullptr) {
   if (proposal.size == 0 || proposal.size > kMtpCandidates ||
       proposal.token >= logits.size() || !std::isfinite(proposal.probability) ||
       proposal.probability <= 0 || proposal.probability > 1)
@@ -96,24 +100,44 @@ inline MtpVerification VerifyMtpProposal(std::span<const float> logits,
   if (total != 1 || selected != proposal.probability)
     throw std::invalid_argument("MTP proposal masses do not match the draw");
   const auto target = sampler.Distribution(logits);
+  const auto report = [&](sampling::TokenId emitted) {
+    if (capture == nullptr)
+      return;
+    const auto top_n = sampler.logprobs_top_n();
+    capture->token = emitted;
+    const double probability = target.probability(emitted);
+    capture->logprob = probability > 0.0
+                           ? std::log(probability)
+                           : -std::numeric_limits<double>::infinity();
+    capture->top = sampling::TopLogprobEntries(target, top_n);
+  };
   if (sampler.Uniform() * proposal.probability <
-      target.probability(proposal.token))
+      target.probability(proposal.token)) {
+    report(proposal.token);
     return {proposal.token, true};
-  return {target.SampleResidual(
-              std::span(proposal.ids).first(proposal.size),
-              std::span(proposal.probabilities).first(proposal.size),
-              sampler.mutable_rng_state()),
-          false};
+  }
+  const auto correction = target.SampleResidual(
+      std::span(proposal.ids).first(proposal.size),
+      std::span(proposal.probabilities).first(proposal.size),
+      sampler.mutable_rng_state());
+  report(correction);
+  return {correction, false};
 }
 
 /// The draft is deterministic, so an exact target sample decides acceptance.
 /// A rejected draw is deferred to the next cycle: restore its RNG so that
 /// stopping at this prefix consumes exactly the draws made by ordinary decode.
+/// When `capture` is non-null, it receives the target model's report for the
+/// sampled token, taken before any Accept changes the distribution.
 template<typename IsStop>
 DraftDecision VerifyDraft(std::span<const float> logits, std::int32_t draft,
-                          sampling::SamplerState& sampler, IsStop is_stop) {
+                          sampling::SamplerState& sampler, IsStop is_stop,
+                          sampling::CapturedTokenLogprobs* capture = nullptr) {
   const auto rng = sampler.rng_state();
   const auto token = sampler.Sample(logits);
+  if (capture != nullptr) {
+    *capture = sampler.CaptureLogprobs(logits, token, sampler.logprobs_top_n());
+  }
   if (is_stop(static_cast<std::int32_t>(token))) {
     return DraftDecision::kStop;
   }

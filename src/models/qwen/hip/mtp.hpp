@@ -43,6 +43,15 @@ public:
   CreateFromEmbedded(std::shared_ptr<const QwenGpuModel> target_model,
                      std::string* error_msg = nullptr);
 
+  // KAT-MTP: the sidecar GGUF is a qwen35moe model whose last block is the
+  // nextn head. The block binds against the sidecar's own config, is copied
+  // to device memory in its packed types, and borrows the tied embedding and
+  // LM head from the target model.
+  [[nodiscard]] static std::shared_ptr<const QwenMtpGpuModel>
+  CreateFromMoeSidecar(std::shared_ptr<const core::GgufReader> reader,
+                       std::shared_ptr<const QwenGpuModel> target_model,
+                       std::string* error_msg = nullptr);
+
   [[nodiscard]] const speculative::QwenMtpWeights& GetWeights() const noexcept {
     return weights_;
   }
@@ -63,7 +72,7 @@ public:
   [[nodiscard]] std::span<const float> GetTargetOutputNorm() const noexcept {
     return target_output_norm_;
   }
-  /// Super ROC DVT: the target model (its tokenizer names the special
+  /// Super Roc DVT: the target model (its tokenizer names the special
   /// tokens the trimmed draft head must keep).
   [[nodiscard]] const QwenGpuModel& GetTargetModel() const noexcept {
     return *target_model_;
@@ -76,6 +85,15 @@ private:
                   std::vector<void*> allocations,
                   std::size_t packed_weight_bytes, double pack_time_seconds,
                   std::vector<float> target_output_norm);
+
+  /// Shared tail of CreateFromEmbedded and CreateFromMoeSidecar: fills
+  /// `weights` from the target's config and the block, borrows the target's
+  /// tied embedding and LM head, refuses a block tensor type the draft
+  /// kernels cannot execute, and copies the target's output_norm to the host.
+  [[nodiscard]] static bool BuildBlockWeights(
+      speculative::QwenMtpWeights& weights, const QwenGpuModel& target_model,
+      const models::QwenLayerWeights& block,
+      std::vector<float>* target_output_norm, std::string* error_msg);
 
   std::shared_ptr<const core::GgufReader> mtp_reader_;
   std::shared_ptr<const QwenGpuModel> target_model_;
@@ -118,7 +136,7 @@ public:
       tokenization::TokenId input_token, std::uint32_t position,
       bool compute_logits = true);
 
-  /// SPEC4 item 2: batched prompt priming. One MTP-block forward for a whole
+  /// Batched prompt priming. One MTP-block forward for a whole
   /// chunk of cells [start_pos, start_pos + tokens.size()); hidden_rows are
   /// the ALREADY-normalized target features for the same rows (pair p uses
   /// h_{p-1}). Writes the MTP KV identically to the serial path.
@@ -132,9 +150,25 @@ public:
 
   /// Maximum rows per ForwardTargetBatch call.
   static constexpr std::size_t kPrimeBatchRows = 4096;
+  /// Rows the batched-prime scratch holds. A longer call runs in chunks of
+  /// this size, so the scratch does not grow with the prefill chunk.
+  static constexpr std::size_t kPrimeScratchRows = 1024;
+  /// Shortest prompt the full-block prime (SUPERROC_MTP_PRIME_FULL) batches.
+  static constexpr std::size_t kFullPrimeBatchFloor = 257;
 
   [[nodiscard]] std::span<const float> CopyLastHidden();
   [[nodiscard]] std::span<const float> CopyLastLogits();
+  /// Probability of the token the last logits forward returned, under a
+  /// softmax over the rows the draft head scored (the trimmed draft vocabulary
+  /// when it is on). Zero until SetDraftProbability(true).
+  [[nodiscard]] float LastTop1Probability() const noexcept {
+    return last_top1_probability_;
+  }
+  /// Has every logits forward also compute LastTop1Probability() on the
+  /// device (one small kernel, returned with the token).
+  void SetDraftProbability(bool enabled) noexcept {
+    draft_probability_ = enabled;
+  }
 
   [[nodiscard]] std::uint32_t GetNextPosition() const noexcept {
     return next_position_;
@@ -148,8 +182,8 @@ public:
   [[nodiscard]] bool IsMoe() const noexcept {
     return model_->GetWeights().layer.is_moe;
   }
-  /// SQ10 SPEC2 (R1): this helper's stream. The session aliases it to its
-  /// own set at backend creation; the dtor removes the alias (R3).
+  /// This helper's stream. The session aliases it to its
+  /// own set at backend creation; the dtor removes the alias.
   [[nodiscard]] hipStream_t Stream() const noexcept { return stream_; }
 
   /// Retained KV state and per-step scratch, in the same terms the DFlash
@@ -159,8 +193,18 @@ public:
     return {state_bytes_, scratch_bytes_};
   }
 
+  /// Keeps only the F16 K/V plane (M2; the default since M5): the F32 copy is
+  /// never allocated, writers take null F32 pointers (the kernels null-check
+  /// each plane), and snapshots copy only the F16 plane. SUPERROC_MTP_KV_ONE=0
+  /// restores the old two-copy plane. The default decode path already reads
+  /// F16, so greedy output is unchanged. Public so the snapshot class (a
+  /// different class) can size payloads.
+  [[nodiscard]] static bool KvSinglePlane() noexcept;
+
   /// Exact device bytes SaveSnapshot will allocate for the valid prefix.
   [[nodiscard]] std::size_t SnapshotPayloadBytes() const;
+  [[nodiscard]] std::size_t SnapshotPayloadBytesAt(
+      std::uint32_t position) const;
   /// Copies the valid KV prefix [0, next_position_) to a device snapshot.
   [[nodiscard]] std::unique_ptr<QwenMtpGpuSnapshot> SaveSnapshot() const;
   /// Restores a snapshot taken from this configuration and rewinds the draft
@@ -179,7 +223,7 @@ private:
                                           bool compute_logits);
   void Allocate();
   void Free() noexcept;
-  /// Super ROC DVT (draft vocab trim), read once from SUPERROC_MTP_DRAFT_VOCAB.
+  /// Super Roc DVT (draft vocab trim), read once from SUPERROC_MTP_DRAFT_VOCAB.
   void ConfigureDraftVocab();
 
   std::shared_ptr<const QwenMtpGpuModel> model_;
@@ -210,7 +254,9 @@ private:
   void* d_kv_cache_f16_{nullptr};
   float* d_split_k_scratch_{nullptr};
 
-  /// Batched-prime scratch (kPrimeBatchRows rows).
+  /// Batched-prime scratch (kPrimeScratchRows rows). The default prime fills
+  /// only the draft KV and uses the first seven; the rest belong to the
+  /// full-block prime and are allocated on its first use.
   std::uint32_t* d_b_tokens_{nullptr};
   float* d_b_h_{nullptr};
   float* d_b_embed_{nullptr};
@@ -228,6 +274,9 @@ private:
   float* d_b_ffn_up_{nullptr};
   float* d_b_ffn_out_{nullptr};
   std::uint32_t* d_out_token_{nullptr};
+  float* d_out_probability_{nullptr};
+  bool draft_probability_{false};
+  float last_top1_probability_{0.0F};
   // KAT-MTP: one-token MoE scratch. Null unless the embedded block is MoE.
   float* d_moe_logits_{nullptr};
   int* d_moe_ids_{nullptr};
@@ -238,10 +287,11 @@ private:
   float* d_moe_act_{nullptr};
   float* d_moe_h_{nullptr};
   /// BF16 activation scratch for the hipBLAS prime GEMM. One weight read
-  /// per chunk; sized to kPrimeBatchRows times the widest K.
+  /// per chunk; sized to kPrimeScratchRows times the widest K.
   std::uint16_t* d_b_bf16_{nullptr};
   std::size_t b_bf16_elems_{0};
-  /// BF16 image of one Q4_0 prime weight. Decode itself stays on the Q4_0 GEMV.
+  /// BF16 image of one Q4_0 prime weight, grown to the largest matrix a
+  /// prime has read. Decode itself stays on the Q4_0 GEMV.
   std::uint16_t* d_q4_bf16_{nullptr};
   std::size_t q4_bf16_elems_{0};
   hipblasHandle_t hipblas_{nullptr};
@@ -251,6 +301,16 @@ private:
   void RunPrimeGemm(const void* weight, core::GgmlType type, const float* input,
                     float* output, std::size_t batch, std::size_t rows_out,
                     std::size_t cols_in, hipStream_t stream);
+  /// M3b (SUPERROC_MTP_PRIME_FREE_Q4=1; M5 adds SUPERROC_MTP_LEAN=1 as an
+  /// alias): releases the Q4_0 BF16 weight image after a prime chunk drains,
+  /// so only an in-flight prime holds it.
+  void MaybeFreeQ4Scratch();
+  /// One ForwardTargetBatch chunk of at most kPrimeScratchRows rows.
+  void ForwardTargetChunk(std::span<const tokenization::TokenId> tokens,
+                          std::span<const float> hidden_rows,
+                          std::uint32_t start_pos);
+  /// Allocates the full-block prime's scratch on its first use.
+  void EnsureFullPrimeScratch();
 
   models::qwen::vision::DeviceInput* vision_input_{
       nullptr};  // owned by the target session
@@ -259,7 +319,7 @@ private:
   std::vector<float> h_last_hidden_;
   std::vector<float> h_logits_;
 
-  /// Super ROC DVT. SUPERROC_MTP_DRAFT_VOCAB=N (N >= 1024) scores only the
+  /// Super Roc DVT. SUPERROC_MTP_DRAFT_VOCAB=N (N >= 1024) scores only the
   /// head's rows [0, N) and the tail [draft_tail_start_, vocab) that holds
   /// the special tokens; the draft logits buffer is packed head then tail.
   /// Default N = 98304; SUPERROC_MTP_DRAFT_VOCAB=0 (draft_rows_ == 0) keeps the
@@ -334,7 +394,7 @@ public:
     return "QwenMtpGpuDraftBackend";
   }
 
-  /// SQ10 SPEC2 (R1): the draft executor's stream, for aliasing to the
+  /// The draft executor's stream, for aliasing to the
   /// owning session's set at creation.
   [[nodiscard]] hipStream_t DraftStream() const noexcept {
     return executor_ != nullptr ? executor_->Stream() : nullptr;
@@ -353,6 +413,18 @@ public:
   [[nodiscard]] speculative::DraftProposal Propose(
       std::span<const tokenization::TokenId> prompt_tokens,
       std::uint32_t current_pos, std::uint32_t max_tokens) override;
+
+  /// Lossless sampled proposals: the top-K draft logits at the request
+  /// temperature, renormalized, plus one draw per row. The verifier's
+  /// rejection sampling corrects any proposal row, so sampled (temperature
+  /// > 0), penalized and constrained requests keep drafting.
+  [[nodiscard]] speculative::DraftProposal ProposeSampled(
+      std::span<const tokenization::TokenId> prompt_tokens,
+      std::uint32_t current_pos, std::uint32_t max_tokens, float temperature,
+      std::uint64_t* rng_state) override;
+  [[nodiscard]] bool SupportsSampledProposals() const noexcept override {
+    return sampled_enabled_;
+  }
 
   void AcceptFeedback(std::span<const tokenization::TokenId> accepted,
                       tokenization::TokenId correction_token) override;
@@ -380,6 +452,8 @@ public:
   /// Snapshots persist the draft KV prefix and hidden row next to the target
   /// state, so post-restore drafts match an uninterrupted run.
   [[nodiscard]] std::size_t SnapshotPayloadBytes() const override;
+  [[nodiscard]] std::optional<std::size_t> SnapshotPayloadBytesAt(
+      std::uint32_t position) const override;
   [[nodiscard]] std::unique_ptr<speculative::IDraftBackendSnapshot> Snapshot()
       const override;
   void RestoreSnapshot(
@@ -417,9 +491,15 @@ private:
   QwenMtpGpuDraftConfig config_;
   std::vector<float> output_norm_;
   std::vector<float> normed_hidden_;
+  /// Batched prime/append row staging, reused across chunks (resize only).
+  std::vector<float> prime_rows_;
   std::vector<float> zero_hidden_;
   bool norm_at_ingest_{true};
   bool batch_prime_{true};
+  /// Sampled proposals (SUPERROC_MTP_SAMPLED=0 turns them off, falling back to
+  /// the greedy-only draft) and the top-K width of each reported row.
+  bool sampled_enabled_{true};
+  std::size_t sampled_top_k_{16};
   std::vector<float> target_hidden_;
   std::vector<float> proposal_target_hidden_;
   std::vector<float> committed_target_hidden_;

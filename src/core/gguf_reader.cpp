@@ -10,6 +10,8 @@
 #include <bit>
 #include <cmath>
 #include <cstddef>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <iomanip>
@@ -26,6 +28,7 @@
 #include <variant>
 #include <vector>
 
+#include "src/core/env.hpp"
 #include "src/core/model_family.hpp"
 #include "src/core/quant/ggml_dequant.hpp"
 
@@ -123,7 +126,7 @@ GgufReader& GgufReader::operator=(GgufReader&& other) noexcept {
 }
 
 std::unique_ptr<GgufReader> GgufReader::OpenFile(
-    const std::filesystem::path& path, std::string* error_msg) {
+    const std::filesystem::path& path, std::string* error_msg, FileRole role) {
   auto first = OpenSingleFile(path, error_msg);
   if (!first) {
     return nullptr;
@@ -137,10 +140,65 @@ std::unique_ptr<GgufReader> GgufReader::OpenFile(
       *error_msg = "Invalid GGUF split count";
     return nullptr;
   }
-  if (split_count <= 1) {
+  if (split_count > 1) {
+    first = OpenSplitFileSet(path, std::move(first), error_msg);
+    if (!first) {
+      return nullptr;
+    }
+  }
+  if (role == FileRole::kSidecar) {
     return first;
   }
-  return OpenSplitFileSet(path, std::move(first), error_msg);
+  return ApplyTensorOverlay(std::move(first), error_msg);
+}
+
+std::unique_ptr<GgufReader> GgufReader::ApplyTensorOverlay(
+    std::unique_ptr<GgufReader> base, std::string* error_msg) {
+  const char* const overlay_path =
+      ::superroc::core::GetEnv("SUPERROC_TENSOR_OVERLAY");
+  if (overlay_path == nullptr || overlay_path[0] == '\0') {
+    return base;
+  }
+  auto overlay = OpenSingleFile(overlay_path, error_msg);
+  if (!overlay) {
+    return nullptr;
+  }
+  std::vector<std::pair<std::size_t, const GgufTensorInfo*>> swaps;
+  for (const auto& tensor : overlay->tensors_) {
+    const auto found = base->tensor_index_.find(tensor.name);
+    if (found == base->tensor_index_.end()) {
+      continue;
+    }
+    if (base->tensors_[found->second].dimensions != tensor.dimensions) {
+      if (error_msg != nullptr) {
+        *error_msg =
+            "Overlay tensor has other dimensions: " + std::string(tensor.name);
+      }
+      return nullptr;
+    }
+    swaps.emplace_back(found->second, &tensor);
+  }
+  if (swaps.empty()) {
+    return base;
+  }
+  auto combined = std::unique_ptr<GgufReader>(new GgufReader());
+  combined->version_ = base->version_;
+  combined->alignment_ = base->alignment_;
+  combined->metadata_ = base->metadata_;
+  combined->tensors_ = base->tensors_;
+  combined->tensor_index_ = base->tensor_index_;
+  combined->size_ = base->size_ + overlay->size_;
+  combined->mapped_regions_ = base->mapped_regions_;
+  combined->mapped_regions_.push_back(
+      {overlay->data_, overlay->size_, overlay->fd_});
+  for (const auto& [index, tensor] : swaps) {
+    combined->tensors_[index] = *tensor;
+  }
+  std::fprintf(stderr, "tensor overlay: %zu tensors from %s\n", swaps.size(),
+               overlay_path);
+  combined->shards_.push_back(std::move(base));
+  combined->shards_.push_back(std::move(overlay));
+  return combined;
 }
 
 std::unique_ptr<GgufReader> GgufReader::OpenSingleFile(
@@ -962,6 +1020,13 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
   }
   if (auto val = GetMetadataUint32(prefix + "expert_used_count")) {
     config.expert_used_count = *val;
+    config.expert_used_file = *val;
+    if (const char* env = ::superroc::core::GetEnv("SUPERROC_ROUTED_EXPERTS");
+        env != nullptr) {
+      const int routed = std::atoi(env);
+      if (routed > 0 && static_cast<std::uint32_t>(routed) < *val)
+        config.expert_used_count = static_cast<std::uint32_t>(routed);
+    }
   }
   if (auto val = GetMetadataUint32(prefix + "expert_feed_forward_length")) {
     config.expert_feed_forward_length = *val;
@@ -1130,7 +1195,7 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     }
   }
 
-  if (superroc::core::IsLfm2Family(config.architecture)) {  // LFM2
+  if (superroc::core::IsLfm2Family(config.architecture)) {
     if (HasMtpTensors()) {
       if (error_msg != nullptr) {
         *error_msg = "lfm2moe does not support MTP";
@@ -1186,7 +1251,7 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     }
     config.num_key_value_heads = static_cast<std::uint32_t>(kv_first);
     if (lfm2_dense) {
-      // Super ROC: dense lfm2 — every layer is a SwiGLU FFN, no router.
+      // Super Roc: dense lfm2 — every layer is a SwiGLU FFN, no router.
       if (config.expert_count != 0) {
         if (error_msg != nullptr) {
           *error_msg = "lfm2 (dense) must not carry experts";
@@ -1245,7 +1310,7 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     config.ssm_time_step_rank = 1;                          // LFM2 chassis
     config.rope_variant = RopeVariant::kNeox;               // LFM2 chassis
     config.norm_eps_post = config.norm_eps_pre;             // LFM2 chassis
-  }  // LFM2
+  }
 
   if (superroc::core::IsModelFamily(config.architecture,
                                     superroc::core::ModelFamilyId::kFlint)) {
@@ -1384,7 +1449,7 @@ std::optional<ModelConfig> GgufReader::ExtractModelConfig(
     if (!rope_dim.has_value() || *rope_dim != *key_len) {
       return fail("rope.dimension_count");
     }
-    // LLAMA (F11): decode runs Flint split-K attention, which refuses
+    // LLAMA: decode runs Flint split-K attention, which refuses
     // head_dim != 128 and GQA groups over 8. Refuse those files at load
     // instead of throwing on the first decode token.
     if (*key_len != 128U) {

@@ -24,12 +24,8 @@ benchmark/tuning executables; Python tools run from this source tree.
 Qwen reference tests. `superroc/safetensors.py` validates source snapshots used by
 MiniMax's manifest and quality tooling. Both support model verification.
 
-`gufo/` remains as an import-compatibility shim: the package moved to `superroc/`,
-and importing the previous name still works with a deprecation warning.
-
-See [performance commands](../docs/PERFORMANCE.md),
-[benchmark methodology](../docs/BENCHMARKS.md), and
-[MiniMax validation](../docs/models/minimax-h3/QUALITY.md).
+See [performance commands](../docs/PERFORMANCE.md)
+and [benchmark methodology](../docs/BENCHMARKS.md).
 
 Functional and regression tests live in [tests/functional/](../tests/functional/README.md),
 including the OpenAI SDK suites and interrupted-chat/disk replay. Use its runner
@@ -79,5 +75,4 @@ compares separate and fused draft normalization/RoPE.
 with separate or fused SwiGLU, including every activation byte and scale.
 It replaces the old standalone W8A8 kernel copies.
 `qwen27b/dflash_reference.py` checks a GPU trace against
-pinned upstream PyTorch operators using the same GGUF weights. See
-`docs/models/qwen3.8-27b/BENCHMARKS.md` and its quality report for commands and evidence.
+pinned upstream PyTorch operators using the same GGUF weights.

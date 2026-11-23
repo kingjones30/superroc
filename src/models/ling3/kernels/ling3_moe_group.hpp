@@ -1,10 +1,10 @@
 #pragma once
-// LS1 PHASE8 item 2. See ling3_moe_group.hip for what this replaces and why it
+// See ling3_moe_group.hip for what this replaces and why it
 // is ordered the way it is.
 /// Tokens per CTA tile in the tiled router logits kernel.
 enum { LS1_ROUTE_TY = 8 };
 
-// LS1 PHASE9: the smallest chunk, in tokens, at which the 2D register-tiled
+// The smallest chunk, in tokens, at which the 2D register-tiled
 // router GEMM is used. Its grid is ceil(E/BM) x ceil(T/BN), so it needs enough
 // tokens to fill the 20 CUs; below this the kernel it replaces runs unchanged.
 // Overridable at runtime with LING3_ROUTE_GEMM_MIN_T so the crossover can be
@@ -23,7 +23,7 @@ extern "C" {
 int ling3_route_logits_tiled(const float* x, const float* gate, int k,
                              int n_expert, int n_tokens, int ty, float* logits);
 
-/// LV1 router logits: logits[t][e] = sum_i x[t][i] * gate[e][i]. One CTA owns
+/// Router logits: logits[t][e] = sum_i x[t][i] * gate[e][i]. One CTA owns
 /// 64 experts x 64 tokens, 128 threads, each an 8x4 register tile, K stepped by
 /// 32 in float4. fp32 accumulate, k ascending, no atomics, one writer per
 /// output. Replaces the PHASE9 64x32 scalar tile. Returns LING3_ERR_ARG unless
@@ -32,7 +32,7 @@ int ling3_route_logits_gemm_launch(const float* x, const float* gate, int K,
                                    int E, int T, float* logits);
 
 /// The PHASE9 tile ling3_route_logits_gemm_launch used to run. Same K % 32
-/// rule. The unit test reports max_abs / top-8 of the LV1 kernel against this
+/// rule. The unit test reports max_abs / top-8 of the kernel against this
 /// one.
 int ling3_route_logits_gemm_legacy_launch(const float* x, const float* gate,
                                           int K, int E, int T, float* logits);

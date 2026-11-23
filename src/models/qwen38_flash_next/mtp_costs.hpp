@@ -3,8 +3,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 
 namespace superroc::models::qwen38_flash_next {
 
@@ -60,16 +62,18 @@ inline constexpr float kMtpCycleMilliseconds[3][5][8] = {
       interval == 0
           ? static_cast<float>(context) / 4096.0F
           : static_cast<float>(std::min(context, 262144U) - 4096) / 28672.0F;
+  const auto cost = [&](int bin, std::size_t i) {
+    return kMtpCycleMilliseconds[bin][cohort][i];
+  };
   std::array<float, 8> costs{};
   for (std::size_t i = 0; i < costs.size(); ++i) {
-    const auto low = kMtpCycleMilliseconds[interval][cohort][i];
-    const auto high = kMtpCycleMilliseconds[interval + 1][cohort][i];
+    const auto low = cost(interval, i);
+    const auto high = cost(interval + 1, i);
     costs[i] = low + fraction * std::max(high - low, 0.0F);
     if (fraction > 1.0F && i != 0) {
       // Independently extrapolated noisy slopes can cross at long contexts.
       // Preserve at least the last measured marginal cost of another draft.
-      const auto marginal =
-          high - kMtpCycleMilliseconds[interval + 1][cohort][i - 1];
+      const auto marginal = high - cost(interval + 1, i - 1);
       costs[i] = std::max(costs[i], costs[i - 1] + marginal);
     }
   }

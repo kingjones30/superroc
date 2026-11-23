@@ -433,6 +433,7 @@ std::optional<LingTokenizer> LingTokenizer::FromGguf(
 
   const std::size_t n = t.texts_.size();
   t.control_.assign(n, 0);
+  t.unknown_.assign(n, 0);
   t.eog_.assign(n, 0);
   bool has_types = false;
   const auto* type_meta = gguf.FindMetadata("tokenizer.ggml.token_type");
@@ -460,8 +461,18 @@ std::optional<LingTokenizer> LingTokenizer::FromGguf(
           tt == TokenType::kUnknown) {
         t.special_cache_.push_back(static_cast<std::int32_t>(i));
       }
+      if (tt == TokenType::kControl || tt == TokenType::kUnknown) {
+        // SR-03: Encode matches specials by raw text, so record the raw
+        // spelling (same source as the LLAMA SpecialSpellings list).
+        if (!t.texts_[i].empty()) {
+          t.special_spellings_.push_back(t.texts_[i]);
+        }
+      }
       if (tt == TokenType::kControl) {
         t.control_[i] = 1;
+      }
+      if (tt == TokenType::kUnknown) {
+        t.unknown_[i] = 1;
       }
     }
   }
@@ -595,7 +606,8 @@ std::vector<std::int32_t> LingTokenizer::Encode(std::string_view text,
       if (tok.empty()) {
         continue;
       }
-      const auto type_control = control_[static_cast<std::size_t>(id)] != 0;
+      const auto type_control = control_[static_cast<std::size_t>(id)] != 0 ||
+                                unknown_[static_cast<std::size_t>(id)] != 0;
       if (!parse_special && type_control) {
         continue;
       }
@@ -666,6 +678,10 @@ std::string LingTokenizer::Decode(std::span<const std::int32_t> tokens) const {
     out += TokenText(t);
   }
   return out;
+}
+
+std::vector<std::string> LingTokenizer::SpecialSpellings() const {
+  return special_spellings_;
 }
 
 }  // namespace superroc::models::ling3

@@ -21,7 +21,6 @@ enum class KatDispatch : int {
   kNotKat = 0,
   kAccept = 1,
   kRefuseDSpark = 2,
-  kRefuseSidecar = 3,
   kRefuseVision = 4,
   kRefuseOther = 5,
 };
@@ -33,9 +32,10 @@ inline bool DflashSidecarIsMarkovKind(bool has_markov_w1,
   return has_markov_w1 && !has_selector_predecessor;
 }
 
-/// KAT: qwen35moe policy. MTP is embedded (no sidecar). The enumerator
-/// `--speculative dspark` stays refused (DeepSeek-only). `--speculative
-/// dflash2` is accepted only when the sidecar GGUF is the markov kind.
+/// KAT: qwen35moe policy. MTP accepts an embedded head or a sidecar GGUF
+/// (`--mtp-model`). The enumerator `--speculative dspark` stays refused
+/// (DeepSeek-only). `--speculative dflash2` is accepted only when the sidecar
+/// GGUF is the markov kind.
 inline KatDispatch ClassifyKatDispatch(
     std::string_view arch, KatSpecKind spec, bool draft_path_empty,
     bool has_vision, bool dflash_markov_sidecar = false) noexcept {
@@ -56,7 +56,7 @@ inline KatDispatch ClassifyKatDispatch(
     return KatDispatch::kRefuseOther;
   }
   if (spec == KatSpecKind::kMtp && !draft_path_empty) {
-    return KatDispatch::kRefuseSidecar;
+    return KatDispatch::kAccept;
   }
   if (spec != KatSpecKind::kOff && spec != KatSpecKind::kMtp) {
     return KatDispatch::kRefuseOther;

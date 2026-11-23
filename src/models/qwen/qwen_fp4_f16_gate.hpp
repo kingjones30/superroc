@@ -1,10 +1,10 @@
 #ifndef SUPERROC_MODELS_QWEN_QWEN_FP4_F16_GATE_HPP_
 #define SUPERROC_MODELS_QWEN_QWEN_FP4_F16_GATE_HPP_
 
-// FRZA SPEC2 (fail closed): a kernel cell that has never run on hardware is
+// A kernel cell that has never run on hardware is
 // not taken by default. Type-100 (kQ4_0_ROCMFP4) tensors on the fused-epilogue
 // prefill cells (ffn_up kSwiGLU; ffn_down, ssm_out, attn_output kResidual) are
-// the REPORT1 candidate (a): bench-proven only on kStore, never on an epilogue
+// the first candidate (a): bench-proven only on kStore, never on an epilogue
 // with type 100. This header is the whole new decision, pure and host-only, so
 // the engine and the host test share it exactly. No HIP, no device.
 

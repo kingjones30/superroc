@@ -250,8 +250,15 @@ HttpResponse HandleAsrWebSocket(const HttpRequest& request,
           throw std::invalid_argument(
               "unsupported realtime transcription event");
         }
-      } catch (const std::exception& exception) {
+      } catch (const std::invalid_argument& exception) {
         if (!error(exception.what(), client_event))
+          return;
+      } catch (const std::length_error& exception) {
+        if (!error(exception.what(), client_event))
+          return;
+      } catch (const std::exception& exception) {
+        Logger::Error("asr", exception.what());
+        if (!error("transcription failed", client_event))
           return;
       }
     }

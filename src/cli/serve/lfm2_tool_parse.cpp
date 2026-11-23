@@ -145,7 +145,7 @@ private:
       out->is_string = false;
       return true;
     }
-    // LFM2 (Super ROC): JSON spellings, admitted by the tool grammar too.
+    // LFM2 (Super Roc): JSON spellings, admitted by the tool grammar too.
     if ((c == 't' && TakeWord("true")) || (c == 'f' && TakeWord("false")) ||
         (c == 'n' && TakeWord("null"))) {
       out->value = c == 't' ? "true" : (c == 'f' ? "false" : "null");
@@ -199,7 +199,7 @@ private:
         case 't':
           out->push_back('\t');
           break;
-        case '/':  // LFM2 (Super ROC): JSON escapes
+        case '/':  // LFM2 (Super Roc): JSON escapes
           out->push_back('/');
           break;
         case 'b':
@@ -335,7 +335,7 @@ private:
   // LFM2: nested literal; strings may be single- or double-quoted,
   // True/False/None map to JSON, object keys may be quoted either way.
   bool ParseNested(NestedValue* out) {
-    // HTC (RVW C3): nesting is capped, so a runaway or hostile body cannot
+    // Nesting is capped, so a runaway or hostile body cannot
     // recurse until the stack overflows; deeper input is a parse failure
     // (the call is dropped, fail closed). The required-call grammar emits at
     // most 4 levels; 64 leaves room for free-form JSON arguments.
@@ -433,7 +433,7 @@ private:
       out->kind = NestedValue::Kind::kNull;
       return true;
     }
-    // LFM2 (Super ROC): JSON spellings, admitted by the tool grammar too.
+    // LFM2 (Super Roc): JSON spellings, admitted by the tool grammar too.
     if (c == 't' && TakeWord("true")) {
       out->kind = NestedValue::Kind::kBool;
       out->boolean = true;

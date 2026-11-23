@@ -1,4 +1,4 @@
-// Tensor-type rules for superroc-quant v0.5 (LQP SPEC1 items 1-2).
+// Tensor-type rules for superroc-quant v0.5.
 //
 // A rule is `RULE -> TYPE`, from `--tensor-type RULE=TYPE` on the command line
 // or a `RULE TYPE` line in a `--protect FILE`. RULE syntax:
@@ -96,7 +96,7 @@ inline const std::map<std::string, Type>& TypeNameTable() {
   static const std::map<std::string, Type> m = {
       {"F32", (Type)0}, {"f32", (Type)0}, {"F16", (Type)1}, {"f16", (Type)1},
       {"Q4_0", (Type)2}, {"q4_0", (Type)2}, {"Q8_0", (Type)8}, {"q8_0", (Type)8},
-      // v0.8 (RV-LQP2 F4 note): Q5_1 is nameable. The encoder, BlockBytes and
+      // Q5_1 is nameable. The encoder, BlockBytes and
       // the recipe's Q5_K shape fallback already knew it; only the CLI table
       // did not, so no new byte path is introduced by naming it.
       {"Q5_1", (Type)7}, {"q5_1", (Type)7},

@@ -13,10 +13,6 @@ from pathlib import Path
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--superroc", type=Path, default=Path("result/bin/superroc"))
-# Compatibility with the previous binary-path flag spelling (hidden alias).
-    parser.add_argument("--" + "g" + "ufo", dest="superroc",
-                        type=Path, default=argparse.SUPPRESS,
-                        help=argparse.SUPPRESS)
 
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--audio", type=Path, required=True)

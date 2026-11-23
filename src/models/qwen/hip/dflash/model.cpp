@@ -56,7 +56,7 @@ void ReadMatrixRow(const models::QwenTensorRef& tensor, std::size_t row,
     }
     return;
   }
-  // NBFAST T1: the loader accepts F16 matrices (IsSupportedMatrixType) but
+  // the loader accepts F16 matrices (IsSupportedMatrixType) but
   // the packer had no F16 reader; F16 drafters failed to load at all.
   if (tensor.type == core::GgmlType::kF16) {
     const std::size_t offset = row * columns;

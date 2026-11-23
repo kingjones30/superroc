@@ -68,7 +68,7 @@ __global__ __launch_bounds__(BN * 2) void moe_gemm_i8(const Tile* tiles, const b
   uint4 pa[A_PER];
   float pd[F_PER], pr[F_PER];
   uint4 pw[W_PER];  // next chunk's weight blocks, coalesced slices
-  uint4 cw[9];      // current chunk's block of this lane's column
+  uint4 cw[9];      // current chunk's block of this thread's column
   auto prefetch = [&](int c) {
 #pragma unroll
     for (int u = 0; u < A_PER; ++u) {

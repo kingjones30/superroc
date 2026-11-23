@@ -31,6 +31,10 @@ The supported modalities are LLM, image, video, and audio (TTS, ASR).
 
 - `context` — maximum context capacity; memory use depends on the model and
   the number of resident sessions.
+- `--no-warmup` — skip the short generation the server runs after loading a
+  text model. The warm-up takes the first-use costs (kernel code, decode
+  graphs, draft buffers, fresh scratch pages) off the first request; it is
+  not counted in the request metrics.
 - `prefillChunk` — prompt tokens processed between active decode steps in
   HTTP serving. Model runtimes choose their own internal prefill batch sizes.
 - `maxTokens` — maximum number of tokens a request may generate. In practice:
@@ -102,16 +106,117 @@ seed. Speed depends on acceptance and verification cost.
 
 - `speculative` — `dflash2` for Qwen3.8-27B, `dspark` for DeepSeek V4 Flash,
   `mtp` for models with a supported MTP head, or `off`. HTTP serving
-  supports `dflash2`, `dspark`, and Flash-Next `mtp`.
+  supports `dflash2`, `dspark`, and `mtp`. With no value, a dense Qwen model
+  file that carries its own MTP block is served with `mtp`; every other model
+  is served without a drafter.
 - `dflashModel` — path to the DFlash2 companion draft.
 - `dsparkModel` — path to the DSpark support GGUF.
-- `mtpModel` — path to the MTP draft model.
+- `mtpModel` — path to the MTP draft model. Not needed when the model file
+  carries the MTP block itself.
 - `draftTokens` — maximum tokens drafted per step. Wider drafts go faster
-  when the guesses are accepted and waste work when they are rejected.
+  when the guesses are accepted and waste work when they are rejected. The
+  default is 7; an MTP block of a dense Qwen model drafts 4 when no value is
+  given. MTP on the Qwen family takes at most 7.
 - `draftPolicy` (`"fixed"` / `"adaptive"`) — DFlash2 block-length policy;
   defaults to adaptive.
 - `minDraftTokens` — minimum draft length where supported. DFlash2, DSpark,
   and Flash-Next MTP require the default of one.
+- `promptLookup` (`--prompt-lookup`) — copy draft tokens from the session's
+  own text when it repeats (Qwen sessions), with or without a draft model.
+
+**Recipe**
+
+- `--recipe off|auto|PATH` — load a `superroc-recipe.json` that carries a
+  model's tuned settings: engine variables, sidecar files and tuning flags.
+  `auto` reads the file beside `--model`; `off` is the default. Flags on the
+  command line take precedence. See [Model recipes](recipes.md).
+
+**Speed settings (environment variables)**
+
+Read once when the model loads. The model cards give the values measured for
+each model.
+
+- `SUPERROC_ROUTED_EXPERTS=N` — mixture-of-experts models (`qwen35moe`,
+  Qwen3.8 Flash-Next): route N experts per token in the main layers instead of
+  the file's count. An MTP draft head keeps the file's count. Fewer experts
+  read fewer weights per token and cost some quality: check the model's
+  perplexity before relying on a value.
+- `SUPERROC_TENSOR_OVERLAY=FILE` — read the tensors of a small GGUF in place
+  of the model file's tensors of the same name and shape; their types may
+  differ. The engine cannot tell one file of a model from another, so use an
+  overlay only with the file it was made for. Flash-Next loads
+  `ffn_gate_inp` and `ffn_gate_inp_shexp` as one tensor: an overlay must give
+  both the same type. The overlay is for the model file: a draft model, an MTP
+  head or a vision projector in another file is read as it is.
+- `SUPERROC_INT4_WEIGHTS=FILE` — run the prefill GEMMs of the dense
+  K=hidden projections through the 4-bit matrix unit, with weights from a
+  route file made for that model file. Dense ROCmFP4 Qwen3.8 models
+  (`qwen35`): FFN gate and up and attention qkv, gate and q. Qwen3.8
+  Flash-Next: the linear-attention qkv and gate projections and the shared
+  expert's FFN gate and up; a projection the route holds runs on the route
+  instead of the fused qkv|gate GEMM. With
+  `SUPERROC_CANONICAL_CACHE=1` the route is not loaded. The engine checks
+  the layer count, the width and the size of each tensor in the file, and
+  refuses a file that does not fit the model; it cannot tell two model
+  files of the same shape apart, so use a route file only with its own
+  model file.
+- `SUPERROC_INT4_TENSORS=LIST` — with `SUPERROC_INT4_WEIGHTS`: a
+  comma-separated subset of `ffn_gate`, `ffn_up`, `attn_qkv`, `attn_gate`
+  and `attn_q` (dense Qwen) or `ssm_qkv`, `ssm_gate`, `attn_qkv`,
+  `ffn_gate_shexp` and `ffn_up_shexp` (Flash-Next); default: every tensor
+  the route file holds.
+- `SUPERROC_TAIL_CAPTURE=N` — also checkpoint the prompt N tokens before its
+  end (rounded down to 64) when at least 512 new tokens precede that point,
+  so a follow-up that changes only the closing lines restores from there.
+  On Flash-Next, N up to 192 is captured inside the same prefill pass. With
+  `SUPERROC_CANONICAL_CACHE=1` there is one restore point, and N moves it
+  that many rows further from the prompt end; values up to 176 keep it
+  inside the last pass on Flash-Next.
+- `SUPERROC_CANONICAL_CACHE=1` — a conversation gets the same reply whether
+  the server saw it turn by turn or reads it in one request: a finished
+  request leaves only prompt checkpoints, the next one reads the previous
+  reply as prompt, dense Qwen prompt passes take one kernel route at every
+  size, and Flash-Next prompts are cut only where the cut does not change
+  the state. See "The same reply for the same history" in
+  [the cache guide](KV-CACHE.md) for what it covers and costs.
+- `SUPERROC_FN_PREP_ATTN_SPLIT=1`, `SUPERROC_FN_FUSE_MOE_COMBINE=1`,
+  `LFN_VERIFY_ATTN_SHARED=1` — Qwen3.8 Flash-Next decode: prepare attention
+  from split Q/K/V projections in one launch, form the MoE epilogue's result
+  in the combine kernel, and let a verify batch of 2 to 8 rows read each K/V
+  tile once. All three give the same logits bit for bit. Together on a
+  Radeon 8060S with the shared MTP head and 5 draft tokens: 1.4 % more
+  decode tokens per second, 1.1 % without a drafter.
+- `SUPERROC_FN_MIX_FP4Q8=1`, `SUPERROC_FN_GDN_FP4Q8=1` — Qwen3.8 Flash-Next
+  decode: the mixer (or linear-attention) epilogue also writes the Q8_1 rows
+  the following FP4 projections read. Fewer launches, but the logits change
+  slightly and replies are not byte-identical to the default; check quality
+  before use.
+- `LFN_MTP_SUBSET_PENALTIES=0` — Qwen3.8 Flash-Next: greedy requests with a
+  presence, frequency or repeat penalty draft through the full draft head
+  again (by default they use the small one, like other greedy requests).
+- `SUPERROC_REASONING_LOOP_GUARD=<min>:<max>:<repeats>` — opt-in stop for a
+  temperature-0 reasoning loop, for example `16:512:3`. While the reply is
+  still reasoning, the guard fires when the last `repeats` copies of one
+  `P`-token block repeat exactly for some `P` in [`min`, `max`], counting
+  only tokens this request generated, then emits the same forced reasoning
+  end a token budget would so the model answers normally. Unset or empty
+  keeps every request on today's path: greedy requests stay on the raw argmax
+  path until the guard fires. A malformed value fails server startup. Each
+  firing logs one server line, and the request's completed line carries
+  `loop_guard_fired=0|1`.
+- `SUPERROC_REASONING_CLOSE_MESSAGE=<text>` (or `--reasoning-close-message
+  TEXT`, which wins) — opt-in sentence emitted before the forced reasoning
+  end when the reasoning budget or the loop guard fires, tokenized once with
+  the normal tokenizer. Unset or empty keeps today's forced end byte for byte.
+- `SUPERROC_REASONING_BAN=<word>,<word>,...` — opt-in ban for reasoning, for
+  example `Wait,wait,Hmm,hmm,Alternatively,alternatively`. At startup each
+  word matches the vocabulary tokens whose decoded text, with leading
+  whitespace removed and trailing `,.!?:;` removed, equals the word exactly
+  (case-sensitive); the per-word token counts log one line each. While the
+  reply is still reasoning, a banned raw argmax falls back to a masked host
+  selection (greedy takes the next best, sampled renormalises without the
+  banned tokens). Answer tokens are never banned, unmatched words log and
+  continue, and unset keeps every request on today's path and speed.
 
 **Server limits (protecting the machine from clients)**
 
@@ -144,7 +249,11 @@ seed. Speed depends on acceptance and verification cost.
 
 ### Video
 
-TODO
+Use `superroc serve video --model DIR` with an operator-supplied MiniMax H3
+checkpoint directory. `--root DIR` is where jobs and their results are kept
+(default `video-jobs`), `--ttl SEC` how long a finished result stays (default
+3600) and `--manifest PATH` replaces the pinned checkpoint manifest. The
+routes are listed under `/v1/videos` in the [server reference](SERVER.md).
 
 ### Audio (TTS and ASR)
 

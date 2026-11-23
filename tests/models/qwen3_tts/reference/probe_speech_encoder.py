@@ -16,7 +16,7 @@ import torch
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--reference-root", default="/home/fbozzo/projects/Qwen3-TTS"
+        "--reference-root", default="/path/to/Qwen3-TTS"
     )
     parser.add_argument(
         "--dependency-root",
@@ -25,21 +25,21 @@ def main():
     parser.add_argument(
         "--model",
         default=(
-            "/home/fbozzo/projects/audio.cpp/models/"
+            "/path/to/audio.cpp/models/"
             "Qwen3-TTS-12Hz-1.7B-Base/speech_tokenizer"
         ),
     )
     parser.add_argument(
         "--audio",
         default=(
-            "/home/fbozzo/projects/superroc/"
+            "/path/to/superroc/"
             "artifacts/qwen3_tts/base/reference.wav"
         ),
     )
     parser.add_argument(
         "--out",
         default=(
-            "/home/fbozzo/projects/superroc/"
+            "/path/to/superroc/"
             "artifacts/qwen3_tts/base/speech_encoder"
         ),
     )

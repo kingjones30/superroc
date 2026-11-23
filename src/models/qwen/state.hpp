@@ -177,13 +177,12 @@ struct QwenLayerWeights {
   QwenTensorRef nextn_hnorm;
   QwenTensorRef nextn_shared_head_norm;
   // LFM2: short-conv operator and the sigmoid router's selection bias.
-  bool is_shortconv = false;     // LFM2
+  bool is_shortconv = false;
   QwenTensorRef shortconv_conv;  // F32 [l_cache, hidden]: tap k of channel c at
-                                 // index c * l_cache + k  // LFM2
-  QwenTensorRef
-      shortconv_in_proj;  // [hidden -> 3 * hidden]: rows B | C | X  // LFM2
-  QwenTensorRef shortconv_out_proj;  // [hidden -> hidden]  // LFM2
-  QwenTensorRef exp_probs_b;         // F32 [expert_count]  // LFM2
+                                 // index c * l_cache + k
+  QwenTensorRef shortconv_in_proj;   // [hidden -> 3 * hidden]: rows B | C | X
+  QwenTensorRef shortconv_out_proj;  // [hidden -> hidden]
+  QwenTensorRef exp_probs_b;         // F32 [expert_count]
   QwenTensorRef attn_sinks;          // FLINT: F32 [num_attention_heads]
 };
 
@@ -207,6 +206,14 @@ struct QwenModelWeights {
   [[nodiscard]] static std::optional<QwenModelWeights> LoadFromGguf(
       const core::GgufReader& reader, std::string* error_msg = nullptr);
 };
+
+/// KAT: binds the MoE MTP (nextn) block tensors at blk.<block_index>,
+/// validating its attention and expert shapes against `config`. The block is
+/// bound beside the trunk: ForwardModel iterates layers.size()==num_layers,
+/// so it never executes as a trunk layer.
+[[nodiscard]] std::optional<QwenLayerWeights> LoadMoeMtpBlock(
+    const core::GgufReader& reader, const core::ModelConfig& config,
+    std::uint32_t block_index, std::string* error_msg);
 
 /// Contiguous Key-Value Cache for auto-regressive generation.
 class QwenKvCache {

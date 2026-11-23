@@ -7,6 +7,7 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -21,6 +22,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -33,14 +36,20 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#if defined(ENGINE_ENABLE_HIP)
+#include <hip/hip_runtime.h>
+#endif
 
 #include "src/cli/serve/asr_service.hpp"
 #include "src/cli/serve/audio_asr_api.hpp"
 #include "src/cli/serve/audio_tts_api.hpp"
 #include "src/cli/serve/audio_websocket.hpp"
+#include "src/cli/serve/environment.hpp"
 #include "src/cli/serve/image_api.hpp"
 #include "src/cli/serve/logging.hpp"
+#include "src/cli/serve/logprobs_json.hpp"
 #include "src/cli/serve/openai_chat.hpp"
+#include "src/cli/serve/recipe.hpp"
 #include "src/cli/serve/sampling_request.hpp"
 #include "src/cli/serve/stop_sequences.hpp"
 #include "src/cli/serve/trace.hpp"
@@ -48,12 +57,99 @@
 #include "src/cli/serve/video_api.hpp"
 #include "src/cli/serve/video_jobs.hpp"
 #include "src/cli/serve/websocket.hpp"
+#include "src/core/canonical.hpp"
 #include "src/core/crypto/sha256.hpp"
 #include "src/core/json.hpp"
 #include "src/core/utf8.hpp"
 #include "src/models/qwen/chat_template.hpp"
 
 namespace superroc::server {
+
+ServerEnvironment CollectServerEnvironment() noexcept {
+  ServerEnvironment env;
+  try {
+    // One properties file per KFD topology node; cwsr_ok conjoins the GPU
+    // nodes. Nothing here throws: every unreadable source keeps its default.
+    std::size_t gpu_nodes = 0;
+    bool all_ok = true;
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(
+             "/sys/class/kfd/kfd/topology/nodes", ec)) {
+      if (ec) {
+        break;
+      }
+      std::ifstream file(entry.path() / "properties");
+      if (!file.is_open()) {
+        continue;
+      }
+      const std::string contents((std::istreambuf_iterator<char>(file)),
+                                 std::istreambuf_iterator<char>());
+      const auto props = ParseKfdNodeProperties(contents);
+      if (!IsKfdGpuNode(props)) {
+        continue;
+      }
+      ++gpu_nodes;
+      all_ok = all_ok && CheckKfdCwsrOk(props);
+    }
+    env.cwsr_ok = gpu_nodes > 0 && all_ok && !ec;
+    struct utsname name{};
+    if (::uname(&name) == 0) {
+      env.kernel = name.release;
+    }
+    if (std::ifstream version("/opt/rocm/.info/version"); version.is_open()) {
+      std::string line;
+      if (std::getline(version, line)) {
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r' ||
+                                 line.back() == ' ' || line.back() == '\t')) {
+          line.pop_back();
+        }
+        if (!line.empty()) {
+          env.rocm_version = line;
+        }
+      }
+    }
+    if (const char* blocking = std::getenv("HIP_LAUNCH_BLOCKING")) {
+      env.hip_launch_blocking = std::string_view(blocking) == "1";
+    }
+#if defined(ENGINE_ENABLE_HIP)
+    hipDeviceProp_t prop{};
+    if (hipGetDeviceProperties(&prop, 0) == hipSuccess &&
+        prop.gcnArchName[0] != '\0') {
+      env.gpu_arch = prop.gcnArchName;
+    }
+#endif
+  } catch (...) {
+  }
+  return env;
+}
+
+/// The /props environment object, collected once: the sysfs walk plus HIP
+/// device query behind CollectServerEnvironment is per-process state, so the
+/// first request pays for it and every later request reuses the result.
+/// Function-local statics initialize exactly once, thread-safely.
+const ServerEnvironment& CachedServerEnvironment() {
+  static const ServerEnvironment cached = CollectServerEnvironment();
+  return cached;
+}
+
+/// Request fields the Completions endpoint accepts, mirroring the parser
+/// above (ReadCompatibilityOptions allowances plus the fields parsed after
+/// it). The /props support list and the parser-acceptance test share it.
+std::vector<std::string_view> CompletionsAcceptedFields() {
+  // Note: stream_options is only accepted together with stream:true; the
+  // parser-acceptance test probes them jointly. echo, store and background
+  // are accepted only as false, n and best_of only as 1.
+  return {"model",           "prompt",         "max_tokens",
+          "stream",          "stream_options", "echo",
+          "store",           "background",     "n",
+          "best_of",         "ignore_eos",     "return_progress",
+          "cache_prompt",    "stop",           "logprobs",
+          "temperature",     "top_k",          "top_p",
+          "min_p",           "min_keep",       "seed",
+          "repeat_penalty",  "repeat_last_n",  "frequency_penalty",
+          "presence_penalty"};
+}
+
 namespace {
 
 std::atomic<int> shutdown_signal{0};
@@ -98,7 +194,7 @@ private:
 // Socket I/O helpers
 // ---------------------------------------------------------------------------
 
-// audit F03 F08: header/body reads are bounded by an absolute deadline.
+// Header/body reads are bounded by an absolute deadline.
 bool ReadUntil(std::string& out, int fd, std::string_view delim,
                std::chrono::steady_clock::time_point deadline,
                std::size_t max_bytes) {
@@ -135,7 +231,7 @@ bool ReadUntil(std::string& out, int fd, std::string_view delim,
   return true;
 }
 
-// audit F03 F08: body reads are bounded by an absolute deadline.
+// Body reads are bounded by an absolute deadline.
 bool ReadN(std::string& out, int fd, std::size_t n,
            std::chrono::steady_clock::time_point deadline) {
   out.reserve(n);
@@ -306,7 +402,7 @@ std::optional<std::size_t> ParseContentLength(const HttpRequest& request) {
   return length.value_or(0);
 }
 
-// audit F19: constant-time digest comparison.
+// Constant-time digest comparison.
 static bool ConstantTimeEquals(std::string_view a, std::string_view b) {
   if (a.size() != b.size())
     return false;
@@ -354,7 +450,7 @@ bool IsAuthorized(const HttpRequest& request, const std::string& key_hash) {
   while (credential.starts_with(' ')) {
     credential.remove_prefix(1);
   }
-  // audit F19: constant-time compare of the credential digests.
+  // Constant-time compare of the credential digests.
   const std::string candidate_hash = CredentialHash(credential);
   return ConstantTimeEquals(candidate_hash, key_hash);
 }
@@ -409,7 +505,8 @@ bool IsEventStream(const HttpResponse& response) {
 }
 
 std::string BuildResponseHead(const HttpResponse& resp,
-                              std::optional<std::size_t> content_length) {
+                              std::optional<std::size_t> content_length,
+                              std::string_view cors_origin) {
   std::string out;
   out.reserve(256);
   out += "HTTP/1.1 ";
@@ -423,9 +520,16 @@ std::string BuildResponseHead(const HttpResponse& resp,
   if (content_length.has_value()) {
     out += "Content-Length: " + std::to_string(*content_length) + "\r\n";
   }
-  out += "Access-Control-Allow-Origin: *\r\n";
-  out += "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n";
-  out += "Access-Control-Allow-Headers: Content-Type, Authorization, Range\r\n";
+  if (!cors_origin.empty()) {
+    out += "Access-Control-Allow-Origin: ";
+    out += cors_origin;
+    out += "\r\n";
+    out += "Access-Control-Allow-Methods: GET, POST, DELETE, OPTIONS\r\n";
+    out +=
+        "Access-Control-Allow-Headers: Content-Type, Authorization, Range\r\n";
+    if (cors_origin != "*")
+      out += "Vary: Origin\r\n";
+  }
   for (const auto& [name, value] : resp.headers) {
     out += name;
     out += ": ";
@@ -438,8 +542,9 @@ std::string BuildResponseHead(const HttpResponse& resp,
   return out;
 }
 
-std::string BuildResponse(const HttpResponse& resp) {
-  std::string out = BuildResponseHead(resp, resp.body.size());
+std::string BuildResponse(const HttpResponse& resp,
+                          std::string_view cors_origin) {
+  std::string out = BuildResponseHead(resp, resp.body.size(), cors_origin);
   out += resp.body;
   return out;
 }
@@ -780,6 +885,8 @@ struct CompatibilityAllowances {
   bool output_config{false};
   /// Messages tools and tool_choice; Responses uses response_controls.
   bool tools{false};
+  /// Integer `logprobs` (the Completions dialect); chat parses its own.
+  bool logprobs{false};
 };
 
 // Validate the text subset before dispatch so a client never gets an answer
@@ -794,7 +901,7 @@ std::optional<HttpResponse> ReadCompatibilityOptions(
   if (const auto* model = body.find("model"); model != nullptr) {
     if (!model->is_string())
       return InvalidCompatibilityRequest("'model' must be a string");
-    if (model->str() != backend.model_id())
+    if (!AcceptAnyModelName() && model->str() != backend.model_id())
       return Err(404, "Not Found", "requested model is not loaded",
                  "invalid_request_error", "model_not_found");
   }
@@ -846,6 +953,7 @@ std::optional<HttpResponse> ReadCompatibilityOptions(
         !(field == "ignore_eos" && allowances.ignore_eos) &&
         !(field == "thinking" && allowances.thinking) &&
         !(field == "output_config" && allowances.output_config) &&
+        !(field == "logprobs" && allowances.logprobs) &&
         !((field == "tools" || field == "tool_choice") && allowances.tools) &&
         body.contains(field) &&
         !(allowances.response_controls &&
@@ -897,7 +1005,7 @@ HttpResponse ListModels(TextGenerationBackend* backend,
     model["id"] = backend->model_id();
     model["object"] = "model";
     model["created"] = Now();
-    model["owned_by"] = "superroc";  // Super ROC
+    model["owned_by"] = "superroc";  // Super Roc
     if (backend->max_context() > 0)
       model["context_length"] =
           static_cast<std::size_t>(backend->max_context());
@@ -982,8 +1090,27 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
                                                 .stream = true,
                                                 .stream_options = true,
                                                 .ignore_eos = true,
+                                                .logprobs = true,
                                             })) {
     return std::move(*error);
+  }
+  sampling_config.logprobs = false;
+  sampling_config.logprobs_top_n = 0;
+  if (const auto* logprobs = body.find("logprobs");
+      logprobs != nullptr && !logprobs->is_null()) {
+    // The Completions dialect takes an integer: how many top alternatives to
+    // report per position (0 reports only the sampled token's logprob with an
+    // empty top list). `top_logprobs` is a chat-only field and stays rejected
+    // on this endpoint. The legacy OpenAI maximum is 5.
+    if (!logprobs->is_number() || !std::isfinite(logprobs->as_double()) ||
+        std::floor(logprobs->as_double()) != logprobs->as_double() ||
+        logprobs->as_double() < 0.0 || logprobs->as_double() > 5.0) {
+      return InvalidCompatibilityRequest(
+          "'logprobs' must be an integer between 0 and 5");
+    }
+    const auto top_n = static_cast<std::uint32_t>(logprobs->as_double());
+    sampling_config.logprobs = true;
+    sampling_config.logprobs_top_n = top_n;
   }
   const auto* stream_field = body.find("stream");
   const bool stream = stream_field != nullptr && stream_field->as_bool();
@@ -1042,6 +1169,23 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
   const std::string model = b.model_id();
   if (stream) {
     auto stream_log = std::make_shared<HttpResponse::StreamLog>();
+    // An empty-text chunk is this dialect's no-op data chunk: it parses as a
+    // completion chunk that adds no text, and unlike an SSE comment it
+    // survives proxies that forward only data lines during a long prefill.
+    json::Value heartbeat_chunk = json::Value::object();
+    heartbeat_chunk["id"] = id;
+    heartbeat_chunk["object"] = "text_completion";
+    heartbeat_chunk["created"] = created;
+    heartbeat_chunk["model"] = model;
+    json::Value heartbeat_choices = json::Value::array();
+    json::Value heartbeat_choice = json::Value::object();
+    heartbeat_choice["text"] = "";
+    heartbeat_choice["index"] = 0;
+    heartbeat_choice["logprobs"] = json::Value();
+    heartbeat_choice["finish_reason"] = json::Value();
+    heartbeat_choices.push_back(std::move(heartbeat_choice));
+    heartbeat_chunk["choices"] = std::move(heartbeat_choices);
+    const std::string heartbeat = "data: " + heartbeat_chunk.dump() + "\n\n";
     return {
         .status = 200,
         .reason = "OK",
@@ -1051,14 +1195,15 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
                     {"X-Accel-Buffering", "no"}},
         .streaming_body =
             [generation = std::move(generation), id, created, model,
-             include_usage, return_progress,
+             include_usage, return_progress, sampling_config,
              stream_log](const HttpResponse::BodyWriter& writer) {
               bool started = return_progress;
               const auto write_chunk =
                   [&](std::string_view piece, std::string_view finish_reason,
                       const json::Value* usage = nullptr,
                       const json::Value* timings = nullptr,
-                      const json::Value* progress = nullptr) {
+                      const json::Value* progress = nullptr,
+                      const json::Value* logprobs = nullptr) {
                     json::Value chunk = json::Value::object();
                     chunk["id"] = id;
                     chunk["object"] = "text_completion";
@@ -1069,7 +1214,11 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
                       json::Value choice = json::Value::object();
                       choice["text"] = std::string(piece);
                       choice["index"] = 0;
-                      choice["logprobs"] = json::Value();
+                      if (logprobs != nullptr) {
+                        choice["logprobs"] = *logprobs;
+                      } else {
+                        choice["logprobs"] = json::Value();
+                      }
                       choice["finish_reason"] =
                           finish_reason.empty()
                               ? json::Value()
@@ -1098,11 +1247,50 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
                       return connected;
                     };
               }
+              std::optional<TextGenerationBackend::TokenMeta> pending_meta;
+              if (sampling_config.logprobs) {
+                generation->SetTokenMetaCallback(
+                    [&](const TextGenerationBackend::TokenMeta& meta) {
+                      pending_meta = meta;
+                      return true;
+                    });
+              }
+              // Reports wait for text: a token whose text is still held back
+              // (a possible stop sequence, an unfinished character) reports
+              // with the chunk that carries it, and never if the stop
+              // sequence swallows it.
+              std::vector<sampling::CapturedTokenLogprobs> held_reports;
+              std::size_t logprobs_offset = 0;
+              const auto take_reports = [&] {
+                auto logged =
+                    CompletionLogprobsJson(held_reports, logprobs_offset);
+                for (const auto& report : held_reports)
+                  logprobs_offset += report.text.size();
+                held_reports.clear();
+                return logged;
+              };
               try {
                 const auto result = generation->Wait(
                     [&](std::string_view piece) {
                       const auto text = decoder.Push(piece, false);
-                      connected = write_chunk(text, {});
+                      auto meta = std::move(pending_meta);
+                      pending_meta.reset();
+                      if (!sampling_config.logprobs) {
+                        connected = write_chunk(text, {});
+                        return connected;
+                      }
+                      if (meta.has_value())
+                        held_reports.push_back(std::move(meta->logprobs));
+                      if (text.empty())
+                        return connected;
+                      if (held_reports.empty()) {
+                        connected = write_chunk(text, {});
+                        logprobs_offset += text.size();
+                      } else {
+                        const auto logged = take_reports();
+                        connected = write_chunk(text, {}, nullptr, nullptr,
+                                                nullptr, &logged);
+                      }
                       return connected;
                     },
                     on_progress,
@@ -1118,13 +1306,19 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
                   return;
                 const auto trailing = decoder.Push({}, true);
                 const auto timings = GenerationTimings(result);
+                // Reports still waiting belong to the end of the text, unless
+                // a stop sequence swallowed their tokens.
+                std::optional<json::Value> last_reports;
+                if (!held_reports.empty() && result.stop_sequence.empty())
+                  last_reports = take_reports();
                 if (!write_chunk(
                         trailing,
                         result.finish_reason ==
                                 TextGenerationBackend::FinishReason::kLength
                             ? "length"
                             : "stop",
-                        nullptr, &timings))
+                        nullptr, &timings, nullptr,
+                        last_reports ? &*last_reports : nullptr))
                   return;
                 if (include_usage) {
                   const auto usage = UsageJson(result);
@@ -1152,9 +1346,7 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
                 Logger::Error("chat", error.what());
                 stream_log->error_code = "generation_failed";
                 json::Value detail = json::Value::object();
-                const char* message = error.what();
-                detail["message"] =
-                    message && *message ? message : "generation failed";
+                detail["message"] = "generation failed";
                 detail["type"] = "server_error";
                 detail["code"] = "generation_failed";
                 json::Value event = json::Value::object();
@@ -1166,6 +1358,7 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
             },
         .stream_log = std::move(stream_log),
         .defer_stream_headers = !return_progress,
+        .sse_heartbeat_payload = heartbeat,
     };
   }
 
@@ -1180,7 +1373,11 @@ HttpResponse OpenAiCompletions(const HttpRequest& req,
   json::Value c = json::Value::object();
   c["text"] = core::Utf8Decoder{}.Push(res.text, true);
   c["index"] = 0;
-  c["logprobs"] = json::Value();
+  if (sampling_config.logprobs) {
+    c["logprobs"] = CompletionLogprobsJson(res.token_logprobs);
+  } else {
+    c["logprobs"] = json::Value();
+  }
   c["finish_reason"] =
       res.finish_reason == TextGenerationBackend::FinishReason::kLength
           ? "length"
@@ -1517,9 +1714,12 @@ HttpResponse LlamaProps(const HttpRequest& req, TextGenerationBackend& b) {
   resp["model"] = requested.empty() ? b.model_id() : requested;
   resp["model_alias"] = b.model_id();
   resp["template"] = "";
+  // Whether the canonical cache switch is on for this server, so a client can
+  // record which mode answered it.
+  resp["canonical_cache"] = superroc::core::CanonicalCacheOn();
   resp["model_info"] = json::Value::object();
   if (auto path = b.model_path(); !path.empty()) {
-    resp["model_path"] = std::move(path);
+    resp["model_path"] = std::filesystem::path(path).filename().string();
   }
   if (auto build = b.build_info(); !build.empty()) {
     resp["build_info"] = std::move(build);
@@ -1559,6 +1759,69 @@ HttpResponse LlamaProps(const HttpRequest& req, TextGenerationBackend& b) {
   modalities["video"] = false;
   modalities["audio"] = false;
   resp["modalities"] = std::move(modalities);
+  // The applied superroc recipe, if any (--recipe off reports {}).
+  json::Value recipe = json::Value::object();
+  {
+    const superroc::cli::AppliedRecipe& applied =
+        superroc::cli::GetAppliedRecipe();
+    if (applied.active) {
+      recipe["file"] = std::filesystem::path(applied.file).filename().string();
+      json::Value env = json::Value::object();
+      for (const auto& kv : applied.env) {
+        env[kv.first] = kv.second;
+      }
+      recipe["env"] = std::move(env);
+      json::Value files = json::Value::object();
+      for (const auto& kv : applied.files) {
+        files[kv.first] = std::filesystem::path(kv.second).filename().string();
+      }
+      recipe["files"] = std::move(files);
+      json::Value file_args = json::Value::object();
+      for (const auto& kv : applied.file_args) {
+        file_args[kv.first] = kv.second;
+      }
+      recipe["file_args"] = std::move(file_args);
+      json::Value args = json::Value::array();
+      for (const auto& arg : applied.args) {
+        args.push_back(arg);
+      }
+      recipe["args"] = std::move(args);
+      json::Value ignored = json::Value::array();
+      for (const auto& key : applied.ignored) {
+        ignored.push_back(key);
+      }
+      recipe["ignored"] = std::move(ignored);
+    }
+  }
+  resp["recipe"] = std::move(recipe);
+
+  const ServerEnvironment& environment = CachedServerEnvironment();
+  json::Value environment_json = json::Value::object();
+  environment_json["gpu_arch"] = environment.gpu_arch;
+  environment_json["rocm_version"] = environment.rocm_version;
+  environment_json["kernel"] = environment.kernel;
+  environment_json["cwsr_ok"] = environment.cwsr_ok;
+  environment_json["hip_launch_blocking"] = environment.hip_launch_blocking;
+  resp["environment"] = std::move(environment_json);
+
+  // Request fields this build accepts, so clients need no 400-probing. The
+  // two lists are kept by hand beside their parsers: Chat fields follow
+  // ParseRequest (plus the sampling fields), Completions fields follow
+  // ReadCompatibilityOptions and the fields parsed after it. A field that is
+  // accepted in one value only (modalities ["text"], echo false, n 1) is
+  // listed too.
+  json::Value support = json::Value::object();
+  json::Value chat_fields = json::Value::array();
+  for (const auto field : ChatAcceptedFields()) {
+    chat_fields.push_back(std::string(field));
+  }
+  support["chat_completions"] = std::move(chat_fields);
+  json::Value completion_fields = json::Value::array();
+  for (const auto field : CompletionsAcceptedFields()) {
+    completion_fields.push_back(std::string(field));
+  }
+  support["completions"] = std::move(completion_fields);
+  resp["support"] = std::move(support);
   return Ok(resp);
 }
 
@@ -1818,7 +2081,7 @@ void LoadingResponder::serve() {
   HttpResponse loading = Err(503, "Service Unavailable", "Loading model",
                              "unavailable_error", "loading");
   loading.headers.emplace_back("Retry-After", "1");
-  const std::string reply = BuildResponse(loading);
+  const std::string reply = BuildResponse(loading, "");
   // One connection at a time is enough for probes. Read the request head
   // before replying so closing does not reset an unread request, but bound
   // the wait: a client that connects and sends nothing must not delay stop().
@@ -2112,7 +2375,7 @@ void HttpServer::run(bool handle_signals) {
           Err(503, "Service Unavailable", "connection limit reached",
               "server_error", "overloaded");
       response.headers.emplace_back("Retry-After", "1");
-      (void)SendAll(client_fd, BuildResponse(response));
+      (void)SendAll(client_fd, BuildResponse(response, options_.cors_origin));
       ::close(client_fd);
     }
   }
@@ -2323,7 +2586,7 @@ void HttpServer::handle_connection(int client_fd) {
     bool payload_too_large = false;
     {
       std::string buffer;
-      // audit F03 F08: headers must arrive within header_deadline.
+      // Headers must arrive within header_deadline.
       if (ReadUntil(buffer, client_fd, "\r\n\r\n",
                     start_time + options_.header_deadline,
                     options_.max_header_bytes)) {
@@ -2357,7 +2620,7 @@ void HttpServer::handle_connection(int client_fd) {
 
         std::size_t cursor =
             eol == std::string::npos ? headers.size() : eol + 2;
-        // audit F03: bound the number of header lines.
+        // Bound the number of header lines.
         std::size_t header_count = 0;
         while (cursor < headers.size()) {
           ++header_count;
@@ -2411,7 +2674,7 @@ void HttpServer::handle_connection(int client_fd) {
           payload_too_large = true;
         } else if (content_length > 0) {
           if (remaining > 0) {
-            // audit F08 body deadline
+            // body deadline
             const auto body_deadline =
                 start_time + options_.header_deadline +
                 std::chrono::seconds(
@@ -2485,7 +2748,8 @@ void HttpServer::handle_connection(int client_fd) {
     bool connected = true;
     if (resp.websocket) {
       response_started = true;
-      connected = SendAll(client_fd, BuildResponseHead(resp, std::nullopt));
+      connected = SendAll(client_fd, BuildResponseHead(resp, std::nullopt,
+                                                       options_.cors_origin));
       if (connected) {
         WebSocket socket(client_fd, std::move(req.body));
         resp.websocket(socket);
@@ -2494,7 +2758,8 @@ void HttpServer::handle_connection(int client_fd) {
       const bool chunked = http11 && !HasHeader(resp, "content-length");
       if (chunked)
         resp.headers.emplace_back("Transfer-Encoding", "chunked");
-      const auto head = BuildResponseHead(resp, std::nullopt);
+      const auto head =
+          BuildResponseHead(resp, std::nullopt, options_.cors_origin);
       if (!resp.defer_stream_headers) {
         response_started = true;
         connected = SendAll(client_fd, head);
@@ -2541,13 +2806,18 @@ void HttpServer::handle_connection(int client_fd) {
               if (!stop.stop_requested() && connected &&
                   std::chrono::steady_clock::now() >=
                       last_write + options_.sse_heartbeat_interval) {
-                // SSE comments carry bytes without changing the API event
-                // stream.
-                connected = chunked ? SendChunk(client_fd, ": ping\n\n")
-                                    : SendAll(client_fd, ": ping\n\n");
+                // The default SSE comment carries bytes without changing the
+                // API event stream. A handler may supply a no-op data chunk
+                // instead for proxies that drop comment lines.
+                const std::string_view payload =
+                    resp.sse_heartbeat_payload.empty()
+                        ? std::string_view(": ping\n\n")
+                        : std::string_view(resp.sse_heartbeat_payload);
+                connected = chunked ? SendChunk(client_fd, payload)
+                                    : SendAll(client_fd, payload);
                 last_write = std::chrono::steady_clock::now();
                 if (traced && connected)
-                  traced_stream.append(": ping\n\n");
+                  traced_stream.append(payload);
               }
             }
           });
@@ -2564,7 +2834,7 @@ void HttpServer::handle_connection(int client_fd) {
           connected = SendAll(client_fd, "0\r\n\r\n");
       }
     } else {
-      const auto payload = BuildResponse(resp);
+      const auto payload = BuildResponse(resp, options_.cors_origin);
       response_started = true;
       connected = SendAll(client_fd, payload);
     }
@@ -2622,17 +2892,19 @@ void HttpServer::handle_connection(int client_fd) {
                        response_started ? "stream_error" : "failed");
     trace_failure(resp);
     if (!response_started)
-      (void)SendAll(client_fd, BuildResponse(resp));
+      (void)SendAll(client_fd, BuildResponse(resp, options_.cors_origin));
   } catch (const std::exception& e) {
     const auto duration_ms = std::chrono::duration<double, std::milli>(
                                  std::chrono::steady_clock::now() - start_time)
                                  .count();
     const char* message = *e.what() ? e.what() : "generation failed";
-    // Retain the cause in logs alongside the client's stable code.
+    // Retain the cause in logs; the client gets only the fixed text below,
+    // never the exception message.
     Logger::Error("http", "request=" + req.request_id +
                               " event=server_exception reason=" + message);
-    HttpResponse resp = Err(500, "Internal Server Error", message,
-                            "internal_error", "server_exception");
+    HttpResponse resp =
+        Err(500, "Internal Server Error", "internal server error",
+            "internal_error", "server_exception");
     // F5: same Anthropic-shape rule as generation failures above.
     if (IsAnthropicApiPath(req.path))
       resp = ToAnthropicError(std::move(resp));
@@ -2643,7 +2915,7 @@ void HttpServer::handle_connection(int client_fd) {
                        response_started ? "stream_error" : "failed");
     trace_failure(resp);
     if (!response_started)
-      (void)SendAll(client_fd, BuildResponse(resp));
+      (void)SendAll(client_fd, BuildResponse(resp, options_.cors_origin));
   } catch (...) {
     const auto duration_ms = std::chrono::duration<double, std::milli>(
                                  std::chrono::steady_clock::now() - start_time)
@@ -2661,7 +2933,7 @@ void HttpServer::handle_connection(int client_fd) {
                        response_started ? "stream_error" : "failed");
     trace_failure(resp);
     if (!response_started)
-      (void)SendAll(client_fd, BuildResponse(resp));
+      (void)SendAll(client_fd, BuildResponse(resp, options_.cors_origin));
   }
   // Act on a loss found by this request now, not at the next health probe.
   (void)device_lost();

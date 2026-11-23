@@ -233,7 +233,7 @@ int RunSpeed(const char* gguf, const char* corpus, int n_prompt,
   return 0;
 }
 
-// Jay: per-position argmax + last-row top-5 of the batched prefill and of the
+// Per-position argmax + last-row top-5 of the batched prefill and of the
 // token loop on the same ids (compare with tools/flint_ref.py --ids).
 int RunDiag(const char* gguf, const std::string& csv) {
   std::vector<superroc::tokenization::TokenId> ids;
@@ -309,7 +309,7 @@ int main(int argc, char** argv) {
     if (argc == 4 && std::string(argv[1]) == "--diag") {
       return RunDiag(argv[2], argv[3]);
     }
-    // Jay: --hidden <gguf> <ids csv> <layers csv> <out.bin>: the batched
+    // --hidden <gguf> <ids csv> <layers csv> <out.bin>: the batched
     // prefill's layer outputs, float32 [token][layer][hidden].
     if (argc == 6 && std::string(argv[1]) == "--hidden") {
       std::vector<superroc::tokenization::TokenId> ids;

@@ -1,5 +1,5 @@
 // LFM2 split-K "flash-decoding" attention (decode) + device-side KV write.
-// fp32 math; KV either fp32 head-major or fp16 token-major (SPEC3).
+// fp32 math; KV either fp32 head-major or fp16 token-major.
 // head_dim 64, group (heads/kv_heads) <= 8, n_splits <= 64.
 #if defined(ENGINE_ENABLE_HIP)
 #include "src/models/lfm2/hip/lfm2_attention.hpp"
@@ -27,7 +27,7 @@ Lfm2LaunchStatus Ok() noexcept { return {true, nullptr}; }
 
 Lfm2LaunchStatus Bad(const char* error) noexcept { return {false, error}; }
 
-// Audit F04: report an async launch failure under a static string.
+// Report an async launch failure under a static string.
 Lfm2LaunchStatus CheckLaunch(const char* what) noexcept {
   if (hipGetLastError() != hipSuccess) {
     return Bad(what);
@@ -35,7 +35,7 @@ Lfm2LaunchStatus CheckLaunch(const char* what) noexcept {
   return Ok();
 }
 
-// SPEC3: one KV element as fp32 (fp32 cache or fp16 bits).
+// One KV element as fp32 (fp32 cache or fp16 bits).
 __device__ __forceinline__ float Lfm2KvLoad(const float* p, std::size_t i) {
   return p[i];
 }
@@ -70,7 +70,7 @@ __global__ void Lfm2WriteKvDevKernel(const float* __restrict__ k,
   v_cache[dst] = v[src];
 }
 
-// HKV (RVW2 V1): the fp16 store saturates at +-65504 instead of overflowing
+// The fp16 store saturates at +-65504 instead of overflowing
 // to +-inf (an inf key turns every later score into inf/NaN); NaN stays NaN.
 // In-range values convert exactly as before (round to nearest even).
 __device__ __forceinline__ std::uint16_t Lfm2F16Sat(float x) {
@@ -78,7 +78,7 @@ __device__ __forceinline__ std::uint16_t Lfm2F16Sat(float x) {
   return __half_as_ushort(__float2half(c));
 }
 
-// SPEC3: fp16 token-major write, element ((layer*max_ctx+pos)*kv_heads+kvh)*hd+d
+// Fp16 token-major write, element ((layer*max_ctx+pos)*kv_heads+kvh)*hd+d
 // (the production plane layout), round to nearest even.
 __global__ void Lfm2WriteKvDevF16Kernel(const float* __restrict__ k,
                                        const float* __restrict__ v,
@@ -104,7 +104,7 @@ __global__ void Lfm2WriteKvDevF16Kernel(const float* __restrict__ k,
   v_cache[dst] = Lfm2F16Sat(v[src]);
 }
 
-// SPEC3/LDW: eight consecutive KV elements as fp32 (vector loads; the row
+// Eight consecutive KV elements as fp32 (vector loads; the row
 // start is 64-element aligned and c is a multiple of 8).
 __device__ __forceinline__ void Lfm2KvLoad8(const float* p, float* out) {
   const float4 lo = *reinterpret_cast<const float4*>(p);
@@ -249,7 +249,7 @@ __global__ void __launch_bounds__(kSplitThreads)
                                         static_cast<int>(kTeam)));
         }
         const float m_new = fmaxf(m[g], tmax);
-        // HKV (RVW2 D3): with every score so far -inf, exp(-inf - -inf) is
+        // With every score so far -inf, exp(-inf - -inf) is
         // NaN; shift by 0 instead so the tile adds nothing. Finite m_new: as
         // before.
         const float m_ref = m_new == -INFINITY ? 0.0F : m_new;
@@ -347,7 +347,7 @@ __global__ void Lfm2CombineKernelB(const float* __restrict__ partial,
   float den = 0.0F;
   for (std::uint32_t sp = 0; sp < n_splits; ++sp) {
     const std::size_t base = static_cast<std::size_t>(sp) * (head_dim + 2U);
-    // HKV (RVW2 D3): all splits -inf -> no weight (output 0), not NaN.
+    // All splits -inf -> no weight (output 0), not NaN.
     const float w = gmax == -INFINITY ? 0.0F : expf(p[base] - gmax);
     num += w * p[base + 2U + d];
     den += w * p[base + 1U];

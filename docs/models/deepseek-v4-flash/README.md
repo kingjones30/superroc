@@ -6,8 +6,6 @@ request state. AR and optional DSpark support prompt, chat and HTTP serving.
 Target-model parity remains open; see the quality limits before relying on
 AR/DSpark agreement as a quality claim.
 
-[Benchmarks](BENCHMARKS.md) · [Quality](QUALITY.md) · [Experiments](EXPERIMENTS.md)
-
 ## Load and run
 
 ```sh

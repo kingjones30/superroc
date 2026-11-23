@@ -46,14 +46,12 @@ int main(int argc, char** argv) {
   auto a = gqt::LoadGguf(argv[1]);
   auto b = gqt::LoadGguf(argv[2]);
 
-  // KV compare (skip tool-provenance keys in both spellings: the quant
-  // tool adds superroc.quant.* (previous engine-name prefix before this
-  // rename) and the fork adds quantize.imatrix.* (+ quantize.*); ignore
-  // order, keys unique)
+  // KV compare (skip tool-provenance keys: the quant tool adds
+  // superroc.quant.* and the fork adds quantize.imatrix.* (+ quantize.*);
+  // ignore order, keys unique)
   auto skip = [](const std::string& k) {
-    static const std::string previous_quant = std::string("g") + "ufo.quant.";
     return k.rfind("superroc.quant.", 0) == 0 ||
-           k.rfind(previous_quant, 0) == 0 || k.rfind("quantize.", 0) == 0;
+           k.rfind("quantize.", 0) == 0;
   };
   std::map<std::string, std::string> ka, kb;
   for (auto& [k, v] : a.kv) if (!skip(k)) ka[k] = ValStr(v);

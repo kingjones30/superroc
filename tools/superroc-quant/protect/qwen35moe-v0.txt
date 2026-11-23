@@ -1,4 +1,4 @@
-# qwen35moe protect preset v0 (QF_BRIEF §1.C; rule grammar from tools/superroc-quant/rules.hpp v0.5)
+# qwen35moe protect preset v0 (rule grammar from tools/superroc-quant/rules.hpp v0.5)
 # qwen35-v0 base + the three MoE shared-expert projections (NOT the router norm).
 # Note: the shared-expert ROUTER is `ffn_gate_inp_shexp.weight` (kNorm F32 only — the
 # loader enforces it [repo:src/models/qwen/weights.cpp:298-299]); the three shared-expert
@@ -6,10 +6,9 @@
 # token processed). A single `*_shexp.weight` glob would catch the router norm too (it is
 # 1-D F32; protecting it to Q8_0 would BREAK the file — the loader refuses). So this
 # preset lists the three projections as exact-family globs.
-# Re-verified against superroc at 1194feaa9fbee6ca0438ca5af882ee09ac62bea4, 2026-10-10.
-# DECISIONS binding (16:21 CDT): rule LITERALS below match DESIGN §1.3; this file adds
-# `# why` tails citing the engine line that pays for each rule (no rule change).
-# DECISIONS condition: every rule matches >= 1 tensor on the shipped arch file
+# Re-verified against the engine, 2026-10-10.
+# Each rule's `# why` tail cites the engine line that pays for it.
+# Every rule matches at least one tensor of the shipped architecture's file
 # (this preset is NOT allow-unmatched; KAT-Coder-V2.5-Dev is the reference file).
 =output.weight Q6_K  # head never 4-bit; precondition hidden%256==0 (2048 OK on KAT/Ornith) — src/models/qwen/weights.cpp:436-438
 =token_embd.weight Q6_K  # embeddings Q6_K (KAT winner recipe) — src/models/qwen/weights.cpp:431-433

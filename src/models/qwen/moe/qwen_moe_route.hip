@@ -1,5 +1,6 @@
 #include "src/models/qwen/moe/qwen_moe_route.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -16,7 +17,7 @@ constexpr int kMaxTokens = 16384;
 constexpr int kThreads = 256;
 
 // ---------------------------------------------------------------------------
-// KAT fast route (SPEC2 item 1). The S2 kernel was one block with thread e
+// KAT fast route. The S2 kernel was one block with thread e
 // serially dotting gate row e: adjacent threads read 8 KB apart, which is why
 // it measured 1093.02 us/call (~1.92 GB/s). This version splits the work into
 // two kernels:
@@ -29,10 +30,10 @@ constexpr int kThreads = 256;
 //      deterministic run to run. The summation order differs from the CPU
 //      oracle's strictly serial dot, so logits may differ by a few ulp --
 //      the same tolerance class the S2 test already gates (the device FMA
-//      contraction); G1's real gates are the id ORDER and the weight cosine.
+//      contraction); the real gates are the id ORDER and the weight cosine.
 //
 //   2. QwenMoeRouteHeadDevice -- top-k + weights, one 32-lane wave per
-//      token (Super ROC QRH). The fork's norm_w divides each picked softmax
+//      token (Super Roc QRH). The fork's norm_w divides each picked softmax
 //      probability by the sum of the picked ones, so the full softmax
 //      denominator cancels: the weights are a softmax over the n_used picked
 //      logits, and ranking by probability is ranking by logit. The head
@@ -85,7 +86,7 @@ __global__ void QwenMoeRouteLogitsKernel(const float* __restrict__ x,
   }
 }
 
-// Super ROC QVB: up to kMaxRouteRows token rows per block against one gate
+// Super Roc QVB: up to kMaxRouteRows token rows per block against one gate
 // row, so the router is read once for all rows. Per row the strided
 // accumulation and the fixed tree are exactly QwenMoeRouteLogitsKernel's, so
 // each logit is bit-identical to a one-row call. With shexp_gate set, block
@@ -164,12 +165,14 @@ __device__ __forceinline__ bool QwenRouteBetter(float va, int ea, float vb,
 // the n_used rounds takes the lane's best unpicked expert, then a 5-step xor
 // butterfly over the wave. ids/weights are written in rank order. Weight r =
 // exp(l_r - l_0) / sum over the picked (sum in rank order, e_0 = 1, so the
-// fork's max(sum, 2^-14) clamp cannot bite). If the top logit is infinite,
+// fork's max(sum, 2^-14) clamp cannot bite). With n_select above n_used the
+// sum runs over n_select experts and only the first n_used are written.
+// If the top logit is infinite,
 // the experts equal to it share the weight and the rest get 0 (all -inf or
 // NaN logits -> uniform weights over the lowest ids).
 __device__ void QwenMoeRouteHeadDevice(int lane,
                                        const float* __restrict__ logits,
-                                       int n_expert, int n_used,
+                                       int n_expert, int n_used, int n_select,
                                        int* __restrict__ ids,
                                        float* __restrict__ weights) {
   const float neg_inf = -__builtin_huge_valf();
@@ -185,7 +188,7 @@ __device__ void QwenMoeRouteHeadDevice(int lane,
   float sum = 0.0F;
   int my_id = 0;
   float my_e = 0.0F;
-  for (int r = 0; r < n_used; ++r) {
+  for (int r = 0; r < n_select; ++r) {
     float bv = neg_inf;
     int be = kMaxExpert;  // "no candidate": loses to every real expert
 #pragma unroll
@@ -227,16 +230,17 @@ __device__ void QwenMoeRouteHeadDevice(int lane,
 }
 
 __global__ void QwenMoeRouteHeadKernel(const float* __restrict__ logits,
-                                       int n_expert, int n_used,
+                                       int n_expert, int n_used, int n_select,
                                        int* __restrict__ ids,
                                        float* __restrict__ weights) {
   QwenMoeRouteHeadDevice(static_cast<int>(threadIdx.x), logits, n_expert,
-                         n_used, ids, weights);
+                         n_used, n_select, ids, weights);
 }
 
 __global__ void QwenMoeRouteHeadBatchKernel(const float* __restrict__ logits,
                                             int n_tokens, int n_expert,
-                                            int n_used, int* __restrict__ ids,
+                                            int n_used, int n_select,
+                                            int* __restrict__ ids,
                                             float* __restrict__ weights) {
   // kHeadTokensPerBlock tokens per block, one wave each. The return is
   // wave-uniform and the head has no barrier.
@@ -248,7 +252,7 @@ __global__ void QwenMoeRouteHeadBatchKernel(const float* __restrict__ logits,
   QwenMoeRouteHeadDevice(static_cast<int>(threadIdx.x) % kHeadLanes,
                          logits + (static_cast<size_t>(tok) *
                                    static_cast<size_t>(n_expert)),
-                         n_expert, n_used,
+                         n_expert, n_used, n_select,
                          ids + (static_cast<size_t>(tok) *
                                 static_cast<size_t>(n_used)),
                          weights + (static_cast<size_t>(tok) *
@@ -282,7 +286,7 @@ int ValidateRouteArgs(const float* x, const float* gate, int k, int n_expert,
 
 int LaunchQwenMoeRoute(const float* x, const float* gate, int k, int n_expert,
                        int n_used, float* logits, int* ids, float* weights,
-                       hipStream_t stream) {
+                       hipStream_t stream, int n_select) {
   const int bad =
       ValidateRouteArgs(x, gate, k, n_expert, n_used, logits, ids, weights);
   if (bad != 0) {
@@ -301,7 +305,7 @@ int LaunchQwenMoeRoute(const float* x, const float* gate, int k, int n_expert,
   QwenMoeRouteLogitsKernel<<<n_expert, kThreads, 0, stream>>>(x, gate, k,
                                                               n_expert, logits);
   QwenMoeRouteHeadKernel<<<1, kHeadLanes, 0, stream>>>(logits, n_expert,
-                                                       n_used, ids, weights);
+                                                       n_used, std::max(n_used, n_select), ids, weights);
   const hipError_t err = hipGetLastError();
   if (err != hipSuccess) {
     std::fprintf(stderr, "LKAT route launch %s\n", hipGetErrorString(err));
@@ -313,7 +317,7 @@ int LaunchQwenMoeRoute(const float* x, const float* gate, int k, int n_expert,
 int LaunchQwenMoeRouteBatch(const float* x, const float* gate, int k,
                             int n_expert, int n_tokens, int n_used,
                             float* logits, int* ids, float* weights,
-                            hipStream_t stream) {
+                            hipStream_t stream, int n_select) {
   const int bad =
       ValidateRouteArgs(x, gate, k, n_expert, n_used, logits, ids, weights);
   if (bad != 0) {
@@ -328,13 +332,13 @@ int LaunchQwenMoeRouteBatch(const float* x, const float* gate, int k,
       static_cast<std::size_t>(n_expert)) {
     return 1;
   }
-  // The register-tiled logits GEMM from src/core/rocm_fp4 (LS1 PHASE9 LV1);
+  // The register-tiled logits GEMM from src/core/rocm_fp4;
   // it steps K by 32, which the host check below mirrors. fp32 accumulate,
   // k ascending, one writer per output -- deterministic.
   if ((k % 32) != 0) {
     return 1;
   }
-  // Super ROC RBS: the logits GEMM now runs on the caller's stream, so it is
+  // Super Roc RBS: the logits GEMM now runs on the caller's stream, so it is
   // ordered after the writes to x and before the head without the two host
   // synchronisations it needed on the null stream (80 per 40-layer prefill
   // chunk). Same kernel, same arithmetic.
@@ -345,7 +349,7 @@ int LaunchQwenMoeRouteBatch(const float* x, const float* gate, int k,
   const int head_blocks =
       (n_tokens + kHeadTokensPerBlock - 1) / kHeadTokensPerBlock;
   QwenMoeRouteHeadBatchKernel<<<head_blocks, kThreads, 0, stream>>>(
-      logits, n_tokens, n_expert, n_used, ids, weights);
+      logits, n_tokens, n_expert, n_used, std::max(n_used, n_select), ids, weights);
   const hipError_t err = hipGetLastError();
   if (err != hipSuccess) {
     return 2;
@@ -357,7 +361,7 @@ int LaunchQwenMoeRouteRows(const float* x, const float* gate, int k,
                            int n_expert, int n_rows, int n_used,
                            float* logits, int* ids, float* weights,
                            const float* shexp_gate, float* sig_out,
-                           hipStream_t stream) {
+                           hipStream_t stream, int n_select) {
   const int bad =
       ValidateRouteArgs(x, gate, k, n_expert, n_used, logits, ids, weights);
   if (bad != 0) {
@@ -393,10 +397,10 @@ int LaunchQwenMoeRouteRows(const float* x, const float* gate, int k,
   }
   if (n_rows == 1) {
     QwenMoeRouteHeadKernel<<<1, kHeadLanes, 0, stream>>>(logits, n_expert,
-                                                         n_used, ids, weights);
+                                                         n_used, std::max(n_used, n_select), ids, weights);
   } else {
     QwenMoeRouteHeadBatchKernel<<<1, kThreads, 0, stream>>>(
-        logits, n_rows, n_expert, n_used, ids, weights);
+        logits, n_rows, n_expert, n_used, std::max(n_used, n_select), ids, weights);
   }
   const hipError_t err = hipGetLastError();
   if (err != hipSuccess) {
@@ -408,7 +412,7 @@ int LaunchQwenMoeRouteRows(const float* x, const float* gate, int k,
 
 int LaunchQwenMoeRouteHeadForTest(const float* logits, int n_tokens,
                                   int n_expert, int n_used, int* ids,
-                                  float* weights, hipStream_t stream) {
+                                  float* weights, hipStream_t stream, int n_select) {
   if (logits == nullptr || ids == nullptr || weights == nullptr ||
       n_expert <= 0 || n_expert > kMaxExpert || n_used <= 0 ||
       n_used > n_expert || n_used > kMaxUsed || n_tokens < 0 ||
@@ -417,12 +421,12 @@ int LaunchQwenMoeRouteHeadForTest(const float* logits, int n_tokens,
   }
   if (n_tokens == 0) {
     QwenMoeRouteHeadKernel<<<1, kHeadLanes, 0, stream>>>(logits, n_expert,
-                                                         n_used, ids, weights);
+                                                         n_used, std::max(n_used, n_select), ids, weights);
   } else {
     const int head_blocks =
         (n_tokens + kHeadTokensPerBlock - 1) / kHeadTokensPerBlock;
     QwenMoeRouteHeadBatchKernel<<<head_blocks, kThreads, 0, stream>>>(
-        logits, n_tokens, n_expert, n_used, ids, weights);
+        logits, n_tokens, n_expert, n_used, std::max(n_used, n_select), ids, weights);
   }
   return hipGetLastError() == hipSuccess ? 0 : 2;
 }

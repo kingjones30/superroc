@@ -17,10 +17,10 @@ OxCoder-9B is a 9B dense Qwen3.5 hybrid coding model with a 262,144-token contex
 ## Serve
 
 ```sh
-SUPERROC_MTP_BORROW_HEAD=1 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/OxCoder-9B-MTP-Q4_0-ROCmFP4-STRIX_LEAN.gguf --served-model-name oxcoder-9b --context 65536 --think off --speculative mtp --mtp-model /path/to/OxCoder-9B-MTP-Q4_0-ROCmFP4-STRIX_LEAN.gguf -d 3 --min-draft-tokens 1
+superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/OxCoder-9B-MTP-Q4_0-ROCmFP4-STRIX_LEAN.gguf --served-model-name oxcoder-9b --context 65536 --think off --speculative mtp -d 3 --min-draft-tokens 1
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 
@@ -38,7 +38,7 @@ KL divergence 0.0879 ± 0.0034 from BF16 with 89.29% top-1 agreement and perplex
 
 ## Notes
 
-- Set SUPERROC_MTP_BORROW_HEAD=1: the drafter is the MTP block inside the same file, and this switch makes it use the model's token embedding and output head that are already on the GPU.
+- The drafter is the MTP block inside the same file; it uses the model's token embedding and output head that are already on the GPU.
 - The MTP head is grafted from the declared base model; it was trained for that model, not for OxCoder, and acceptance is measured on the benchmark prompts.
 - With the head loaded, image requests fail on this build; for image input, drop the speculative flags and serve with the projector.
 - The vision projector is published alongside the file; this setup attaches no projector and serves text only.

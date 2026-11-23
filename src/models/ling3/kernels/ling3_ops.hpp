@@ -1,6 +1,6 @@
 // ling3_ops.hpp — the small ops a Ling-3.0 decode step needs around the
-// attention blocks. Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not
-// confuse with LG's drafts. Lane LK, phase 2 of the Ling-on-superroc build.
+// attention blocks. MiMo — Ling-on-superroc build. Do not
+// confuse with the other drafts.
 //
 // Five things (phase-2 spec):
 //   1. RMSNorm          eps from the GGUF
@@ -15,7 +15,7 @@
 // The sum is accumulated in double on the CPU oracle and in float on the GPU,
 // which is what ggml-cuda's rms_norm_f32 does.
 //
-// The Q6_K decoder is LX's, vendored by include: `../ling-moe/ling3_quant.hpp`
+// The Q6_K decoder is vendored by include: `ling3_quant.hpp`
 // (self-contained, host/device). It follows ggml-quants.c dequantize_row_q6_K.
 
 #ifndef LING3_OPS_HPP
@@ -82,7 +82,7 @@ void ops_embedding_row(int token_embd_type, const void* token_embd, int n_embd,
 //    Ties resolve to the lowest index (the CPU oracle does the same).
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
-// 2b. LS2 PHASE7: residual add fused with the RMSNorm that consumes it.
+// 2b. Residual add fused with the RMSNorm that consumes it.
 //     y = ((a + b) * rsqrtf(mean((a+b)^2) + eps)) * w ; rsum (optional) also
 //     gets a + b. Same arithmetic as ops_residual_add followed by ops_rms_norm.
 // ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ inline void ops_argmax(const float* logits, int n, int rows, int32_t* out_index,
 }
 
 // ---------------------------------------------------------------------------
-// LM1 SPEC6 item 3 (RV14 3.2): argmax AND its top-1 softmax probability in one
+// Argmax AND its top-1 softmax probability in one
 // pass over the logits. p_top1 = 1 / sum_i exp(x_i - x_max), exact to fp32.
 //
 // Two loops, not one: the max must be known before exp(x - max) is safe. The

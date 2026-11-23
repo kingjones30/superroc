@@ -6,7 +6,6 @@
 #include <string_view>
 
 #include "src/core/json.hpp"
-#include "src/core/previous_name_compat.hpp"
 
 namespace superroc::eval {
 namespace {
@@ -99,8 +98,7 @@ std::optional<EvalSuite> LoadEvalSuite(const std::filesystem::path& path,
   try {
     const Value root = superroc::json::parse(contents.str());
     if (!root.is_object() ||
-        !::superroc::core::MatchesCurrentOrPrevious(
-            RequireString(root, "schema"), "superroc.eval-cases.v2")) {
+        (RequireString(root, "schema")) != ("superroc.eval-cases.v2")) {
       throw std::runtime_error("unsupported evaluation schema");
     }
 

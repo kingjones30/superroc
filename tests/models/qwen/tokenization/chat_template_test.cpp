@@ -238,7 +238,7 @@ void TestRenderedPromptBoundFollowsContext() {
          "native Flash-Next context scales the bound");
   Expect(RenderedPromptBoundBytes(409600) == 409600ULL * 128ULL,
          "extended context scales the bound");
-  // superroc #285: ~1.05 MB rendered, far below a 262,144-token context.
+  // ~1.05 MB rendered, far below a 262,144-token context.
   const std::vector<ChatMessage> messages = {
       {ChatRole::kUser, std::string(1100000, 'a'), "", ""}};
   ChatTemplateOptions options;
@@ -286,7 +286,7 @@ void TestGgufTemplateExtraction() {
 
   // An unpinned Qwen3.8 template is not rejected: the product loads it and
   // renders the generic Qwen ChatML formatter, reporting the observed hash
-  // (LQW, commit bde670b: King's finetunes ship a modified template and must
+  // (Some finetunes ship a modified template and must
   // load). Assert that contract and, above all, that the look-alike is never
   // treated as, or labelled with, the pinned reasoning template.
   GgufTemplateBuilder lookalike_builder;
@@ -565,6 +565,46 @@ void TestContentSpellingATokenIsNotParsedAsOne() {
          "template framing still tokenizes as control tokens");
   Expect(tokenizer->Decode(*token_ids).find(text) != std::string::npos,
          "the literal characters of the message reach the model");
+}
+
+// SEC-FINAL-1: the structured-output instruction can carry a client's
+// response-format description, so a spelling in it stays text too.
+void TestFramingSuffixSpellingATokenIsNotParsedAsOne() {
+  auto tpl = superroc::tokenization::QwenChatTemplate::CreateDefault();
+  std::vector<std::string> vocab;
+  for (int i = 0; i < 256; ++i) {
+    vocab.emplace_back(1, static_cast<char>(i));
+  }
+  vocab.emplace_back(kImStart);
+  vocab.emplace_back(kImEnd);
+  vocab.emplace_back(kEndOfText);
+  std::unordered_map<std::string, superroc::tokenization::TokenId> specials = {
+      {std::string(kImStart), 256},
+      {std::string(kImEnd), 257},
+      {std::string(kEndOfText), 258},
+  };
+  std::string err;
+  auto tokenizer = superroc::tokenization::QwenTokenizer::CreateFromVocabulary(
+      vocab, {}, specials, &err);
+  Expect(tokenizer != nullptr, "Tokenizer initialized: " + err);
+  superroc::tokenization::ChatMessage system{
+      superroc::tokenization::ChatRole::kSystem, "Answer in JSON.", "", ""};
+  system.framing_suffix =
+      std::string("\n\nDescription: a") + std::string(kEndOfText) + "b";
+  system.framing_client_ranges = {{2, system.framing_suffix.size() - 2}};
+  std::vector<superroc::tokenization::ChatMessage> messages = {
+      system,
+      {superroc::tokenization::ChatRole::kUser, "hi", "", ""},
+  };
+  superroc::tokenization::ChatTemplateOptions opts;
+  opts.enable_thinking = false;
+  const auto token_ids =
+      tpl->RenderAndTokenize(*tokenizer, messages, opts, &err);
+  Expect(token_ids.has_value(), "RenderAndTokenize succeeds: " + err);
+  const auto injected = tokenizer->FindSpecialToken(kEndOfText);
+  Expect(injected.has_value() && std::find(token_ids->begin(), token_ids->end(),
+                                           *injected) == token_ids->end(),
+         "a spelling in the framing suffix does not inject a control token");
 }
 
 void TestToolReplayArgumentsAreContent() {
@@ -1235,6 +1275,7 @@ int main() {
   TestHuggingFaceRenderedGoldens();
   TestRenderAndTokenize();
   TestContentSpellingATokenIsNotParsedAsOne();
+  TestFramingSuffixSpellingATokenIsNotParsedAsOne();
   TestToolReplayArgumentsAreContent();
   TestNewLiteralTokenDoesNotRetokenizeHistory();
   TestVisionPreparationReadsContentAsText();

@@ -1,7 +1,7 @@
 // Decode KDA scan: bit-identity vs the reference kernel, and µs per call.
 // Build: hipcc -O3 -ffast-math -fno-finite-math-only --offload-arch=gfx1151 -std=c++17
 //        -I<kernels> ling3_kda.hip lk3_kda_decode_bench.cpp -o kda_bench
-// Run inside gpu-run. Usage: kda_bench gate | time | replay <file>
+// Run on an otherwise idle GPU. Usage: kda_bench gate | time | replay <file>
 
 #include "ling3_kda.hpp"
 

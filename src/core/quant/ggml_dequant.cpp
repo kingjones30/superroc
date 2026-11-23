@@ -1,5 +1,6 @@
 #include "src/core/quant/ggml_dequant.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -406,6 +407,76 @@ void DequantizeQ8_0(const void* src, float* dst, std::size_t k) {
     const float d = Fp16ToFloat(blocks[b].d);
     for (std::size_t i = 0; i < 32; ++i) {
       dst[(b * 32) + i] = d * static_cast<float>(blocks[b].qs[i]);
+    }
+  }
+}
+
+std::uint16_t FloatToFp16(float f) noexcept {
+  std::uint32_t x = 0;
+  std::memcpy(&x, &f, sizeof(x));
+  const std::uint32_t sign = (x >> 16U) & 0x8000U;
+  const std::uint32_t mag = x & 0x7fffffffU;
+
+  if (mag >= 0x7f800000U) {  // inf / NaN
+    return static_cast<std::uint16_t>(sign | 0x7c00U |
+                                      (mag > 0x7f800000U ? 0x200U : 0U));
+  }
+  if (mag >= 0x47800000U) {  // >= 2^16: past the largest half
+    return static_cast<std::uint16_t>(sign | 0x7c00U);
+  }
+  if (mag >= 0x38800000U) {  // >= 2^-14: a normal half
+    // The exponent is rebased from the float bias (127) to the half bias (15)
+    // before the mantissa is shifted down; rounding adds to the combined
+    // value, so a mantissa carry reaches the exponent.
+    std::uint32_t val =
+        (((mag >> 23U) - 112U) << 10U) | ((mag >> 13U) & 0x3ffU);
+    const std::uint32_t rem = mag & 0x1fffU;
+    if (rem > 0x1000U || (rem == 0x1000U && (val & 1U) != 0U)) {
+      ++val;
+    }
+    return static_cast<std::uint16_t>(sign | val);
+  }
+  if (mag < 0x33000000U) {  // < 2^-25: rounds to zero
+    return static_cast<std::uint16_t>(sign);
+  }
+  // A subnormal half: make the leading one explicit, shift, then round.
+  const std::uint32_t m = (mag & 0x7fffffU) | 0x800000U;
+  const std::uint32_t shift = 126U - (mag >> 23U);  // 14 .. 24
+  std::uint32_t h = m >> shift;
+  const std::uint32_t rem = m & ((1U << shift) - 1U);
+  const std::uint32_t half = 1U << (shift - 1U);
+  if (rem > half || (rem == half && (h & 1U) != 0U)) {
+    ++h;
+  }
+  return static_cast<std::uint16_t>(sign | h);
+}
+
+void QuantizeQ4_0(const float* src, void* dst, std::size_t k) noexcept {
+  auto* blocks = static_cast<block_q4_0*>(dst);
+  const std::size_t nb = k / 32;
+  for (std::size_t b = 0; b < nb; ++b) {
+    const float* x = src + (b * 32);
+    float amax = 0.0F;
+    float max = 0.0F;
+    for (std::size_t j = 0; j < 32; ++j) {
+      const float v = std::isfinite(x[j]) ? x[j] : 0.0F;
+      if (std::fabs(v) > amax) {
+        amax = std::fabs(v);
+        max = v;
+      }
+    }
+    const float d = max / -8.0F;
+    const float id = d != 0.0F ? 1.0F / d : 0.0F;
+    blocks[b].d = FloatToFp16(d);
+    const auto code = [id](float value) {
+      const float v = std::isfinite(value) ? value : 0.0F;
+      // Truncation of (q + 8.5) rounds q to nearest; q is in [-8, 8].
+      const int q = static_cast<int>((v * id) + 8.5F);
+      return static_cast<std::uint8_t>(std::clamp(q, 0, 15));
+    };
+    for (std::size_t j = 0; j < 16; ++j) {
+      blocks[b].qs[j] =
+          static_cast<std::uint8_t>(code(x[j]) | (code(x[j + 16]) << 4U));
     }
   }
 }

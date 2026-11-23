@@ -1,4 +1,4 @@
-// LS4 phase 1, step 3: the MTP block on the GPU, checked against the CPU
+// The MTP block on the GPU, checked against the CPU
 // oracle.
 //
 // mtp_ref_test --dump writes one row per position of a real sequence:
@@ -9,16 +9,17 @@
 // and compares the draft token and the returned hidden state against the
 // oracle's. It exists so the MTP block can be validated on small shapes before
 // anything runs it on the full model: a GPU fault resets the GPU and kills
-// every seat on the box, so the index math and the buffer sizes have to be
-// right before a 64 GiB load is worth risking.
+// every seat on the test machine, so the index math and the buffer sizes
+// have to be right before a 64 GiB load is worth risking.
 //
 // The rows must be replayed in order and into ONE state: the MTP block has one
 // latent cache and it must be filled at every position in order, exactly as the
 // CPU oracle filled it. Replaying a subset, or out of order, would compare
 // against a different cache and every row would differ.
 //
-// Run it ONLY inside gpu-run. It loads the full resident plan (~64 GiB + the
-// head's ~3.3 GiB) because the head borrows the trunk's token_embd / output.
+// Run it ONLY on an otherwise idle GPU. It loads the full resident plan (~64
+// GiB + the head's ~3.3 GiB) because the head borrows the trunk's token_embd /
+// output.
 
 #include <cmath>
 #include <cstdint>

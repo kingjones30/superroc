@@ -1,4 +1,4 @@
-// GLM: GLIMMER S4 probe. Reproduces one greedy trajectory through the same
+// GLIMMER S4 probe. Reproduces one greedy trajectory through the same
 // render and the same kernels the serve path uses, and dumps per-step token
 // ids with their top-k logprobs so the sequence can be aligned with the
 // fork's llama-server logprobs (s3-eom-fork.json) token for token.

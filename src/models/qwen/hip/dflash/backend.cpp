@@ -17,7 +17,7 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/sampling.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 
@@ -25,7 +25,7 @@ namespace superroc::hip {
 namespace {
 
 [[nodiscard]] float DsparkEnvFloat(const char* name, float fallback) {
-  const char* value = ::superroc::core::GetEnvCompat(name);
+  const char* value = ::superroc::core::GetEnv(name);
   if (value == nullptr || value[0] == '\0') {
     return fallback;
   }
@@ -38,7 +38,7 @@ namespace {
 }
 
 [[nodiscard]] bool DsparkEnvOn(const char* name) {
-  const char* value = ::superroc::core::GetEnvCompat(name);
+  const char* value = ::superroc::core::GetEnv(name);
   return value != nullptr && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -260,7 +260,8 @@ QwenDFlashGpuDraftBackend::QwenDFlashGpuDraftBackend(
           // The tied output tensor distinguishes the qualified Q8 target
           // (Q8_0 head) from Q4 (Q6_K head) for verification cost selection.
           executor_->GetModel().GetWeights().output.type ==
-              core::GgmlType::kQ8_0) {}
+              core::GgmlType::kQ8_0,
+          config.flat_verify) {}
 
 std::unique_ptr<QwenDFlashGpuDraftBackend> QwenDFlashGpuDraftBackend::Create(
     std::shared_ptr<const QwenDFlashGpuModel> model,
@@ -280,6 +281,22 @@ std::unique_ptr<QwenDFlashGpuDraftBackend> QwenDFlashGpuDraftBackend::Create(
   if (executor == nullptr) {
     return nullptr;
   }
+  // Every creation path (the server builds the drafter through
+  // here) configures the trimmed draft vocab once the executor exists. The
+  // tail keeps the target tokenizer's special tokens (chat, think, tool
+  // call).
+  std::vector<std::uint32_t> special_ids;
+  const auto& target = executor->GetModel().GetTargetModel();
+  // A llama target has no Qwen tokenizer, and the trim was not measured on its
+  // vocabulary, so it keeps the full draft vocab.
+  if (!target.GetConfig().llama) {
+    const auto& special_tokens = target.GetTokenizer().SpecialTokens();
+    special_ids.reserve(special_tokens.size());
+    for (const auto& entry : special_tokens) {
+      special_ids.push_back(static_cast<std::uint32_t>(entry.second));
+    }
+  }
+  executor->ConfigureDraftVocab(special_ids);
   return std::unique_ptr<QwenDFlashGpuDraftBackend>(
       new QwenDFlashGpuDraftBackend(std::move(executor), config));
 }
@@ -296,11 +313,18 @@ QwenDFlashGpuDraftBackend::CreateFromGguf(
     return nullptr;
   }
   auto reader_owner =
-      core::GgufReader::OpenFile(std::string(dflash_model_path), error_msg);
+      core::GgufReader::OpenFile(std::string(dflash_model_path), error_msg,
+                                 core::GgufReader::FileRole::kSidecar);
   if (reader_owner == nullptr) {
     return nullptr;
   }
   std::shared_ptr<const core::GgufReader> reader(std::move(reader_owner));
+  const auto& target_layers = target_model->GetWeights().layers;
+  config.flat_verify =
+      !target_layers.empty() &&
+      (target_layers.front().ffn_gate.type == core::GgmlType::kQ4_0_ROCMFP4 ||
+       target_layers.front().ffn_gate.type ==
+           core::GgmlType::kQ4_0_ROCMFP4_FAST);
   auto model = QwenDFlashGpuModel::Create(std::move(reader),
                                           std::move(target_model), error_msg);
   if (model == nullptr) {
@@ -319,22 +343,37 @@ bool QwenDFlashGpuDraftBackend::PrimeTargetContext(
   const std::size_t num_tokens = context.prompt_tokens.size();
   const std::size_t enc_in_dim = executor_->GetTargetFeaturesSize();
 
-  if (context.hidden_size != enc_in_dim ||
-      context.prompt_hidden_states.size() != num_tokens * enc_in_dim) {
+  // A chunk whose every row is skipped advances the committed context without
+  // features, so its context may carry none.
+  const bool skip_all = context.skip_tokens == num_tokens;
+  if (context.skip_tokens > num_tokens ||
+      (!skip_all &&
+       (context.hidden_size != enc_in_dim ||
+        context.prompt_hidden_states.size() != num_tokens * enc_in_dim))) {
     return false;
   }
 
   try {
-    const auto ok =
-        executor_->InjectTargetContext(context.prompt_hidden_states, 0,
-                                       static_cast<std::uint32_t>(num_tokens));
-    if (!ok) {
+    // Leading rows the verifier knows can never enter the attention window
+    // advance the committed context without paying the projection cost.
+    if (context.skip_tokens > 0 &&
+        !executor_->SkipTargetContext(0, context.skip_tokens)) {
       return false;
+    }
+    if (context.skip_tokens < num_tokens) {
+      const std::size_t inject = num_tokens - context.skip_tokens;
+      const auto ok = executor_->InjectTargetContext(
+          context.prompt_hidden_states.subspan(
+              static_cast<std::size_t>(context.skip_tokens) * enc_in_dim,
+              inject * enc_in_dim),
+          context.skip_tokens, static_cast<std::uint32_t>(inject));
+      if (!ok) {
+        return false;
+      }
     }
     primed_ = true;
     return true;
-  } catch (const std::exception& exc) {
-    std::fprintf(stderr, "[SpecPrime] prime failed: %s\n", exc.what());
+  } catch (const std::exception&) {
     Reset();
     return false;
   }
@@ -517,18 +556,44 @@ void QwenDFlashGpuDraftBackend::InjectPendingFeatures(
   pending_target_features_.clear();
 }
 
-bool QwenDFlashGpuDraftBackend::AppendTargetContext(
-    const speculative::DraftTargetContext& context, std::uint32_t position) {
-  if (!primed_ || proposal_active_ ||
-      context.hidden_size != executor_->GetTargetFeaturesSize() ||
-      context.prompt_hidden_states.size() !=
-          context.prompt_tokens.size() * context.hidden_size) {
+bool QwenDFlashGpuDraftBackend::SkipTargetContext(std::uint32_t position,
+                                                  std::uint32_t num_tokens) {
+  if (!primed_ || proposal_active_) {
     return false;
   }
   InjectPendingFeatures(position);
+  return executor_->SkipTargetContext(position, num_tokens);
+}
+
+bool QwenDFlashGpuDraftBackend::AppendTargetContext(
+    const speculative::DraftTargetContext& context, std::uint32_t position) {
+  // A chunk whose every row is skipped advances the committed context without
+  // features, so its context may carry none.
+  const bool skip_all = context.skip_tokens == context.prompt_tokens.size();
+  if (!primed_ || proposal_active_ ||
+      context.skip_tokens > context.prompt_tokens.size() ||
+      (!skip_all &&
+       (context.hidden_size != executor_->GetTargetFeaturesSize() ||
+        context.prompt_hidden_states.size() !=
+            context.prompt_tokens.size() * context.hidden_size))) {
+    return false;
+  }
+  InjectPendingFeatures(position);
+  // Leading rows below the caller's final window boundary never enter the
+  // attention window; advance over them without the projection cost.
+  if (context.skip_tokens > 0 &&
+      !SkipTargetContext(position, context.skip_tokens)) {
+    return false;
+  }
+  const std::size_t inject = context.prompt_tokens.size() - context.skip_tokens;
+  if (inject == 0) {
+    return true;
+  }
   return executor_->InjectTargetContext(
-      context.prompt_hidden_states, position,
-      static_cast<std::uint32_t>(context.prompt_tokens.size()));
+      context.prompt_hidden_states.subspan(
+          static_cast<std::size_t>(context.skip_tokens) * context.hidden_size,
+          inject * context.hidden_size),
+      position + context.skip_tokens, static_cast<std::uint32_t>(inject));
 }
 
 speculative::DraftProposal QwenDFlashGpuDraftBackend::ProposeImpl(
@@ -657,6 +722,13 @@ std::size_t QwenDFlashGpuDraftBackend::SnapshotPayloadBytes() const {
   return gpu_bytes + pending_target_features_.size() * sizeof(float);
 }
 
+std::optional<std::size_t> QwenDFlashGpuDraftBackend::SnapshotPayloadBytesAt(
+    std::uint32_t position) const {
+  // Feeding the target context flushes the pending features.
+  return CheckedPersistentAdd(executor_->SnapshotPayloadBytesAt(position),
+                              sizeof(float) + sizeof(std::uint32_t));
+}
+
 std::unique_ptr<speculative::IDraftBackendSnapshot>
 QwenDFlashGpuDraftBackend::Snapshot() const {
   if (proposal_active_) {
@@ -665,35 +737,6 @@ QwenDFlashGpuDraftBackend::Snapshot() const {
   }
   return std::make_unique<QwenDFlashDraftSnapshot>(
       executor_->SaveSnapshot(), pending_target_features_,
-      executor_->GetTargetFeaturesSize(), config_, controller_.State(),
-      controller_.LastFullWidth(), primed_);
-}
-
-std::size_t QwenDFlashGpuDraftBackend::SnapshotPayloadBytesAtPosition(
-    std::uint32_t position) const {
-  if (position > executor_->GetInjectedContextLength()) {
-    throw std::logic_error(
-        "DFlash position snapshot exceeds the injected context");
-  }
-  // Pending features are the tail past injected_context_len_: they sit
-  // beyond the truncation point, so the snapshot drops them and a restoring
-  // session re-appends its own committed tokens.
-  return CheckedPersistentAdd(executor_->SnapshotPayloadBytesAt(position),
-                              sizeof(float) + sizeof(std::uint32_t));
-}
-
-std::unique_ptr<speculative::IDraftBackendSnapshot>
-QwenDFlashGpuDraftBackend::SnapshotAtPosition(std::uint32_t position) const {
-  if (proposal_active_) {
-    throw std::logic_error(
-        "DFlash snapshot requires a committed proposal boundary");
-  }
-  if (position > executor_->GetInjectedContextLength()) {
-    throw std::logic_error(
-        "DFlash position snapshot exceeds the injected context");
-  }
-  return std::make_unique<QwenDFlashDraftSnapshot>(
-      executor_->SaveSnapshotAt(position), std::vector<float>{},
       executor_->GetTargetFeaturesSize(), config_, controller_.State(),
       controller_.LastFullWidth(), primed_);
 }

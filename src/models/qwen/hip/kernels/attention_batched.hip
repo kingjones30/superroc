@@ -20,7 +20,7 @@
 
 namespace superroc::hip {
 
-// SQ17: static LDS word count of BatchedAttentionKernel (s_scratch). The
+// Static LDS word count of BatchedAttentionKernel (s_scratch). The
 // launcher adds it to the dynamic score plane when checking the block limit.
 inline constexpr std::size_t kBatchedAttentionStaticLdsFloats{256};
 
@@ -257,7 +257,7 @@ void LaunchBatchedAttention(const float* q, const float* k, const float* v,
                             std::uint32_t num_kv_heads, std::uint32_t head_dim,
                             hipStream_t stream, bool skip_kv_write,
                             void* out_context_bf16) {
-  // SQ17: BatchedAttentionKernel stages one float score per visible position
+  // BatchedAttentionKernel stages one float score per visible position
   // in dynamic LDS on top of its static scratch. Past the per-block LDS limit
   // HSA rejects the launch, aborting the queue and wedging the server (MiMo
   // at 27.7K tokens asked 66560 bytes of 64 KiB). Refuse first, before

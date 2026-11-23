@@ -330,11 +330,11 @@ void TestBase(const std::filesystem::path& root,
 
 int main() {
   const std::filesystem::path voice_design_root =
-      "/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-VoiceDesign";
+      "/path/to/Qwen3-TTS-12Hz-1.7B-VoiceDesign";
   const std::filesystem::path base_root =
-      "/home/fbozzo/projects/audio.cpp/models/Qwen3-TTS-12Hz-1.7B-Base";
+      "/path/to/audio.cpp/models/Qwen3-TTS-12Hz-1.7B-Base";
   const std::filesystem::path artifact_root =
-      "/home/fbozzo/projects/strix-halo.cpp/artifacts/qwen3_tts";
+      "/path/to/strix-halo.cpp/artifacts/qwen3_tts";
   if (!std::filesystem::is_regular_file(voice_design_root /
                                         "model.safetensors") ||
       !std::filesystem::is_regular_file(base_root / "model.safetensors") ||

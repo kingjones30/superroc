@@ -28,14 +28,14 @@ Lfm2LaunchStatus LaunchLfm2WriteKvDev(
 // splits into out. Grid shapes depend only on heads/kv_heads/n_splits (not on
 // the position), so the pair can live in a HIP graph. Host checks:
 // head_dim == 64, heads % num_kv_heads == 0, group <= 8, 1 <= n_splits <= 64,
-// pointers non-null; hipGetLastError() after each launch (audit F04 style).
+// pointers non-null; hipGetLastError() after each launch.
 Lfm2LaunchStatus LaunchLfm2DecodeAttention(
     const float* q, const float* k_cache, const float* v_cache, float* out,
     std::uint32_t layer, const std::uint32_t* d_pos, std::uint32_t max_context,
     std::uint32_t num_heads, std::uint32_t num_kv_heads, std::uint32_t head_dim,
     std::uint32_t n_splits, float* partial, hipStream_t stream);
 
-// LFM2 (SPEC3): fp16 token-major KV, the production plane layout: element
+// LFM2: fp16 token-major KV, the production plane layout: element
 // ((layer*max_ctx+pos)*num_kv_heads+kvh)*head_dim+d, V plane = K + plane
 // elements. Write rounds to nearest even; attention converts to fp32 on load
 // and is otherwise the same split-K math and checks as above.

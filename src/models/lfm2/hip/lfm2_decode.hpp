@@ -1,5 +1,5 @@
 // LFM2 decode step: one-token forward over short-conv + GQA + sigmoid MoE.
-// SPEC2 (lane LFD). No HIP graph capture on this path (v1).
+// No HIP graph capture on this path (v1).
 #ifndef SUPERROC_MODELS_LFM2_HIP_LFM2_DECODE_HPP_
 #define SUPERROC_MODELS_LFM2_HIP_LFM2_DECODE_HPP_
 

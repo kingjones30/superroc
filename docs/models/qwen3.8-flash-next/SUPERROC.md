@@ -1,4 +1,4 @@
-# Qwen3.8-Flash-Next on Super ROC (Uncensored ROCmFP4 and stock 4-bit, MTP drafter)
+# Qwen3.8-Flash-Next on Super Roc (Uncensored ROCmFP4 and stock 4-bit, MTP drafter)
 
 Qwen3.8-Flash-Next is a 176.9B mixture-of-experts model. This card covers two file sets: an uncensored ROCmFP4 STRIX_LEAN build with importance-matrix weighting (`hc_attn` / `hc_ffn` down and up matrices at Q8_0, `hc` inject and SSM alpha/beta at F32, three shards) and the stock Unsloth UD-Q4_K_XL file in four shards. Both setups draft with a Q8_0 MTP head and run with thinking on at low effort.
 
@@ -31,7 +31,31 @@ superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Qwen3.8-Flash-Next-U
 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf --served-model-name qwen3.8-flash-next --context 32768 --think on --reasoning-effort low --speculative mtp --mtp-model /path/to/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf
 ```
 
-## Measured on Super ROC
+## Speed settings
+
+New in this release, for the Uncensored ROCmFP4 file above: a tensor overlay and six routed experts per token (the
+file routes ten). Download the overlay next to the model shards and add two variables to its serve command.
+
+| File | Role | Repository |
+|---|---|---|
+| `Qwen3.8-Flash-Next-Uncensored-overlay.gguf` | tensor overlay for this model file (518 MB) | [kingjones777/Qwen3.8-Flash-Next-Uncensored-ROCmFP4-STRIX_LEAN-imatrix-GGUF](https://huggingface.co/kingjones777/Qwen3.8-Flash-Next-Uncensored-ROCmFP4-STRIX_LEAN-imatrix-GGUF) |
+
+```sh
+SUPERROC_TENSOR_OVERLAY=/path/to/Qwen3.8-Flash-Next-Uncensored-overlay.gguf SUPERROC_ROUTED_EXPERTS=6 \
+superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Qwen3.8-Flash-Next-Uncensored-Q4_0-ROCmFP4-STRIX_LEAN-imatrix-hcq8-ssmf32-00001-of-00003.gguf --served-model-name qwen3.8-flash-next --context 32768 --think on --reasoning-effort low --speculative mtp --mtp-model /path/to/mtp-Qwen3.8-Flash-Next-Q8_0.gguf --draft-tokens 3
+```
+
+| Measurement | File as published | Overlay, 6 experts |
+|---|---:|---:|
+| Generation, 16 prose prompts, 256 tokens each | 52.4 tok/s | 58.2 tok/s (+11.1 %) |
+| Prompt processing, those 2,041-token prompts | 1,392.7 tok/s | 1,523.4 tok/s (+9.4 %) |
+| Perplexity, 4,096-token held-out text | 5.1276 | 5.0456 (lower is better) |
+
+AMD Ryzen AI Max+ 395, 128 GB, ROCm 7.2.4; one build, the two settings in alternating runs, temperature 0, the serve command
+above. The overlay belongs to this model file. The engine replaces tensors by name and shape, so an overlay used
+with another Flash-Next file still loads and changes that model.
+
+## Measured on Super Roc
 
 ### Uncensored ROCmFP4 STRIX_LEAN imatrix, hc tensors Q8_0, SSM alpha/beta F32 (3 shards)
 
@@ -59,7 +83,7 @@ AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request a
 
 ## Quality
 
-Perplexity on a 6K-token long-text corpus (context 4096), measured with Super ROC on an earlier build: 5.97374 for the
+Perplexity on a 6K-token long-text corpus (context 4096), measured with Super Roc on an earlier build: 5.97374 for the
 Uncensored file with the `hc` tensors at Q8_0 and F32 and SSM alpha/beta at F32, against 6.18385 for the STRIX_LEAN imatrix
 file it was built from (3.4 % lower). No quality measurement for the stock Unsloth file is recorded yet.
 

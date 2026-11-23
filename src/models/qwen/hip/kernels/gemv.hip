@@ -181,12 +181,12 @@ void ExecuteDenseGemv(models::qwen::QwenGemmRoute route, const void* A,
 void LaunchGEMV(const void* A, core::GgmlType a_type, const float* x, float* y,
                 std::size_t M, std::size_t K, hipStream_t stream,
                 models::qwen::QwenGemmMode mode) {
-  // lqw:spec5-q4. Sidecar draft matrices stay Q4_0.
+  // Sidecar draft matrices stay Q4_0.
   if (a_type == core::GgmlType::kQ4_0) {
     LaunchQ4_0Gemv(A, x, y, M, K, stream);
     return;
   }
-  // lqw:gemv. A5 integer GEMV. A failed launch falls through to the A4 sub16 path.
+  // A5 integer GEMV. A failed launch falls through to the A4 sub16 path.
   if (IsRocmFp4(a_type) && RocmFp4ShapeOk(M, K) &&
       TryLaunchRocmFp4Gemv(a_type, A, x, y, M, K, stream)) {
     return;

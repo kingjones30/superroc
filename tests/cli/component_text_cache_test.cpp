@@ -888,6 +888,116 @@ void FailedCaptureKeepsPublishedBoundary() {
   auto& restored_state = dynamic_cast<State&>(restored->state());
   assert(runner->adapter->RecurrentHash(restored_state.slot) == hash);
 }
+// Dual in-pass capture slots: reserve/capture/
+// publish both, a refused second reservation leaves the stable slot alone,
+// and a P payload-byte mismatch skips only the P snapshot.
+void DualInPassReservationAndPublish() {
+  std::vector<TextRunnerToken> prompt(300);
+  std::iota(prompt.begin(), prompt.end(), 10);
+  const std::size_t fed = 100, p = 128, s = 200;
+  {
+    auto runner = std::make_shared<Runner>();
+    ComponentTextCache cache(runner, 1, 1 << 22, {});
+    auto lease = cache.Acquire(prompt, {}, {}, true, 0, true);
+    auto& state = dynamic_cast<State&>(lease->state());
+    runner->adapter->Append(state.slot, std::span(prompt).first(fed),
+                            std::span(prompt).first(fed));
+    const auto bytes_p = lease->CaptureBytes(p);
+    const auto bytes_s = lease->CaptureBytes(s);
+    assert(bytes_p > 0 && bytes_s > 0);
+    // Reserve S first, then P; publish ascending.
+    assert(lease->TryReserveSnapshot(bytes_s, s, false,
+                                     SnapshotPurpose::kContinuation,
+                                     {prompt.begin(), prompt.begin() + s}));
+    assert(
+        lease->TryReserveSecondSnapshot(bytes_p, p, SnapshotPurpose::kHistory,
+                                        {prompt.begin(), prompt.begin() + p}));
+    // Captures read the live frontier: reach each boundary before capturing
+    // it, as the in-pass BoundaryScope exposes the frozen view.
+    runner->adapter->Append(state.slot, std::span(prompt).subspan(fed, p - fed),
+                            std::span(prompt).subspan(fed, p - fed));
+    std::shared_ptr<const TextRunnerSnapshot> first = lease->CaptureSecond();
+    runner->adapter->Append(state.slot, std::span(prompt).subspan(p, s - p),
+                            std::span(prompt).subspan(p, s - p));
+    std::shared_ptr<const TextRunnerSnapshot> second = lease->Capture();
+    assert(first && second);
+    assert(lease->PublishSecondSnapshot({prompt.begin(), prompt.begin() + p},
+                                        first, false));
+    assert(lease->PublishSnapshot({prompt.begin(), prompt.begin() + s}, second,
+                                  false));
+    lease->Invalidate();
+    auto at_p = cache.Acquire({prompt.begin(), prompt.begin() + p}, {}, {},
+                              true, 0, true);
+    assert(at_p->cached_tokens() == p);
+    at_p->Invalidate();
+    auto at_s = cache.Acquire({prompt.begin(), prompt.begin() + s}, {}, {},
+                              true, 0, true);
+    assert(at_s->cached_tokens() == s);
+    at_s->Invalidate();
+  }
+  {
+    // A refused second reservation never disturbs S: an over-budget P with
+    // no disk queue is refused while S captures and publishes as today.
+    auto runner = std::make_shared<Runner>();
+    ComponentTextCache cache(runner, 1, 1 << 22, {});
+    auto lease = cache.Acquire(prompt, {}, {}, true, 0, true);
+    auto& state = dynamic_cast<State&>(lease->state());
+    runner->adapter->Append(state.slot, std::span(prompt).first(fed),
+                            std::span(prompt).first(fed));
+    const auto bytes_s = lease->CaptureBytes(s);
+    assert(lease->TryReserveSnapshot(bytes_s, s, false,
+                                     SnapshotPurpose::kContinuation,
+                                     {prompt.begin(), prompt.begin() + s}));
+    assert(!lease->TryReserveSecondSnapshot(
+        (1 << 22) + 1, p, SnapshotPurpose::kHistory,
+        {prompt.begin(), prompt.begin() + p}));
+    runner->adapter->Append(state.slot, std::span(prompt).subspan(fed, s - fed),
+                            std::span(prompt).subspan(fed, s - fed));
+    std::shared_ptr<const TextRunnerSnapshot> only = lease->Capture();
+    assert(only);
+    assert(lease->PublishSnapshot({prompt.begin(), prompt.begin() + s}, only,
+                                  false));
+    lease->Invalidate();
+    auto at_s = cache.Acquire({prompt.begin(), prompt.begin() + s}, {}, {},
+                              true, 0, true);
+    assert(at_s->cached_tokens() == s);
+    at_s->Invalidate();
+  }
+  {
+    // A P payload whose bytes differ from its reservation skips only P;
+    // S still publishes and restores.
+    auto runner = std::make_shared<Runner>();
+    ComponentTextCache cache(runner, 1, 1 << 22, {});
+    auto lease = cache.Acquire(prompt, {}, {}, true, 0, true);
+    auto& state = dynamic_cast<State&>(lease->state());
+    runner->adapter->Append(state.slot, std::span(prompt).first(fed),
+                            std::span(prompt).first(fed));
+    const auto bytes_p = lease->CaptureBytes(p);
+    const auto bytes_s = lease->CaptureBytes(s);
+    assert(lease->TryReserveSnapshot(bytes_s, s, false,
+                                     SnapshotPurpose::kContinuation,
+                                     {prompt.begin(), prompt.begin() + s}));
+    assert(lease->TryReserveSecondSnapshot(
+        bytes_p / 2 + 1, p, SnapshotPurpose::kHistory,
+        {prompt.begin(), prompt.begin() + p}));
+    runner->adapter->Append(state.slot, std::span(prompt).subspan(fed, p - fed),
+                            std::span(prompt).subspan(fed, p - fed));
+    std::shared_ptr<const TextRunnerSnapshot> first = lease->CaptureSecond();
+    runner->adapter->Append(state.slot, std::span(prompt).subspan(p, s - p),
+                            std::span(prompt).subspan(p, s - p));
+    std::shared_ptr<const TextRunnerSnapshot> second = lease->Capture();
+    assert(first && second);
+    assert(first->PayloadBytes() != bytes_p / 2 + 1);
+    lease->SkipSnapshot(SnapshotEventReason::kByteCapacity, bytes_p / 2 + 1, p);
+    assert(lease->PublishSnapshot({prompt.begin(), prompt.begin() + s}, second,
+                                  false));
+    lease->Invalidate();
+    auto at_s = cache.Acquire({prompt.begin(), prompt.begin() + s}, {}, {},
+                              true, 0, true);
+    assert(at_s->cached_tokens() == s);
+    at_s->Invalidate();
+  }
+}
 void BackingPressureKeepsSharedPrefix(bool capacity_check = false) {
   struct PressureRunner final : Runner {
     bool capacity_check{};
@@ -1516,6 +1626,7 @@ int main() {
   ReusedConversationOutlivesOneUseRequests();
   RestartAndCorruption();
   FailedCaptureKeepsPublishedBoundary();
+  DualInPassReservationAndPublish();
   BackingPressureKeepsSharedPrefix();
   BackingPressureKeepsSharedPrefix(true);
   FragmentedBackingKeepsCompletePrompt();

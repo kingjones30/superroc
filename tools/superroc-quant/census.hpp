@@ -1,8 +1,8 @@
-// In-tree GGUF census for superroc-quant v0.5 (LQP SPEC1 item 4).
+// In-tree GGUF census for superroc-quant v0.5.
 //
 // `superroc-quant census <file.gguf> [--json]`: the header census — arch,
 // hyperparameters, tensor count, 2-D types by family with shapes, 1-D summary,
-// provenance keys, bytes, BPW. A C++ port of `~/ls/kit/gguf_census.py` (same
+// provenance keys, bytes, BPW. A C++ port of a Python GGUF census script (same
 // output fields for the parts the script has) with the receipt fields the
 // formula needs added (1-D summary, provenance keys, bytes, BPW).
 //
@@ -65,7 +65,7 @@ inline std::string CensusTypeName(Type t) {
     case (Type)29: return "IQ1_M";
     case (Type)30: return "BF16";
     case (Type)31: return "Q8_0_ROCMFPX";
-    // v0.8 (RV-LQP2 F3): type 32 is NOT named MXFP4: this project's ggml enum
+    // Type 32 is NOT named MXFP4: this project's ggml enum
     // (qfn_ggml_stubs.h) jumps from BF16=30 to MXFP4=39, and no header in the
     // 1194fea tree defines id 32, so the old name was a guess. It falls
     // through to the generic T32 below and is sized by offset differencing.
@@ -267,7 +267,7 @@ inline std::uint64_t CensusTensorBytes(Type t, const std::vector<std::uint64_t>&
     case (Type)28: be = 1; bb = 8; break;      // F64
     case (Type)29: be = 256; bb = 56; break;   // IQ1_M
     case (Type)30: be = 1; bb = 2; break;      // BF16
-    // v0.8 (RV-LQP2 F3): ggml MXFP4-family layouts from qfn_ggml_stubs.h
+    // ggml MXFP4-family layouts from qfn_ggml_stubs.h
     // (ggml_type_size :254-256, ggml_blck_size :279-297).
     case (Type)39: be = 32; bb = 17; break;    // MXFP4
     case (Type)40: be = 64; bb = 18; break;    // NVFP4

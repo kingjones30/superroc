@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "src/core/gguf_reader.hpp"
+#include "tools/ppl_ref.hpp"
 #include "src/models/qwen/tokenizer.hpp"
 #include "src/models/qwen38_flash_next/engine.hpp"
 
@@ -128,6 +129,8 @@ int main(int argc, char** argv) {
     if (session == nullptr)
       throw std::runtime_error(error);
 
+    superroc::tools::PplRef ppl_ref;
+    ppl_ref.Open();
     double nll = 0.0;
     std::size_t count = 0;
     std::size_t argmax_hits = 0;
@@ -155,6 +158,7 @@ int main(int argc, char** argv) {
         const auto view = session->Logits();
         vocab = view.size();
         const double one = ScoreToken(view, target, &chunk_hits);
+        ppl_ref.Add(view, one);
         chunk_nll += one;
         ++chunk_scored;
         if ((count + chunk_scored) % 256 == 0)
@@ -189,8 +193,10 @@ int main(int argc, char** argv) {
       std::printf("[%zu]%.4f,", chunk + 1, ppl_cum);
       std::fflush(stdout);
     }
+    std::printf("\n");
+    ppl_ref.Report();
     const double ppl = std::exp(nll / static_cast<double>(count));
-    std::printf("\nFinal estimate: PPL = %.4f\n", ppl);
+    std::printf("Final estimate: PPL = %.4f\n", ppl);
     std::cout << "PPL " << ppl << " n_ctx=" << n_ctx << " n_chunk=" << n_chunk
               << " scored_tokens=" << count << " vocab=" << vocab
               << " argmax_hits=" << argmax_hits << " add_bos="

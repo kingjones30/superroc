@@ -192,7 +192,7 @@ the G4 recipes) — `:803-814`. These keys are ignored by llama.cpp-based loader
 `superroc-quant census <file.gguf> [--json]` (`CensusMain`, `:227-250`,
 `census.hpp`) prints the header census without touching tensor payloads:
 arch/name/basename/finetune, tensor count, the `arch.*` hyperparameters (the
-same filter as `~/ls/kit/gguf_census.py`: `block_count|embedding_length|expert
+same filter as the reference census script: `block_count|embedding_length|expert
 |hc|ssm|feed_forward|head_count$|indexer|ple`), 2-D+ types overall, 2-D types by
 family with first-seen shapes, a 1-D type summary, provenance keys
 (`superroc.quant.*`, `quantize.*`), total data bytes, element count and BPW

@@ -47,7 +47,7 @@ target_link_libraries(superroc_ling3_ref PRIVATE superroc_ling3_reference)
 set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/ling3_ref_main.cpp
   PROPERTIES COMPILE_OPTIONS "-O2")
 
-# LS4: replays mtp_ref_test's dump through mtp::DraftNext on the GPU and
+# Replays mtp_ref_test's dump through mtp::DraftNext on the GPU and
 # compares the draft tokens against the CPU oracle's. Needs the HIP build.
 if(ENGINE_ENABLE_HIP)
   add_executable(mtp_gpu_check EXCLUDE_FROM_ALL mtp_gpu_check.cpp)
@@ -55,7 +55,7 @@ if(ENGINE_ENABLE_HIP)
   set_source_files_properties(mtp_gpu_check.cpp PROPERTIES COMPILE_OPTIONS "-O2")
 endif()
 
-# LS4: drives the MTP draft head (block 42) on the CPU oracle and MEASURES
+# Drives the MTP draft head (block 42) on the CPU oracle and MEASURES
 # draft acceptance. CPU only, links superroc_ling3_reference -- no HIP, no GPU.
 add_executable(mtp_ref_test EXCLUDE_FROM_ALL
   mtp_ref_test.cpp)
@@ -75,7 +75,7 @@ add_executable(superroc_ling3_chat_template_test EXCLUDE_FROM_ALL
 target_link_libraries(superroc_ling3_chat_template_test PRIVATE superroc_ling3)
 
 # Standalone semantics tests. These depend on nothing -- not on superroc_core, not on
-# a model file, not on the GPU -- because they compare LG's arithmetic against a
+# a model file, not on the GPU -- because they compare the engine's arithmetic against a
 # second, independent transcription of the fork's kernels and graph. Two real
 # bugs were found this way (the shared KDA conv state and the MLA softmax indexed
 # by head instead of position), both of which a single-token smoke test cannot
@@ -117,21 +117,21 @@ set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/ling3_step_test.cpp
   PROPERTIES COMPILE_OPTIONS "-O2")
 
 # ---------------------------------------------------------------------------
-# ROCm backend. engine.cpp is compiled either way; the kernels and LK's / LX's
-# sources only with HIP, and LING3_WITH_ROCM is what switches Model::Load
+# ROCm backend. engine.cpp is compiled either way; the kernels build
+# only with HIP, and LING3_WITH_ROCM is what switches Model::Load
 # between the two backends.
 # ---------------------------------------------------------------------------
 set(LING3_KERNEL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/kernels)
 
 if(ENGINE_ENABLE_HIP)
-  # LG's own: elementwise/reduction/rotary plus the decode GEMV.
-  # LK's and LX's kernel sources, copied into kernels/. A missing one is
+  # Elementwise/reduction/rotary plus the decode GEMV.
+  # The kernel sources, copied into kernels/. A missing one is
   # skipped with a message rather than a configure error, so a partial set
   # degrades to the refusal rocm_backend.cpp already produces.
-  # LS3 2026-10-01: ling3_gemm.hip (batched-prefill GEMM + router) follows the
+  # ling3_gemm.hip (batched-prefill GEMM + router) follows the
   # same rule.
   set(LING3_HIP_SOURCES "")
-  # LS3 P3: ling3_wmma.hip holds only WaveSize-64 kernels (the
+  # ling3_wmma.hip holds only WaveSize-64 kernels (the
   # __builtin_amdgcn_wmma_i32_16x16x16_iu8_w64 path needs the wavefrontsize64
   # target feature; superroc compiles its own wave64 kernel this way too). The
   # other kernels retain wave32. Its 32-lane reductions pin the width
@@ -146,16 +146,16 @@ if(ENGINE_ENABLE_HIP)
                      "cannot link without it")
     endif()
   endforeach()
-  # LK's KDA block and LX's quant/GEMV/router/expert-FFN, copied into this
+  # The KDA block and quant/GEMV/router/expert-FFN, copied into this
   # package rather than linked across trees.
-  # mtp_gpu.cpp is LS4's MTP draft head. It is listed only in the HIP build:
+  # mtp_gpu.cpp is the MTP draft head. It is listed only in the HIP build:
   # it has its own #else stub, but there is nothing to compile without HIP.
   target_sources(superroc_ling3 PRIVATE engine.cpp mtp_gpu.cpp ${LING3_HIP_SOURCES})
   set_source_files_properties(${LING3_HIP_SOURCES} PROPERTIES LANGUAGE HIP)
   set_target_properties(superroc_ling3 PROPERTIES HIP_STANDARD 17
     HIP_STANDARD_REQUIRED ON POSITION_INDEPENDENT_CODE ON)
   target_compile_definitions(superroc_ling3 PRIVATE LING3_WITH_ROCM=1)
-  # LM1 2026-10-02: LS1's small-m decode kernels (ling3_gemv_m /
+  # The small-m decode kernels (ling3_gemv_m /
   # ling3_gemv_q8_m / ling3_expert_ffn_m in kernels/ling3_gemv_q8.{hpp,hip})
   # let a speculative verify read each weight ONCE for m activation columns.
   # Detect them and tell rocm_backend.cpp so StepMultiDispatch can route
@@ -179,7 +179,7 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3 PUBLIC hip::host)
 
-  # LVV: the vision tower is its own HIP library so it does not inherit the
+  # The vision tower is its own HIP library so it does not inherit the
   # language kernels' -ffast-math. The projector math stays the one the
   # cosine check measured.
   add_library(superroc_ling3_vision STATIC vision_tower_lib.hip)
@@ -193,7 +193,7 @@ if(ENGINE_ENABLE_HIP)
   target_link_libraries(lvv_describe PRIVATE superroc_ling3 superroc_ling3_reference)
 
 
-  # LC1 (wave 3, 2026-10-03): the token-parallel KDA conv against a VERBATIM copy of
+  # The token-parallel KDA conv against a VERBATIM copy of
   # build28g's serial conv_silu_kernel that lives inside the test -- the "old" side is not
   # the new dispatcher. Bit-identical or it did not happen. Compiled as HIP: the test
   # defines the reference __global__ kernel.
@@ -210,8 +210,8 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_kda_conv_parity PRIVATE hip::host)
 
-  # LS3: unit gate for the batched kernels, against the CPU reference, on
-  # small shapes. EXCLUDE_FROM_ALL: built by name, run inside gpu-run.
+  # Unit gate for the batched kernels, against the CPU reference, on
+  # small shapes. EXCLUDE_FROM_ALL: built by name, run on an otherwise idle GPU.
   add_executable(superroc_ling3_gemm_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_gemm_test.cpp
     ${LING3_KERNEL_DIR}/ling3_gemm.hip)
@@ -224,7 +224,7 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_gemm_test PRIVATE hip::host)
 
-  # LK3: decode KDA scan vs the reference kernel. EXCLUDE_FROM_ALL, run inside gpu-run.
+  # Decode KDA scan vs the reference kernel. EXCLUDE_FROM_ALL, run on an otherwise idle GPU.
   add_executable(superroc_ling3_kda_decode_bench EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/lk3_kda_decode_bench.cpp
     ${LING3_KERNEL_DIR}/ling3_kda.hip)
@@ -237,7 +237,7 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_kda_decode_bench PRIVATE hip::host)
 
-  # LKF (wave 3): fused decode KDA vs the unfused sequence, memcmp exact.
+  # Fused decode KDA vs the unfused sequence, memcmp exact.
   add_executable(ling3_kda_fusion_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_kda_fusion_test.cpp
     ${LING3_KERNEL_DIR}/ling3_kda.hip)
@@ -252,7 +252,7 @@ if(ENGINE_ENABLE_HIP)
   target_link_libraries(ling3_kda_fusion_test PRIVATE hip::host)
 
 
-  # LS3 P3: unit gate for the W8A8 int8-WMMA grouped GEMM (fork-semantics
+  # Unit gate for the W8A8 int8-WMMA grouped GEMM (fork-semantics
   # oracle + F32 oracle, small shapes, real shapes; optional real GGUF rows).
   add_executable(superroc_ling3_wmma_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_wmma_test.cpp
@@ -266,7 +266,7 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_wmma_test PRIVATE hip::host)
 
-  # LS3 P2: unit gate for mla_attn_tok (tiled, warp pairs) vs the proven
+  # Unit gate for mla_attn_tok (tiled, warp pairs) vs the proven
   # serial mla_attn, on synthetic tensors at the real shapes. No model load.
   add_executable(superroc_ling3_mla_tok_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_mla_tok_test.cpp
@@ -280,7 +280,7 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_mla_tok_test PRIVATE hip::host)
 
-  # LW1 (wave 2): unit gate for the two-pass WMMA prefill attention vs the
+  # Unit gate for the two-pass WMMA prefill attention vs the
   # serial mla_attn and vs mla_attn_tok, synthetic tensors at real shapes.
   add_executable(superroc_ling3_mla_w2_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_mla_w2_test.cpp
@@ -296,10 +296,10 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_mla_w2_test PRIVATE hip::host)
 
-  # LF1 SPEC3: unit gate for the ported fork tile kernel
+  # Unit gate for the ported fork tile kernel
   # (ling3_mla_tile.hip) vs mla_attn_tok, on synthetic tensors at the real
   # shapes plus an optional real captured q/cache. EXCLUDE_FROM_ALL: built by
-  # name, run inside gpu-run.
+  # name, run on an otherwise idle GPU.
   add_executable(superroc_ling3_mla_prefill_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_mla_prefill_test.cpp
     ${LING3_KERNEL_DIR}/ling3_mla.hip
@@ -319,13 +319,13 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_mla_prefill_test PRIVATE hip::host)
 
-  # LS3 PHASE6: minimal decode runner for rocprof kernel traces.
+  # Minimal decode runner for rocprof kernel traces.
   add_executable(superroc_ling3_trace_decode EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_trace_decode.cpp)
   target_link_libraries(superroc_ling3_trace_decode PRIVATE superroc_ling3
     superroc_ling3_reference)
 
-  # LS3 PHASE4: split-K decode-attention gate vs the serial mla_attn.
+  # Split-K decode-attention gate vs the serial mla_attn.
   add_executable(superroc_ling3_mla_sk_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_mla_sk_test.cpp
     ${LING3_KERNEL_DIR}/ling3_mla.hip)
@@ -337,11 +337,11 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_mla_sk_test PRIVATE hip::host)
 
-  # LC1 SPEC4 (wave 3): unit gate for the RV25 MLA decode fusions -- M1's
+  # Unit gate for the MLA decode fusions --
   # mla_pre_fused and the Q2-MLA wo Q8_1 epilogue -- against the unfused
   # sequence they replace, on BOTH decode arms (n_pos 100 serial, 1630
   # split-K) at the model's real MLA shapes. Whole-buffer memcmp, not a
-  # tolerance. EXCLUDE_FROM_ALL: built by name, run inside gpu-run.
+  # tolerance. EXCLUDE_FROM_ALL: built by name, run on an otherwise idle GPU.
   add_executable(superroc_ling3_mla_fusion_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_mla_fusion_test.cpp
     ${LING3_KERNEL_DIR}/ling3_mla.hip
@@ -356,9 +356,9 @@ if(ENGINE_ENABLE_HIP)
     $<$<COMPILE_LANGUAGE:HIP>:-O3;-ffast-math;-fno-finite-math-only;-Wno-unused-command-line-argument>)
   target_link_libraries(superroc_ling3_mla_fusion_test PRIVATE hip::host)
 
-  # LS3: model-level batched-prefill gate (scalar-vs-batched logits, teacher
+  # Model-level batched-prefill gate (scalar-vs-batched logits, teacher
   # forcing, greedy continuation) on the real GGUF. Needs the whole ling3
-  # package (weights + reader + kernels). Run inside gpu-run.
+  # package (weights + reader + kernels). Run on an otherwise idle GPU.
   add_executable(superroc_ling3_batch_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/ling3_batch_test.cpp)
   target_link_libraries(superroc_ling3_batch_test PRIVATE superroc_ling3
@@ -369,7 +369,7 @@ else()
   target_compile_options(superroc_ling3 PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-O2>)
 endif()
 
-# Checks LG's ROCmFP4 matvec against ggml's own CPU kernel. ggml quantizes the
+# Checks the engine's ROCmFP4 matvec against ggml's own CPU kernel. ggml quantizes the
 # activation to Q8_0 and runs an integer dot, so decode-and-multiply in float is
 # a different computation -- this is what tells the two apart.
 add_executable(superroc_ling3_dot_parity EXCLUDE_FROM_ALL
@@ -380,25 +380,25 @@ target_link_libraries(superroc_ling3_dot_parity PRIVATE superroc_ling3_reference
 # GPU-only test and benchmark tools: defined only in HIP builds (a CPU-only
 # build has no HIP language).
 if(ENGINE_ENABLE_HIP)
-# LS1 2026-10-01: the integer (Q8_1 activation) ROCmFP4 GEMV against the CPU
+# The integer (Q8_1 activation) ROCmFP4 GEMV against the CPU
 # dequant reference, on synthetic rows of BOTH block types and on every shape
-# Ling decodes. Needs the GPU; run it inside gpu-run.
+# Ling decodes. Needs the GPU; run it on an otherwise idle GPU.
 add_executable(superroc_ling3_gemv_q8_test EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/ling3_gemv_q8_test.cpp)
 target_link_libraries(superroc_ling3_gemv_q8_test PRIVATE superroc_ling3 ${CMAKE_DL_LIBS})
 
-# LA1 2026-10-03: the two-phase argmax, byte-for-byte vs the CPU reference on
+# The two-phase argmax, byte-for-byte vs the CPU reference on
 # random rows, crafted ties, all -INF, NaNs, slice-boundary n, and stride rows.
-# Needs the GPU; run it inside gpu-run. Small and fast.
+# Needs the GPU; run it on an otherwise idle GPU. Small and fast.
 add_executable(superroc_ling3_argmax_test EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/ling3_argmax_test.cpp)
 target_link_libraries(superroc_ling3_argmax_test PRIVATE superroc_ling3 ${CMAKE_DL_LIBS})
 
-# LF1 2026-10-03: RV25 wave-1 fusion gate. F4 (add_rms_norm vs residual_add +
-# rms_norm) memcmp-exact at H=2560, and F3 (the 0.0f + down store) memcmp-exact
+# Fusion gate. (add_rms_norm vs residual_add +
+# rms_norm) memcmp-exact at H=2560, and (the 0.0f + down store) memcmp-exact
 # against memset + k_axpy including a -0.0 case, plus ling3_dense_ffn vs
 # ling3_dense_ffn_w1 end to end on synthetic ROCmFP4 weights. Needs the GPU; run
-# it inside gpu-run. Small and fast.
+# it on an otherwise idle GPU. Small and fast.
 add_executable(superroc_ling3_fusion_w1_test EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/ling3_fusion_w1_test.cpp)
 target_link_libraries(superroc_ling3_fusion_w1_test PRIVATE superroc_ling3 ${CMAKE_DL_LIBS})
@@ -408,9 +408,9 @@ set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/ling3_fusion_w1_test.cpp
   PROPERTIES LANGUAGE HIP)
 
 
-# LS1 2026-10-02: the memory ROOF of this box -- achieved read bandwidth for large
+# The memory ROOF of this box -- achieved read bandwidth for large
 # reads, MALL-cold. Every "% of roof" claim needs this number measured on the same
-# machine. Allocates its own buffer; never touches the model. Run it inside gpu-run.
+# machine. Allocates its own buffer; never touches the model. Run it on an otherwise idle GPU.
 add_executable(superroc_ling3_roof_bench EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/ling3_roof_bench.cpp)
 target_link_libraries(superroc_ling3_roof_bench PRIVATE superroc_ling3)
@@ -419,22 +419,22 @@ target_link_libraries(superroc_ling3_roof_bench PRIVATE superroc_ling3)
 set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/ling3_roof_bench.cpp
   PROPERTIES LANGUAGE HIP)
 
-# LS1 2026-10-02: the router. Runs build24's kernels against the new ones on the
+# The router. Runs the earlier kernels against the new ones on the
 # device and requires bit-identical logits, ids (in order) and weights, on random
 # inputs, adversarial ties and captured real ones. Validates every index it hands
-# the device on the HOST first. Run it inside gpu-run, smallest shape first.
+# the device on the HOST first. Run it on an otherwise idle GPU, smallest shape first.
 add_executable(superroc_ling3_route_test EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/ling3_route_test.cpp)
 target_link_libraries(superroc_ling3_route_test PRIVATE superroc_ling3)
 
-# LS1 2026-10-02: the device MoE expert grouping, against a host transcription of the
+# The device MoE expert grouping, against a host transcription of the
 # counting sort it replaces. Bit-exact per element, including the order of slots inside an
-# expert. Runs inside gpu-run, smallest shape first.
+# expert. Runs on an otherwise idle GPU, smallest shape first.
 add_executable(superroc_ling3_moe_group_test EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/ling3_moe_group_test.cpp)
 target_link_libraries(superroc_ling3_moe_group_test PRIVATE superroc_ling3)
 
-# LS1 2026-10-03: the TILED router logits kernel, against a transcription of the
+# The TILED router logits kernel, against a transcription of the
 # one it replaces. Bit-exact per element -- Ling's router has a block-2 near-tie that a
 # 1-ulp change flips, so anything less is not a pass. Smallest shape first.
 add_executable(superroc_ling3_route_logits_test EXCLUDE_FROM_ALL
@@ -445,8 +445,8 @@ target_link_libraries(superroc_ling3_route_logits_test PRIVATE superroc_ling3)
 set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/ling3_route_logits_test.cpp
   PROPERTIES LANGUAGE HIP)
 
-# LS1 2026-10-03: the 2D register-tiled router-logits GEMM. NOT bit-identical by
-# design (DECISIONS 2026-10-03 00:55) -- this reports max_abs / max_rel against the kernel
+# The 2D register-tiled router-logits GEMM. NOT bit-identical by
+# design -- this reports max_abs / max_rel against the kernel
 # it replaces and how many top-8 picks move per token, which is what can move a text.
 # Compiled as HIP: it defines the reference __global__ kernel.
 add_executable(superroc_ling3_route_gemm_test EXCLUDE_FROM_ALL
@@ -455,7 +455,7 @@ target_link_libraries(superroc_ling3_route_gemm_test PRIVATE superroc_ling3)
 set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/ling3_route_gemm_test.cpp
   PROPERTIES LANGUAGE HIP)
 
-# LS1 PHASE9 item 3: the token-count crossover between the 2D register-tiled router
+# The token-count crossover between the 2D register-tiled router
 # GEMM and the kernel it replaces. EXCLUDE_FROM_ALL: built by name.
 add_executable(superroc_ling3_route_gemm_bench EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/ling3_route_gemm_bench.cpp)
@@ -464,7 +464,7 @@ set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/ling3_route_gemm_bench.c
   PROPERTIES LANGUAGE HIP)
 endif()
 
-# LS/LQ1 2026-10-01: tokenizer parity probe. Reads the GGUF vocabulary and
+# Tokenizer parity probe. Reads the GGUF vocabulary and
 # nothing else -- no weights, no engine, no GPU -- and prints the ids
 # LingTokenizer::Encode produces for a text file. Compiles the tokenizer and the
 # GGUF reader directly instead of linking superroc_ling3, so the target never pulls
@@ -477,6 +477,6 @@ add_executable(superroc_ling3_tokenize EXCLUDE_FROM_ALL
 target_include_directories(superroc_ling3_tokenize PRIVATE ${PROJECT_SOURCE_DIR})
 target_link_libraries(superroc_ling3_tokenize PRIVATE ICU::uc)
 
-# LM1: host test for the Ling MTP depth rule (depth_rule.hpp). CPU only.
+# Host test for the Ling MTP depth rule (depth_rule.hpp). CPU only.
 add_executable(depth_rule_test EXCLUDE_FROM_ALL depth_rule_test.cpp)
 target_compile_options(depth_rule_test PRIVATE -Wall -Wextra -Werror)

@@ -17,8 +17,7 @@
 #include "src/models/minimax_h3/runtime.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
 #include "src/models/minimax_h3/video_vae.hpp"
-#include "src/core/previous_name_compat.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace {
 
@@ -102,8 +101,8 @@ void RecordProgress(int completed, int total, void* opaque) {
 
 int main() {
   constexpr std::array<int, 5> kSelectedIndexes = {0, 5, 11, 16, 21};
-  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* golden_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_VIDEO_VAE_GOLDEN");
+  const char* root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
+  const char* golden_value = ::superroc::core::GetEnv("SUPERROC_H3_VIDEO_VAE_GOLDEN");
   if (root == nullptr || golden_value == nullptr) {
     std::cout
         << "SKIP: SUPERROC_H3_MODEL_ROOT or SUPERROC_H3_VIDEO_VAE_GOLDEN unset\n";
@@ -118,9 +117,8 @@ int main() {
   try {
     const h3::json::Value fixture =
         h3::json::ParseFile(SUPERROC_H3_VIDEO_VAE_FIXTURE, 1U << 20U);
-    CHECK(::superroc::core::MatchesCurrentOrPrevious(
-        RequireField(fixture, "schema").AsString(),
-        "superroc.minimax-h3-video-vae-golden.v1"));
+    CHECK((RequireField(fixture, "schema").AsString()) ==
+        ("superroc.minimax-h3-video-vae-golden.v1"));
     CHECK(RequireField(fixture, "model_revision").AsString() ==
           "42ed227ee7df40d41602854ae760620d6eb651fe");
     CHECK(RequireField(fixture, "reference_revision").AsString() ==

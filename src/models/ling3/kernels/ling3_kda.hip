@@ -1,5 +1,5 @@
-// ling3_kda.hip — KDA kernels for Ling-3.0 (bailingmoe3), lane LK.
-// Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with LG's drafts.
+// ling3_kda.hip — KDA kernels for Ling-3.0 (bailingmoe3).
+// MiMo — Ling-on-superroc build. Do not confuse with the other drafts.
 //
 // Arithmetic follows the fork exactly:
 //   conv     ggml_compute_forward_ssm_conv_f32   (tap 0 = oldest stream sample)
@@ -69,11 +69,11 @@ __device__ __forceinline__ float block_sum(float v, float * smem) {
 // conv_state points at the qkv slice of one sequence's state row:
 //   base + s*embd_r + qkv*(d_conv-1)*d_inner + c*(d_conv-1) + tap
 // ---------------------------------------------------------------------------
-// LS2 PHASE7. One THREAD per channel, and q/k/v in ONE launch: blockIdx.z picks the view AND
+// One THREAD per channel, and q/k/v in ONE launch: blockIdx.z picks the view AND
 // the conv-state slice. 4,096 blocks of 256 threads with 255 lanes idle became 16x3 blocks with
 // every lane working, and 3 launches per layer became 1.
 //
-// THE FIX (Jay, PHASE7). The state update below must read st[p], NOT st[tap]:
+// THE FIX. The state update below must read st[p], NOT st[tap]:
 //
 //     original:  st[tap] = stream_at(n_tokens + tap)      with stream_at(p) = p < hist ? st[p] : ...
 //     mine:      st[tap] = (p < hist) ? st[tap] : ...      <-- read st[tap], i.e. itself
@@ -89,7 +89,7 @@ __device__ __forceinline__ float block_sum(float v, float * smem) {
 // shift safe for one lane owning st[c*hist .. c*hist+hist-1]. That is also why the original
 // needed its single-lane serialisation: a lane owns the run, so no barrier is needed here.
 //
-// LC1 (wave 3, 2026-10-03). The per-output computation lives in ONE function,
+// The per-output computation lives in ONE function,
 // conv_silu_out_at, that BOTH this serial kernel and conv_silu_run_kernel call, so the
 // compiler emits the same FMA contraction for both and the token-parallel path is
 // bit-identical by construction: same tap order, same `acc += w * sv` statement, same index
@@ -108,7 +108,7 @@ __device__ __forceinline__ float conv_silu_stream_at(const float * __restrict__ 
     return p < hist ? st[p] : xr[c + (p - hist) * x_tok];
 }
 
-// LC1 SPEC2: the conv writes each output exactly once and never reads it back, so the store is
+// The conv writes each output exactly once and never reads it back, so the store is
 // STREAMING (non-temporal). The default write-back policy makes the GPU fetch the cache line
 // before overwriting it (read-for-ownership); MEASURED that dominated the call -- 222.7 of
 // 276.7 us at n_tokens 512 (probe: identical loads/stores with the store deleted = 54.0 us).
@@ -128,7 +128,7 @@ __device__ __forceinline__ void conv_silu_out_at(
     conv_silu_store(&yr[c + (int64_t) t * y_tok], silu_f(acc));
 }
 
-// LC1: the serial body's trailing state loop, verbatim. One thread owns the whole hist-run of
+// The serial body's trailing state loop, verbatim. One thread owns the whole hist-run of
 // one channel and must walk the taps in increasing order: the read index p = n_tokens + tap is
 // always ahead of the write index tap (n_tokens >= 1), which is what makes the in-place shift safe.
 __device__ __forceinline__ void conv_silu_state_at(
@@ -196,7 +196,7 @@ static __global__ void conv_silu_kernel(const float * __restrict__ xq,
 }
 
 // ---------------------------------------------------------------------------
-// LC1 SPEC2: run-parallel output pass (n_tokens > 1). One THREAD per channel; a block covers
+// Run-parallel output pass (n_tokens > 1). One THREAD per channel; a block covers
 // kRunChan channels x kRun consecutive tokens. Each thread keeps the last d_conv stream values
 // in REGISTERS and slides the window one token at a time, so every input element leaves DRAM
 // once instead of once per tap -- that is the whole speedup. This is the shape of the fork's
@@ -207,8 +207,9 @@ static __global__ void conv_silu_kernel(const float * __restrict__ xq,
 // The per-output expression is the shared conv_silu_out_at: same tap order, same
 // acc += w[tap + c*d_conv] * sv[tap] statement, same silu_f, so the compiler emits the same
 // FMA contraction the serial kernel does and the two paths stay bit-identical. Only the loads
-// are shared -- which is also why the run is bounded (kRun tokens) rather than the whole chunk:
-// a run keeps enough blocks on the box to saturate DRAM while still reading each input once.
+// are shared -- which is also why the run is bounded (kRun tokens) rather
+// than the whole chunk: a run keeps enough blocks on the test machine to
+// saturate DRAM while still reading each input once.
 //
 // d_conv is a template parameter (as in the fork) so the tap loop, the window slide and the
 // weight loads all unroll into registers; a runtime d_conv would push the window through
@@ -314,7 +315,7 @@ static void conv_silu_run_launch(int d_conv, const dim3 & grid,
     }
 }
 
-// LC1: state pass (n_tokens > 1), the second launch of the prefill split. One thread per channel
+// State pass (n_tokens > 1), the second launch of the prefill split. One thread per channel
 // applies conv_silu_state_at -- the serial body's trailing update -- with the same slice selection.
 // It runs after conv_silu_run_kernel on the same stream, so every output has already been read
 // out of the OLD state, exactly the order the serial body has.
@@ -351,7 +352,7 @@ static __global__ void gate_kernel(const float * __restrict__ f,
                                    int head_dim, int n_tokens, int n_seqs, int d_inner,
                                    int64_t f_tok, int64_t f_seq,
                                    int64_t g_tok, int64_t g_seq) {
-    // LS2 PHASE7: this was grid(d_inner) blocks of 256 threads with the body looping
+    // This was grid(d_inner) blocks of 256 threads with the body looping
     // `for (idx = threadIdx.x; idx < n_tokens * n_seqs; ...)`. On the decode path that total is
     // 1, so 255 of every 256 lanes did nothing: 4,096 blocks to compute 4,096 elements.
     // One THREAD per channel now. Index expression, sigmoid_f and multiply order unchanged.
@@ -555,9 +556,9 @@ static __global__ void zero_kernel(float * __restrict__ p, size_t n) {
 // ---------------------------------------------------------------------------
 static int grid_1d(int n) { return n > 0 ? n : 1; }
 
-// LC1: which path the last conv call took (0 = the serial kernel, 1 = the token-parallel
+// Which path the last conv call took (0 = the serial kernel, 1 = the token-parallel
 // prefill pair). Diagnostic only: the parity test reads it so it cannot compare the serial
-// path with itself the way LG1's did.
+// path with itself the way an earlier test did.
 static std::atomic<int> g_conv_silu_path{0};
 
 int kda_conv_silu_last_path() {
@@ -565,7 +566,7 @@ int kda_conv_silu_last_path() {
 }
 
 // ---------------------------------------------------------------------------
-// LC1: host-side index audit (the lf_audit pattern). Every index the two prefill kernels
+// Host-side index audit (the lf_audit pattern). Every index the two prefill kernels
 // compute is enumerated against the ALLOCATION each pointer lives in (hipMemGetAddressRange,
 // which returns the base and size of the block the pointer is inside, so a slice of a bigger
 // arena -- conv_state is one -- is checked against the arena). An out-of-bounds launch is
@@ -740,7 +741,7 @@ void kda_conv_silu(const KdaShape & sh, const float * conv_w,
     // is given -- the qkv offset belongs here on the host, exactly as in the original.
     float * st = conv_state + (size_t) qkv * (size_t) hist * (size_t) d_inner;
 
-    // LC1: n_tokens > 1 takes the run-parallel pair (outputs against the OLD state, then the
+    // n_tokens > 1 takes the run-parallel pair (outputs against the OLD state, then the
     // state update). n_tokens == 1 -- every decode step -- keeps the serial kernel untouched.
     // The z extent is n_seqs, not 1: which = zs / n_seqs is 0 for every slot and s = zs, so
     // every sequence gets its outputs and its state update (n_seqs == 1 hides this).
@@ -785,7 +786,7 @@ void kda_conv_silu_qkv(const KdaShape & sh,
     const int d_inner = sh.d_inner();
     const int bs      = 256;
 
-    // LC1: n_tokens > 1 takes the run-parallel pair. The audit is what makes this safe --
+    // n_tokens > 1 takes the run-parallel pair. The audit is what makes this safe --
     // every index the two kernels compute is checked against the real allocation first.
     if (n_tokens > 1 && conv_silu_qkv_audit(sh, q, k, v, qo, ko, vo, wq, wk, wv,
                                             conv_state, n_tokens, n_seqs)) {
@@ -1613,7 +1614,7 @@ size_t kda_forward_scratch_bytes(const KdaShape & sh, int n_tokens, int n_seqs) 
     return per_tok_seq * (size_t) n_tokens * (size_t) n_seqs * sizeof(float);
 }
 
-// LKF wave-3 K1: conv + gate + beta + l2(q) + l2(k), decode only.
+// K1: conv + gate + beta + l2(q) + l2(k), decode only.
 // Grid (d_inner/256, 1, 4), block 256. z = 0,1,2 is the serial conv body on q,k,v
 // (same helpers and the same acc loop as conv_silu_out_at). z = 3 is gate_kernel's
 // per-channel formula; block 0 also writes beta (32 sigmoids). Each z<2 block then
@@ -1760,7 +1761,7 @@ static __global__ void kda_q8_1_quant(const float * x, int8_t * qs, float * ds, 
     qb[lane] = (int8_t) roundf(xb[lane] * id_b);
 }
 
-// LKF wave-3 K2 + Q2-KDA. One block per head, 128 threads, one thread per value
+// K2 + Q2-KDA. One block per head, 128 threads, one thread per value
 // column — the same statements as scan_kernel (the reference t32 is bit-identical
 // to). A reused 32-column shared tile did not match t32 on a random state
 // (unit rand-a, first differing state byte 2568). The out_norm tree is

@@ -38,7 +38,7 @@
 #include <vector>
 
 #include "src/core/crypto/sha256.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::server {
 namespace {
@@ -121,7 +121,7 @@ constexpr std::string_view kTemporaryPrefix = ".tmp-";
 /// machine's parallelism capped at 8. Tests pin it to 1, 2, 8 and 16.
 [[nodiscard]] std::size_t VerifyThreads() noexcept {
   if (const char* text =
-          ::superroc::core::GetEnvCompat("SUPERROC_KVC_VERIFY_THREADS")) {
+          ::superroc::core::GetEnv("SUPERROC_KVC_VERIFY_THREADS")) {
     char* end = nullptr;
     const unsigned long parsed = std::strtoul(text, &end, 10);
     if (end != text && parsed >= 1 && parsed <= kMaxVerifyThreads)
@@ -133,7 +133,7 @@ constexpr std::string_view kTemporaryPrefix = ".tmp-";
 }
 
 [[nodiscard]] bool TimingEnabled() noexcept {
-  const char* text = ::superroc::core::GetEnvCompat("SUPERROC_KVC_TIMING");
+  const char* text = ::superroc::core::GetEnv("SUPERROC_KVC_TIMING");
   return text != nullptr && text[0] != '\0' && text[0] != '0';
 }
 
@@ -142,8 +142,7 @@ constexpr std::string_view kTemporaryPrefix = ".tmp-";
 /// verification and runner calls unchanged, so the mmap change can be measured
 /// from one binary. Unset in production.
 [[nodiscard]] bool LegacyStagingEnabled() noexcept {
-  const char* text =
-      ::superroc::core::GetEnvCompat("SUPERROC_KVC_LEGACY_STAGING");
+  const char* text = ::superroc::core::GetEnv("SUPERROC_KVC_LEGACY_STAGING");
   return text != nullptr && text[0] != '\0' && text[0] != '0';
 }
 

@@ -77,7 +77,33 @@ public:
         break;
       }
     }
-    return inner_->Wait(on_token, on_progress, on_start);
+    // Mirror the scheduler for an armed request: one fabricated meta per
+    // streamed piece, delivered before the piece. Only tests that set the
+    // transport callback observe it.
+    std::size_t index = 0;
+    auto wrapped = [&](std::string_view piece) {
+      if (meta_callback_) {
+        Backend::TokenMeta meta;
+        meta.token = static_cast<superroc::sampling::TokenId>(index);
+        meta.piece = std::string(piece);
+        meta.logprobs.token = meta.token;
+        meta.logprobs.logprob = -0.1 * static_cast<double>(index + 1);
+        meta.logprobs.text = std::string(piece);
+        meta.logprobs.top.push_back(
+            {meta.token, meta.logprobs.logprob, std::string(piece)});
+        if (!meta_callback_(meta)) {
+          inner_->Cancel();
+          return false;
+        }
+      }
+      ++index;
+      return !on_token || on_token(piece);
+    };
+    return inner_->Wait(wrapped, on_progress, on_start);
+  }
+  void SetTokenMetaCallback(
+      const Backend::TokenMetaCallback& callback) override {
+    meta_callback_ = callback;
   }
   void Cancel() noexcept override { inner_->Cancel(); }
   std::optional<superroc::sampling::JsonConstraint::ToolFormat> ToolFormat()
@@ -90,6 +116,7 @@ private:
   std::vector<Backend::PromptProgress> progress_;
   const std::optional<superroc::sampling::JsonConstraint::ToolFormat>
       tool_format_;
+  Backend::TokenMetaCallback meta_callback_;
 };
 
 class FakeBackend final : public superroc::server::TextGenerationBackend {
@@ -179,6 +206,20 @@ public:
     result.completion_tokens = result.tokens.size();
     result.finish_reason = finish_reason;
     result.stop_sequence = stop_sequence;
+    // Mirror an armed runner: one fabricated report per emitted token, so
+    // the response-shape tests pin the transport, not the sampler.
+    if (sampling.logprobs) {
+      for (std::size_t i = 0; i < result.tokens.size(); ++i) {
+        superroc::sampling::CapturedTokenLogprobs logged;
+        logged.token = result.tokens[i];
+        logged.logprob = -0.1 * static_cast<double>(i + 1);
+        logged.text = pieces[i];
+        logged.top.push_back({result.tokens[i], logged.logprob, pieces[i]});
+        logged.top.push_back(
+            {static_cast<superroc::sampling::TokenId>(1000 + i), -1.0, "top"});
+        result.token_logprobs.push_back(std::move(logged));
+      }
+    }
     completed.store(true);
     return result;
   }
@@ -257,6 +298,26 @@ superroc::server::HttpRequest Request(
       .headers = std::move(headers),
       .is_cancelled = {},
   };
+}
+
+superroc::json::Value ParseBody(
+    const superroc::server::HttpResponse& response) {
+  Expect(response.status == 200, "request is accepted");
+  return superroc::json::parse(response.body);
+}
+
+std::vector<superroc::json::Value> CollectChunks(
+    superroc::server::HttpResponse& response) {
+  Expect(static_cast<bool>(response.streaming_body),
+         "streaming request returns a streaming body");
+  std::vector<superroc::json::Value> chunks;
+  response.streaming_body([&](std::string_view part) {
+    if (part == "data: [DONE]\n\n")
+      return true;
+    chunks.push_back(superroc::json::parse(part.substr(6)));
+    return true;
+  });
+  return chunks;
 }
 
 void AppendToolDeltas(std::vector<superroc::json::Value>& calls,
@@ -363,6 +424,225 @@ void TestStreamingIsLive() {
              response.stream_log->details.find("finish=length") !=
                  std::string::npos,
          "Streaming completion retains request diagnostics");
+}
+
+void TestChatLogprobsValidation() {
+  FakeBackend backend;
+  backend.pieces = {"Hello"};
+  const auto post = [&](std::string_view body) {
+    return superroc::server::HandleOpenAiChat(Request(std::string(body)),
+                                              backend);
+  };
+  Expect(
+      post(R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "logprobs":"yes"})")
+              .status == 400,
+      "logprobs must be a boolean");
+  Expect(
+      post(R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "logprobs":1})")
+              .status == 400,
+      "logprobs must be a boolean, not a number");
+  Expect(
+      post(R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "logprobs":true,"top_logprobs":21})")
+              .status == 400,
+      "top_logprobs above 20 is rejected");
+  Expect(
+      post(R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "logprobs":true,"top_logprobs":-1})")
+              .status == 400,
+      "negative top_logprobs is rejected");
+  Expect(
+      post(R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "top_logprobs":2})")
+              .status == 400,
+      "top_logprobs requires logprobs");
+  const auto answers_without_logprobs = [&](std::string_view body) {
+    const auto response = post(body);
+    if (response.status != 200)
+      return false;
+    const auto parsed = superroc::json::parse(response.body);
+    const auto* choices = parsed.find("choices");
+    return choices != nullptr && !choices->items().empty() &&
+           choices->items()[0].find("logprobs") == nullptr;
+  };
+  Expect(
+      answers_without_logprobs(
+          R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "logprobs":null})"),
+      "null logprobs stays off");
+  Expect(
+      answers_without_logprobs(
+          R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "logprobs":false})"),
+      "false logprobs stays off");
+  const auto armed = post(
+      R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "logprobs":true,"top_logprobs":2})");
+  Expect(armed.status == 200 && backend.last_sampling.logprobs &&
+             backend.last_sampling.logprobs_top_n == 2,
+         "logprobs arming reaches the sampler config");
+  const auto no_top = post(
+      R"({"model":"test-model","messages":[{"role":"user","content":"hi"}],
+      "logprobs":true})");
+  Expect(no_top.status == 200 && backend.last_sampling.logprobs &&
+             backend.last_sampling.logprobs_top_n == 0,
+         "logprobs without top_logprobs reports the token alone");
+}
+
+void TestChatLogprobsNonStreamingShape() {
+  FakeBackend backend;
+  backend.pieces = {"Hello", " world"};
+  const auto body = ParseBody(
+      superroc::server::HandleOpenAiChat(Request(R"({"model":"test-model",
+        "messages":[{"role":"user","content":"hi"}],
+        "logprobs":true,"top_logprobs":2})"),
+                                         backend));
+  const auto& choice = body.find("choices")->items()[0];
+  const auto* logprobs = choice.find("logprobs");
+  Expect(logprobs != nullptr, "armed chat reports choice logprobs");
+  const auto& content = logprobs->find("content")->items();
+  Expect(content.size() == 2, "one entry per emitted token");
+  Expect(content[0].member_str("token") == "Hello" &&
+             content[0].member_double("logprob") == -0.1,
+         "first token reports its text and logprob");
+  const auto& bytes = content[0].find("bytes")->items();
+  Expect(bytes.size() == 5 && bytes[0].as_double() == 72 &&
+             bytes[4].as_double() == 111,
+         "token bytes quote the UTF-8 text");
+  const auto& top = content[0].find("top_logprobs")->items();
+  Expect(top.size() == 2 && top[0].member_str("token") == "Hello" &&
+             top[0].member_double("logprob") == -0.1 &&
+             top[1].member_str("token") == "top" &&
+             top[1].member_double("logprob") == -1.0,
+         "top entries rank the reported tokens");
+  Expect(content[1].member_str("token") == " world" &&
+             content[1].member_double("logprob") == -0.2,
+         "second token reports its own logprob");
+  const auto plain = ParseBody(
+      superroc::server::HandleOpenAiChat(Request(R"({"model":"test-model",
+        "messages":[{"role":"user","content":"hi"}]})"),
+                                         backend));
+  Expect(plain.find("choices")->items()[0].find("logprobs") == nullptr,
+         "unarmed chat omits logprobs exactly as before");
+}
+
+void TestChatLogprobsStreamingShape() {
+  FakeBackend backend;
+  backend.pieces = {"Hello", " world"};
+  auto response =
+      superroc::server::HandleOpenAiChat(Request(R"({"model":"test-model",
+        "messages":[{"role":"user","content":"hi"}],
+        "stream":true,"logprobs":true,"top_logprobs":1})"),
+                                         backend);
+  const auto chunks = CollectChunks(response);
+  std::vector<superroc::json::Value> logged;
+  for (const auto& chunk : chunks) {
+    for (const auto& choice : chunk.find("choices")->items()) {
+      const auto* delta = choice.find("delta");
+      if (delta == nullptr || delta->find("content") == nullptr) {
+        continue;
+      }
+      const auto* logprobs = choice.find("logprobs");
+      Expect(logprobs != nullptr,
+             "content chunks carry choice-level logprobs when armed");
+      Expect(delta->find("logprobs") == nullptr,
+             "streamed logprobs are siblings of delta, never inside it");
+      logged.push_back(*logprobs);
+      Expect(delta->member_str("content") ==
+                 logprobs->find("content")->items()[0].member_str("token"),
+             "the reported token matches the streamed text");
+    }
+  }
+  Expect(logged.size() == 2, "one logprobs chunk per token");
+  Expect(
+      logged[0].find("content")->items()[0].member_double("logprob") == -0.1 &&
+          logged[1].find("content")->items()[0].member_double("logprob") ==
+              -0.2,
+      "streamed logprobs quote each token in order");
+  Expect(logged[0]
+                 .find("content")
+                 ->items()[0]
+                 .find("top_logprobs")
+                 ->items()
+                 .size() == 1,
+         "streamed top entries honour the requested depth");
+}
+
+void TestChatStreamingLogprobsHeldMarkerSuffix() {
+  // A reasoning suffix held back across chunks must not duplicate or drop
+  // metadata: the split token's report attaches to the emission that
+  // completes it, and every token's report arrives exactly once, in order.
+  FakeBackend backend;
+  backend.initial_output_state_override =
+      superroc::server::TextGenerationBackend::InitialOutputState::kReasoning;
+  backend.pieces = {"ABCDE</thi", "s not end>"};
+  auto response =
+      superroc::server::HandleOpenAiChat(Request(R"({"model":"test-model",
+        "messages":[{"role":"user","content":"hi"}],
+        "stream":true,"logprobs":true,"top_logprobs":1})"),
+                                         backend);
+  const auto chunks = CollectChunks(response);
+  std::vector<std::string> tokens;
+  std::vector<double> logprobs;
+  for (const auto& chunk : chunks) {
+    for (const auto& choice : chunk.find("choices")->items()) {
+      const auto* delta = choice.find("delta");
+      if (delta == nullptr || (delta->find("content") == nullptr &&
+                               delta->find("reasoning_content") == nullptr)) {
+        continue;
+      }
+      const auto* reported = choice.find("logprobs");
+      Expect(delta->find("logprobs") == nullptr,
+             "held-back streaming logprobs stay siblings of delta");
+      if (reported == nullptr) {
+        continue;
+      }
+      for (const auto& entry : reported->find("content")->items()) {
+        tokens.push_back(entry.member_str("token"));
+        logprobs.push_back(entry.member_double("logprob"));
+      }
+    }
+  }
+  Expect(tokens == std::vector<std::string>{"ABCDE</thi", "s not end>"},
+         "every token's report arrives exactly once, in order");
+  Expect(logprobs.size() == 2 && logprobs[0] == -0.1 && logprobs[1] == -0.2,
+         "held-back reports quote each token in order");
+}
+
+void TestChatSupportListIsAccepted() {
+  FakeBackend backend;
+  backend.pieces = {R"({"a": 1})"};
+  superroc::json::Value body = superroc::json::parse(R"({
+    "model": "test-model",
+    "messages": [{"role": "user", "content": "hi"}],
+    "temperature": 0.7, "top_k": 40, "top_p": 0.9, "min_p": 0.05,
+    "min_keep": 1, "seed": 42, "repeat_penalty": 1.1, "repeat_last_n": 64,
+    "frequency_penalty": 0.1, "presence_penalty": 0.1,
+    "max_tokens": 16, "max_completion_tokens": 16,
+    "stream": false, "stream_options": {"include_usage": false},
+    "n": 1, "stop": ["STOP"],
+    "tools": [{"type": "function", "function": {"name": "get_weather",
+      "description": "weather", "parameters": {"type": "object"}}}] ,
+    "tool_choice": "auto", "parallel_tool_calls": false,
+    "response_format": {"type": "json_object"},
+    "thinking": {"type": "disabled"}, "reasoning_effort": "none",
+    "reasoning_budget_tokens": -1, "thinking_budget_tokens": -1,
+    "chat_template_kwargs": {"enable_thinking": false},
+    "modalities": ["text"],
+    "cache_prompt": true, "return_progress": false,
+    "logprobs": true, "top_logprobs": 5
+  })");
+  // Every field the support list advertises must survive the parser.
+  for (const std::string_view field : superroc::server::ChatAcceptedFields()) {
+    Expect(body.find(std::string(field)) != nullptr,
+           std::string("support list field present in probe: ") +
+               std::string(field));
+  }
+  const auto response =
+      superroc::server::HandleOpenAiChat(Request(body.dump()), backend);
+  Expect(response.status == 200, "every supported field parses together");
 }
 
 void TestLessThanProseStreamsBeforeCompletion() {
@@ -586,6 +866,55 @@ void TestCachedPrefillMetrics() {
          "Usage explains cache misses without exposing prompt text");
 }
 
+// lemonade's bench reads a llama.cpp-shaped `timings` object from both
+// completion transports, so every text family reports the same fields and
+// keeps the per_second = n / ms * 1000 identities.
+void TestResponseTimingsAreLlamaCompatible() {
+  FakeBackend backend;
+  backend.pieces.assign(20, "x");
+  const auto response = superroc::server::HandleOpenAiChat(
+      Request(
+          R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})"),
+      backend);
+  Expect(response.status == 200, "Timings response succeeds");
+  const auto body = superroc::json::parse(response.body);
+  const auto* timings = body.find("timings");
+  Expect(timings != nullptr, "Non-streaming chat plumbs timings at top level");
+  Expect(
+      timings->member_size("prompt_n") == 2 &&
+          timings->member_size("cache_n") == 5 &&
+          timings->member_size("prompt_n") + timings->member_size("cache_n") ==
+              body.find("usage")->member_size("prompt_tokens"),
+      "prompt_n + cache_n equals the prompt token count");
+  Expect(timings->member_double("prompt_ms") == 2.5 &&
+             timings->member_double("prompt_per_token_ms") == 1.25 &&
+             timings->member_double("prompt_per_second") == 800.0,
+         "prompt per_token/per_second derive from n and ms");
+  Expect(timings->member_size("predicted_n") == 20 &&
+             timings->member_double("predicted_ms") == 4.0 &&
+             timings->member_double("predicted_per_token_ms") == 0.2 &&
+             timings->member_double("predicted_per_second") == 5000.0,
+         "predicted per_token/per_second derive from n and ms");
+  Expect(timings->member_size("draft_n") == 0 &&
+             timings->member_size("draft_n_accepted") == 0,
+         "draft counters exist and default to zero");
+
+  // A lone completion token has no first-to-last window: the llama.cpp pair
+  // is 0 ms and 0 per second, never a queue-jitter throughput spike.
+  backend.pieces = {"solo"};
+  const auto single = superroc::server::HandleOpenAiChat(
+      Request(
+          R"({"model":"test-model","messages":[{"role":"user","content":"hello"}]})"),
+      backend);
+  const auto single_body = superroc::json::parse(single.body);
+  const auto* single_timings = single_body.find("timings");
+  Expect(single_timings && single_timings->member_size("predicted_n") == 1 &&
+             single_timings->member_double("predicted_ms") == 0.0 &&
+             single_timings->member_double("predicted_per_token_ms") == 0.0 &&
+             single_timings->member_double("predicted_per_second") == 0.0,
+         "predicted_n <= 1 reports the zero llama.cpp pair");
+}
+
 void TestToolCallsAreStructured() {
   FakeBackend backend;
   backend.pieces = {
@@ -784,7 +1113,7 @@ void TestLing3NativeToolCallsParseWithoutGrammar() {
 }
 
 void TestGlmCallRenamesTheOneUnknownKeyToTheMissingRequiredField() {
-  // Jay 2026-10-24 (Flint): Flint writes "command" for a shell tool whose
+  // Flint writes "command" for a shell tool whose
   // schema asks for "cmd". One unknown key + one missing required field = that
   // field; anything less certain stays as the model wrote it.
   const auto body = [](bool stream) {
@@ -2577,6 +2906,20 @@ void TestWrongModelIsRejected() {
          "Rejected request never reaches the backend");
 }
 
+void TestAnyModelNameAcceptedWhenAllowed() {
+  FakeBackend backend;
+  superroc::server::SetAcceptAnyModelName(true);
+  const auto response = superroc::server::HandleOpenAiChat(Request(R"({
+        "model":"lemonade-forwarded-name",
+        "messages":[{"role":"user","content":"hello"}]
+      })"),
+                                                           backend);
+  superroc::server::SetAcceptAnyModelName(false);
+  Expect(response.status == 200, "Any model name is accepted when allowed");
+  Expect(backend.chat_calls.load() == 1,
+         "Accepted request reaches the backend once");
+}
+
 void TestClientIdentityReachesBackend() {
   FakeBackend backend;
   backend.pieces = {"ok"};
@@ -2835,7 +3178,10 @@ void TestStopSequencesAndDefaultFields() {
                response.body.find(message) != std::string::npos,
            "validation errors describe the accepted values");
   }
-  for (const auto* stop : {"null", "[]", "\"END\"", "[\"END\",\"終\"]"}) {
+  for (const auto* stop : {"null", "[]", "\"END\"", "[\"END\",\"終\"]",
+                           "[\"END\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\","
+                           "\"9\",\"10\",\"11\",\"12\",\"13\",\"14\",\"15\","
+                           "\"16\"]"}) {
     auto body = base;
     body["stop"] = superroc::json::parse(stop);
     FakeBackend backend;
@@ -2856,7 +3202,8 @@ void TestStopSequencesAndDefaultFields() {
   for (const bool stream : {false, true}) {
     for (const auto* stop :
          {"true", "123", "{}", "\"\"", "[\"\"]", "[\"END\",null]",
-          "[\"1\",\"2\",\"3\",\"4\",\"5\"]"}) {
+          "[\"1\",\"2\",\"3\",\"4\",\"5\",\"6\",\"7\",\"8\",\"9\",\"10\","
+          "\"11\",\"12\",\"13\",\"14\",\"15\",\"16\",\"17\"]"}) {
       auto body = base;
       body["stream"] = stream;
       body["stop"] = superroc::json::parse(stop);
@@ -2920,8 +3267,7 @@ void TestStopSequencesAndDefaultFields() {
                  .status == 200,
          "explicit text-only and disabled logprobs defaults work");
   for (const auto* request :
-       {R"({"logprobs":true})", R"({"top_logprobs":3})",
-        R"({"modalities":["text","audio"]})", R"({"audio":{}})",
+       {R"({"modalities":["text","audio"]})", R"({"audio":{}})",
         R"({"response_format":{"type":"text","unexpected":true}})"}) {
     auto invalid = base;
     const auto fields = superroc::json::parse(request);
@@ -6667,10 +7013,16 @@ int main() {
   TestCachePromptOption();
   TestToolChoiceEnforcement();
   TestStreamingIsLive();
+  TestChatLogprobsValidation();
+  TestChatLogprobsNonStreamingShape();
+  TestChatLogprobsStreamingShape();
+  TestChatStreamingLogprobsHeldMarkerSuffix();
+  TestChatSupportListIsAccepted();
   TestLessThanProseStreamsBeforeCompletion();
   TestStreamingWithoutUsage();
   TestUtf8Output();
   TestCachedPrefillMetrics();
+  TestResponseTimingsAreLlamaCompatible();
   TestBackendSamplingDefaults();
   TestModelSamplingDefaults();
   TestCompleteToolDefinitionsReachTemplate();
@@ -6704,6 +7056,7 @@ int main() {
   TestFlintStructuredToolCalls();
   TestStreamingStopsAtRejectedParameter();
   TestWrongModelIsRejected();
+  TestAnyModelNameAcceptedWhenAllowed();
   TestClientIdentityReachesBackend();
   TestStreamingOverloadIsRejectedBeforeHeaders();
   TestImagePartsRetainOrderAndIdentity();

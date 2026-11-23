@@ -1,5 +1,4 @@
-// tools/qwen_gemm_bench.cpp — SQ1 SPEC1 item 2 (the kill criterion) +
-// SQ1 SPEC2 step 1 (the missing rows; corrected SPEC2 21:08 CDT).
+// tools/qwen_gemm_bench.cpp — the kill criterion +
 //
 // Times, per 27B dense (m, k) and T in {512, 1024, 2048, 4096}:
 //   * stock:  F32->F16 narrow + LaunchBatchedQuantGEMMFp16 over Q4_K weights
@@ -8,25 +7,25 @@
 //   * today:  Q8_1 quant + LaunchBatchedQuantGEMMPreQuantized over type-101
 //             weights (today's ROC route on our engine),
 //   * real:   Q8_1 quant (shared with today) + PreQuantized over the weight
-//             types the stock UD file REALLY uses per role (SPEC2 step 1):
+//             types the stock UD file REALLY uses per role:
 //             Q4_K (= the requested int8-Q4K row), Q5_K, Q6_K, IQ4_XS and
 //             Q8_0 — the censused types,
 //   * f16:    F32->F16 narrow (shared with stock) + LaunchBatchedQuantGEMMFp16
-//             over the stock file's real per-role types (SPEC2 step 1, the
+//             over the stock file's real per-role types (the
 //             TRUE stock route per tensor; Q4_K is the stock row above),
-//             plus f16-100/f16-101 (SPEC2 bench3: the FP4-in-F16 fix under
+//             plus f16-100/f16-101 (the FP4-in-F16 fix under
 //             test) and dual-Q4K on the gate/up cell (production stock takes
 //             the dual kernel there; bar-soundness check),
 //   * ported: F32->F16 narrow + the ported Fp4DenseF16Gemm over type-101 and
 //             type-100 weights.
 // Random weights/activations (timing only), HIP-event timing, median of N
-// reps, finite-output smoke check per route. SPEC2 bar: an FP4 total <=
+// reps, finite-output smoke check per route. Bar: an FP4 total <=
 // 1/0.9 of the stock-F16 total (speed) on every cell, both FP4 types, every
 // T the serve path uses (chunks of <= 4096: prefill.cpp ForwardPromptBatch /
 // arena.cpp kMaxPromptBatch).
 //
 // Usage: qwen_gemm_bench [T=512,1024,2048,4096] [reps=20] [--csv]
-// Run inside gpu-run. No model load; peak device use is ~2 GB.
+// Run on an otherwise idle GPU. No model load; peak device use is ~2 GB.
 
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
@@ -153,7 +152,7 @@ static void FillFP4(std::vector<std::uint8_t>& buf, std::size_t rows,
     }
 }
 
-// SPEC2 step 1 fillers: timing-only random blocks for the stock file's real
+// Timing-only random blocks for the stock file's real
 // per-role types. Block layouts from src/core/quant/ggml_dequant.hpp;
 // sizes via sizeof (never hardcoded).
 static void FillQ5K(std::vector<std::uint8_t>& buf, std::size_t rows,
@@ -226,8 +225,8 @@ static void FillQ80(std::vector<std::uint8_t>& buf, std::size_t rows,
     }
 }
 
-// Stock UD-Q4_K_XL per-role census (MAX1, /root/ls/kit/gguf_census.py,
-// 2026-10-10; block_count=65). Printed in the header so the real-stock rows
+// Stock UD-Q4_K_XL per-role census (block_count=65, from a Python GGUF
+// census script). Printed in the header so the real-stock rows
 // below are traceable to the file.
 static void PrintCensus() {
   printf("# census Qwen3.8-27B-UD-Q4_K_XL.gguf (block_count=65):\n");
@@ -263,8 +262,8 @@ struct Shape {
   std::size_t m, k;
 };
 
-// SPEC1 item 2: the 27B shapes (m = batch is the T sweep), plus the fused
-// qkv projection (SPEC2 bench3: a real production GEMM in all 48 fused
+// The 27B shapes (m = batch is the T sweep), plus the fused
+// qkv projection (a real production GEMM in all 48 fused
 // layers; every route supports m=10240). ssm_alpha/beta (m=32) stay out:
 // negligible time, noise-dominated cells.
 static const Shape kShapes[] = {
@@ -301,7 +300,7 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
     FillQ4K(wq4, s.m, s.k, rng);
     FillFP4(wf4fast, s.m, s.k, true, rng);
     FillFP4(wf4, s.m, s.k, false, rng);
-    // SPEC2 step 1: the stock file's real per-role types.
+    // The stock file's real per-role types.
     std::vector<std::uint8_t> wq5, wq6, wiq4xs, wq8;
     FillQ5K(wq5, s.m, s.k, rng);
     FillQ6K(wq6, s.m, s.k, rng);
@@ -367,7 +366,7 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
         flops / (q_ms + today_ms) / 1e9, wbytes_f4 / (q_ms + today_ms) / 1e6,
         true, "quant+gemm");
 
-    // SPEC2 step 1: real-stock = the same Q8_1 quant (shared dq8) +
+    // Real-stock = the same Q8_1 quant (shared dq8) +
     // PreQuantized over the stock file's real per-role types. Answers (a)
     // FP4-vs-Q4_K inside one int8 kernel and (b) F16-vs-int8 for stock types.
     struct RealType {
@@ -395,7 +394,7 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
           rt.wbytes / (q_ms + r_ms) / 1e6, true, "quant+gemm");
     }
 
-    // SPEC2 step 1 (corrected): the stock F16 route over the stock file's
+    // The stock F16 route over the stock file's
     // real per-role types (shared F16 narrow). Q4_K is the stock row above.
     // Every type here is in DirectGemm's switch (prefill_fp16.hip) and takes
     // this route in production on stock files.
@@ -418,7 +417,7 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
           rt.wbytes / (narrow_ms + f_ms) / 1e6, true, "narrow+gemm");
     }
 
-    // SPEC2 step 2 (bench3): FP4 through the stock F16 kernel (the fix under
+    // FP4 through the stock F16 kernel (the fix under
     // test: DirectGemm FP4 cases in prefill_fp16.hip). Shared F16 narrow.
     struct Fp4Row {
       const char* route;
@@ -444,7 +443,7 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
           fr.wbytes / (narrow_ms + p_ms) / 1e6, true, "narrow+gemm");
       const double fratio = stock_total / (narrow_ms + p_ms);
       if (!g_csv)
-        printf("# %s %s: f16fp4/stock-Q4K = %.3f (bar: >= 0.9 vs the stock-F16 mix, in REPORT2)\n",
+        printf("# %s %s: f16fp4/stock-Q4K = %.3f (bar: >= 0.9 vs the stock-F16 mix)\n",
                cell, fr.route, fratio);
     }
 
@@ -471,10 +470,10 @@ static void Bench(std::size_t T, int reps, hipStream_t stream,
           wbytes_f4 / total / 1e6, true, "narrow+gemm");
       const double ratio = stock_total / total;
       if (!g_csv)
-        printf("# %s %s: ported/stock-Q4K = %.3f (info only; SPEC2 bar is vs the stock-F16 mix, in REPORT2)\n",
+        printf("# %s %s: ported/stock-Q4K = %.3f (info only; the bar is vs the stock-F16 mix)\n",
                cell, route, ratio);
     }
-    // SPEC2 step 2 (bench3, bar soundness): production stock gate/up takes the
+    // Production stock gate/up takes the
     // DUAL kernel when types qualify. Measure it on the gate/up cell (Q4_K/Q4_K;
     // one [B,M] F16 SwiGLU activation out) against 2x the single.
     if (std::strcmp(s.cell, "d17408x5120") == 0) {

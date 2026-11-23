@@ -17,6 +17,8 @@
 #include <sstream>
 #include <string>
 
+#include "src/core/canonical.hpp"
+
 namespace superroc::server {
 namespace {
 
@@ -190,6 +192,10 @@ void Logger::LogRequest(std::string_view id, std::string_view method,
           << " path=" << path << " status=" << status_code
           << " duration_ms=" << std::fixed << std::setprecision(1)
           << duration_ms << " outcome=" << outcome;
+  // The canonical cache mode of this server, so a log reader can tell which
+  // mode answered a request.
+  if (superroc::core::CanonicalCacheOn())
+    message << " canonical=1";
   if (!details.empty())
     message << ' ' << details;
   message << ' ' << MemoryStatus();

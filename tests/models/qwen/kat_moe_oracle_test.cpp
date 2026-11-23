@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -21,6 +22,13 @@ void Expect(bool ok, const std::string& msg) {
     std::cerr << "FAIL " << msg << "\n";
     std::exit(1);
   }
+}
+
+// exists() throws or says yes for a fixture the user cannot read; open it
+// instead.
+bool FixtureReadable(const std::string& p) {
+  std::ifstream f(p, std::ios::binary);
+  return f.good();
 }
 
 std::uint32_t Mix(std::uint32_t x) {
@@ -233,7 +241,7 @@ int main() {
       path_env != nullptr ? path_env
                           : "/path/to/models/swap/kat-coder/"
                             "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf";
-  if (!std::filesystem::exists(path)) {
+  if (!FixtureReadable(path)) {
     std::cout << "SKIP: KAT GGUF not found: " << path << " (set KAT_GGUF)\n";
     return 77;
   }

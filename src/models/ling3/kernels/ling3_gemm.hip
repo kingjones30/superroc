@@ -1,6 +1,6 @@
 // ling3_gemm.hip — batched-prefill GEMM + batched MoE router for Ling-3.0-flash.
-// Lane LS3 (GLM 5.3), Ling speed wave, 2026-10-01. See ling3_gemm.hpp for the
-// contracts. Nothing in LX's ling3_moe.hip / LK's kernel files is modified.
+// See ling3_gemm.hpp for the
+// contracts. Nothing in ling3_moe.hip or the other kernel files is modified.
 //
 // The GEMM (k_gemm_grp) is a tiled kernel, not one-thread-per-row:
 //   * one block = [64 weight rows x 32 tokens x 64 k per tile], 256 threads;
@@ -19,7 +19,7 @@
 //     masked in the epilogue; a block whose whole token tile is past the group
 //     count returns before touching memory.
 //
-// Bounds discipline (this lane faults no GPUs):
+// Bounds discipline (these kernels fault no GPUs):
 //   * W reads: row < n and k0+kk < k are checked BEFORE the pointer is formed
 //     (blk stays null otherwise); the byte reads inside are then in-row only.
 //   * X reads: float4 at x + row*k + k0 + kk4*4 with k % 4 == 0 (checked on the
@@ -139,7 +139,7 @@ __global__ __launch_bounds__(256) void k_gemm_grp(
     for (int a = 0; a < 4 * NTOK; ++a) {
         acc[a] = 0.f;
     }
-    // Small-group path (LS3 perf): a MoE chunk of 512 tokens routes ~8 tokens
+    // Small-group path: a MoE chunk of 512 tokens routes ~8 tokens
     // per expert, and the 4-row x 2-token mapping leaves 3/4 of the block
     // idle (tokens past cnt). For cnt <= 8 every thread instead takes ONE
     // token and two rows, so all 256 threads work. cnt is block-uniform, so
@@ -462,7 +462,7 @@ extern "C" int ling3_slot_gather_sum(const float * partials, const int * slot,
 // ---------------------------------------------------------------------------
 // batched router
 //
-// The per-token arithmetic is Jay/H1's k_route from ling3_moe.hip, copied
+// The per-token arithmetic is k_route from ling3_moe.hip, copied
 // verbatim (sigmoid+bias selection scores, group score = top-2 sum, group mask
 // to -inf, bitonic DESC argsort with the same padding and strict-compare rules,
 // weights = unbiased sigmoids, norm then w_scale) with exactly three changes:
@@ -540,7 +540,7 @@ __global__ void k_route_batch_logits(const float * __restrict__ x,
     }
 }
 
-// LV1 R2: one CTA per expert, m dots. Each token's products are added in the
+// One CTA per expert, m dots. Each token's products are added in the
 // same thread stride as k_route_batch_logits, then the same 64-wide tree.
 // The gate element is loaded once and reused. n_tokens is 2..4 (LS1_MAX_M).
 __global__ void k_route_batch_logits_m(const float * __restrict__ x,
@@ -698,8 +698,8 @@ extern "C" int ling3_route_batch(const float * x, const float * gate, const floa
         }
         cap = n_tokens;
     }
-    // ---- LS1 PHASE9: the router logits as a real 2D register-tiled GEMM ----
-    // MEASURED on halo, same binary, same box, 8 chunks of 512 tokens, only this switch
+    // ---- The router logits as a real 2D register-tiled GEMM ----
+    // Measured on one machine, same binary, 8 chunks of 512 tokens, only this switch
     // differing: `route` 148.5 ms -> 53.0 ms, 2.80x, -95.5 ms a chunk. At 2*E*T*K =
     // 1.07 GFLOP in 53.0 ms that is 20.3 TFLOP/s, about 80 % of this APU's fp32 FMA peak,
     // so the kernel is now compute-bound and sitting at the roofline rather than hiding
@@ -718,11 +718,11 @@ extern "C" int ling3_route_batch(const float * x, const float * gate, const floa
     // LING3_ROUTE_GEMM=0 forces the shipped kernel everywhere; LING3_ROUTE_GEMM_MIN_T
     // overrides the threshold so the crossover can be re-measured without a rebuild.
     //
-    // LS1 PHASE8's 1D token tiling (LING3_ROUTE_LOGITS_TILED) is kept below, default off.
+    // The 1D token tiling (LING3_ROUTE_LOGITS_TILED) is kept below, default off.
     // It is proven bit-identical (0 differing of 262,144) and NOT faster (~207 ms at a
-    // tile of 8, ~148 at a tile of 2, against ~154 for the kernel below): REPORT8's
-    // finding was that the router logits kernel is latency-bound, not bandwidth-bound,
-    // and this GEMM is the shape that acts on it. See REPORT9.md.
+    // tile of 8, ~148 at a tile of 2, against ~154 for the kernel below): the
+    // measurement showed that the router logits kernel is latency-bound, not
+    // bandwidth-bound, and this GEMM is the shape that acts on it.
     static const int gemm_min_t = [] {
         const char * e = getenv("LING3_ROUTE_GEMM_MIN_T");
         return (e != nullptr && e[0] != '\0') ? atoi(e) : (int) LS1_ROUTE_GEMM_MIN_T;
@@ -738,7 +738,7 @@ extern "C" int ling3_route_batch(const float * x, const float * gate, const floa
         rc = ling3_route_logits_tiled(x, gate, k, n_expert, n_tokens, LS1_ROUTE_TY,
                                       logits_scratch);
     } else if (n_tokens > 1 && n_tokens <= 4) {
-        // LV1 R2. n_tokens == 1 stays on the kernel below. Prefill chunks are
+        // n_tokens == 1 stays on the kernel below. Prefill chunks are
         // 512 and take the GEMM above (LS1_ROUTE_GEMM_MIN_T is 256), so a
         // 4096-token PPL run never enters here.
         k_route_batch_logits_m<<<n_expert, 64>>>(x, gate, k, n_expert, n_tokens,

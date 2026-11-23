@@ -1,4 +1,4 @@
-// LS1 2026-10-01 — the decode-step GEMV as an integer dot against a Q8_1
+// The decode-step GEMV as an integer dot against a Q8_1
 // activation.
 //
 // Why this is faster than k_gemv_wide (which stays for the non-FP4 types):
@@ -231,7 +231,7 @@ int g_cap[LS1_NSLOT] = {0, 0, 0};
 // matter: the two choices give scales that differ by a sign and codes that
 // differ by that same sign, so the product ds * qs is the same.
 __global__ void k_q8_1_quant(const float * x, int8_t * qs, float * ds, int nb) {
-    // LA1: one WARP (32 lanes, one per value) per 32-value block, eight warps per
+    // One WARP (32 lanes, one per value) per 32-value block, eight warps per
     // CTA, instead of one thread scanning the block serially. The old layout ran
     // one thread per block, so a k=2560 row quantised with only 80 active threads.
     // Same recipe and same arithmetic, bit-identical:
@@ -292,7 +292,7 @@ extern "C" int ling3_quant_q8(const float * x, int k, int slot, hipStream_t stre
         g_cap[slot] = k;
     }
     const int nb = k / 32;
-    // LA1: the kernel runs one warp per 32-value block, eight warps per CTA, so
+    // The kernel runs one warp per 32-value block, eight warps per CTA, so
     // the grid is ceil(nb/8), not ceil(nb/(blockDim)). blockDim stays 256.
     const int threads = 256;
     const int blocks = (nb + 7) / 8;
@@ -301,7 +301,7 @@ extern "C" int ling3_quant_q8(const float * x, int k, int slot, hipStream_t stre
     return ls1_chk("q8 quant");
 }
 
-// LKF: hand the caller the slot buffers the wo GEMV will read. Same allocation
+// Hand the caller the slot buffers the wo GEMV will read. Same allocation
 // as ling3_quant_q8, no kernel. The fused KDA epilogue fills them.
 extern "C" int ling3_q8_slot_device(int slot, int k, int8_t ** qs, float ** ds) {
     if (qs == nullptr || ds == nullptr || k <= 0 || (k % 32) != 0 ||
@@ -419,7 +419,7 @@ __global__ void k_gemv_wide_q8_cta64(int qtype, const uint8_t * W, size_t row_by
     }
 }
 
-// RV25 wave1 F3: the same accumulation with a STORE that reproduces the unfused
+// The same accumulation with a STORE that reproduces the unfused
 // pair hipMemset(y, 0) ; k_axpy(1.0f, p, y) bit for bit. That pair computes
 //     y[i] = (+0.0f) + (1.0f * s) = 0.0f + s
 // and the "0.0f +" is load-bearing: for s == -0.0f it yields +0.0f, which is what
@@ -453,10 +453,10 @@ __global__ void k_gemv_wide_q8_cta64_zp(int qtype, const uint8_t * W, size_t row
 }
 
 // ---------------------------------------------------------------------------
-// PHASE6: one WARP per row, several consecutive rows per CTA.
+// One WARP per row, several consecutive rows per CTA.
 //
-// The measured shape of the two weak decode GEMVs (REPORT5 §3, from the build21
-// profile) is a lane-utilisation problem, not a bandwidth one:
+// The measured shape of the two weak decode GEMVs (from an earlier profile)
+// is a lane-utilisation problem, not a bandwidth one:
 //
 //   k_moe_down_weighted   n_ff = 768  -> 24 blocks of 32 values, spread over a 64-lane
 //                                     CTA: 24 of 64 lanes load anything, 37.5 %.
@@ -497,7 +497,7 @@ __global__ void k_gemv_wide_q8_rows(int qtype, const uint8_t * W, size_t row_byt
     }
 }
 
-// RV25 wave1 F3: k_gemv_wide_q8_rows with the same 0.0f + store as
+// k_gemv_wide_q8_rows with the same 0.0f + store as
 // k_gemv_wide_q8_cta64_zp above. Only reached when LING3_GEMV_GEMV / LING3_GEMV_VARIANT
 // selects the warp-per-row matvec; it must carry the same bit-identity.
 __global__ void k_gemv_wide_q8_rows_zp(int qtype, const uint8_t * W, size_t row_bytes,
@@ -524,14 +524,14 @@ __global__ void k_gemv_wide_q8_rows_zp(int qtype, const uint8_t * W, size_t row_
 }
 
 // ---------------------------------------------------------------------------
-// LVL SPEC1: the Q6_K LM head of the Ling-3.0-flash-VL artifact.
+// The Q6_K LM head of the Ling-3.0-flash-VL artifact.
 //
 // The generic float matvec (ling3_moe.hip's k_gemv_wide_gs) gave one thread a
 // whole row and decoded every element through ling3_elem. Two things cost: the
 // 32 lanes of a warp then walked 32 rows 2100 bytes apart, so each weight load
 // was its own cache line, and every element re-derived its block indices from a
-// runtime k. Measured on halo with rocprofv3 over 128 decode steps it was
-// 1967 ms = 15.4 ms per token, 40.9 % of all GPU time on the box.
+// runtime k. Measured on one machine with rocprofv3 over 128 decode steps it was
+// 1967 ms = 15.4 ms per token, 40.9 % of all GPU time on the test machine.
 //
 // Shape here: one warp per output row, and inside a row one lane per 32-element
 // piece of every 256-element block -- lane `l` owns local index p*32 + l for
@@ -571,7 +571,7 @@ __global__ __launch_bounds__(256) void lvl_gemv_q6k_rows(
             const uint8_t * blk = w + (size_t) b * (size_t) LVL_Q6K_TSZ;
             const float d = ling3_fp16_to_fp32(ling3_ld16(blk + 208));
             const float * xb = x + (size_t) b * 256u;
-            // LVL SPEC2 item 3. Per 256-element block this lane needs FOUR
+            // Per 256-element block this thread needs FOUR
             // distinct ql bytes ((piece&1) and half) and TWO distinct qh bytes
             // (half). Read them once here, as plain loads so clang can batch
             // and pipeline them, instead of re-reading the same address through
@@ -705,20 +705,21 @@ __global__ void k_gemv_wide_q8_gs(int qtype, const uint8_t * W, size_t row_bytes
 // build with no environment set behaves exactly as it did before this phase. The
 // unit test runs both and requires them to agree bit-for-bit.
 // ---------------------------------------------------------------------------
-// LS1 PHASE7 item 4: the flag is SPLIT, because its two halves are not the same claim.
+// The flag is SPLIT, because its two halves are not the same claim.
 //
 //   LING3_GEMV_DOWN  (default ON)  -- the warp-per-row grouped expert FFN. MEASURED
 //       bit-identical: max_rel_diff 0, 0 differing of 2560, in all three
 //       configurations. There is no numerical risk in it.
 //
 //   LING3_GEMV_GEMV  (default OFF) -- the warp-per-row plain matvec. It regroups a
-//       row's float additions (float addition is not associative), so ~60 % of output
-//       elements differ in their low bits and the greedy text diverges from build24 at
-//       character 194. Its error against the CPU integer reference is the same ~1e-6
-//       band as the kernel it replaces, and the perplexity gates pass (step 6.1014 vs
+//       row's float additions (float addition is not associative), so ~60 % of
+//       output elements differ in their low bits and the greedy text diverges
+//       from the earlier kernel at character 194. Its error against the CPU
+//       integer reference is the same ~1e-6 band as the kernel it replaces,
+//       and the perplexity gates pass (step 6.1014 vs
 //       batched 6.1037 on positions 4096-8191; 4096-token step 9.2905 vs batched
 //       9.3094) -- but end to end it bought 0.1 % (37.90/37.95 tok/s against 37.89/37.87
-//       with it off), which does not pay for changing greedy output. Jay decides.
+//       with it off), which does not pay for changing greedy output.
 static int ls1_env_on(const char * name, int dflt) {
     const char * e = getenv(name);
     if (e == nullptr || e[0] == '\0') {
@@ -767,7 +768,7 @@ extern "C" int ling3_gemv_fp4_q8_rows(int qtype, const void * W, int slot, float
     return ls1_chk("gemv rows");
 }
 
-// LS1 PHASE7 item 3: quantise into an explicitly named slot, for the call sites
+// Quantise into an explicitly named slot, for the call sites
 // that run several matvecs against ONE activation. ling3_gemv_fp4 still quantises for
 // itself; this is the opt-in that lets a caller pay once.
 extern "C" int ling3_act_prepare(const float * x, int k, int slot, hipStream_t stream) {
@@ -800,7 +801,7 @@ extern "C" int ling3_gemv_fp4_q8(int qtype, const void * W, int slot,
     return ls1_chk("gemv q8");
 }
 
-// RV25 wave1 F3: matvec whose STORE is y[row] = 0.0f + s, so a down projection can
+// Matvec whose STORE is y[row] = 0.0f + s, so a down projection can
 // write the caller's output directly and take the place of
 //     hipMemset(y, 0, ...) ; <gemv -> p> ; k_axpy(1.0f, p, y)
 // with no second launch and no scratch. `slot` must already hold the Q8_1 vector,
@@ -902,7 +903,7 @@ extern "C" int ling3_gemv_q8_codebook_check(void) {
     return bad;
 }
 // ---------------------------------------------------------------------------
-// Grouped, device-routed expert FFN (LS1 phases 2 and 3).
+// Grouped, device-routed expert FFN.
 //
 // The per-expert host loop this replaces did, per MoE layer, two blocking D2H copies of
 // the router's 8 ids and 8 weights -- 40 GPU syncs per token -- and then roughly 56 kernel
@@ -1035,7 +1036,9 @@ extern "C" int ling3_expert_ffn_dev(
     const int8_t * xq = g_qs[LS1_SLOT_FFN_X];
     const float * xd = g_ds[LS1_SLOT_FFN_X];
 
-    k_moe_gate_up_swiglu<<<(unsigned) ((n_ff + 63) / 64) * 64 * (unsigned) n_used, 64, 0, stream>>>(
+    // One CTA per (slot, row): the kernel takes its slot from blockIdx / n_ff, so the
+    // grid is exactly n_ff * n_used (n_ff need not be a multiple of 64).
+    k_moe_gate_up_swiglu<<<(unsigned) n_ff * (unsigned) n_used, 64, 0, stream>>>(
         qtype, (const uint8_t *) gate, (const uint8_t *) up, rb_k,
         ids_d, xq, xd, ls1_moe_hs, limit, n_ff, n_expert, k, ls1_moe_rc);
     if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;
@@ -1044,7 +1047,7 @@ extern "C" int ling3_expert_ffn_dev(
     rc = ling3_quant_q8(ls1_moe_hs, (int) nn, LS1_SLOT_MOE_H, stream);
     if (rc != LING3_OK) return rc;
 
-    // LS1 PHASE7 item 4: the down half defaults ON. It is MEASURED bit-identical
+    // The down half defaults ON. It is MEASURED bit-identical
     // (max_rel_diff 0, 0 differing of 2560, all three configurations), so it carries no
     // numerical risk, and it is 1.22x faster on the isolated A/B.
     // (An earlier revision of this file had lost the branch here entirely, which is why
@@ -1113,7 +1116,7 @@ extern "C" int ling3_moe_hs_peek(float * out, int n) {
 }
 
 // ---------------------------------------------------------------------------
-// LS1 phase 4, item 3: the small-m decode forward, for MTP verification.
+// The small-m decode forward, for MTP verification.
 //
 // A speculative verify runs m = 2..4 rows of the SAME weights against m different
 // activations. The m = 1 path reads every weight byte once per row, so m rows cost m times
@@ -1127,7 +1130,7 @@ extern "C" int ling3_moe_hs_peek(float * out, int n) {
 //   k_moe_down_m      -- its down + weighted sum, m accumulators in one register set
 //
 // Both grouped kernels take the per-pair expert id from DEVICE memory and never sync, like
-// their m = 1 counterparts. Nothing here is wired into Step; LS4 calls it.
+// their m = 1 counterparts. Nothing here is wired into Step; the multi-row verify calls it.
 enum { LS1_MAX_M = 4 };
 
 __global__ void k_gemv_wide_q8_m(int qtype, const uint8_t * W, size_t row_bytes,
@@ -1235,7 +1238,7 @@ __global__ void k_moe_down_m(int qtype, const uint8_t * down, size_t rb_ff,
     }
 }
 
-// LV1 R3: one expert, m rows. Each gate/up/down row is decoded once and dotted
+// One expert, m rows. Each gate/up/down row is decoded once and dotted
 // against every token. The per-thread block order, ls1_block_sum, SwiGLU and
 // `acc += weight * part` match k_moe_gu_m / k_moe_down_m at n_used = 1.
 __global__ void k_moe_gu_one_m(int qtype, const uint8_t * gate, const uint8_t * up,
@@ -1368,7 +1371,7 @@ extern "C" int ling3_gemv_q8_m(int qtype, const void * W, const int8_t * xq, con
     return ls1_chk("gemv q8 m");
 }
 
-// LM1 SPEC4 item 2: quantise-only entry. See the header for the sharing rule.
+// Quantise-only entry. See the header for the sharing rule.
 extern "C" int ling3_quant_m(const float * x, int n_tokens, int k, hipStream_t stream,
                              const int8_t ** xq, const float ** xd) {
     if (xq == nullptr || xd == nullptr) return LING3_ERR_ARG;
@@ -1444,7 +1447,7 @@ extern "C" int ling3_expert_ffn_m(int qtype, const void * gate, const void * up,
     return ls1_chk("moe m down");
 }
 
-// LV1 R3. n_tokens == 1 and n_used != 1 stay on ling3_expert_ffn_m, so Step's
+// n_tokens == 1 and n_used != 1 stay on ling3_expert_ffn_m, so Step's
 // single-token expert and the routed verify (n_used = 8) do not change.
 extern "C" int ling3_expert_ffn_shared_m(int qtype, const void * gate, const void * up,
                                         const void * down, const float * x,
@@ -1536,7 +1539,9 @@ extern "C" int ling3_expert_ffn_dev_tuned(int qtype, const void * gate, const vo
     const int8_t * xq = g_qs[LS1_SLOT_FFN_X];
     const float * xd = g_ds[LS1_SLOT_FFN_X];
 
-    k_moe_gate_up_swiglu<<<(unsigned) (((n_ff + 63) / 64) * 64 * n_used), 64, 0, stream>>>(
+    // One CTA per (slot, row): the kernel takes its slot from blockIdx / n_ff, so the
+    // grid is exactly n_ff * n_used (n_ff need not be a multiple of 64).
+    k_moe_gate_up_swiglu<<<(unsigned) n_ff * (unsigned) n_used, 64, 0, stream>>>(
         qtype, (const uint8_t *) gate, (const uint8_t *) up, rb_k,
         ids_d, xq, xd, ls1_moe_hs, limit, n_ff, n_expert, k, ls1_moe_rc);
     if (::superroc::hip_check::LaunchFailed()) return LING3_ERR_HIP;

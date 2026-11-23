@@ -1,14 +1,36 @@
 # Benchmark methodology
 
-Build with `nix build` and measure binaries under `result/bin`. Per-model
-results and qualification gaps live in:
+Build with `nix build` and measure binaries under `result/bin`.
 
-- [DeepSeek V4 Flash](models/deepseek-v4-flash/BENCHMARKS.md)
-- [Qwen3.8 27B](models/qwen3.8-27b/BENCHMARKS.md)
-- [Qwen3.8 Flash-Next](models/qwen3.8-flash-next/BENCHMARKS.md)
-- [Qwen3-TTS](models/qwen3-tts/BENCHMARKS.md)
-- [Qwen3-ASR](models/qwen3-asr/BENCHMARKS.md)
-- [MiniMax H3](models/minimax-h3/BENCHMARKS.md)
+## Results through Lemonade's benchmark (Strix Halo)
+
+Measured with [Lemonade](https://github.com/lemonade-sdk/lemonade)'s own harness, the command used for the Halogen backend:
+
+```sh
+lemonade bench <model> --scenarios context-4k context-32k chat-long-output --ctx-size 40960 --runs 2
+```
+
+Every request has temperature 0. Hardware: AMD Ryzen AI Max+ 395 (gfx1151), 128 GB; ROCm 7.13 on the host. Each row is the
+mean of 2 runs. The context scenarios generate about 20 tokens, so their decode figure is short-run; chat-long-output
+generates 256.
+
+### Qwen3.8-27B, one model file for every engine
+
+File: `Qwen3.8-27B-UD-Q4_K_XL.gguf` (unsloth/Qwen3.8-27B-GGUF). Decode and prefill in tokens per second.
+
+| Engine and setup | Decode chat / 4K / 32K | Prefill 4K / 32K |
+| --- | --- | --- |
+| llama.cpp b12109 ROCm, default (its automatic MTP drafts) | 23.3 / 27.0 / 29.2 | 376.5 / 323.4 |
+| llama.cpp b12109 ROCm, `--spec-type none` | 12.2 / 12.0 / 10.6 | 393.3 / 336.5 |
+| llama.cpp b12109 Vulkan, default | 21.5 / 26.3 / 27.2 | 320.1 / 285.6 |
+| Super Roc, no speculation | 12.5 / 12.3 / 11.4 | 638.0 / 594.5 |
+| Super Roc, MTP from the same file (3-token drafts) | 20.2 / 24.2 / 29.3 | 625.8 / 587.6 |
+| Super Roc, recipe (prompt lookup) + DFlash2 draft | 26.2 / 34.3 / 38.9 | 639.5 / 600.6 |
+
+Speculation of the same kind: llama.cpp's MTP decodes faster than Super Roc's MTP row at chat and 4K and equal at 32K;
+Super Roc's decode lead comes from the recipe with the DFlash2 draft. Prefill is ahead in every Super Roc row. GSM8K (first
+200 questions, chat template, thinking on, temperature 0, lm-evaluation-harness through Lemonade): Super Roc 0.810 with and
+without speculation, llama.cpp 0.805.
 
 ## Model benchmark driver
 
@@ -41,8 +63,7 @@ DeepSeek's HTTP payload omits pp/tg durations. The driver reads the pinned
 server's existing stage timers from its log and checks them against HTTP token
 counts. Native `ds4-bench` also supports single-session AR/DSpark, but not
 concurrency. The pinned ROCm server disables DSpark when batching, so C>1
-DSpark comparisons are **N/A**. See the
-[DS4 method](models/deepseek-v4-flash/QUALITY.md#benchmark-method).
+DSpark comparisons are **N/A**.
 
 New or refreshed text-model cards use the same pp2048 prose/copying prompts
 for single-user d0 and concurrency, with tg128. The driver shares their prompt

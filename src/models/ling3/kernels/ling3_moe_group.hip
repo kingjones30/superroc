@@ -1,4 +1,4 @@
-// ling3_moe_group.hip — LS1 PHASE8 item 2: the MoE expert grouping ON THE DEVICE.
+// ling3_moe_group.hip — the MoE expert grouping ON THE DEVICE.
 //
 // WHY THIS EXISTS. In ForwardBatch (rocm_backend.cpp) every MoE layer, every 512-token
 // chunk, did:
@@ -11,8 +11,8 @@
 //       slot_dest                                                 // eight more copies
 //     ling3_wmma_gemm_grp / ling3_gemm_grp
 //
-// Eleven transfers and one full drain, per MoE layer, per chunk. Jay's build27 profile on
-// amdaimax2 has `route` at 145-163 ms per chunk; that is what this file is aimed at.
+// Eleven transfers and one full drain, per MoE layer, per chunk. A profiled
+// build has `route` at 145-163 ms per chunk; that is what this file is aimed at.
 //
 // WHAT THIS DOES. The whole sort is reproduced on the device, in the SAME order, by the SAME
 // algorithm -- so the grouped GEMM computes bit-identical results. Not "an equivalent
@@ -31,16 +31,17 @@
 //     grp_zp[gi] = tile_acc ; tile_acc += (grp_cnt[gi] + 15) / 16 ; grp_zp[n_groups] = tile_acc
 //     for gi, for c: slot_dest[goff+c] = ((zp[gi] + (c >> 4)) << 4) | (c & 15)
 //
-// LK1 (wave 3). The serial body below is the oracle: LING3_MOE_GROUP_SERIAL=1
+// The serial body below is the oracle: LING3_MOE_GROUP_SERIAL=1
 // launches it, and the parallel kernel calls it for rc / id / group-cap errors so
 // those partial writes stay byte-identical. The default kernel is parallel. Rank
 // is counts[e] + #{j' < j : ids[j'] == e}, which is the stable counting sort.
 // Tile-count atomics only add 1s; their order does not change the sum. The lane
 // scan that places each slot walks increasing j, so it does not use atomics.
 //
-// BOUNDS DISCIPLINE (this lane's rule, after the 2026-10-02T01:58:04Z fault). Every size is
-// derived from the same constants the caller sized the buffers with, and every index the
-// kernel forms is checked against them on the host before the launch, in
+// BOUNDS DISCIPLINE (a standing rule, after the 2026-10-02T01:58:04Z fault).
+// Every size is derived from the same constants the caller sized the buffers
+// with, and every index the kernel forms is checked against them on the host
+// before the launch, in
 // ling3_moe_group_batch. A slot id outside [0, n_expert) sets the status word instead of
 // indexing, and the caller turns that into a loud failure -- exactly what the host loop it
 // replaces did with `return fail("router id out of range...")`.
@@ -54,16 +55,16 @@
 #include "src/models/ling3/kernels/ling3_quant.hpp"
 
 // ---------------------------------------------------------------------------
-// LS1 PHASE8 item 1 (NUDGE 2): the ROUTER LOGITS kernel, tiled over tokens.
+// The ROUTER LOGITS kernel, tiled over tokens.
 //
-// LR1 MEASURED, both engines on the same 13.8K prompt: k_route_batch_logits costs
+// MEASURED, both engines on the same 13.8K prompt: k_route_batch_logits costs
 // 3.39 ms per call x 1,080 calls = 3.66 s -- 5.1 % of superroc's prefill, and 13.3x the fork's
 // router (276 ms). That is ~136 ms of the ~155 ms `route` section per 512-token chunk.
 //
 // WHY IT IS SLOW, exactly. The old kernel is <<<n_expert, n_tokens>>>, 64 threads: one CTA
 // per (expert, token) PAIR, and every CTA walks the whole k = 2048 of BOTH the activation row
 // and the gate row. So a chunk reads n_expert x n_tokens x k floats where its inputs are only
-// n_tokens x k + n_expert x k. On halo, 479 x 512 x 2048 x 4 B is about 2.0 GB of loads for
+// n_tokens x k + n_expert x k. 479 x 512 x 2048 x 4 B is about 2.0 GB of loads for
 // 8 MB of input -- roughly 250x the minimum -- which is why one matvec costs 3.39 ms.
 //
 // WHAT THIS DOES. One CTA per (expert, tile of LS1_ROUTE_TY tokens). The gate row is read
@@ -81,7 +82,7 @@
 // so "close enough" is not a standard worth shipping against.
 
 // Tokens per CTA tile. 8 puts the reduction LDS at 2 KiB and gives the gate row eight uses
-// per load; REPORT8.md has the measured 4 / 8 / 16 spread.
+// per load; the measured spread was 4 / 8 / 16.
 enum { LS1_ROUTE_TY = 2 };
 
 __global__ void k_route_logits_tiled(const float * __restrict__ x,
@@ -135,11 +136,12 @@ __global__ void k_route_logits_tiled(const float * __restrict__ x,
 }
 
 // ---------------------------------------------------------------------------
-// LS1 PHASE9 item 1: the router logits as a real 2D register-tiled GEMM.
+// The router logits as a real 2D register-tiled GEMM.
 //
-// REPORT8 proved the bit-identical rewrites cannot win: k_route_batch_logits is
-// LATENCY-bound, and keeping its per-row dot order is exactly what forbids the fix.
-// Jay's decision (DECISIONS 2026-10-03 00:55) is that the router's accumulation order MAY
+// Measurement proved the bit-identical rewrites cannot win:
+// k_route_batch_logits is LATENCY-bound, and keeping its per-row dot
+// order is exactly what forbids the fix.
+// The router's accumulation order MAY
 // change -- superroc's order is arbitrary (the fork's differs) and the block-2 near-tie moving is
 // a numerics change like any other, so the WAVE 2 numerics gates decide, not byte-identity.
 //
@@ -150,7 +152,7 @@ __global__ void k_route_logits_tiled(const float * __restrict__ x,
 // WHY THE OLD ONE IS SLOW, restated because it drives the design: it was one CTA per
 // (expert, token) PAIR with 64 threads and a 64-deep LDS tree, so it read n_expert x
 // n_tokens x k floats where the inputs are n_tokens x k + n_expert x k -- about 2.0 GB of
-// loads for 8 MB of input -- and, per REPORT8, cutting the CTA count to amortise the gate row
+// loads for 8 MB of input -- and cutting the CTA count to amortise the gate row
 // made it worse, because the problem is latency and parallelism, not traffic.
 //
 // THE DESIGN. Each CTA owns a BM(experts) x BN(tokens) output tile and marches over K in
@@ -258,16 +260,16 @@ __global__ void k_route_logits_gemm(const float * __restrict__ x,
 }
 
 
-// LV1 SPEC2. The router logits GEMM that ling3_route_logits_gemm_launch runs.
+// The router logits GEMM that ling3_route_logits_gemm_launch runs.
 // Tile: 64 experts x 64 tokens, K step 32, 128 threads, each thread an 8x4
 // register tile, float4 along K. One LDS buffer, padded float4 stride (8+1)
 // so a warp's token rows do not all hit one bank. No atomics, k ascending,
 // each output written by exactly one thread.
 //
-// MEASURED (route_bench2, amdaimax2, 20 CU, T=512 E=512 K=2560, narrow weights):
+// MEASURED (route_bench2, 20 CU, T=512 E=512 K=2560, narrow weights):
 // median 440.8 us vs k_route_logits_gemm 1041.4 us (2.36x), nondet=0,
 // top-8 picks moved 0/4096, max_abs 5.48e-6. rocBLAS on the same buffers was
-// 505 us. ~/ls/lv1/out-rbench2.txt.
+// 505 us.
 //
 // Index audit. Host rejects K that is not a multiple of 32, and null/non-positive
 // extents. Inside the kernel:
@@ -870,7 +872,7 @@ int ling3_route_logits_gemm_launch(const float * x, const float * gate, int K, i
     if (!x || !gate || !logits || K <= 0 || E <= 0 || T <= 0) {
         return LING3_ERR_ARG;
     }
-    // Jay 2026-10-03 (RV12): LING3_ROUTE_LV2_OFF=1 sends the router GEMM back to the 28g tile kernel, for an A/B
+    // LING3_ROUTE_LV2_OFF=1 sends the router GEMM back to the 28g tile kernel, for an A/B
     // of top-8 picks or a hot disable without a rebuild.
     static const bool lv2_off = [] {
         const char * e = std::getenv("LING3_ROUTE_LV2_OFF");

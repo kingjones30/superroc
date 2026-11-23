@@ -1,8 +1,8 @@
-// ling3-argmax-test -- LA1 bit-identical check of the two-phase argmax.
+// ling3-argmax-test -- bit-identical check of the two-phase argmax.
 //
-// The old argmax scanned the whole row with one 256-thread block; LA1 splits it
-// into LING3_ARGMAX_SLICES contiguous slices each reduced by its own block and
-// combines the partials in a tiny second kernel. The spec says the new one has
+// The old argmax scanned the whole row with one 256-thread block; the new one
+// splits it into LING3_ARGMAX_SLICES contiguous slices, each reduced by its
+// own block, and combines the partials in a tiny second kernel. It has
 // to be BYTE-FOR-BYTE identical to the CPU reference (and therefore to the old
 // kernel). That holds by construction (the (max, lowest-index) reduction is
 // order-independent), and this test proves it on the device:

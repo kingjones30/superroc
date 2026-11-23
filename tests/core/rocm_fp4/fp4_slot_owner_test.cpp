@@ -1,4 +1,4 @@
-// SQ10: FP4 slot ownership. Two host threads on two streams run interleaved
+// FP4 slot ownership. Two host threads on two streams run interleaved
 // quantize -> GEMV on different inputs; each stream's outputs must equal its
 // single-stream reference bit-for-bit. On 1194fea's process-global slots the
 // second stream's quantize overwrites the first's activation, so this test
@@ -87,7 +87,7 @@ struct AbortBarrier {
   int gen = 0;
 };
 
-// SPEC2 (RV 4.1): bounded wait on a flag with a deadline, not a bare sleep.
+// Bounded wait on a flag with a deadline, not a bare sleep.
 // Returns true when the flag set before the deadline.
 bool WaitFlagUntil(const std::atomic<bool>& flag,
                    std::chrono::milliseconds deadline) {
@@ -296,7 +296,7 @@ int RunExhaustion() {
   SQ10_EXPECT(a0 != a1, "no alias while held");
   SQ10_EXPECT(superroc_fp4_slot_stream_attach(t0) == a0, "attach idempotent");
 #ifdef SUPERROC_FP4_SLOT_HAS_ALIAS
-  // SPEC2 (R2): the N+1-th stream is refused at once, not parked.
+  // The N+1-th stream is refused at once, not parked.
   const unsigned long r0 = superroc_fp4_slot_refuse_count();
   SQ10_EXPECT(superroc_fp4_slot_stream_attach(t2) == -SUPERROC_FP4_ERR_BUSY,
               "N+1-th attach refuses");
@@ -486,7 +486,7 @@ int RunZeroAlloc() {
   return 0;
 }
 
-// SPEC2 gate 1: the production shape. Configure once, two sessions attach
+// The production shape. Configure once, two sessions attach
 // (both sets busy, as under -j 2), then a helper stream launches an FP4
 // matrix. On sq10-1 (no alias API: the ifdef below compiles out) the helper
 // waits for a set nobody ever frees, so this case FAILS on the deadline --
@@ -616,7 +616,7 @@ int RunProductionHelper() {
 }
 
 #ifdef SUPERROC_FP4_SLOT_HAS_ALIAS
-// SPEC2 gate 5: the alias contract. A helper resolves to its owner's set
+// The alias contract. A helper resolves to its owner's set
 // and launches bit-identically there; bad registrations are loud; detach
 // removes aliases in both directions.
 int RunAlias() {
@@ -710,7 +710,7 @@ int RunAlias() {
   return 0;
 }
 
-// SPEC2 gate 5: create/destroy 1,000 attach/alias pairs; the maps stay flat.
+// Create/destroy 1,000 attach/alias pairs; the maps stay flat.
 int RunLifecycle() {
   SQ10_EXPECT(superroc_fp4_slot_debug_map_size() == 0,
               "lifecycle map starts 0");
@@ -764,7 +764,7 @@ int RunLifecycle() {
 }
 #endif  // SUPERROC_FP4_SLOT_HAS_ALIAS
 
-// SPEC2 gate 5 (RV 4.2): all five scratch groups interleaved on two
+// All five scratch groups interleaved on two
 // streams -- GENERIC quant+GEMV, the m-pair, the single-token MoE scratch,
 // the verify pair, and the SwiGLU pair. Both workers queue every launch,
 // meet at a barrier, then sync and compare against serial references.
@@ -1115,7 +1115,7 @@ int RunInterleaveGroups() {
       "GROUPS PASS (2 streams x 2000 steps x 5 groups, bit-identical)\n");
   SQ10_CHECK_HIP(hipStreamSynchronize(s0));
   SQ10_CHECK_HIP(hipStreamSynchronize(s1));
-  // SPEC3 (S3-4): the SwiGLU grow path. Both sets were pre-warmed to 512;
+  // The SwiGLU grow path. Both sets were pre-warmed to 512;
   // asking s0's set for 2048 must sync, malloc under the sets mutex, free
   // the old pair and hand back a working new one, leaving s1's pair alone.
   float* gg = nullptr;
@@ -1137,7 +1137,7 @@ int RunInterleaveGroups() {
               "groups grown pair works, other pair intact");
   std::printf("GROUPS_GROW PASS (512 -> 2048 reallocates; pairs isolated)\n");
 #ifdef SUPERROC_FP4_SLOT_HAS_ALIAS
-  // SPEC3 (S3-4): alias + groups. s1 drops its set and aliases to s0's, and
+  // Alias + groups. s1 drops its set and aliases to s0's, and
   // both sides run the four FP4 groups in ordered serial phases (the
   // production-with-drains shape: each side syncs before the other
   // launches), bit-identical to the serial references. The SwiGLU pair is
@@ -1230,7 +1230,7 @@ int RunInterleaveGroups() {
   return 0;
 }
 
-// SPEC2 (R6): is the MoE status-word read stale? A bad expert id is safe
+// Is the MoE status-word read stale? A bad expert id is safe
 // (the kernel clamps to row 0 and writes SUPERROC_FP4_ERR_ARG to the word), so
 // force one on a non-blocking stream and check at once, 200 times. This is
 // main's behaviour, not the patch's: the case reports CONFIRMED or REFUTED
@@ -1307,7 +1307,7 @@ int RunStaleStatus() {
   std::printf("STALE_STATUS reported=%d missed=%d/200 verdict=%s\n", reported,
               missed, missed > 0 ? "CONFIRMED" : "REFUTED");
 #ifdef SUPERROC_FP4_SLOT_HAS_STREAM_CHECK
-  // SPEC2 (R6): the stream-ordered check must never miss. This loop is the
+  // The stream-ordered check must never miss. This loop is the
   // failing test for the fix (the bare loop above misses on main).
   int fixed_missed = 0;
   for (int t = 0; t < 200; ++t) {
@@ -1340,7 +1340,7 @@ int RunStaleStatus() {
 }
 
 #ifdef SUPERROC_FP4_SLOT_HAS_ALIAS
-// SPEC3 (S3-1): the alias race, then the ordered pattern. An aliased helper
+// The alias race, then the ordered pattern. An aliased helper
 // and its owner share one slot set with no ordering edge between their
 // streams. Queue the helper's quant + a long memset stall + the helper's
 // gemv, then launch the owner's quant+gemv at once over the same slots,
@@ -1348,7 +1348,7 @@ int RunStaleStatus() {
 // the shared slot while the helper's gemv is still queued, and the helper
 // reads the wrong activation. With drain == false this case shows the
 // unordered pattern FAILING (it fails if the window never opens); with
-// drain == true it runs the S3-1 production pattern (the drafter entry
+// drain == true it runs the production pattern (the drafter entry
 // drains its stream before the session's next launch) and must stay
 // bit-identical to the serial reference. An event (queried, never waited
 // on) times the owner's launch into the helper's stall; the streams
@@ -1503,7 +1503,7 @@ int RunAliasOrder(bool drain) {
 }
 #endif  // SUPERROC_FP4_SLOT_HAS_ALIAS
 
-// SPEC3 (S3-2): the prefill-path stale read. superroc_fp4_expert_ffn_m runs on
+// The prefill-path stale read. superroc_fp4_expert_ffn_m runs on
 // the non-blocking arena stream; the bare m_check reads the status word on
 // the default stream with no drain, so it can precede the kernels and miss
 // a bad-router-id error on a prefill row -- the same stale class R6 fixed

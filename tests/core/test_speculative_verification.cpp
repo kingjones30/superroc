@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -213,7 +214,7 @@ private:
   std::vector<float> updated_hidden_;
 };
 
-class SampledTargetExecutor final
+class SampledTargetExecutor
     : public superroc::speculative::ISpeculativeTargetExecutor {
 public:
   explicit SampledTargetExecutor(std::vector<float> target_logits,
@@ -343,6 +344,44 @@ public:
 
 private:
   std::array<float, 2> probabilities_;
+};
+
+// Device-resident sampled executor: verification rows are scripted per
+// forward and served through CopyVerificationLogits, while each accept or
+// reject decision runs through the base-class default on the recorded rows.
+// This drives the pre-call capture path of device-resident sampling.
+class DeviceSampledTargetExecutor final : public SampledTargetExecutor {
+public:
+  explicit DeviceSampledTargetExecutor(std::vector<std::vector<float>> rows)
+      : SampledTargetExecutor(
+            rows.empty() ? std::vector<float>{0.0F, 0.0F, 0.0F} : rows.front(),
+            true),
+        scripted_rows_(std::move(rows)) {}
+
+  void Reset() noexcept override {
+    SampledTargetExecutor::Reset();
+    recorded_rows_.clear();
+  }
+
+  TokenId ForwardToken(TokenId token_id, std::uint32_t pos,
+                       bool compute_logits) override {
+    const auto next =
+        SampledTargetExecutor::ForwardToken(token_id, pos, compute_logits);
+    recorded_rows_.push_back(recorded_rows_.size() < scripted_rows_.size()
+                                 ? scripted_rows_[recorded_rows_.size()]
+                                 : scripted_rows_.back());
+    return next;
+  }
+
+  std::span<const float> CopyVerificationLogits(std::size_t row) override {
+    return {recorded_rows_.at(row).data(), recorded_rows_.at(row).size()};
+  }
+
+  bool SupportsDeviceResidentSampling() const noexcept override { return true; }
+
+private:
+  std::vector<std::vector<float>> scripted_rows_;
+  std::vector<std::vector<float>> recorded_rows_;
 };
 
 class FixedSampledDraftBackend final
@@ -529,93 +568,6 @@ void TestSpeculativeStats() {
   stats.total_accepted_tokens = 8;
   Expect(std::abs(stats.AcceptanceRate() - 0.80F) < 1e-5F,
          "non-empty acceptance rate");
-}
-
-void TestPlainRateGuard() {
-  ScriptedTargetExecutor target({}, 900);
-  auto draft = [] {
-    return std::make_unique<superroc::speculative::MockDraftBackend>(
-        std::vector<TokenId>{101, 102, 103});
-  };
-
-  // No rate table: the guard never arms.
-  superroc::speculative::SpeculativeVerifier unguarded(
-      target, draft(), superroc::speculative::SpeculativeOptions{});
-  for (int round = 0; round < 30; ++round) {
-    unguarded.RecordDecodeRound(1, 1.0, 512);
-  }
-  Expect(!unguarded.SpeculationDisabled(),
-         "empty rate table keeps the guard off");
-
-  superroc::speculative::SpeculativeOptions policy;
-  policy.plain_decode_rates = {{512, 10.0}, {4096, 8.0}, {8192, 7.0}};
-  superroc::speculative::SpeculativeVerifier verifier(target, draft(), policy);
-
-  // Rounds that produce nothing are not evidence about throughput.
-  for (int round = 0; round < 30; ++round) {
-    verifier.RecordDecodeRound(0, 1.0, 512);
-  }
-  Expect(!verifier.SpeculationDisabled(), "empty rounds do not arm the guard");
-
-  // Fewer than eight rounds is not a full window.
-  for (int round = 0; round < 7; ++round) {
-    verifier.RecordDecodeRound(6, 1.0, 512);
-  }
-  Expect(!verifier.SpeculationDisabled(),
-         "partial window does not trip the guard");
-
-  // Rounds inside the settling budget are acceptance ramp-up, not evidence.
-  for (int round = 7; round < 23; ++round) {
-    verifier.RecordDecodeRound(6, 1.0, 512);
-  }
-  Expect(!verifier.SpeculationDisabled(),
-         "settling rounds do not trip the guard");
-
-  // Past the settling budget, 6 tok/s sits under the 512-context floor of
-  // 10 tok/s; one and two below-floor windows are still noise.
-  verifier.RecordDecodeRound(6, 1.0, 512);
-  Expect(!verifier.SpeculationDisabled(),
-         "one below-floor window does not trip the guard");
-  verifier.RecordDecodeRound(6, 1.0, 512);
-  Expect(!verifier.SpeculationDisabled(),
-         "two below-floor windows do not trip the guard");
-  verifier.RecordDecodeRound(6, 1.0, 512);
-  Expect(verifier.SpeculationDisabled(),
-         "a third below-floor window switches the request to plain "
-         "decoding");
-
-  verifier.BeginRequest();
-  Expect(!verifier.SpeculationDisabled(),
-         "BeginRequest re-arms the guard for the next request");
-
-  // 2304 sits halfway between (512, 10) and (4096, 8): the interpolated
-  // floor is 9 tok/s. 9.5 stays above it; 8.5 falls below.
-  for (int round = 0; round < 26; ++round) {
-    verifier.RecordDecodeRound(19, 2.0, 2304);
-  }
-  Expect(!verifier.SpeculationDisabled(),
-         "above the interpolated floor does not trip the guard");
-  verifier.BeginRequest();
-  for (int round = 0; round < 26; ++round) {
-    verifier.RecordDecodeRound(17, 2.0, 2304);
-  }
-  Expect(verifier.SpeculationDisabled(),
-         "below the interpolated floor trips the guard");
-
-  // Contexts outside the table clamp to its ends: 100 -> 10 tok/s,
-  // 9000 -> 7 tok/s.
-  verifier.BeginRequest();
-  for (int round = 0; round < 26; ++round) {
-    verifier.RecordDecodeRound(19, 2.0, 100);
-  }
-  Expect(verifier.SpeculationDisabled(),
-         "below the clamped first-entry floor trips the guard");
-  verifier.BeginRequest();
-  for (int round = 0; round < 26; ++round) {
-    verifier.RecordDecodeRound(15, 2.0, 9000);
-  }
-  Expect(!verifier.SpeculationDisabled(),
-         "above the clamped last-entry floor does not trip the guard");
 }
 
 void TestStopTokensFollowTargetVocabulary() {
@@ -841,6 +793,110 @@ void TestSampledSpeculationMatchesTargetDistribution() {
          "lossless rejection sampling preserves the target distribution");
   Expect(drafted_count == trials,
          "positive-temperature verification continues to use drafts");
+}
+
+void TestDeviceSampledReportsMatchEmittedTokens() {
+  // The correction token's report is appended exactly once: a rejected
+  // draft's pre-call entry goes away and the common assembly reports the
+  // correction. Reports stay parallel to emitted tokens on immediate
+  // rejection, partial acceptance, and full acceptance with the bonus token.
+  superroc::sampling::SamplingConfig config;
+  config.temperature = 1.0F;
+  config.seed = 7;
+  config.logprobs = true;
+  config.logprobs_top_n = 1;
+  const std::vector<float> favor_zero = {0.0F, -INFINITY, -INFINITY};
+  const std::vector<float> favor_one = {-INFINITY, 0.0F, -INFINITY};
+  const auto sampled_proposal = [](std::vector<TokenId> tokens) {
+    superroc::speculative::DraftProposal proposal;
+    proposal.tokens = std::move(tokens);
+    proposal.candidates_per_token = 2;
+    for (std::size_t i = 0; i < proposal.tokens.size(); ++i) {
+      proposal.candidate_ids.push_back(1);
+      proposal.candidate_ids.push_back(2);
+      proposal.candidate_probabilities.push_back(1.0F);
+      proposal.candidate_probabilities.push_back(0.0F);
+    }
+    proposal.start_pos = 1;
+    return proposal;
+  };
+  const auto run = [&](std::vector<std::vector<float>> rows,
+                       superroc::speculative::DraftProposal proposal,
+                       std::uint32_t max_emitted) {
+    DeviceSampledTargetExecutor target(std::move(rows));
+    superroc::speculative::SpeculativeOptions options;
+    options.max_draft_tokens = 2;
+    options.initial_draft_tokens = 2;
+    options.enable_adaptive_draft_length = false;
+    superroc::speculative::SpeculativeVerifier verifier(
+        target, std::make_unique<FixedSampledDraftBackend>(std::move(proposal)),
+        options);
+    const std::vector<TokenId> prompt = {0};
+    const TokenId current = verifier.Prime(prompt);
+    std::vector<TokenId> sequence = {prompt.front(), current};
+    superroc::sampling::SamplerState sampler(config, sequence);
+    auto step =
+        verifier.VerifyStep(sequence, 1, current, 99, max_emitted, sampler);
+    Expect(step.emitted_target_logprobs.size() == step.emitted_tokens.size(),
+           "one logprobs report per emitted token");
+    for (std::size_t i = 0; i < step.emitted_tokens.size(); ++i) {
+      Expect(step.emitted_target_logprobs[i].token == step.emitted_tokens[i],
+             "each report names its emitted token in order");
+    }
+    return step;
+  };
+  const auto rejected = run({favor_zero, favor_zero}, sampled_proposal({1}), 2);
+  Expect(rejected.emitted_tokens == std::vector<TokenId>({0}) &&
+             rejected.accepted_count == 0,
+         "immediate device rejection emits the correction token");
+  const auto partial =
+      run({favor_one, favor_zero, favor_zero}, sampled_proposal({1, 1}), 3);
+  Expect(partial.emitted_tokens == std::vector<TokenId>({1, 0}) &&
+             partial.accepted_count == 1,
+         "partial device acceptance emits the accepted draft plus correction");
+  const auto bonus = run({favor_one, favor_one}, sampled_proposal({1}), 2);
+  Expect(bonus.emitted_tokens == std::vector<TokenId>({1, 1}) &&
+             bonus.accepted_count == 1,
+         "full device acceptance emits the draft plus the bonus token");
+  // An accepted draft that is the stop token ends the step with one report
+  // for it, taken before the token entered the sampler's history: with a
+  // presence penalty the two states give different values. A draft
+  // probability of one half makes the acceptance certain.
+  auto penalized = config;
+  penalized.presence_penalty = 1.0F;
+  const std::vector<float> tie = {0.0F, 0.0F, -INFINITY};
+  for (const bool host_rows : {false, true}) {
+    auto proposal = sampled_proposal({1, 1});
+    std::fill(proposal.candidate_probabilities.begin(),
+              proposal.candidate_probabilities.end(), 0.5F);
+    SampledTargetExecutor host(tie, true);
+    DeviceSampledTargetExecutor device({tie, tie});
+    SampledTargetExecutor& target = host_rows ? host : device;
+    superroc::speculative::SpeculativeOptions options;
+    options.max_draft_tokens = 2;
+    options.initial_draft_tokens = 2;
+    options.enable_adaptive_draft_length = false;
+    superroc::speculative::SpeculativeVerifier verifier(
+        target, std::make_unique<FixedSampledDraftBackend>(std::move(proposal)),
+        options);
+    const std::vector<TokenId> prompt = {0};
+    const TokenId current = verifier.Prime(prompt);
+    std::vector<TokenId> sequence = {prompt.front(), current};
+    superroc::sampling::SamplerState sampler(penalized, sequence);
+    superroc::sampling::SamplerState reference(penalized, sequence);
+    const auto before = reference.CaptureLogprobs(tie, 1, 1);
+    reference.Accept(1);
+    const auto after = reference.CaptureLogprobs(tie, 1, 1);
+    const auto stopped =
+        verifier.VerifyStep(sequence, 1, current, 1, 3, sampler);
+    Expect(stopped.emitted_tokens == std::vector<TokenId>({1}) &&
+               stopped.hit_eos && stopped.emitted_target_logprobs.size() == 1,
+           "an accepted stop token ends the step with one report");
+    Expect(before.logprob != after.logprob &&
+               stopped.emitted_target_logprobs.size() == 1 &&
+               stopped.emitted_target_logprobs[0].logprob == before.logprob,
+           "the stop token's report predates its acceptance");
+  }
 }
 
 void TestFilteredSampledSpeculationMatchesTargetDistribution(
@@ -1568,12 +1624,86 @@ void TestPersistentVerifierSnapshotRoundTrip() {
          "persistent verifier round trip is byte exact");
 }
 
+class SizedDraftBackend final : public superroc::speculative::IDraftBackend {
+public:
+  SizedDraftBackend(std::size_t bytes, std::optional<std::size_t> at_bytes,
+                    std::uint32_t position = 0)
+      : bytes_(bytes), at_bytes_(at_bytes), position_(position) {}
+
+  [[nodiscard]] std::string_view Name() const noexcept override {
+    return "SizedDraftBackend";
+  }
+
+  [[nodiscard]] superroc::speculative::DraftProposal Propose(
+      std::span<const TokenId>, std::uint32_t current_pos,
+      std::uint32_t) override {
+    superroc::speculative::DraftProposal proposal;
+    proposal.start_pos = current_pos;
+    return proposal;
+  }
+
+  [[nodiscard]] std::size_t SnapshotPayloadBytes() const override {
+    return bytes_;
+  }
+
+  [[nodiscard]] std::optional<std::size_t> SnapshotPayloadBytesAt(
+      std::uint32_t) const override {
+    return at_bytes_;
+  }
+
+  [[nodiscard]] std::uint32_t Position() const noexcept { return position_; }
+
+private:
+  std::size_t bytes_;
+  std::optional<std::size_t> at_bytes_;
+  std::uint32_t position_;
+};
+
+void TestSnapshotPayloadBytesAtNamesVerifierOverhead() {
+  // SpeculativeVerifier::SnapshotPayloadBytesAt returns the
+  // draft value plus the verifier's own bytes: rolling floats plus stats plus
+  // draft length. A fresh verifier holds no rolling entries, so the overhead
+  // is 32 bytes of stats and 4 bytes of draft length on this platform.
+  {
+    ScriptedTargetExecutor target({10, 11}, 900);
+    auto backend = std::make_unique<SizedDraftBackend>(7, 64);
+    superroc::speculative::SpeculativeVerifier verifier(target,
+                                                        std::move(backend));
+    const auto fresh = verifier.SnapshotPayloadBytesAt(3, true);
+    const auto reused = verifier.SnapshotPayloadBytesAt(3, false);
+    Expect(fresh.has_value() && *fresh == 100,
+           "sized draft plus verifier overhead is 64 + 32 + 4");
+    Expect(reused.has_value() && *reused == 100,
+           "fresh verifier rolling state adds no bytes");
+  }
+  {
+    ScriptedTargetExecutor target({10, 11}, 900);
+    auto backend = std::make_unique<SizedDraftBackend>(5, std::nullopt);
+    superroc::speculative::SpeculativeVerifier verifier(target,
+                                                        std::move(backend));
+    Expect(!verifier.SnapshotPayloadBytesAt(3, true).has_value(),
+           "unsized draft gives no fresh payload size");
+    Expect(!verifier.SnapshotPayloadBytesAt(3, false).has_value(),
+           "unsized draft gives no reused payload size");
+  }
+  {
+    ScriptedTargetExecutor target({10, 11}, 900);
+    auto backend = std::make_unique<SizedDraftBackend>(48, 48, 7);
+    const auto position = backend->Position();
+    superroc::speculative::SpeculativeVerifier verifier(target,
+                                                        std::move(backend));
+    const auto at = verifier.SnapshotPayloadBytesAt(position, false);
+    Expect(at.has_value() && *at == verifier.SnapshotPayloadBytes(),
+           "matching backend sizes agree at its current position");
+    Expect(*at == 84, "matching sizes are 48 + 32 + 4");
+  }
+}
+
 }  // namespace
 
 int main() {
   TestSpeculativeDraftBackendInterface();
   TestSpeculativeStats();
-  TestPlainRateGuard();
   TestStopTokensFollowTargetVocabulary();
   TestFullAcceptanceProducesTargetBonusToken();
   TestPartialRejectionRestoresAndReplaysState();
@@ -1584,6 +1714,7 @@ int main() {
   TestFirstPrefillEosIsNotEmitted();
   TestFirstTokenUsesTargetSampler();
   TestSampledSpeculationMatchesTargetDistribution();
+  TestDeviceSampledReportsMatchEmittedTokens();
   TestFilteredSampledSpeculationMatchesTargetDistribution();
   TestFilteredSampledSpeculationMatchesTargetDistribution(true);
   TestGreedyPenaltiesRetainSpeculationAndHistory();
@@ -1594,6 +1725,7 @@ int main() {
   TestConstrainedGreedyVerification();
   TestConcurrentVerificationChunks();
   TestPersistentVerifierSnapshotRoundTrip();
+  TestSnapshotPayloadBytesAtNamesVerifierOverhead();
   std::cout << "All speculative verification tests passed.\n";
   return 0;
 }

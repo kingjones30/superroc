@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/models/minimax_h3/prompt_encoder.hpp"
 #include "src/models/minimax_h3/tokenizer.hpp"
 #include "src/models/qwen/control_tokens.hpp"
@@ -190,7 +190,7 @@ void CheckSynthetic(const std::filesystem::path& directory) {
 }
 
 void CheckPinnedCheckpoint() {
-  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
   if (root == nullptr || *root == '\0') {
     std::cout << "SKIP pinned tokenizer corpus: SUPERROC_H3_MODEL_ROOT unset\n";
     return;

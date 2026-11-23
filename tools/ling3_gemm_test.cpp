@@ -1,8 +1,8 @@
-// ling3_gemm_test.cpp — LS3's unit gate for kernels/ling3_gemm.hip.
+// ling3_gemm_test.cpp — unit gate for kernels/ling3_gemm.hip.
 // Compares the tiled grouped GEMM and the batched router against the CPU
 // references (ling3_gemm_cpu / ling3_route_core) on SMALL shapes, so the first
 // full-model run never carries an untested kernel (the brief's rule after H1's
-// GPU reset). Run inside gpu-run: ./superroc_ling3_gemm_test
+// GPU reset). Run on an otherwise idle GPU: ./superroc_ling3_gemm_test
 #include <hip/hip_runtime.h>
 
 #include <cmath>

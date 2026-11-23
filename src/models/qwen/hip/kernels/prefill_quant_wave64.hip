@@ -40,7 +40,7 @@ bool TryLaunchQuantPrefillWave64(core::GgmlType type, const void* w,
       }
       launch.template operator()<core::GgmlType::kIQ4_XS>();
       return true;
-    case core::GgmlType::kQ4_0_ROCMFP4:  // lqw:wave64
+    case core::GgmlType::kQ4_0_ROCMFP4:
       launch.template operator()<core::GgmlType::kQ4_0_ROCMFP4>();
       return true;
     case core::GgmlType::kQ4_0_ROCMFP4_FAST:

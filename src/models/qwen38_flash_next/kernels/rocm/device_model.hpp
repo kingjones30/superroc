@@ -13,7 +13,7 @@
 
 namespace superroc::models::qwen38_flash_next::rocm {
 
-// LFX1B (RV53 F2/F5): the load-site gate for a Q6_K tensor reaching
+// The load-site gate for a Q6_K tensor reaching
 // copy_embedding, by role. Only an LM head consumed by Executor::Dense
 // (the trunk's output.weight or the sidecar's own output.weight) stays
 // quantized on device, and only when the GEMV can read it (K a multiple
@@ -33,6 +33,8 @@ struct DeviceTensor {
   std::uint32_t cols{0};
   std::uint32_t rows{0};
   std::uint32_t experts{1};
+  /// Rows per group after superroc_fp4_group_rows; 1 is row-major.
+  std::uint32_t row_group{1};
 
   [[nodiscard]] bool empty() const noexcept { return data == nullptr; }
   [[nodiscard]] const float* f32() const noexcept {
@@ -91,18 +93,25 @@ public:
   const Config& config() const noexcept { return config_; }
   const DeviceTensor& token_embd() const noexcept { return token_embd_; }
   const DeviceTensor& output() const noexcept { return output_; }
-  /// The leading output() rows the MTP draft head scores in place (see
+  /// The leading draft_head() rows the MTP draft head scores in place (see
   /// draft_vocab.hpp); empty when the draft projects the full vocabulary.
   const DeviceTensor& draft_output() const noexcept { return draft_output_; }
+  /// The head every draft read projects through: the MTP file's own
+  /// output.weight when it carries one, else the trunk head. Verify and
+  /// prefill logits always read output().
+  const DeviceTensor& draft_head() const noexcept {
+    return mtp_output_.empty() ? output_ : mtp_output_;
+  }
   /// Special tokens above the prefix: the first rows of each session's
   /// draft table.
   std::span<const std::int32_t> draft_specials() const noexcept {
     return draft_specials_;
   }
-  /// Bytes of one output() row.
-  std::size_t output_row_bytes() const noexcept {
-    return output_.rows == 0 ? 0 : output_bytes_ / output_.rows;
-  }
+  /// Bytes of one output() row on the device (F32 after a host expand).
+  std::size_t output_row_bytes() const noexcept { return output_row_bytes_; }
+  /// Bytes of one draft_head() row on the device. Rows of a session's draft
+  /// table are copies of draft_head() rows, so they use this size.
+  std::size_t draft_row_bytes() const noexcept { return draft_row_bytes_; }
   /// Drafts score output() rows [0, prefix_rows) in place plus a
   /// per-session table that starts with `specials`. Draft proposals only
   /// steer speculation: the target still verifies every token, so greedy
@@ -137,8 +146,9 @@ private:
   Config config_;
   DeviceTensor token_embd_;
   DeviceTensor output_;
-  std::size_t output_bytes_{0};
+  std::size_t output_row_bytes_{0};
   DeviceTensor draft_output_;
+  std::size_t draft_row_bytes_{0};
   std::vector<std::int32_t> draft_specials_;
   DeviceMixer hc_head_;
   std::vector<DeviceLayer> layers_;

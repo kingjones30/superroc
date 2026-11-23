@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "src/cli/serve/environment.hpp"
 #include "src/cli/serve/generation_metrics.hpp"
 #include "src/cli/serve/text_generation_backend.hpp"
 
@@ -84,6 +85,12 @@ struct HttpResponse {
   /// bounded time, so failures before that return a real 5xx while
   /// keepalives still cover prefill and queue waits.
   bool defer_stream_headers{false};
+  /// Keepalive the transport heartbeat writes while an event stream is idle.
+  /// Empty selects an SSE comment; a handler whose dialect has a harmless
+  /// no-op data chunk sets that chunk instead, because some proxies drop
+  /// comment lines and their clients then see a silent stream during a long
+  /// prefill.
+  std::string sse_heartbeat_payload;
 };
 
 using Handler =
@@ -93,7 +100,10 @@ struct HttpServerOptions {
   std::size_t max_request_body_bytes{static_cast<std::size_t>(8) * 1024 * 1024};
   std::size_t max_connections{16};
   std::string api_key;
-  // audit F03 F08: bound slowloris and huge-header resource use.
+  /// Origin allowed by the CORS response headers. Empty (the default) sends
+  /// no CORS headers at all.
+  std::string cors_origin;
+  // Bound slowloris and huge-header resource use.
   std::chrono::seconds header_deadline{30};
   std::size_t body_min_bytes_per_second{65536};
   std::size_t max_header_bytes{65536};
@@ -198,6 +208,15 @@ private:
   std::atomic<bool> stopped_{false};
   std::thread thread_;
 };
+
+/// Reads the live box for GET /props "environment" (sysfs KFD topology,
+/// uname, HIP runtime, environment). Never throws. serve.cpp calls it once
+/// at startup for the CWSR warning; the /props handler caches its own copy.
+ServerEnvironment CollectServerEnvironment() noexcept;
+
+/// Request fields the Completions endpoint accepts, mirroring its parser.
+/// The /props support list and the parser-acceptance test share it.
+std::vector<std::string_view> CompletionsAcceptedFields();
 
 /// Scheduled requests are recorded by the scheduler when they finish. Other
 /// backends contribute here, at completion.

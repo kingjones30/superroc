@@ -20,7 +20,7 @@ MiMo-V2.6-Distill-Qwen-9B is a 9B dense Qwen3.5 model. These files are ROCmFP4 S
 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/MiMo-V2.6-Distill-Qwen-9B-Q4_0-ROCmFP4-STRIX_LEAN.gguf --served-model-name mimo-v2.6-9b --context 32768 --think off
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 
@@ -39,5 +39,5 @@ Perplexity 8.2378 ± 0.079 on wikitext-2 (40 chunks, 4096 context), against 8.49
 ## Notes
 
 - The checkpoint declares one MTP layer but ships no MTP weights, so no speculative mode helps; serve without a drafter.
-- On Super ROC the model serves text only; the width-4096 vision projector is refused.
+- On Super Roc the model serves text only; the width-4096 vision projector is refused.
 - The STRIX_LEAN tier keeps the output head at Q6_K; the FAST tier without that protection is faster but measures worse on perplexity.

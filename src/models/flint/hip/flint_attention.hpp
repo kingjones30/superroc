@@ -3,6 +3,8 @@
 #define SUPERROC_MODELS_FLINT_HIP_FLINT_ATTENTION_HPP_
 
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
@@ -13,6 +15,16 @@ struct FlintLaunchStatus {
   bool ok{false};
   const char* error{nullptr};
 };
+
+// FLINT_SPLITK=0 declines the split-K decode attention; unset and every
+// other value take it.
+inline bool FlintSplitKEnabled() {
+  static const bool enabled = [] {
+    const char* env = std::getenv("FLINT_SPLITK");
+    return env == nullptr || std::strcmp(env, "0") != 0;
+  }();
+  return enabled;
+}
 
 // Flint: split-K flash-decoding attention over the windowed range
 // [begin, *d_pos+1). Sinks enter the combine once (not per split).

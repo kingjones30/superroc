@@ -260,6 +260,82 @@ void TestRejectedSchemas() {
   }
 }
 
+void TestConjoinExpansionBudget() {
+  // SEC-B-001: 9 levels of 10-way anyOf $refs would materialize ~10^9
+  // nodes in Conjoin; the call budget must reject it fast instead.
+  std::string defs = "\"d0\":{\"type\":\"string\"}";
+  for (int level = 1; level <= 9; ++level) {
+    defs += ",\"d" + std::to_string(level) + "\":{\"anyOf\":[";
+    for (int branch = 0; branch < 10; ++branch) {
+      if (branch)
+        defs += ",";
+      defs += "{\"$ref\":\"#/$defs/d" + std::to_string(level - 1) + "\"}";
+    }
+    defs += "]}";
+  }
+  const auto schema = parse(
+      "{\"type\":\"object\",\"properties\":{\"x\":"
+      "{\"$ref\":\"#/$defs/d9\",\"type\":\"string\"}},"
+      "\"required\":[\"x\"],\"additionalProperties\":false,"
+      "\"$defs\":{" +
+      defs + "}}");
+  const auto start = std::chrono::steady_clock::now();
+  bool rejected = false;
+  std::string message;
+  try {
+    (void)JsonConstraint::Compile(schema, true);
+  } catch (const std::invalid_argument& error) {
+    rejected = true;
+    message = error.what();
+  }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  assert(rejected);
+  assert(message.find("schema expansion exceeds its resource budget") !=
+         std::string::npos);
+  assert(elapsed < std::chrono::seconds(2));
+}
+
+void TestConjoinWideObjectBudget() {
+  // SR-01: a $ref to one wide closed object with another wide closed object
+  // as its siblings costs width x width comparisons in a single Conjoin; the
+  // work budget must reject it fast.
+  auto wide = [](char prefix) {
+    std::string properties;
+    std::string required;
+    for (int i = 0; i < 2400; ++i) {
+      const std::string name = std::string(1, prefix) + std::to_string(i);
+      if (i) {
+        properties += ",";
+        required += ",";
+      }
+      properties += "\"" + name + "\":{\"type\":\"string\"}";
+      required += "\"" + name + "\"";
+    }
+    return "\"type\":\"object\",\"additionalProperties\":false,"
+           "\"properties\":{" +
+           properties + "},\"required\":[" + required + "]";
+  };
+  const auto schema = parse(
+      "{\"type\":\"object\",\"additionalProperties\":false,"
+      "\"required\":[\"x\"],"
+      "\"properties\":{\"x\":{\"$ref\":\"#/$defs/A\"," +
+      wide('b') + "}},\"$defs\":{\"A\":{" + wide('a') + "}}}");
+  const auto start = std::chrono::steady_clock::now();
+  bool rejected = false;
+  std::string message;
+  try {
+    (void)JsonConstraint::Compile(schema, true);
+  } catch (const std::invalid_argument& error) {
+    rejected = true;
+    message = error.what();
+  }
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  assert(rejected);
+  assert(message.find("schema expansion exceeds its resource budget") !=
+         std::string::npos);
+  assert(elapsed < std::chrono::seconds(2));
+}
+
 void TestSchemaIntersections() {
   const auto grammar = JsonConstraint::Compile(parse(R"({
     "type":"object","properties":{
@@ -1247,6 +1323,10 @@ void TestNativeTools() {
                                                    true, false, format);
     const auto call = wrap(" <think>literal</think> \"42\" \\\nπ🦉\n ", 3);
     assert(Accepts(*grammar, call));
+    // A required call may be preceded by at most 8 whitespace bytes.
+    assert(Accepts(*grammar, "\n" + call));
+    assert(Accepts(*grammar, std::string(8, ' ') + call));
+    assert(!Accepts(*grammar, std::string(9, ' ') + call));
     assert(Accepts(*grammar, wrap("</tool_call><tool_call>", 3, true)));
     assert(!Accepts(*grammar, wrap("", 3)));
     assert(!Accepts(*grammar, wrap("value", 6)));
@@ -1435,6 +1515,12 @@ void TestFlintTools() {
   assert(Accepts(*required,
                  " \n<tool_call>read<arg_key>path</arg_key>"
                  "<arg_value>/work/a.py</arg_value></tool_call>"));
+  // At most 8 whitespace bytes may precede a required call: an unbounded run
+  // let a model that closed its own thinking emit whitespace until
+  // max_tokens.
+  assert(Accepts(*required, "\n" + cmd_call));
+  assert(Accepts(*required, std::string(8, ' ') + cmd_call));
+  assert(!Accepts(*required, std::string(9, ' ') + cmd_call));
   // (c) Flint may open its own reasoning block, and a mentioned tag in
   // backticks is prose, not the call.
   const auto thinking = JsonConstraint::WithOptionalReasoning(automatic);
@@ -2389,6 +2475,8 @@ int main(int argc, char** argv) {
   TestSchemaIntersections();
   TestMixedEnumValues();
   TestRejectedSchemas();
+  TestConjoinExpansionBudget();
+  TestConjoinWideObjectBudget();
   TestOpenResponseObjects();
   TestIntegerBoundsAndRecursion();
   TestPrimitiveConstraints();
@@ -2413,7 +2501,7 @@ int main(int argc, char** argv) {
 }
 
 void TestLfm2RequiredCall() {
-  // LFM2 (Super ROC): "[" first, offered names, declared keys, typed Python
+  // LFM2 (Super Roc): "[" first, offered names, declared keys, typed Python
   // literals, "]<|tool_call_end|>" last.
   const std::vector<JsonConstraint::Lfm2Tool> tools = {
       {"get_weather",

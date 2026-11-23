@@ -7,11 +7,13 @@
 #include <stdexcept>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/kernels/q4_0_gemv.hpp"
 #include "src/models/qwen/hip/mtp.hpp"
+#include "src/models/qwen/hip/mtp/detail/allocation.hpp"
 #include "src/models/qwen/hip/mtp/kat_moe_ffn.hpp"
+#include "src/models/qwen/hip/mtp/prime_route.hpp"
 #include "src/models/qwen/hip/ops/attention.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
@@ -38,6 +40,33 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
       static_cast<std::size_t>(start_pos) + batch > max_context_) {
     throw std::out_of_range("MTP batched prime positions are not sequential");
   }
+  if (batch > kPrimeBatchRows) {
+    throw std::out_of_range("MTP batched prime chunk exceeds the scratch");
+  }
+  const std::size_t hidden_size = model_->GetConfig().hidden_size;
+  try {
+    for (std::size_t done = 0; done < batch;) {
+      const std::size_t count = std::min(kPrimeScratchRows, batch - done);
+      ForwardTargetChunk(
+          tokens.subspan(done, count),
+          hidden_rows.subspan(done * hidden_size, count * hidden_size),
+          start_pos + static_cast<std::uint32_t>(done));
+      done += count;
+    }
+  } catch (...) {
+    // All or nothing: the callers fall back to the serial prime from
+    // start_pos, so no chunk may stay counted.
+    if (next_position_ > start_pos) {
+      Rewind(start_pos);
+    }
+    throw;
+  }
+}
+
+void QwenMtpGpuExecutor::ForwardTargetChunk(
+    std::span<const tokenization::TokenId> tokens,
+    std::span<const float> hidden_rows, std::uint32_t start_pos) {
+  const std::size_t batch = tokens.size();
   const auto& weights = model_->GetWeights();
   const auto& config = weights.config;
   const auto& layer = weights.layer;
@@ -48,16 +77,17 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
   const std::size_t total_kv =
       static_cast<std::size_t>(config.num_key_value_heads) * max_context_ *
       config.head_dim;
-  if (batch > kPrimeBatchRows) {
-    throw std::out_of_range("MTP batched prime chunk exceeds the scratch");
-  }
-  // KAT-MTP F1 (RV44): the full-block prime below runs the dense FFN GEMMs.
+  // M2: d_kv_cache_ is null, so the F32 writes are null too (the kernels
+  // null-check each plane); d_kv_cache_ + total_kv must NOT be formed.
+  float* const kv_f32_k = KvSinglePlane() ? nullptr : d_kv_cache_;
+  float* const kv_f32_v = KvSinglePlane() ? nullptr : d_kv_cache_ + total_kv;
+  // KAT-MTP F1: the full-block prime below runs the dense FFN GEMMs.
   // On a MoE block those weights are empty, so it would launch a null-weight
-  // GEMM and fault the GPU with King's seats resident. Refuse before any
+  // GEMM and fault the GPU with seats resident. Refuse before any
   // device work. The caller (PrimeTargetContext) catches this and falls back
   // to the serial prime, which runs the real MoE FFN.
   if (layer.is_moe &&
-      ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_FULL") != nullptr) {
+      ::superroc::core::GetEnv("SUPERROC_MTP_PRIME_FULL") != nullptr) {
     static bool announced_full_moe = false;
     if (!announced_full_moe) {
       announced_full_moe = true;
@@ -116,12 +146,12 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
   LaunchBatchedRMSNorm(d_b_hidden_,
                        static_cast<const float*>(layer.attn_norm.data),
                        d_b_normed_, nullptr, batch, hidden, 1.0e-6F, stream_);
-  // SPEC4 item 2. Priming only fills the draft KV. K and V are projections of
+  // Priming only fills the draft KV. K and V are projections of
   // this fused hidden, taken before attention, so Q, attention, the output
   // projection, and the FFN do not change the cache. Decode runs the full
   // block itself. SUPERROC_MTP_PRIME_FULL=1 keeps the old full block.
   const bool full_block =
-      ::superroc::core::GetEnvCompat("SUPERROC_MTP_PRIME_FULL") != nullptr;
+      ::superroc::core::GetEnv("SUPERROC_MTP_PRIME_FULL") != nullptr;
   static bool announced = false;
   if (!announced) {
     announced = true;
@@ -152,7 +182,7 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
                       nullptr);
     if (detail::IsTiledAttentionSupported(tiled)) {
       const bool packed = LaunchPackTiledAttentionKv(
-          d_b_k_, d_b_v_, d_kv_cache_, d_kv_cache_ + total_kv, d_kv_cache_f16_,
+          d_b_k_, d_b_v_, kv_f32_k, kv_f32_v, d_kv_cache_f16_,
           static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv,
           /*layer_idx=*/0, start_pos, batch, max_context_,
           config.num_attention_heads, config.num_key_value_heads,
@@ -169,20 +199,22 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
         std::fprintf(stderr, "mtp-prime path=kv-general\n");
       }
       LaunchKatMtpWriteKv(
-          d_b_k_, d_b_v_, d_kv_cache_, d_kv_cache_ + total_kv, d_kv_cache_f16_,
+          d_b_k_, d_b_v_, kv_f32_k, kv_f32_v, d_kv_cache_f16_,
           static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv, start_pos,
           batch, max_context_, config.num_key_value_heads, config.head_dim,
           stream_);
     }
     f16_prefix_packed_ = start_pos + static_cast<std::uint32_t>(batch);
     next_position_ += static_cast<std::uint32_t>(batch);
-    // SQ10 SPEC3 (S3-1): terminal drain (the :100 sync is ingress only).
+    // Terminal drain (the :100 sync is ingress only).
     // Every drafter entry that queues a launch drains before returning.
     if (hipStreamSynchronize(stream_) != hipSuccess) {
       throw std::runtime_error("MTP batched prime completion failed");
     }
+    MaybeFreeQ4Scratch();
     return;
   }
+  EnsureFullPrimeScratch();
   LaunchBatchedPerHeadRMSNorm(
       d_b_k_, static_cast<const float*>(layer.attn_k_norm.data), d_b_k_, batch,
       config.num_key_value_heads, config.head_dim, 1.0e-6F, stream_);
@@ -198,11 +230,10 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
                     config.rotary_dim, start_pos, config.rope_theta, stream_,
                     nullptr);
   const bool tiled = LaunchBatchedAttentionTile(
-      d_b_q_, d_b_k_, d_b_v_, d_b_gate_, d_kv_cache_, d_kv_cache_ + total_kv,
-      d_kv_cache_f16_, static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv,
-      d_b_context_, 0, start_pos, batch, max_context_,
-      config.num_attention_heads, config.num_key_value_heads, config.head_dim,
-      stream_);
+      d_b_q_, d_b_k_, d_b_v_, d_b_gate_, kv_f32_k, kv_f32_v, d_kv_cache_f16_,
+      static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv, d_b_context_, 0,
+      start_pos, batch, max_context_, config.num_attention_heads,
+      config.num_key_value_heads, config.head_dim, stream_);
   if (!tiled) {
     throw std::runtime_error("MTP batched prime attention shape unsupported");
   }
@@ -228,9 +259,33 @@ void QwenMtpGpuExecutor::ForwardTargetBatch(
 
   f16_prefix_packed_ = start_pos + static_cast<std::uint32_t>(batch);
   next_position_ += static_cast<std::uint32_t>(batch);
-  // SQ10 SPEC3 (S3-1): terminal drain, as on the kv-only return above.
+  // Terminal drain, as on the kv-only return above.
   if (hipStreamSynchronize(stream_) != hipSuccess) {
     throw std::runtime_error("MTP batched prime completion failed");
+  }
+  MaybeFreeQ4Scratch();
+}
+
+void QwenMtpGpuExecutor::MaybeFreeQ4Scratch() {
+  // M5: SUPERROC_MTP_LEAN=1 implies the free (memory-tight seats).
+  static const bool free_q4 = [] {
+    const char* e = ::superroc::core::GetEnv("SUPERROC_MTP_PRIME_FREE_Q4");
+    const char* l = ::superroc::core::GetEnv("SUPERROC_MTP_LEAN");
+    return (e != nullptr && e[0] == '1') || (l != nullptr && l[0] == '1');
+  }();
+  if (free_q4 && d_q4_bf16_ != nullptr) {
+    // Both ForwardTargetChunk exits drain the stream before returning, so no
+    // queued launch reads the image. The next prime regrows it on demand.
+    static bool announced = false;
+    if (!announced) {
+      announced = true;
+      std::fprintf(stderr,
+                   "MTP prime: freeing Q4_0 scratch after each chunk "
+                   "(SUPERROC_MTP_PRIME_FREE_Q4/LEAN)\n");
+    }
+    (void)hipFree(d_q4_bf16_);
+    d_q4_bf16_ = nullptr;
+    q4_bf16_elems_ = 0;
   }
 }
 
@@ -239,7 +294,26 @@ void QwenMtpGpuExecutor::RunPrimeGemm(const void* weight, core::GgmlType type,
                                       std::size_t batch, std::size_t rows_out,
                                       std::size_t cols_in, hipStream_t stream) {
   (void)stream;
-  if (type == core::GgmlType::kQ8_0 || type == core::GgmlType::kQ8_K) {
+  if (type == core::GgmlType::kQ8_0 || type == core::GgmlType::kQ8_K ||
+      type == core::GgmlType::kQ4_0_ROCMFP4 ||
+      type == core::GgmlType::kQ4_0_ROCMFP4_FAST) {
+    // A prompt chunk reads the weight once per row tile through the target's
+    // prefill route. The rows only fill the draft KV, so quantized activations
+    // cost no output text. SUPERROC_MTP_PRIME_TILED=0 keeps the eight-row loop.
+    static const bool tiled_on = [] {
+      const char* e = ::superroc::core::GetEnv("SUPERROC_MTP_PRIME_TILED");
+      return e == nullptr || e[0] != '0';
+    }();
+    if (tiled_on && MtpPrimeTiledShapeOk(type, batch, rows_out, cols_in) &&
+        d_b_bf16_ != nullptr &&
+        QuantizedActivationBytes(batch, cols_in) <=
+            b_bf16_elems_ * sizeof(*d_b_bf16_)) {
+      LaunchQuantizeActivationQ8_1FromFp32(input, d_b_bf16_, batch, cols_in,
+                                           stream_);
+      LaunchBatchedQuantGEMMPreQuantized(type, weight, d_b_bf16_, output, batch,
+                                         rows_out, cols_in, stream_);
+      return;
+    }
     // KAT-MTP: the small-batch Q8 kernel is general for 1..8 rows. Wider
     // prime chunks share a weight read eight rows at a time.
     std::size_t done = 0;
@@ -255,8 +329,18 @@ void QwenMtpGpuExecutor::RunPrimeGemm(const void* weight, core::GgmlType type,
   const void* bf16_weight = weight;
   if (type == core::GgmlType::kQ4_0) {
     const std::size_t elements = rows_out * cols_in;
-    if (d_q4_bf16_ == nullptr || elements > q4_bf16_elems_) {
-      throw std::runtime_error("MTP prime Q4_0 weight scratch is too small");
+    if (elements > q4_bf16_elems_) {
+      // Queued launches may still read the old image.
+      if (hipStreamSynchronize(stream_) != hipSuccess) {
+        throw std::runtime_error("MTP prime Q4_0 weight scratch sync failed");
+      }
+      auto* grown = static_cast<std::uint16_t*>(
+          detail::AllocateDevice(elements * sizeof(std::uint16_t)));
+      if (d_q4_bf16_ != nullptr) {
+        (void)hipFree(d_q4_bf16_);
+      }
+      d_q4_bf16_ = grown;
+      q4_bf16_elems_ = elements;
     }
     LaunchDequantQ4_0ToBf16(weight, d_q4_bf16_, elements, stream_);
     bf16_weight = d_q4_bf16_;
@@ -273,6 +357,13 @@ void QwenMtpGpuExecutor::RunPrimeGemm(const void* weight, core::GgmlType type,
 }
 
 std::vector<float> QwenMtpGpuExecutor::CopyKvCacheF32() {
+  // M2/M5: the F32 plane does not exist by default; the kv-dump debug path
+  // needs it.
+  if (d_kv_cache_ == nullptr) {
+    throw std::runtime_error(
+        "MTP KV F32 export is unavailable with the single F16 plane "
+        "(SUPERROC_MTP_KV_ONE=0 restores it)");
+  }
   const auto& config = model_->GetConfig();
   const std::size_t total_kv =
       static_cast<std::size_t>(config.num_key_value_heads) * max_context_ *

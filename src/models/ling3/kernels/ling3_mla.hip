@@ -1,5 +1,5 @@
-// ling3_mla.hip — gated-MLA kernels for Ling-3.0 (bailingmoe3), lane LK phase 2.
-// Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with LG's drafts.
+// ling3_mla.hip — gated-MLA kernels for Ling-3.0 (bailingmoe3).
+// MiMo — Ling-on-superroc build. Do not confuse with the other drafts.
 //
 // The fork's absorbed form (bailingmoe3.cpp gated-MLA branch, build_attn_mha with v_mla).
 // Arithmetic:
@@ -12,7 +12,7 @@
 
 #include "ling3_mla.hpp"
 
-// LC1 SPEC4: LING3_TAIL_PAD (the activation-buffer tail contract) for the wo
+// LING3_TAIL_PAD (the activation-buffer tail contract) for the wo
 // Q8_1 pair this module owns.
 #include "ling3_quant.hpp"
 
@@ -75,7 +75,7 @@ __device__ __forceinline__ float block_reduce_sum(float v, float * smem) {
 
 
 // ---------------------------------------------------------------------------
-// LC1 SPEC4: the decode-fusion knob and the wo Q8_1 handoff buffers.
+// The decode-fusion knob and the wo Q8_1 handoff buffers.
 //
 // LING3_MLA_DECODE_FUSED (default 1) is read ONCE, at first use. When it is on,
 // the MLA decode path runs M1's single pre-attention kernel and the Q2-MLA
@@ -132,14 +132,14 @@ void mla_fusion_stats_reset() { g_mla_pre_fused_launches = 0; g_mla_wo_q8_epilog
 
 // ---------------------------------------------------------------------------
 // RoPE, GGML_ROPE_TYPE_NORM. One thread per (pair, head, token*sequence) item,
-//   256 items per block over a flat index (LW1 PHASE2: the original launched one
+//   256 items per block over a flat index (the original launched one
 //   thread per BLOCK -- 524,288 blocks for a 512-token chunk's q-rope -- and the
 //   block launch rate, not the math, was the cost).
 //   x points at the rope section's first element; s_head / s_tok / s_seq are element strides.
 //   (x[2i], x[2i+1]) rotated by pos*theta^(-2i/rot) -- NORM pairs consecutive
 //   elements; (x[i], x[i+half]) would be NEOX.
 // ---------------------------------------------------------------------------
-// LVV: M-RoPE sections [8, 12, 12, 0] over the 32 NORM pairs. A null table
+// M-RoPE sections [8, 12, 12, 0] over the 32 NORM pairs. A null table
 // returns the original (float) pos[t] * freq expression, so a text token is
 // unchanged. Channel 0 is temporal, 1 is height, 2 is width. The pointer is a
 // kernel argument so a text launch passes null and never reads the table.
@@ -166,7 +166,7 @@ static __global__ __launch_bounds__(256) void rope_kernel(
     float theta, int rot, int n_tokens, int n_head, int n_seqs,
     int64_t s_head, int64_t s_tok, int64_t s_seq,
     const int * __restrict__ mrope) {
-    // LW1 PHASE2: flat index w -> (pair, head, token, seq) is a bijection, so
+    // Flat index w -> (pair, head, token, seq) is a bijection, so
     // each thread owns exactly one item and its two elements (base[2i],
     // base[2i+1]); the in-place rotation below stays race-free and every
     // element's arithmetic is IDENTICAL to the original, statement for
@@ -239,7 +239,7 @@ static __global__ __launch_bounds__(256) void cache_append_kernel(
     int64_t a_tok, int64_t a_seq,
     int64_t s_pos, int64_t s_seq,
     int n_seqs, int n_pos, const int * pos_d) {
-    // LW1 PHASE2: one block per (token, sequence), threads over the cache
+    // One block per (token, sequence), threads over the cache
     // columns. The original mapped blocks to columns and threads to tokens, so
     // every warp touched 32 different cache rows one 4-byte element each (stride
     // s_pos). This layout is coalesced on both sides and moves each element
@@ -247,7 +247,7 @@ static __global__ __launch_bounds__(256) void cache_append_kernel(
     const int t = blockIdx.x;                 // token, 0..n_tokens-1
     const int s = blockIdx.y;                 // sequence
     if (t >= n_tokens) return;
-    // LS2 PHASE12: n_pos is per-token and a captured graph freezes kernel arguments, so it
+    // n_pos is per-token and a captured graph freezes kernel arguments, so it
     // cannot arrive by value. n_pos == pos + 1 and pos is already device memory here, so
     // read the same pointer instead of adding a second one. On the plain path
     // pos_d[0] == st->pos == n_pos - 1 exactly (Step uploads it at the top of the call), so
@@ -264,7 +264,7 @@ static __global__ __launch_bounds__(256) void cache_append_kernel(
 }
 
 // ---------------------------------------------------------------------------
-// LC1 SPEC4 item 1 (M1): rope(q) + rope(kv) + latent_norm + cache_append in ONE
+// rope(q) + rope(kv) + latent_norm + cache_append in ONE
 // decode kernel, replacing four launches with one (-3 per MLA layer, -21 per
 // token). Both MLA arms call the same four stages -- serial `mla_block` and
 // split-K `mla_block_splitk` -- and MTP verify walks `mla_block_splitk` per row,
@@ -361,7 +361,7 @@ static __global__ __launch_bounds__(256) void mla_pre_fused_kernel(
     __syncthreads();
 
     // --- 4. append to the cache (cache_append_kernel, verbatim) ------------
-    // LS2 PHASE12: n_pos is per-token and a captured graph freezes kernel arguments, so it
+    // n_pos is per-token and a captured graph freezes kernel arguments, so it
     // cannot arrive by value. n_pos == pos + 1 and pos is already device memory here, so
     // read the same pointer instead of adding a second one. On the plain path
     // pos_d[0] == st->pos == n_pos - 1 exactly (Step uploads it at the top of the call), so
@@ -378,9 +378,9 @@ static __global__ __launch_bounds__(256) void mla_pre_fused_kernel(
 }
 
 // ---------------------------------------------------------------------------
-// LC1 SPEC4 item 2 (Q2-MLA): the wo Q8_1 quantisation as an attention epilogue.
+// The wo Q8_1 quantisation as an attention epilogue.
 //
-// k_q8_1_quant's recipe, statement for statement (LA1's one-warp-per-group
+// k_q8_1_quant's recipe, statement for statement (one-warp-per-group
 // form): a 32-value group is owned by one WARP, lane l holding element l; the
 // scale is the signed value at the LOWEST index attaining the max |x| (the
 // `(oa, oi)` butterfly resolves the tie to the same lowest index a serial scan
@@ -444,7 +444,7 @@ __device__ __forceinline__ void mla_wo_q8_epilogue(float * __restrict__ orow,
 //   latent_o = sum_p w[p] * cache[p][0:kv]
 //   out[r]   = sigmoid(gate) * sum_j wv_b[(h*head_v + r)*kv + j] * latent_o[j]
 //
-// LC1 SPEC4: wo_qs / wo_ds are the Q2-MLA epilogue's destination (see
+// wo_qs / wo_ds are the Q2-MLA epilogue's destination (see
 // mla_q8_1_group_warp); nullptr keeps the pre-Q2 kernel exactly.
 // ---------------------------------------------------------------------------
 static __global__ void attn_kernel(const float * __restrict__ q,
@@ -474,7 +474,7 @@ static __global__ void attn_kernel(const float * __restrict__ q,
     const float * qrow0 = q + (int64_t) h * head_k;                 // token 0 of this head
     float *       orow0 = out + (int64_t) h * head_v;
     const float * crow0 = cache + (int64_t) s * s_seq;
-    // LS2 PHASE12: see cache_append_kernel. One device pointer, not two.
+    // See cache_append_kernel. One device pointer, not two.
     const int npos = pos_d ? pos_d[0] + 1 : n_pos;
 
     float *       srow  = scores + ((int64_t) s * n_head + h) * npos;
@@ -565,7 +565,7 @@ static __global__ void attn_kernel(const float * __restrict__ q,
         __syncthreads();
     }
 
-    // LC1 SPEC4 Q2-MLA: quantise the wo activation here instead of paying a
+    // Quantise the wo activation here instead of paying a
     // separate k_q8_1_quant launch (-1 per MLA layer, -7 per token). Decode
     // only (one token, one sequence -- n_seqs is the grid's y, so one sequence
     // means gridDim.y == 1): prefill and any multi-token call leave wo_qs null
@@ -621,7 +621,7 @@ void mla_cache_append(const MlaShape & sh, const MlaCache & cache,
 }
 
 // ---------------------------------------------------------------------------
-// LC1 SPEC4 M1: the four stages above in one launch. Same arguments the four
+// The four stages above in one launch. Same arguments the four
 // launchers take, collected -- including both `n_pos` and `pos_d`, because
 // cache_append_kernel derives `npos` from whichever the CALL SITE used and the
 // two block entries differ there (split-K passes no pos_d, the serial arm does).
@@ -664,7 +664,7 @@ size_t mla_block_scratch_bytes(const MlaShape & sh, int n_seqs, int n_pos) {
 }
 
 // ---------------------------------------------------------------------------
-// LS3 2026-10-01: token-parallel attention for batched prefill.
+// Token-parallel attention for batched prefill.
 // attn_kernel above runs one block per (head, sequence) and loops tokens
 // serially inside -- 32 blocks for the whole chunk. This variant runs one
 // WARP per (head, token): a block covers LS3_MLA_WPB tokens of one head
@@ -969,7 +969,7 @@ void mla_block_scratch(const MlaShape & sh, const MlaScalars & sc, const MlaWeig
 }
 
 // ---------------------------------------------------------------------------
-// SPEC6: row-transposed weight copies for the decode path.
+// Row-transposed weight copies for the decode path.
 // dst[h][i][r] = src[h][r][i]; one thread per (h, r) column. Values are
 // copied, never recomputed, so the bits are exactly the source's.
 // ---------------------------------------------------------------------------
@@ -996,7 +996,7 @@ void mla_weights_transpose(const float * src, float * dst, int n_head,
 }
 
 // ---------------------------------------------------------------------------
-// LS3 PHASE4: split-K ("flash decoding") attention for the decode step.
+// Split-K ("flash decoding") attention for the decode step.
 //
 // attn_kernel runs one block per head -- 32 blocks for the whole model --
 // and walks the cache serially, so decode throughput falls as the context
@@ -1019,7 +1019,7 @@ static __global__ __launch_bounds__(256) void attn_sk_prep_kernel(
         const float * __restrict__ wk_bT,
         float * __restrict__ q_abs_out,
         int head_k, int nope, int kv) {
-    // SPEC6: blockIdx.x is a row group, blockIdx.y the head, so one thread
+    // blockIdx.x is a row group, blockIdx.y the head, so one thread
     // owns exactly one of the kv rows (no idle lanes, 2 groups of 256 at
     // kv = 512 instead of 32 blocks x 2 rows each).
     const int h = blockIdx.y;
@@ -1140,7 +1140,7 @@ static __global__ __launch_bounds__(256) void attn_sk_partial_kernel(
 }
 
 // ---------------------------------------------------------------------------
-// LS3 PHASE5: HEAD-SHARED partial. attn_sk_partial_kernel above runs one
+// HEAD-SHARED partial. attn_sk_partial_kernel above runs one
 // workgroup per (head, slice), so every cache slice is read n_head times per
 // token; at 56K that traffic is ~76 ms of a ~108 ms token. This variant runs
 // one workgroup per (group of 8 heads, slice): the group's absorbed q rows
@@ -1298,7 +1298,7 @@ static __global__ __launch_bounds__(256) void attn_sk_partial_hs_kernel(
 }
 
 // ---------------------------------------------------------------------------
-// LS3 PHASE6: REGISTER-FUSED head-shared partial. The P5 LDS-tile version
+// REGISTER-FUSED head-shared partial. The P5 LDS-tile version
 // measured 57.4 ms of an 81.8 ms 56K token (70 %) at 15.8 GB/s -- 6.5 % of
 // the 242 GB/s roof, and the SAME ~15.5 GB/s at 13.8K, i.e. a fixed
 // structural cost, not bandwidth: the 38 KB of LDS (q rows + 8-position
@@ -1362,7 +1362,7 @@ static __global__ __launch_bounds__(256) void attn_sk_partial_rf_kernel(
     }
 
     const float * crow = cache;                     // decode: n_seqs == 1
-    // LVL SPEC2 item 2: the score dot below is a 72-long serial fp32 chain per
+    // The score dot below is a 72-long serial fp32 chain per
     // position and the loop is runtime-bounded, so the warp stalls on every
     // position's latency. Unrolling by 2 lets two positions' chains be in
     // flight together. Nothing is reordered: each position's score reduction
@@ -1370,7 +1370,7 @@ static __global__ __launch_bounds__(256) void attn_sk_partial_rf_kernel(
 #pragma unroll 2
     for (int p = 0; p < p_cnt; ++p) {
         const float * cp = crow + (int64_t) (p0 + p) * s_pos;
-        // partial score over this lane's 72 elements
+        // partial score over this thread's 72 elements
         float a = 0.0f;
 #pragma unroll
         for (int j = 0; j < EI; ++j) {
@@ -1414,7 +1414,7 @@ static __global__ __launch_bounds__(256) void attn_sk_partial_rf_kernel(
     }
 }
 
-// PHASE7: the m-row variant of the register-fused partial. Identical body
+// The m-row variant of the register-fused partial. Identical body
 // to attn_sk_partial_rf_kernel with (a) row = blockIdx.y selecting the query
 // row (q offset by row * q_tok; gate row likewise in the reduce), and
 // (b) a per-row causal limit: row j sees global positions < n_pos - m + j + 1.
@@ -1499,7 +1499,7 @@ static __global__ __launch_bounds__(256) void attn_sk_partial_rf_m_kernel(
     }
 }
 
-// PHASE7: the reduce with a row axis (grid n_head x m); combines [row][h][*]
+// The reduce with a row axis (grid n_head x m); combines [row][h][*]
 // in fixed ascending slice order and writes out row `row`.
 static __global__ __launch_bounds__(256) void attn_sk_reduce_m_kernel(
         const float * __restrict__ gate,
@@ -1623,7 +1623,7 @@ static __global__ __launch_bounds__(256) void attn_sk_reduce_kernel(
         orow[r] = g * (a * inv);
     }
 
-    // LC1 SPEC4 Q2-MLA: the wo Q8_1 quantisation as this kernel's epilogue
+    // The wo Q8_1 quantisation as this kernel's epilogue
     // (-1 launch per MLA layer on the split-K arm). One block per head covers
     // head_v = 128 outputs = 4 whole quant groups, so every group is complete
     // inside this block. Values are read back out of `out` -- the exact floats
@@ -1785,7 +1785,7 @@ void mla_block_splitk(const MlaShape & sh, const MlaScalars & sc, const MlaWeigh
         abort();
     }
     const int T = in.n_tokens;
-    // LC1 SPEC4: M1 fuses the four stage launches (-3), Q2-MLA adds the wo Q8_1
+    // M1 fuses the four stage launches (-3), Q2-MLA adds the wo Q8_1
     // epilogue (-1). This entry's cache_append used NO pos_d (npos = n_pos), so
     // the fused kernel is handed the same nullptr and computes the same npos.
     int8_t * wo_qs = nullptr;
@@ -1837,7 +1837,7 @@ void mla_block(const MlaShape & sh, const MlaScalars & sc, const MlaWeights & w,
         abort();
     }
 
-    // LC1 SPEC4: M1 + Q2-MLA, exactly as mla_block_splitk. This entry's
+    // M1 + Q2-MLA, exactly as mla_block_splitk. This entry's
     // cache_append DID take pos_d, so the fused kernel gets it and computes
     // npos = pos_d[0] + 1 the same way.
     int8_t * wo_qs = nullptr;

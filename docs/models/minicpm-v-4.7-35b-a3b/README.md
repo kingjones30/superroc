@@ -20,7 +20,7 @@ MiniCPM-V-4.7-35B-A3B is a 35B mixture-of-experts model. These files are ROCmFP4
 GPU_MAX_HW_QUEUES=2 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/MiniCPM-V-4.7-35B-A3B-ROCmFP4-LEAN-Q6K-trunk.gguf --served-model-name minicpm-v-4.7-35b-a3b --context 32768 --think off
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.13.0. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 
@@ -39,6 +39,6 @@ Perplexity 7.0038 for the served build against 6.9139 for stock (quality ratio 1
 ## Notes
 
 - The served build is the Q6K-trunk variant: its perplexity stays within 2 % of the stock file over the whole 95 % interval, and the plain LEAN variant's does not.
-- A DSpark drafter file is in the repository. On Super ROC it drafts exactly (`--speculative dflash2`), but on average it was slower than no drafter for this model, so this setup runs without one.
+- A DSpark drafter file is in the repository. On Super Roc it drafts exactly (`--speculative dflash2`), but on average it was slower than no drafter for this model, so this setup runs without one.
 - Vision was not tested on these builds; serve text only.
 - The trunk protection costs 3.5-4.9% of decode against the plain LEAN build.

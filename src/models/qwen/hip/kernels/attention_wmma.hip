@@ -70,13 +70,14 @@
 #include "src/models/qwen/hip/ops/attention.hpp"
 #include "src/core/hip_launch_check.hpp"
 
+
 namespace superroc::hip {
 
 // Defined in kernels/attention_tile.hip; the WMMA route reuses the same FP16
 // cache and the same pack/sync pair unchanged.
 // KAT-ATTN: the pack kernel is templated on head config (default (24,4)); the
 // WMMA launcher instantiates it explicitly per dispatched config.
-// LGA: the pack kernel is also templated on head dim (default 256); the
+// The pack kernel is also templated on head dim (default 256); the
 // launcher passes all three arguments explicitly.
 template<std::uint32_t kHq, std::uint32_t kHkv, std::uint32_t kHd>
 __global__ void PackTiledAttentionKvKernel(
@@ -147,7 +148,7 @@ constexpr std::uint32_t kWmmaKStride = kHeadDim + 8;
 // dimension, which is what keeps Q in registers at 64 VGPRs. Growing kQueryRows
 // and shrinking kKeys in step therefore trades nothing in the tiling but halves
 // the K/V bytes each block pulls per query row -- the dominant cost.
-// LGA: kHeadDimT (default 256) extends the kernel to Glimmer's head_dim 128,
+// kHeadDimT (default 256) extends the kernel to Glimmer's head_dim 128,
 // and kWindowed (default false) adds the sliding-window lower bound. Every
 // new statement sits inside if constexpr (kWindowed) or folds to the old
 // value at 256, so the (24,4)/(16,2) instantiations are unchanged.
@@ -170,7 +171,7 @@ __launch_bounds__(256, 2) __global__
   // KAT-ATTN: per-instantiation head geometry. Same names as the old file
   // constants, so the body below is untouched; (24,4): GQA 6, widths 6144 /
   // 1024. (16,2): GQA 8, widths 4096 / 512.
-  // LGA: same treatment for the head dim: the shadows below keep every
+  // Same treatment for the head dim: the shadows below keep every
   // kHeadDim/kWmmaKSteps/kWmmaKStride use textually untouched, and 256 folds
   // to the same values as before. kDimTilesPerWave is 2 at 256 (each wave
   // owns dim tiles wave and wave+8) and 1 at 128.
@@ -215,12 +216,12 @@ __launch_bounds__(256, 2) __global__
   const std::uint32_t sub = lane & 15u;
   const std::uint32_t half_id = lane >> 4u;
 
-  // NBFAST A2: with a folded split sweep, blockIdx.x is the split index and
+  // with a folded split sweep, blockIdx.x is the split index and
   // every row lives at the final batch positions.
   const std::uint32_t query_start =
       kFoldedGqa ? 0u : blockIdx.x * kQueryRows;
   const std::uint32_t head_pair = blockIdx.y;
-  // NBFAST A2 (folded GQA): for a small batch (a speculative verify block),
+  // folded GQA: for a small batch (a speculative verify block),
   // one block owns ONE KV head and folds the whole GQA group into the row
   // dimension -- row = (query head of the group) * batch + batch row -- so
   // every K/V row is read once instead of once per query head (7x at 8K
@@ -233,7 +234,7 @@ __launch_bounds__(256, 2) __global__
       kFoldedGqa ? 0u : head_pair % (kGqa / kWmmaHeads);
   const std::uint32_t first_query_head =
       (kv_head * kGqa) + (pair_in_group * kWmmaHeads);
-  // LGA: 1/sqrt(head_dim) as an f16-exact Q factor times an fp32 score
+  // 1/sqrt(head_dim) as an f16-exact Q factor times an fp32 score
   // factor. 256 folds to today's single 1/16 exactly; 128 is 2^-4*sqrt(2),
   // which keeps the systematic f16 rounding of 1/sqrt(128) out of Q.
   constexpr float kQScale16 = (kHeadDim == 256) ? (1.0F / 16.0F) : 0.0625F;
@@ -299,7 +300,7 @@ __launch_bounds__(256, 2) __global__
   }
 
   // This wave owns dim tiles `wave` and `wave + 8` for every row block, so both
-  // halves of the head dimension stay evenly loaded. LGA: at head_dim 128
+  // halves of the head dimension stay evenly loaded. At head_dim 128
   // each wave owns one dim tile (`wave`).
   v8f o_acc[kRowBlocks][kDimTilesPerWave] = {};
   // Each softmax row keeps the same four owner lanes across the key sweep.
@@ -311,7 +312,7 @@ __launch_bounds__(256, 2) __global__
       start_pos + static_cast<std::uint32_t>(batch_size);
   // Folded rows all sit at the final batch positions, so the sweep ends at
   // the real context edge rather than the row tile's positional extent.
-  // NBFAST A2: a nonzero key_limit caps the sweep for one split of a folded
+  // a nonzero key_limit caps the sweep for one split of a folded
   // verify attention (the split's merge recombines the partials).
   std::uint32_t max_visible =
       kFoldedGqa ? context_end
@@ -383,7 +384,7 @@ __launch_bounds__(256, 2) __global__
   ValueFragment v_cur[kValueFragments];
   uint4 k_pre[kKRegs] = {};
   ValueFragment v_pre[kValueFragments] = {};
-  // LGA: a windowed block starts its sweep at its earliest row's window
+  // A windowed block starts its sweep at its earliest row's window
   // begin, aligned down to a 16-key tile (aligning up would drop keys).
   // Rows whose own window starts later re-apply the bound per row below.
   std::uint32_t loop_begin = key_begin;
@@ -446,7 +447,7 @@ __launch_bounds__(256, 2) __global__
       // read-modify-write that would need a barrier between the halves.
 #pragma unroll
       for (std::uint32_t i = 0; i < 8; ++i) {
-        // LGA: the fp32 half of the 1/sqrt(head_dim) pair. Discarded at 256.
+        // The fp32 half of the 1/sqrt(head_dim) pair. Discarded at 256.
         float s = s_acc[i];
         if constexpr (kScoreScale != 1.0F) {
           s *= kScoreScale;
@@ -473,7 +474,7 @@ __launch_bounds__(256, 2) __global__
       for (std::uint32_t m = 0; m < kPerLane; ++m) {
         const std::uint32_t col = (seg * kPerLane) + m;
         const std::uint32_t key_position = key_start + col;
-        // LGA: the window lower bound is per row (pos = start+row); the
+        // The window lower bound is per row (pos = start+row); the
         // block sweep above starts at the earliest row's begin.
         [[maybe_unused]] bool window_ok = true;
         if constexpr (kWindowed) {
@@ -483,7 +484,7 @@ __launch_bounds__(256, 2) __global__
                   : absolute_query + 1u - window;
           window_ok = key_position >= row_begin;
         }
-        // NBFAST A2 (folded GQA): row = (head * batch) + batch row, so the
+        // folded GQA: row = (head * batch) + batch row, so the
         // causal bound is per decomposed row; padding rows past the group
         // are dead.
         const bool valid = [&] {
@@ -617,7 +618,7 @@ __launch_bounds__(256, 2) __global__
           // keys only. WMMA can round differently when a zero probability
           // multiplies a populated future value instead of chunk padding.
           // Complete tiles keep the matrix-core path and its original order.
-          // LGA: the window's left edge is the same kind of edge as the
+          // The window's left edge is the same kind of edge as the
           // causal right edge. A tile straddling some row's window begin, or
           // lying fully before it, is recomputed over visible keys only.
           const bool need_right =
@@ -646,7 +647,7 @@ __launch_bounds__(256, 2) __global__
                 static_cast<int>(first_key) -
                 static_cast<int>(start_pos + query_start +
                                  row_block_offset(rb));
-            // NBFAST A2 (folded GQA): each row's position comes from its
+            // folded GQA: each row's position comes from its
             // decomposed batch row, not from its tile offset.
             [[maybe_unused]] const auto folded_relative = [&](std::uint32_t i) {
               const int row_local = static_cast<int>(row_block_offset(rb)) +
@@ -673,7 +674,7 @@ __launch_bounds__(256, 2) __global__
                                  static_cast<int>(2 * i);
                 }
                 if constexpr (kWindowed) {
-                  // LGA: this row's own window begin, in absolute positions.
+                  // This row's own window begin, in absolute positions.
                   // A key is taken iff it is visible on BOTH sides. Note the
                   // first conjunct above is the row-level right gate (row
                   // masks a key at the right), not a key condition: a row
@@ -754,7 +755,7 @@ __launch_bounds__(256, 2) __global__
   __syncthreads();
 
   // --- epilogue ---
-  // NBFAST A2: a split block writes its partial to this launch's slice.
+  // a split block writes its partial to this launch's slice.
   float* out_split =
       (kFoldedGqa && splits > 1)
           ? out_context + (static_cast<std::size_t>(blockIdx.x) * batch_size *
@@ -822,7 +823,7 @@ __launch_bounds__(256, 2) __global__
     for (std::uint32_t rg = lane; rg < kRows; rg += 32) {
       const std::uint32_t rb = rg / 16;
       if constexpr (kFoldedGqa) {
-        // NBFAST A2: folded rows decompose as head/batch; the split merge
+        // folded rows decompose as head/batch; the split merge
         // recombines these partial log-sum-exp values per (head, batch).
         const std::uint32_t row_local =
             row_block_offset(rb) + (rg % 16);
@@ -854,7 +855,7 @@ __launch_bounds__(256, 2) __global__
   }
 }
 
-// NBFAST A2: merge kernel for the split folded verify attention. Every
+// merge kernel for the split folded verify attention. Every
 // split wrote a normalized [batch][head][dim] partial plus its partial
 // log-sum-exp per (head, batch row); this combines them with the standard
 // max-shifted split-softmax weights. One thread per (batch, head, dim).
@@ -903,7 +904,7 @@ __global__ void WmmaFoldedAttentionMerge(
 // 16-key V tile into the layout consumed by WMMA. Persistent KV is unchanged.
 // KAT-ATTN: templated on head config (default (24,4)); only the KV-head count
 // enters the source stride and group bounds below.
-// LGA: templated on head dim (default 256); (24,4) and (16,2) fold to the
+// Templated on head dim (default 256); (24,4) and (16,2) fold to the
 // same values as before.
 template<std::uint32_t kHq = kQueryHeads, std::uint32_t kHkv = kKvHeads,
          std::uint32_t kHd = kHeadDim>
@@ -954,7 +955,7 @@ __global__ void PackAttentionHeads(const __half* keys, const __half* values,
 // KAT-ATTN: the launcher body for one instantiated head config. The grid,
 // strides, pack widths and group loop below derive from <kHq, kHkv>; the
 // <24,4> instantiation is the production path with identical values.
-// LGA: kHeadDimT (default 256) and kWindowed (default false) extend the
+// kHeadDimT (default 256) and kWindowed (default false) extend the
 // body to Glimmer's (32,2,128) windowed and windowless instantiations.
 template<std::uint32_t kHq, std::uint32_t kHkv,
          std::uint32_t kHeadDimT = kHeadDim, bool kWindowed = false,
@@ -998,7 +999,7 @@ bool LaunchQwenWmmaAttentionImpl(
     return false;
   }
   if constexpr (kWindowed) {
-    // LGA: the split contract needs one key_begin shared by both halves; a
+    // The split contract needs one key_begin shared by both halves; a
     // per-row window would need per-row partition bounds. Glimmer prefill
     // never uses the split path.
     if (lse_out != nullptr) {
@@ -1052,10 +1053,10 @@ bool LaunchQwenWmmaAttentionImpl(
   // and speculative commit replays retain the canonical cache directly.
   // Reuse the same workspace for bounded groups at depths where all four
   // heads no longer fit; every head keeps its original key order.
-  // NBFAST A2: the packed multi-head path keeps its own instantiation and
+  // the packed multi-head path keeps its own instantiation and
   // is dead code for the folded tile (small batches never reach it).
   if constexpr (!kFoldedGqa) {
-    if (batch_size >= 1024 && heads_per_group != 0 && key_begin < length &&
+    if (batch_size >= 256 && heads_per_group != 0 && key_begin < length &&
         key_begin % kWmmaKeys == 0) {
     auto* packed_k = reinterpret_cast<__half*>(packed_k_workspace.data());
     auto* packed_v = reinterpret_cast<__half*>(packed_v_workspace.data());
@@ -1098,11 +1099,12 @@ bool LaunchQwenWmmaAttention(
     std::uint32_t num_kv_heads, std::uint32_t head_dim, hipStream_t stream,
     float* lse_out, std::uint32_t key_begin, bool skip_kv_write,
     std::span<float> packed_k_workspace, std::span<float> packed_v_workspace,
-    std::uint32_t window, const float* sinks, std::uint32_t key_limit) {
+    std::uint32_t window, const float* sinks, std::uint32_t key_limit,
+    bool single_sweep) {
   // KAT-ATTN: runtime dispatch at the launcher edge. (24,4) is the production
   // 27B instantiation; (16,2) is KAT-Coder full attention; (16,4) is MiMo-9B
-  // full attention (SQ17). Anything else returns false so the caller falls
-  // back (tiled/baseline).
+  // full attention; (32,2) is Ornith-1.5-122B full attention. Anything else
+  // returns false so the caller falls back (tiled/baseline).
   const detail::AttentionSupportParams support_params{
       .batch_size = batch_size,
       .start_pos = start_pos,
@@ -1143,7 +1145,18 @@ bool LaunchQwenWmmaAttention(
         head_dim, stream, lse_out, key_begin, skip_kv_write,
         packed_k_workspace, packed_v_workspace, 0, nullptr);
   }
-  // LGA: Glimmer 30B prefill (32 Q, 2 KV, head_dim 128). Window 0 is full
+  if (detail::IsWmmaAttentionSupportedFor<
+          detail::kOrnith122FullAttentionQueryHeads,
+          detail::kOrnith122FullAttentionKvHeads>(support_params)) {
+    return LaunchQwenWmmaAttentionImpl<
+        detail::kOrnith122FullAttentionQueryHeads,
+        detail::kOrnith122FullAttentionKvHeads>(
+        q, k, v, gate, k_cache, v_cache, k_cache_f16, v_cache_f16, out_context,
+        layer_idx, start_pos, batch_size, max_context, num_heads, num_kv_heads,
+        head_dim, stream, lse_out, key_begin, skip_kv_write,
+        packed_k_workspace, packed_v_workspace, 0, nullptr);
+  }
+  // Glimmer 30B prefill (32 Q, 2 KV, head_dim 128). Window 0 is full
   // attention; a nonzero window selects the windowed instantiation.
   if (detail::IsWmmaAttentionSupportedFor<detail::kGlimmerQueryHeads,
                                           detail::kGlimmerKvHeads,
@@ -1197,7 +1210,7 @@ bool LaunchQwenWmmaAttention(
                                           detail::kLlamaHeadDim>(
           support_params)) {
     if (window == 0) {
-      // NBFAST A2: a small batch (a speculative verify block, a prefill
+      // a small batch (a speculative verify block, a prefill
       // tail) folds the GQA group into the row tile, so each KV row is read
       // once per layer instead of once per query head -- at 8K context the
       // verify attention was 7x the K/V bytes of the shared-cache floor.
@@ -1216,7 +1229,10 @@ bool LaunchQwenWmmaAttention(
         const std::size_t partial_stride = batch_size * attn_width;
         const std::size_t lse_stride =
             static_cast<std::size_t>(detail::kLlamaQueryHeads) * batch_size;
-        std::uint32_t splits = std::min<std::uint32_t>(8, length / 512);
+        // A caller that needs the same bits for every pass size asks for
+        // the single sweep.
+        std::uint32_t splits =
+            single_sweep ? 1 : std::min<std::uint32_t>(8, length / 512);
         while (splits >= 2 &&
                static_cast<std::size_t>(splits - 1) *
                        ((length + splits - 1) / splits) >=

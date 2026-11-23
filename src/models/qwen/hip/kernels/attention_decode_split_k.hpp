@@ -20,7 +20,7 @@
 // score tree differ between kernels.
 namespace superroc::hip::detail {
 
-// XOR exchange inside a 16-lane DPP row (gfx10 and later) on the ALU path
+// XOR exchange inside a DPP row of 16 lanes (gfx10 and later) on the ALU path
 // instead of ds_bpermute. Both lanes of a pair add the same two values, so
 // after the 8, 4, 2, 1 ladder every lane of a row holds the row's sum, and
 // that sum is lane zero's descending tree bit for bit.
@@ -126,7 +126,7 @@ struct SplitKAttentionHead {
   float running_sum = 0.0F;
   float negative_zero = -0.0F;
 
-  // float4 index of this lane's vector in the head's 64 vectors.
+  // float4 index of this thread's vector in the head's 64 vectors.
   __device__ static constexpr std::uint32_t Vector(std::uint32_t lane,
                                                    std::uint32_t vector) {
     return lane + (vector / 2) * Lanes + (vector % 2) * 32;
@@ -143,7 +143,7 @@ struct SplitKAttentionHead {
     }
   }
 
-  // This lane's partial of q . k, ready for the score tree.
+  // The thread's partial of q . k, ready for the score tree.
   __device__ __forceinline__ float Partial(const __half* key,
                                            std::uint32_t lane) const {
     if constexpr (Lanes == 32) {

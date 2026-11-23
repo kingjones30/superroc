@@ -50,6 +50,9 @@ public:
   /// or kResumeBack tokens before it (the output repeated a few tokens).
   static constexpr std::size_t kResumeWindow = 512;
   static constexpr std::size_t kResumeBack = 8;
+  /// A copy earns its width: a fresh match verifies this many tokens, and one
+  /// that continues the last mostly accepted copy may fill every row.
+  static constexpr std::size_t kFreshCopyTokens = 3;
 
   struct Match {
     std::size_t start{0};   ///< committed index of the first proposal
@@ -146,6 +149,12 @@ public:
     // it is indexed once the next token commits.
   }
 
+  /// Whether a copy starting at `start` continues the last accepted copy.
+  [[nodiscard]] bool Continues(std::size_t start) const {
+    return resume_ != kNoResume && start + kResumeBack >= resume_ &&
+           start <= resume_ + kResumeWindow;
+  }
+
   /// Copies must end inside the indexed source, even when the query's
   /// committed history has grown beyond a sampled request's source boundary.
   [[nodiscard]] std::size_t IndexedTokens() const { return prev_.size(); }
@@ -182,9 +191,7 @@ public:
              committed[end - length - 1] == at(context - length - 1)) {
         ++length;
       }
-      const bool resumes = resume_ != kNoResume &&
-                           end + kResumeBack >= resume_ &&
-                           end <= resume_ + kResumeWindow;
+      const bool resumes = Continues(end);
       if (end < prev_.size() && length > best.length &&
           (length >= minimum || (resumes && length >= kResumeMinMatch))) {
         best = {end, length};

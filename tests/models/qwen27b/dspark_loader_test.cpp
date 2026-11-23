@@ -11,7 +11,7 @@
 #include <string_view>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen/dflash_weights.hpp"
 
@@ -259,7 +259,7 @@ void TestRealDsparkFile(const char* path) {
   Expect(df.block_size == 15, "block_size 15");
   Expect(df.target_layer_ids.size() == 5, "5 taps");
   const char* tap_minus1 =
-      ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_TAP_MINUS1");
+      ::superroc::core::GetEnv("SUPERROC_DSPARK_TAP_MINUS1");
   const bool want_minus1 = tap_minus1 != nullptr && tap_minus1[0] != '\0' &&
                            !(tap_minus1[0] == '0' && tap_minus1[1] == '\0');
   if (want_minus1) {
@@ -302,7 +302,7 @@ void TestRealDsparkFile(const char* path) {
 int main() {
   try {
     TestDflash2HeaderStillLoads();
-    const char* path = ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_MODEL");
+    const char* path = ::superroc::core::GetEnv("SUPERROC_DSPARK_MODEL");
     if (path == nullptr || path[0] == '\0') {
       std::cout << "SKIP real DSpark file (SUPERROC_DSPARK_MODEL unset)\n";
       return 0;

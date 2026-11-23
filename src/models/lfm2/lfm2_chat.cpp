@@ -306,7 +306,7 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
   }
   if (!sys.empty()) {
     out.append("<|im_start|>system\n");
-    // HTC (RVW C4): the tool list is client text too, so the whole system
+    // The tool list is client text too, so the whole system
     // turn body is content: a special-token spelling inside a tool
     // description stays characters. It holds no framing token of its own, so
     // a normal render tokenizes exactly as before.
@@ -358,7 +358,7 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
             out.append(", ");
           }
           first_call = false;
-          // HTC (RVW C4): a replayed call (name, keys, values) is client
+          // A replayed call (name, keys, values) is client
           // history, so it is content; only <|tool_call_start|>/end frame.
           std::string call_text = call.name;
           call_text.push_back('(');
@@ -389,12 +389,12 @@ std::optional<std::string> Lfm2Render(std::span<const ChatMessage> messages,
     if (options.require_tool_call) {
       // LFM2: superroc extension, the pinned template has no "required";
       // prefill past thinking into a tool call so a required call cannot be
-      // skipped. Super ROC: stop at <|tool_call_start|>. The vocabulary merges
+      // skipped. Super Roc: stop at <|tool_call_start|>. The vocabulary merges
       // "[" and
       // "(" with the following letters ("[get", "[search", "(x"), so a
       // prefilled "[" or "name(" left the model on a token boundary it never
       // saw and it picked the wrong tool; the tool grammar writes them now.
-      // Super ROC: and close a think block only where the template opens one
+      // Super Roc: and close a think block only where the template opens one
       // (24B): an empty "<think></think>" in front of the call made the 1.2B
       // (whose template never opens it) call the same tool for everything.
       out.append("<|im_start|>assistant\n");

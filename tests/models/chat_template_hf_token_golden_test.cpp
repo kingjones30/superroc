@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "src/core/crypto/sha256.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/core/json.hpp"
 #include "src/models/qwen/chat_template.hpp"
@@ -131,7 +131,7 @@ void TestQwenGoldens(const json::Value& fixture,
 }  // namespace
 
 int main() {
-  const char* qwen_model = ::superroc::core::GetEnvCompat("SUPERROC_QWEN_GGUF");
+  const char* qwen_model = ::superroc::core::GetEnv("SUPERROC_QWEN_GGUF");
   if (qwen_model == nullptr || qwen_model[0] == '\0') {
     std::cout << "SKIP: set SUPERROC_QWEN_GGUF\n";
     return 77;

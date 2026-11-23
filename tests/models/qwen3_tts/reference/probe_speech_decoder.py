@@ -16,12 +16,12 @@ import torch
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--reference-root", default="/home/fbozzo/projects/Qwen3-TTS"
+        "--reference-root", default="/path/to/Qwen3-TTS"
     )
     parser.add_argument("--dependency-root")
     parser.add_argument(
         "--model",
-        default="/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-CustomVoice",
+        default="/path/to/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     )
     parser.add_argument("--codes", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)

@@ -10,7 +10,7 @@ import tempfile
 def main():
     binary = sys.argv[1]
     env = {key: value for key, value in os.environ.items()
-           if key not in {"HOST", "PORT", "SUPERROC_HOST", "SUPERROC_PORT", "G" + "UFO_HOST", "G" + "UFO_PORT"}}
+           if key not in {"HOST", "PORT", "SUPERROC_HOST", "SUPERROC_PORT"}}
 
     def check(args, status, message):
         result = subprocess.run([binary, *args], env=env, text=True,
@@ -69,6 +69,7 @@ def main():
     assert "8589934592" in help_text
     assert "0 = auto, at most the disk budget and 1/8 available RAM" in help_text
     assert "--log-progress" in help_text
+    assert "--recipe" in help_text
 
     # Verbosity must change the output, not merely parse. The config line is
     # emitted at the debug tier before the model file is opened, so these all

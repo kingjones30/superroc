@@ -1,4 +1,4 @@
-// superroc_fp4_moe_group.hip — LS1 PHASE8 item 2: the MoE expert grouping ON THE DEVICE.
+// superroc_fp4_moe_group.hip — the MoE expert grouping ON THE DEVICE.
 //
 // WHY THIS EXISTS. In ForwardBatch (rocm_backend.cpp) every MoE layer, every 512-token
 // chunk, did:
@@ -11,8 +11,8 @@
 //       slot_dest                                                 // eight more copies
 //     superroc_fp4_wmma_gemm_grp / superroc_fp4_gemm_grp
 //
-// Eleven transfers and one full drain, per MoE layer, per chunk. Jay's build27 profile on
-// amdaimax2 has `route` at 145-163 ms per chunk; that is what this file is aimed at.
+// Eleven transfers and one full drain, per MoE layer, per chunk. One profile
+// has `route` at 145-163 ms per chunk; that is what this file is aimed at.
 //
 // WHAT THIS DOES. The whole sort is reproduced on the device, in the SAME order, by the SAME
 // algorithm -- so the grouped GEMM computes bit-identical results. Not "an equivalent
@@ -31,14 +31,14 @@
 //     grp_zp[gi] = tile_acc ; tile_acc += (grp_cnt[gi] + 15) / 16 ; grp_zp[n_groups] = tile_acc
 //     for gi, for c: slot_dest[goff+c] = ((zp[gi] + (c >> 4)) << 4) | (c & 15)
 //
-// LK1 (wave 3). The serial body below is the oracle: SUPERROC_FP4_MOE_GROUP_SERIAL=1
+// The serial body below is the oracle: SUPERROC_FP4_MOE_GROUP_SERIAL=1
 // launches it, and the parallel kernel calls it for rc / id / group-cap errors so
 // those partial writes stay byte-identical. The default kernel is parallel. Rank
 // is counts[e] + #{j' < j : ids[j'] == e}, which is the stable counting sort.
 // Tile-count atomics only add 1s; their order does not change the sum. The lane
 // scan that places each slot walks increasing j, so it does not use atomics.
 //
-// BOUNDS DISCIPLINE (this lane's rule, after the 2026-10-02T01:58:04Z fault). Every size is
+// BOUNDS DISCIPLINE. Every size is
 // derived from the same constants the caller sized the buffers with, and every index the
 // kernel forms is checked against them on the host before the launch, in
 // superroc_fp4_moe_group_batch. A slot id outside [0, n_expert) sets the status word instead of
@@ -52,20 +52,20 @@
 #include <cstdlib>
 
 #include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 namespace superroc_fp4_ks {
 
 // ---------------------------------------------------------------------------
-// LS1 PHASE8 item 1 (NUDGE 2): the ROUTER LOGITS kernel, tiled over tokens.
+// The ROUTER LOGITS kernel, tiled over tokens.
 //
-// LR1 MEASURED, both engines on the same 13.8K prompt: k_route_batch_logits costs
+// Measured, both engines on the same 13.8K prompt: k_route_batch_logits costs
 // 3.39 ms per call x 1,080 calls = 3.66 s -- 5.1 % of superroc's prefill, and 13.3x the fork's
 // router (276 ms). That is ~136 ms of the ~155 ms `route` section per 512-token chunk.
 //
 // WHY IT IS SLOW, exactly. The old kernel is <<<n_expert, n_tokens>>>, 64 threads: one CTA
 // per (expert, token) PAIR, and every CTA walks the whole k = 2048 of BOTH the activation row
 // and the gate row. So a chunk reads n_expert x n_tokens x k floats where its inputs are only
-// n_tokens x k + n_expert x k. On halo, 479 x 512 x 2048 x 4 B is about 2.0 GB of loads for
+// n_tokens x k + n_expert x k. 479 x 512 x 2048 x 4 B is about 2.0 GB of loads for
 // 8 MB of input -- roughly 250x the minimum -- which is why one matvec costs 3.39 ms.
 //
 // WHAT THIS DOES. One CTA per (expert, tile of SUPERROC_FP4_LS1_ROUTE_TY tokens). The gate row is read
@@ -83,7 +83,7 @@ namespace superroc_fp4_ks {
 // so "close enough" is not a standard worth shipping against.
 
 // Tokens per CTA tile. 8 puts the reduction LDS at 2 KiB and gives the gate row eight uses
-// per load; REPORT8.md has the measured 4 / 8 / 16 spread.
+// per load; the measured spread was 4 / 8 / 16.
 enum { SUPERROC_FP4_LS1_ROUTE_TY = 2 };
 
 __global__ void superroc_fp4_k_route_logits_tiled(const float * __restrict__ x,
@@ -137,13 +137,14 @@ __global__ void superroc_fp4_k_route_logits_tiled(const float * __restrict__ x,
 }
 
 // ---------------------------------------------------------------------------
-// LS1 PHASE9 item 1: the router logits as a real 2D register-tiled GEMM.
+// The router logits as a real 2D register-tiled GEMM.
 //
-// REPORT8 proved the bit-identical rewrites cannot win: k_route_batch_logits is
-// LATENCY-bound, and keeping its per-row dot order is exactly what forbids the fix.
-// Jay's decision (DECISIONS 2026-10-03 00:55) is that the router's accumulation order MAY
-// change -- superroc's order is arbitrary (the fork's differs) and the block-2 near-tie moving is
-// a numerics change like any other, so the WAVE 2 numerics gates decide, not byte-identity.
+// Measurement proved the bit-identical rewrites cannot win:
+// k_route_batch_logits is LATENCY-bound, and keeping its per-row dot
+// order is exactly what forbids the fix.
+// The router's accumulation order MAY change -- superroc's order is arbitrary
+// (the fork's differs) and the block-2 near-tie moving is a numerics change
+// like any other, so the numerics gates decide, not byte-identity.
 //
 // THE PROBLEM. logits[t][e] = sum_i x[t][i] * gate[e][i] for t in [0,T), e in [0,E),
 // i in [0,K). At Ling's shape that is 512 x 512 x 2048 = 1.07 GFLOP per MoE layer per chunk,
@@ -152,7 +153,7 @@ __global__ void superroc_fp4_k_route_logits_tiled(const float * __restrict__ x,
 // WHY THE OLD ONE IS SLOW, restated because it drives the design: it was one CTA per
 // (expert, token) PAIR with 64 threads and a 64-deep LDS tree, so it read n_expert x
 // n_tokens x k floats where the inputs are n_tokens x k + n_expert x k -- about 2.0 GB of
-// loads for 8 MB of input -- and, per REPORT8, cutting the CTA count to amortise the gate row
+// loads for 8 MB of input -- and cutting the CTA count to amortise the gate row
 // made it worse, because the problem is latency and parallelism, not traffic.
 //
 // THE DESIGN. Each CTA owns a BM(experts) x BN(tokens) output tile and marches over K in
@@ -260,16 +261,16 @@ __global__ void superroc_fp4_k_route_logits_gemm(const float * __restrict__ x,
 }
 
 
-// LV1 SPEC2. The router logits GEMM that superroc_fp4_route_logits_gemm_launch runs.
+// The router logits GEMM that superroc_fp4_route_logits_gemm_launch runs.
 // Tile: 64 experts x 64 tokens, K step 32, 128 threads, each thread an 8x4
 // register tile, float4 along K. One LDS buffer, padded float4 stride (8+1)
 // so a warp's token rows do not all hit one bank. No atomics, k ascending,
 // each output written by exactly one thread.
 //
-// MEASURED (route_bench2, amdaimax2, 20 CU, T=512 E=512 K=2560, narrow weights):
+// Measured (route_bench2, 20 CU, T=512 E=512 K=2560, narrow weights):
 // median 440.8 us vs superroc_fp4_k_route_logits_gemm 1041.4 us (2.36x), nondet=0,
 // top-8 picks moved 0/4096, max_abs 5.48e-6. rocBLAS on the same buffers was
-// 505 us. ~/ls/lv1/out-rbench2.txt.
+// 505 us.
 //
 // Index audit. Host rejects K that is not a multiple of 32, and null/non-positive
 // extents. Inside the kernel:
@@ -841,7 +842,7 @@ __global__ void superroc_fp4_k_moe_group_parallel(const int * ids, const float *
 
 
 /// Launch the tiled router logits. `ty` is clamped to SUPERROC_FP4_LS1_ROUTE_TY on the HOST, so the
-/// kernel can trust the LDS it indexes -- the lane's bounds discipline: every extent the
+/// kernel can trust the LDS it indexes -- every extent the
 /// device code touches is checked against the constant it was compiled with, before launch.
 int superroc_fp4_route_logits_tiled(const float * x, const float * gate, int k, int n_expert,
                              int n_tokens, int ty, float * logits) {
@@ -861,8 +862,8 @@ int superroc_fp4_route_logits_tiled(const float * x, const float * gate, int k, 
 }
 
 /// Launch the 2D register-tiled router logits. Behind SUPERROC_FP4_ROUTE_GEMM=1; unset keeps the
-/// kernel that shipped. The extents are audited on the HOST before the launch -- the lane's
-/// rule since the 2026-10-02T01:58:04Z fault -- and every index the device forms is either
+/// kernel that shipped. The extents are audited on the HOST before the launch
+/// and every index the device forms is either
 /// bounds-checked above or provably inside the tiles.
 int superroc_fp4_route_logits_gemm_legacy_launch(const float * x, const float * gate, int K, int E, int T,
                                          float * logits, hipStream_t stream);
@@ -872,10 +873,10 @@ int superroc_fp4_route_logits_gemm_launch(const float * x, const float * gate, i
     if (!x || !gate || !logits || K <= 0 || E <= 0 || T <= 0) {
         return SUPERROC_FP4_ERR_ARG;
     }
-    // Jay 2026-10-03 (RV12): SUPERROC_FP4_ROUTE_LV2_OFF=1 sends the router GEMM back to the 28g tile kernel, for an A/B
+    // SUPERROC_FP4_ROUTE_LV2_OFF=1 sends the router GEMM back to the 28g tile kernel, for an A/B
     // of top-8 picks or a hot disable without a rebuild.
     static const bool lv2_off = [] {
-        const char * e = ::superroc::core::GetEnvCompat("SUPERROC_FP4_ROUTE_LV2_OFF");
+        const char * e = ::superroc::core::GetEnv("SUPERROC_FP4_ROUTE_LV2_OFF");
         return e != nullptr && e[0] != '\0' && e[0] != '0';
     }();
     if (lv2_off) {
@@ -932,7 +933,7 @@ int superroc_fp4_moe_group_batch(const int * ids, const float * wts, const int *
     const long long max_groups = (long long) n_expert + (long long) slots / group_cap + 1;
     // Test-only. Production never sets this. The in-kernel cap check is what the
     // overflow case compares; the host audit rejects that shape before launch.
-    const char * skip_e = ::superroc::core::GetEnvCompat("SUPERROC_FP4_MOE_GROUP_SKIP_AUDIT");
+    const char * skip_e = ::superroc::core::GetEnv("SUPERROC_FP4_MOE_GROUP_SKIP_AUDIT");
     const bool skip_audit = skip_e != nullptr && skip_e[0] == '1' && skip_e[1] == '\0';
     if (!skip_audit && max_groups > (long long) grp_capacity + 1) {
         fprintf(stderr, "superroc_fp4_moe_group: need grp_capacity >= %lld (+1), have %d\n",
@@ -962,7 +963,7 @@ int superroc_fp4_moe_group_batch(const int * ids, const float * wts, const int *
     const int lk1_spr = 256;
     const long smem_ints = (long)slots + (long)n_expert * (3 + lk1_ng) + lk1_spr;
     const long smem_bytes = smem_ints * (long)sizeof(int);
-    const char * serial_e = ::superroc::core::GetEnvCompat("SUPERROC_FP4_MOE_GROUP_SERIAL");
+    const char * serial_e = ::superroc::core::GetEnv("SUPERROC_FP4_MOE_GROUP_SERIAL");
     const bool force_serial = serial_e != nullptr && serial_e[0] == '1' && serial_e[1] == '\0';
     const bool shape_ok = slots == n * kMaxExperts && smem_bytes > 0 && smem_bytes <= 48 * 1024
                           && slots <= 8192;
@@ -993,7 +994,7 @@ int superroc_fp4_moe_group_batch(const int * ids, const float * wts, const int *
 
 
 
-// KPF2 SPEC1 step 2: multi-block stable grouper for 0 < slots <= 32768.
+// Multi-block stable grouper for 0 < slots <= 32768.
 // Bit-identical to the serial oracle (moe_group_serial above): the same
 // counting sort (slot order inside an expert is the contract), the same
 // kGroupCap sub-group split, the same 16-aligned tile prefix, the same
@@ -1079,6 +1080,7 @@ __global__ void superroc_fp4_k_group_scan(const int * __restrict__ counts,
     }
     __shared__ int tot[256];
     __shared__ int prefix[257];
+    __shared__ int run[256];
     __shared__ int bad;
     if (tx == 0) {
         bad = (hdr_dev[SUPERROC_FP4_LS1_HDR_STATUS] != SUPERROC_FP4_OK);
@@ -1106,7 +1108,6 @@ __global__ void superroc_fp4_k_group_scan(const int * __restrict__ counts,
         // Per-(block, expert) base: expert_base + #{j' < b*4096 : ids[j']==e}.
         // Blocks partition [0, slots) in order, so summing earlier blocks'
         // histograms is exactly the oracle's fill[e] at j = b*4096.
-        int run[256];
         for (int e = 0; e < n_expert; ++e) {
             run[e] = 0;
         }
@@ -1225,7 +1226,7 @@ __global__ void superroc_fp4_k_group_scatter(const int * __restrict__ ids,
 static int * g32_scratch = nullptr;
 static int g32_scratch_words = 0;
 
-/// KPF2: multi-block stable grouper for 0 < slots <= 32768. Same argument
+/// Multi-block stable grouper for 0 < slots <= 32768. Same argument
 /// list and output layout as superroc_fp4_moe_group_batch, but the 4 header
 /// words go to the DEVICE buffer hdr_dev (PRE-ZEROED by the caller:
 /// SUPERROC_FP4_OK is 0) instead of a host readback -- there is no D2H and no
@@ -1289,7 +1290,7 @@ int superroc_fp4_moe_group_batch32k(const int * ids, const float * wts, const in
 }
 
 
-// KPF2: device-sized grp_zb block prefix. Same contract as
+// Device-sized grp_zb block prefix. Same contract as
 // superroc_fp4_moe_group_blocks, but n_groups comes from the 32k grouper's
 // hdr_dev instead of the host. A non-OK STATUS leaves grp_zb untouched
 // (the device-sized GEMM then exits at once on the same STATUS).
@@ -1326,7 +1327,7 @@ int superroc_fp4_moe_group_blocks_dev(const int * grp_cnt, const int * hdr_dev, 
 }
 
 
-// MG64: BN-block prefix over the group counts for the 64-token grouped GEMM.
+// BN-block prefix over the group counts for the 64-token grouped GEMM.
 // One block, one thread: grp_zb[g] is group g's first BN-block, and
 // grp_zb[n_groups] is the total block count (the grp64 grid may be larger).
 __global__ void superroc_fp4_k_moe_group_blocks(const int * grp_cnt, int n_groups,

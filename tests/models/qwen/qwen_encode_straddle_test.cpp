@@ -1,4 +1,4 @@
-// HT2 (Muse Wonder W2 HTC-1, W6 E-1): a client span that overlaps a special
+// A client span that overlaps a special
 // spelling -- inside it, straddling either edge, or across two spans -- must be
 // tokenized as text, never as a special token; ordinary content tokenizes
 // exactly as before; the check stays linear on a long tool history.

@@ -92,7 +92,7 @@ __device__ __forceinline__ void TileHalf2Dot(float& accumulator, __half2 lhs,
 // KAT-ATTN: templated on head config (default (24,4)); the unqualified call
 // sites below keep resolving to the 27B instantiation. Only the KV-head count
 // enters the widths; head_dim stays 256.
-// LGA: templated on head dim (default 256) for Glimmer's (32,2,128). The
+// Templated on head dim (default 256) for Glimmer's (32,2,128). The
 // (24,4) and (16,2) instantiations fold to the same values as before.
 template<std::uint32_t kHq = kTileAttentionQueryHeads,
          std::uint32_t kHkv = kTileAttentionKvHeads,
@@ -536,7 +536,7 @@ template __global__ void PackTiledAttentionKvKernel<
     float* __restrict__, std::uint32_t, std::uint32_t, std::size_t,
     std::uint32_t);
 
-// SQ17: same for the MiMo (16,4) pack instantiation.
+// Same for the MiMo (16,4) pack instantiation.
 template __global__ void PackTiledAttentionKvKernel<
     detail::kMimoFullAttentionQueryHeads, detail::kMimoFullAttentionKvHeads>(
     const float* __restrict__, const float* __restrict__,
@@ -544,7 +544,16 @@ template __global__ void PackTiledAttentionKvKernel<
     float* __restrict__, std::uint32_t, std::uint32_t, std::size_t,
     std::uint32_t);
 
-// LGA: the WMMA launcher launches the Glimmer pack instantiation from
+// Same for the Ornith-1.5-122B (32,2) pack instantiation.
+template __global__ void PackTiledAttentionKvKernel<
+    detail::kOrnith122FullAttentionQueryHeads,
+    detail::kOrnith122FullAttentionKvHeads>(
+    const float* __restrict__, const float* __restrict__,
+    __half* __restrict__, __half* __restrict__, float* __restrict__,
+    float* __restrict__, std::uint32_t, std::uint32_t, std::size_t,
+    std::uint32_t);
+
+// The WMMA launcher launches the Glimmer pack instantiation from
 // another TU, so instantiate it explicitly here.
 template __global__ void PackTiledAttentionKvKernel<
     detail::kGlimmerQueryHeads, detail::kGlimmerKvHeads,

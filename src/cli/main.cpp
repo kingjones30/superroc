@@ -1,5 +1,6 @@
 #include <array>
 #include <iostream>
+#include <optional>
 #include <span>
 #include <string_view>
 
@@ -8,9 +9,11 @@
 #include "src/cli/diagnose/diagnose.h"
 #include "src/cli/eval/eval.hpp"
 #include "src/cli/prompt/prompt.hpp"
+#include "src/cli/serve/recipe.hpp"
 #include "src/cli/serve/serve.hpp"
 #include "src/cli/transcribe/transcribe.hpp"
 #include "src/cli/video/video.hpp"
+#include "src/core/gpu_runtime_environment.hpp"
 
 #ifndef SUPERROC_RELEASE_VERSION
 #define SUPERROC_RELEASE_VERSION "development"
@@ -24,15 +27,15 @@ constexpr std::string_view kSuperROCRevision = SUPERROC_REVISION;
 
 namespace {
 
-// Super ROC: name help output after the invoked binary basename.
+// Super Roc: name help output after the invoked binary basename.
 std::string_view Basename(std::string_view path) {
   const std::string_view::size_type slash = path.find_last_of('/');
   return slash == std::string_view::npos ? path : path.substr(slash + 1);
 }
 
 void print_version() {
-  // Super ROC: product identity; internal names stay superroc in M1.
-  std::cout << "Super ROC " << kSuperROCReleaseVersion << " ("
+  // Super Roc: product identity; internal names stay superroc in M1.
+  std::cout << "Super Roc " << kSuperROCReleaseVersion << " ("
             << kSuperROCRevision
             << ") - engine lineage: upstream v0.19.0 (MIT)\n";
 }
@@ -41,8 +44,8 @@ void print_help(std::string_view program_name) {
   std::cout
       << "Usage: " << program_name
       << " <COMMAND> [OPTIONS]\n\n"
-      // Super ROC: product identity.
-      << "Super ROC - fast LLM inference for AMD Strix Halo (gfx1151): "
+      // Super Roc: product identity.
+      << "Super Roc - fast LLM inference for AMD Strix Halo (gfx1151): "
          "ROCmFP4 quants, MTP/DSpark drafting, prompt cache.\n\n"
       << "Commands:\n"
       << "  serve          Start the OpenAI-compatible HTTP server\n"
@@ -64,12 +67,12 @@ void print_help(std::string_view program_name) {
 int run(std::span<const char* const> args) {
   if (args.empty()) {
     std::cerr << "Error: missing command or option\n";
-    print_help("superroc");  // Super ROC: no argv[0] when argc==0; default to
+    print_help("superroc");  // Super Roc: no argv[0] when argc==0; default to
                              // product name.
     return 2;
   }
 
-  // Super ROC: basename so the binary and its previous-name link each name
+  // Super Roc: basename so the binary and its previous-name link each name
   // themselves.
   const std::string_view program_name = Basename(args[0]);
   const auto options = args.subspan(1);
@@ -172,16 +175,6 @@ int run(std::span<const char* const> args) {
     return superroc::cli::RunServe(options.subspan(1));
   }
 
-  // If invoked as legacy binary name or flag passed directly, route to serve
-  // Compatibility: the previous server binary name is built from
-  // parts so its spelling never appears here.
-  static const std::string previous_server_bin =
-      std::string("g") + "ufo-server";
-  if (program_name.ends_with(previous_server_bin) ||
-      program_name.ends_with("/" + previous_server_bin)) {
-    return superroc::cli::RunServe(options);
-  }
-
   std::cerr << "Error: unknown command '" << first_arg << "'\n";
   print_help(program_name);
   return 2;
@@ -191,5 +184,15 @@ int run(std::span<const char* const> args) {
 
 int main(int argc, char* argv[]) {
   const std::span<const char* const> args(argv, static_cast<std::size_t>(argc));
+  // Before anything can start the GPU runtime: it reads these once.
+  superroc::core::ApplyGpuRuntimeDefaults();
+  // Recipe pre-scan: apply the recipe's env/files before the first
+  // SUPERROC_/LFN_ read. RunServe consults SUPERROC_HOST/PORT defaults and
+  // several engine readers cache env in function-local statics on first call,
+  // all before the llm options are parsed; the serve path re-validates, logs,
+  // and merges the flags afterwards.
+  if (const std::optional<int> early = superroc::cli::PrescanRecipeEnv(args)) {
+    return *early;
+  }
   return run(args);
 }

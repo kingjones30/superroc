@@ -10,7 +10,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "src/models/glimmer/hip/glimmer_attention.hpp"  // LGA
+#include "src/models/glimmer/hip/glimmer_attention.hpp"
 #include "src/models/glimmer/hip/glimmer_decode.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
@@ -39,7 +39,7 @@ std::size_t WeightScratchElems(const core::ModelConfig& config) {
                        config.ssm_time_step_rank});
 }
 
-// GLM: GLIMMER_W8A8=0 keeps the BF16 dequant path. Anything else, including
+// GLIMMER_W8A8=0 keeps the BF16 dequant path. Anything else, including
 // unset, uses the 27B prequantized W8A8 route.
 bool UseW8A8() {
   static const bool on = [] {
@@ -49,8 +49,8 @@ bool UseW8A8() {
   return on;
 }
 
-// GLM: SPEC4 item 2. The W8A8 WMMA route wins on short prefill chunks and
-// loses once a chunk approaches the arena batch. Measured on amdaimax2 with
+// The W8A8 WMMA route wins on short prefill chunks and
+// loses once a chunk approaches the arena batch. Measured on one machine with
 // GLIMMER_PROF per-chunk GEMM ms, 103 GGUF (chunk rows -> BF16 / W8A8):
 //   1447 -> 4221.8 / 3602.9 (-15%), 1777 -> 4872.8 / 4274.7 (-12%),
 //   4096 -> 9253.7..9496.7 / 9756.9..10120.6 (+5..7%),
@@ -299,7 +299,7 @@ void Project(QwenGpuArena& arena, const models::QwenTensorRef& weight,
   CheckGpu("glimmer prefill bf16 gemm failed");
 }
 
-// GLM: prequantized activation, no weight dequant.
+// Prequantized activation, no weight dequant.
 void ProjectQ8(QwenGpuArena& arena, const models::QwenTensorRef& weight,
                const void* q8, float* y, std::size_t batch, std::size_t m,
                std::size_t k) {
@@ -426,7 +426,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardGlimmerPromptChunk(
                          arena_.d_normed, bf16, batch, hidden,
                          config.norm_eps_pre, arena_.stream);
     CheckGpu("glimmer prefill attn norm failed");
-    // GLM: one Q8_1 activation shared by q/k/v/gate.
+    // One Q8_1 activation shared by q/k/v/gate.
     prof.Begin(prof.gemm);
     if (w8) {
       LaunchQuantizeActivationQ8_1(bf16, arena_.d_scratch_q8_act, batch, hidden,
@@ -460,7 +460,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardGlimmerPromptChunk(
         arena_.d_k, batch, config.num_key_value_heads, config.head_dim,
         config.norm_eps_pre, arena_.stream);
     CheckGpu("glimmer prefill qk norm failed");
-    // GLM: attention region. The launch below is LX1's call site and is unchanged.
+    // Attention region. The launch below is unchanged.
     const bool full_layer = config.LayerSwaWindow(layer_index) == 0;
     const std::uint64_t layer_pairs = CausalPairs(
         start_pos, static_cast<std::uint32_t>(batch),
@@ -493,15 +493,15 @@ tokenization::TokenId QwenGpuExecutor::ForwardGlimmerPromptChunk(
     if (!wrote.ok) {
       throw std::runtime_error(wrote.error);
     }
-    // LGA: the token-major fp16 plane sits beside the fp32 cache. V starts
+    // The token-major fp16 plane sits beside the fp32 cache. V starts
     // one plane past K, mirroring the fp32 v_cache above.
     void* k_f16 = arena_.d_glimmer_kv_f16;
     void* v_f16 =
         k_f16 == nullptr ? nullptr : static_cast<std::uint16_t*>(k_f16) + plane;
-    // PGA: c20cf22 has no fp16 dual-write in LaunchGlimmerBatchedWriteKv --
-    // lane LX1's never landed and glimmer_decode.{hpp,hip} are outside this
-    // lane's zone. LGA's own LaunchGlimmerCastKvFp16 does exactly the remap
-    // LX1's dual-write did (head-major fp32 rows [0, valid_rows) -> token-major
+    // C20cf22 has no fp16 dual-write in LaunchGlimmerBatchedWriteKv --
+    // glimmer_decode.{hpp,hip} are not changed here.
+    // LaunchGlimmerCastKvFp16 does exactly the remap
+    // the dual-write did (head-major fp32 rows [0, valid_rows) -> token-major
     // fp16), so the prefill cast is issued here, per layer, right after the
     // fp32 write. [0, start_pos+batch) is precisely the causal span the
     // attention below reads, and the fp32 plane stays the decode path's
@@ -535,7 +535,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardGlimmerPromptChunk(
                                   : "glimmer prefill fp16 kv cast failed");
       }
     }
-    // LGA: WMMA matrix cores first, the GQA-shared fp16 kernel second, the
+    // WMMA matrix cores first, the GQA-shared fp16 kernel second, the
     // fp32 reference last. GLIMMER_ATTN=0 keeps the fp32 reference.
     GlimmerLaunchStatus attn{false, nullptr};
     if (fp16_plane) {
@@ -576,7 +576,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardGlimmerPromptChunk(
       Project(arena_, layer.attn_output, arena_.d_ssm_out, bf16, arena_.d_attn_out,
               batch, hidden, attention, weight_elems);
     } else if (w8) {
-      // GLM: quantize the fp32 attention output. No bf16 cast.
+      // Quantize the fp32 attention output. No bf16 cast.
       prof.Begin(prof.gemm);
       LaunchQuantizeActivationQ8_1FromFp32(arena_.d_ssm_out, arena_.d_scratch_q8_act,
                                            batch, attention, arena_.stream);
@@ -605,7 +605,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardGlimmerPromptChunk(
                          arena_.d_normed, bf16, batch, hidden,
                          config.norm_eps_pre, arena_.stream);
     CheckGpu("glimmer prefill ffn norm failed");
-    // GLM: one Q8_1 activation, dual gate/up, fused SwiGLU-quantize, then down.
+    // One Q8_1 activation, dual gate/up, fused SwiGLU-quantize, then down.
     prof.Begin(prof.gemm);
     if (w8) {
       LaunchQuantizeActivationQ8_1(bf16, arena_.d_scratch_q8_act, batch, hidden,

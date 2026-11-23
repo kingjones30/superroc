@@ -10,13 +10,13 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::speculative {
 namespace {
 
 [[nodiscard]] bool DsparkEnvOn(const char* name) {
-  const char* value = ::superroc::core::GetEnvCompat(name);
+  const char* value = ::superroc::core::GetEnv(name);
   return value != nullptr && value[0] != '\0' &&
          !(value[0] == '0' && value[1] == '\0');
 }
@@ -215,7 +215,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
     return std::nullopt;
   }
 
-  // NBFAST T1: carry the drafter's RMSNorm epsilon (Nanbeige: 1e-5; the
+  // carry the drafter's RMSNorm epsilon (Nanbeige: 1e-5; the
   // Qwen file's 1e-6 matches the executor's former hardcoded value, so
   // existing drafters are unchanged). Absent key keeps the 1e-6 default.
   if (const auto eps = reader.GetMetadataFloat32(
@@ -317,7 +317,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
         df_cfg.conv_group_size == 0 ||
         config.hidden_size % df_cfg.conv_group_size != 0 ||
         df_cfg.selector_rank == 0 || df_cfg.selector_top_k == 0 ||
-        // NBFAST T1: the Nanbeige DFlash2 drafter is trained with top-k 32;
+        // the Nanbeige DFlash2 drafter is trained with top-k 32;
         // the selector kernels size their lists by kMaxSelectorTopK (32).
         df_cfg.selector_top_k > 32U ||
         df_cfg.sliding_window < df_cfg.block_size || *is_causal) {
@@ -339,7 +339,7 @@ std::optional<QwenDFlashWeights> QwenDFlashWeights::LoadFromGguf(
       df_cfg.sliding_window = config.context_length;
     }
     if (const char* window =
-            ::superroc::core::GetEnvCompat("SUPERROC_DSPARK_WINDOW")) {
+            ::superroc::core::GetEnv("SUPERROC_DSPARK_WINDOW")) {
       char* end = nullptr;
       const unsigned long parsed = std::strtoul(window, &end, 10);
       if (end != window && parsed >= df_cfg.block_size &&

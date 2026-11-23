@@ -28,7 +28,7 @@ ability to trim a checkpoint: a saved snapshot can only be reused **whole**,
 and only when its tokens are an exact prefix of the new prompt.
 
 Qwen3.8-Flash-Next no longer uses this snapshot cache: it serves through the
-component cache of the [cache redesign](cache-redesign/RFC.md), whose options
+component cache, whose options
 are described under [Flash-Next budgets](#flash-next-budgets). The rest of this
 document describes the snapshot cache that the other models still use; its
 Flash-Next descriptions and measurements predate the change.
@@ -129,7 +129,7 @@ and all remaining checkpoints fall after the edit, reuse is impossible:
 | 3', no usable earlier checkpoint | 5,620 | 0 | 5,620 | 5,599 |
 
 That gap between "common prefix" and "reused" is the signature of the
-exact-prefix limitation. See #331.
+exact-prefix limitation.
 
 ## Concurrent requests sharing a prefix
 
@@ -192,12 +192,16 @@ gain was about 1 s of 9 s, which is why short prefixes do not wait.
 The unit of retention is a **checkpoint**, not a conversation. A single request
 can retain up to four intermediate checkpoints in addition to its branching
 fallback and complete prompt. Prefill stops at those positions and captures the
-whole model state before advancing. Positions lie on a 2,048-token grid spread
-across the prompt; the final grid point is within 2,048 tokens of its end.
-Warm continuations skip grid positions less than 2,048 tokens beyond the reused
-frontier, and every request skips grid positions within 128 tokens of its end:
-such a point would split the final prefill pass for a checkpoint next to the
-complete prompt. Capture runs asynchronously while that session is frozen, so other
+whole model state before advancing. Positions are chosen on a 2,048-token grid
+spread across the prompt. Warm continuations skip grid positions less than
+2,048 tokens beyond the reused frontier, and every request skips grid positions
+within 128 tokens of its end: such a point would split the final prefill pass
+for a checkpoint next to the complete prompt. Flash-Next, whose prefill passes
+are 4,096 tokens wide, moves each grid position back to the end of the pass
+before it, so a checkpoint does not split a pass: its intermediate checkpoints
+sit on pass ends, up to 4,096 tokens apart from the grid position and from the
+prompt end, and a prompt that fits in one pass has none. Capture runs
+asynchronously while that session is frozen, so other
 requests can continue; a single execution slot skips the extra worker. A
 request whose first token is already published decodes as soon as its capture
 finishes, before the next bounded prefill chunk of a peer.
@@ -291,9 +295,10 @@ capture a text prompt's stable boundary within the final prefill pass: its
 recurrent kernels retain the boundary state, convolution and PLE retain their
 history, and a one-row head computes the boundary logits. Attention queries
 on either side keep the grouping of separate passes. The final batch can
-include up to 128 tokens beyond the normal 2,048-token chunk, so a prompt that
-ends just past a chunk needs no separate tail pass; the stable boundary must be
-within eight tokens of that batch's end.
+include up to 512 tokens beyond the normal 4,096-token chunk, so a prompt that
+ends just past a chunk needs no separate tail pass (a pass of a few hundred
+rows costs about 0.2 s at 24,000 tokens of context); the stable boundary must
+be within eight tokens of that batch's end.
 The cache reserves the full payload before enabling this capture. Disk,
 image, intermediate and learned-prefix checkpoints still stop prefill at
 their boundary.
@@ -402,13 +407,12 @@ keep more deep conversations:
   disk. The other models also need `--cache-disk-staging-bytes` above the
   snapshot size; Flash-Next streams any size through its default buffer.
 
-See #343.
 
 Snapshot size scales with retained tokens and differs sharply between models:
 roughly 0.5 GB at 5k tokens on Flash-Next, and 3.7 GB at 24k tokens on
 Qwen3.8-27B **(measured)**. Automatic disk staging therefore has no fixed cap:
 it follows available RAM and the disk budget, so `--cache-disk` keeps 27B
-checkpoints at moderate depth without an explicit limit. See #259.
+checkpoints at moderate depth without an explicit limit.
 
 RAM eviction follows the checkpoint priorities above. Disk eviction remains
 global least-recently-used, without conversation or rebuild-cost awareness.
@@ -421,7 +425,7 @@ Flash-Next keeps the same options with these meanings:
 | --- | --- |
 | `--cache-ram-bytes` | The automatic and explicit sizing above, as a cap. Pinned 64 KiB pages for up to about 89% of it are committed as captures need them, in equal steps of about 1 GiB, and stay committed; the rest is reserved for cache metadata, which grows with use. The pages hold checkpoint state, KV rows, partial tails and idle-session spill. There is no separate spill budget. |
 | `--cache-disk-bytes` | Counts referenced, temporary and orphaned files. A lower budget at startup removes temporaries and orphans, then the oldest checkpoints by creation order: use history does not survive a restart. |
-| `--cache-disk-staging-bytes` | Ignored, with an `event=option_ignored` warning. Disk transfers use an internal 1 MiB pinned buffer; checkpoints of any size stream through it. Its size did not change restore or write speed (#562), and a larger value only took pinned RAM and device heap. Earlier advice to raise staging no longer applies. |
+| `--cache-disk-staging-bytes` | Ignored, with an `event=option_ignored` warning. Disk transfers use an internal 1 MiB pinned buffer; checkpoints of any size stream through it. Its size did not change restore or write speed, and a larger value only took pinned RAM and device heap. Earlier advice to raise staging no longer applies. |
 | `--cache-disk DIR` | Owned by one Flash-Next server. A second one fails at startup, before committing its RAM budget, with an ownership error naming the directory. Other models do not take this lock. Startup removes earlier-release `*.kvc` and `.tmp-*` files from the directory, including those of another model's server sharing it. |
 
 The 128-record limit stays internal. Each checkpoint holds about 132 MB of
@@ -490,7 +494,7 @@ It also **learns shared-prefix boundaries** that survive restarts. RAM learns a
 divergence point from the second conversation and restores it from the third
 (see above); the disk index needs more conversations, and in one run its
 boundary became usable from the fifth **(measured)**. When both tiers choose the
-same position, one capture feeds both. See #267.
+same position, one capture feeds both.
 
 **Disk checkpoints are spaced at least 2048 tokens apart.** A conversation
 advances a few hundred tokens per turn, so writing every turn serialises, fsyncs
@@ -513,7 +517,7 @@ unaffected.
 
 Disk entries are evicted by global LRU on last access, so one active run whose
 checkpoints are all recent will displace every other conversation in age order
-**(measured)**. See #275.
+**(measured)**.
 
 ## What invalidates reuse
 
@@ -532,7 +536,7 @@ Anything that changes the token prefix. In practice:
   boundary before the assistant opening, so the next turn can reuse the prior
   history and process the rewritten assistant plus new input. That boundary
   must be saved on warm hits too; retaining only the old resume point caused
-  cache reuse to stop advancing for the rest of the session. See #335.
+  cache reuse to stop advancing for the rest of the session.
 
 These do **not** invalidate reuse **(measured)**: changing `temperature`,
 `top_p`, `seed`, `max_tokens`, penalties or `stop` between turns; streaming
@@ -542,6 +546,125 @@ versus not, which reuse identically and interoperate within one conversation.
 `/v1/completions` or `/completion` bypasses lookup for a single request. The
 result can still populate the cache. `null` keeps the default, `true`.
 
+## The same reply for the same history
+
+By default the next turn of a conversation continues from the state the
+previous reply left behind. The decode kernels produced that state one token
+at a time. A server that receives the same conversation in one request (after
+a restart, after the checkpoint was evicted, or because another server
+answers) reads all of it through the prompt kernels instead, and it may cut
+the prompt into passes at other points. The paths round differently in the
+last bits. At temperature 0 that is enough to change a token wherever two
+candidates are nearly tied, and from there the texts part. An agent run then
+depends on what the cache happened to hold.
+
+`SUPERROC_CANONICAL_CACHE=1` removes that dependence:
+
+- A finished or cancelled request leaves prompt checkpoints only. The next
+  request restores one and reads the previous reply's tokens as prompt,
+  together with its own new tokens.
+- Every prompt token goes through the prompt kernels. Without the switch a
+  dense Qwen server consumes a one-token suffix that equals its own last
+  prediction with a decode step.
+- Dense Qwen models (Qwen3.8-27B): every prompt pass takes the same kernel
+  route. Without the switch a pass of fewer than 128 rows takes the 8-bit
+  activation route, which is cheaper at that size and rounds differently. A
+  4-bit route file (`SUPERROC_INT4_WEIGHTS`) is not used, because that route
+  takes only passes of 512 rows and more.
+- Qwen3.8-Flash-Next: the state after a prompt is the same
+  bits only when every pass ends on a multiple of 4 rows, the key blocks of
+  its sparse attention, and holds at least 16 rows. The server therefore cuts
+  and checkpoints a prompt only on multiples of 64 rows with at least 16 rows
+  on both sides: one checkpoint 16 to 79 rows before the prompt end, and grid
+  points on pass ends. The last pass reads the prompt to its end and freezes
+  that checkpoint on the way, as the state a pass ending there leaves; the
+  rows after it are computed as a pass of their own would compute them. The
+  stable boundary, the complete prompt and shared-prefix points are not kept,
+  and no other row is captured inside a pass. `SUPERROC_TAIL_CAPTURE=N` moves
+  that one restore point N rows further from the prompt end, so a follow-up
+  that changes only the closing lines still restores there; every other turn
+  then reads N more rows again. Values up to 176 keep the point inside the
+  last pass.
+- Flash-Next projections stored in half precision (the regular K-quant files
+  keep some): one kernel with one summation order for every pass size.
+  Without the switch the order follows the number of rows in the pass.
+- Qwen MoE models (measured on KAT-Coder-V2.5-Dev): the cache rule above is
+  enough. Their prompt kernels gave the same bits for every tested split.
+- Llama-family models (measured on Nanbeige4.3-33B-Base): a one-row prompt
+  pass takes the batch kernels, and prompt attention reads its keys in one
+  sweep. Without the switch one row runs as a decode step, and the sweep is
+  divided by the number of keys.
+
+The price: each reply is read a second time, as prompt. On Flash-Next the
+last 16 to 79 prompt rows are a pass of their own only where the checkpoint
+cannot be frozen inside the pass: with a `--cache-disk` directory, when the
+rest of the prompt does not fit one pass, or when the checkpoint lies on a
+pass boundary anyway. A step budget
+(`--prefill-chunk`) is exceeded where that is needed to end a pass on an
+allowed row. A `--cache-disk` directory is not shared between servers with
+and without the switch: the cache identity differs.
+
+**Measured** on a Radeon 8060S with six agent tasks of six turns each (36
+turns; temperature 0, seed 1, thinking off, at most 400 tokens per reply).
+Each conversation is served turn by turn; then a freshly started server gets
+every turn's whole history in one request, and the two replies are compared.
+"Long" adds 120 lines of notes to the system prompt, which puts the
+conversations at 3,650 to 4,700 tokens, past the 2,048 tokens where
+Flash-Next's attention turns sparse and across its 4,096-row pass boundary.
+
+| Model | Context | Same reply, default | Same reply, switch |
+| --- | --- | ---: | ---: |
+| Qwen3.8-27B-UD-Q4_K_XL, drafting from the file's MTP block | short | 35 of 36 | 36 of 36 |
+| | long | 34 of 36 | 36 of 36 |
+| Qwen3.8-27B ROCmFP4, DFlash2 draft and prompt lookup | long | 31 of 36 | 36 of 36 |
+| Qwen3.8-Flash-Next ROCmFP4, 7 routed experts | short | 32 of 36 | 36 of 36 |
+| | long | 29 of 36 | 36 of 36 |
+| Qwen3.8-Flash-Next-UD-Q4_K_XL, drafting from its MTP head | short | not measured | 36 of 36 |
+| | long | 28 of 36 | 36 of 36 |
+| KAT-Coder-V2.5-Dev ROCmFP4 (Qwen MoE), no drafter | short | 27 of 36 | 36 of 36 |
+| | long | 29 of 36 | 36 of 36 |
+| KAT-Coder-V2.5-Dev ROCmFP4, drafting from the file's MTP block | long | 29 of 36 | 36 of 36 |
+| Nanbeige4.3-33B-Base Q4_K_M (llama family), no drafter | short | 33 of 36 | 36 of 36 |
+
+What it costs was measured with an agent replay of two sessions of ten turns
+(29,000 to 73,000 tokens of context, a tool result of 800 to 3,000 tokens per
+turn), run alternately. On Flash-Next the median time to the first token was
+1.07 and 1.13 s with the switch and 1.11 and 1.14 s without. On Qwen3.8-27B
+(ROCmFP4, DFlash2 draft and prompt lookup) it was 3.92 and 3.91 s with the
+switch and 3.96 and 3.98 s without. Neither model pays for the switch there.
+
+A second test sends a raw prompt that grows by 1 to 12 tokens per request, so
+every request reads only a few rows behind the cache, and compares each reply
+with a fresh server's: 21 of 21 steps agree on both 27B files, on both
+Flash-Next files, on KAT-Coder-V2.5-Dev (14 of 21 without the switch) and on
+Nanbeige4.3-33B-Base.
+
+Two programs check the property below the server. `qwen27b_prompt_split_test`
+reads a 384-token prompt whole and in 46 other ways (every last-pass size
+from 1 to 17 rows, sizes around 32, 64, 128 and 256, chains of short passes)
+and a 2,304-token prompt in 12 other ways (passes on both sides of 1,024
+rows), each once directly and once through a snapshot, reset and restore. It
+requires the same bits in the logits after the prompt and after each of 16
+decode steps. `llama_prompt_split_test` does the same for a llama-family
+file (116 of 116 plans). `qwen38_flash_next_split_probe` prints the same
+comparison for Flash-Next sessions, including the checkpoint frozen inside a
+pass, and, with `require`, fails when a split on allowed cuts leaves another
+state.
+
+What the switch covers: one build, one set of model files and options, one
+GPU model, requests served one at a time, on Qwen3.8-27B and
+Qwen3.8-Flash-Next (K-quant and ROCmFP4 files of both), on Qwen MoE models
+and on llama-family models. It does not cover:
+
+- Other model families (LFM2, Flint, Glimmer). They get the cache behaviour,
+  but their prompt routes can depend on the pass size. A runner without
+  prompt snapshots (Ling-3) is unchanged, and the server logs
+  `event=canonical_cache_not_applied`.
+- Sampling above temperature 0 without a fixed `seed`.
+
+[Reproducibility](REPRODUCIBILITY.md) has the two tools that run the
+36-turn and growing-prompt checks against any OpenAI-compatible server.
+
 ## Observing it
 
 | Log line | Meaning |
@@ -550,7 +673,7 @@ result can still populate the cache. `null` keeps the default, `true`.
 | `schema=component-cache-v1 event=configured` | Flash-Next: RAM, staging and disk budgets at startup, with the automatic budget and the most an explicit `--cache-ram-bytes` may claim |
 | `schema=component-cache-v1 event=backing_grown` | Flash-Next: a capture committed another segment of cache pages (about 1 GiB); reports `committed_bytes`, `segments` and the capture's `acquire_ms` |
 | `schema=component-cache-v1 event=backing_limited reason=host_reserve` | Flash-Next: the cache stopped growing below its budget because the host would keep less than 4 GiB available |
-| `schema=component-cache-v1 event=backing_limited reason=device_heap_reserve` | Flash-Next: the cache stopped growing because its pinned pages would leave the device heap less than its 4 GiB dispatch reserve, which would push session and scratch allocations onto managed memory (#460) |
+| `schema=component-cache-v1 event=backing_limited reason=device_heap_reserve` | Flash-Next: the cache stopped growing because its pinned pages would leave the device heap less than its 4 GiB dispatch reserve, which would push session and scratch allocations onto managed memory |
 | `schema=component-cache-v1 event=option_ignored option=--cache-disk-staging-bytes` | Flash-Next: the staging option is ignored; disk transfers use the internal buffer |
 | `schema=component-cache-v1 event=disk_evicted reason=budget` | Flash-Next: startup removed the oldest checkpoints (creation order) to fit a lowered `--cache-disk-bytes` |
 | `schema=component-cache-v1 event=disk_over_budget` | Flash-Next: the directory still exceeds `--cache-disk-bytes` after startup reclamation and eviction; publication is refused until it fits |
@@ -594,7 +717,7 @@ Reading them:
   `event=shared_prefix_wait` and `event=shared_prefix_ready` name the leader
   and position.
 - `cache_n` **pinned** at the same value while `prompt_n` grows every turn is a
-  checkpoint that stopped advancing. See #335.
+  checkpoint that stopped advancing.
 - A large `cache_common_prefix_tokens` on a miss means a long prefix agreed and
   could not be resumed from: a mid-history edit, or an evicted checkpoint.
 
@@ -621,8 +744,3 @@ Reading them:
   `tests/cli/continuation_disk_store_test.cpp` and
   `tests/cli/text_model_runner_test.cpp` cover retention, admission, eviction
   and the event sinks without loading a model.
-
-## Known gaps
-
-Tracked under #336, with the upstream reports #331, #335, #259, #267, #275,
-#300 and #318.

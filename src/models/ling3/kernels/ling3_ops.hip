@@ -1,10 +1,10 @@
-// ling3_ops.hip — the small ops around the attention blocks, lane LK phase 2.
-// Lane: LK (MiMo) — Ling-on-superroc overnight build. Do not confuse with LG's drafts.
+// ling3_ops.hip — the small ops around the attention blocks.
+// Ling-on-superroc overnight build. Do not confuse with other drafts.
 // See ling3_ops.hpp for scope. RMSNorm matches ggml-cuda rms_norm_f32 (float accumulation).
 
 #include "ling3_ops.hpp"
 
-#include "ling3_quant.hpp"   // LX's decoder: -I../ling-moe on the box, -Imactest/vendor on the Mac
+#include "ling3_quant.hpp"   // Q6_K decoder, vendored; include dir per build
 
 #include <cmath>
 #include <cstdio>
@@ -73,7 +73,7 @@ static __global__ void rms_norm_kernel(const float * __restrict__ x,
     }
 }
 
-// LS2 PHASE7: residual add fused with the RMSNorm that consumes it -- the shape every block has.
+// Residual add fused with the RMSNorm that consumes it -- the shape every block has.
 // As two kernels it cost an extra dispatch per layer (42/token) and a second trip to global
 // memory for a value the first kernel already had in a register. xi is the same a[i]+b[i], the
 // sum of squares accumulates in the same thread-strided order, and the output is the same
@@ -128,7 +128,7 @@ static __global__ void residual_add_kernel(const float * __restrict__ a,
     }
 }
 
-// LS2 PHASE7. This ran ling3_dequant_row over a whole 2,560-wide Q6_K row on ONE thread: a
+// This ran ling3_dequant_row over a whole 2,560-wide Q6_K row on ONE thread: a
 // fully serial 2,100-byte unpack, measured at 1,583 us for a single row. A quant block is
 // self-contained (ling3_term_block reads only inside [blk, blk+type_size)), so the row now
 // splits 32 elements per thread -- one eighth of a 256-element Q6_K block -- through the SAME
@@ -162,7 +162,7 @@ static __global__ void embedding_row_kernel(const void * __restrict__ table,
 // ---------------------------------------------------------------------------
 // argmax over `n` floats per row; ties resolve to the lowest index.
 // ---------------------------------------------------------------------------
-// LM1 SPEC6 item 3 (RV14 3.2): argmax + top-1 softmax probability in one
+// Argmax + top-1 softmax probability in one
 // launch. The reduction is the same one argmax_kernel does for the max; the
 // probability is a second strided pass of exp(x - max) summed in shared memory.
 // p = 1 / sum exp(x - max) is exact to fp32 and needs no logarithm.
@@ -227,7 +227,7 @@ static __global__ void argmax_prob_kernel(const float * __restrict__ logits,
     }
 }
 
-// LA1: two-phase argmax. The old kernel scanned all n floats with ONE 256-thread
+// Two-phase argmax. The old kernel scanned all n floats with ONE 256-thread
 // block, so a 157,184-logit row read the 629 KB at ~3.5 GB/s of a 244 GB/s box
 // (~179 us). The answer -- max value, lowest index on a tie, NaN never wins, an
 // all--INF row returns 0 -- is independent of reduction order, so the row is now
@@ -413,7 +413,7 @@ void ops_argmax(const float * logits, int n, int rows, int32_t * out_index,
     LING3_HIP_CHECK(hipGetLastError());
 }
 
-// LM1 SPEC6 item 3: see the hpp note. `out_p` may alias out_index + 1 so both
+// See the hpp note. `out_p` may alias out_index + 1 so both
 // results land in one 8-byte device word for a single memcpy.
 void ops_argmax_prob(const float * logits, int n, int rows, int32_t * out_index,
                      float * out_p, int64_t logits_tok, hipStream_t stream) {

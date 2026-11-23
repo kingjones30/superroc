@@ -1,4 +1,4 @@
-// lqw:spec5-q4. Declarations plus the device element helper. Kernel bodies
+// Declarations plus the device element helper. Kernel bodies
 // live in q4_0_gemv.hip and are compiled into one translation unit.
 #pragma once
 

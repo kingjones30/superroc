@@ -251,6 +251,79 @@ int RunCase(std::uint32_t kTokens, bool extreme_gates = false) {
             throw std::runtime_error(
                 "GDN checkpoint wrote beyond its boundary");
       }
+      // Dual in-pass checkpoints: one pass with both
+      // boundaries set must freeze exactly the states (and conv histories)
+      // of passes ending at each boundary, and keep every live row identical.
+      // GPU gate for step 2: built here, run only on the GPU box.
+      const std::uint32_t pair_first =
+          kTokens == 1 ? 1U : std::max(1U, kTokens / 3U);
+      const std::uint32_t pair_second =
+          kTokens <= 2 ? kTokens : std::max(pair_first + 1U, kTokens / 2U);
+      HipBuffer<float> pair_first_state(kStateCount + kCheckpointGuard);
+      HipBuffer<float> pair_first_conv(kConvState + kCheckpointGuard);
+      HipBuffer<float> pair_second_state(kStateCount + kCheckpointGuard);
+      HipBuffer<float> pair_second_conv(kConvState + kCheckpointGuard);
+      Upload(&pair_first_state,
+             std::vector<float>(kStateCount + kCheckpointGuard,
+                                kCheckpointSentinel));
+      Upload(&pair_first_conv, std::vector<float>(kConvState + kCheckpointGuard,
+                                                  kCheckpointSentinel));
+      Upload(&pair_second_state,
+             std::vector<float>(kStateCount + kCheckpointGuard,
+                                kCheckpointSentinel));
+      Upload(&pair_second_conv,
+             std::vector<float>(kConvState + kCheckpointGuard,
+                                kCheckpointSentinel));
+      Upload(&d_conv_state, conv_state);
+      Upload(&d_state, state);
+      q::GatedDeltaNet(
+          d_qkv.get(), kChannels, d_z.get(), kZ, d_alpha_beta.get(),
+          d_conv_w.get(), d_a.get(), d_dt.get(), d_norm_w.get(),
+          d_conv_state.get(), d_scratch.get(), d_qn.get(), d_kn.get(),
+          d_raw.get(), d_state.get(), d_out.get(), nullptr, {}, {}, kTokens,
+          kKHeads, kVHeads, kDim, kKernel, route == 1, false, kEps, nullptr,
+          nullptr,
+          {pair_second_state.get(), pair_second_conv.get(), pair_second}, 0,
+          nullptr, {pair_first_state.get(), pair_first_conv.get(), pair_first});
+      CheckHip(hipDeviceSynchronize(), "GDN synchronization");
+      const auto pair_live_state = Download(&d_state, kStateCount);
+      const auto pair_live_out = Download(&d_out, kOut);
+      if (std::memcmp(pair_live_state.data(), states[route].data(),
+                      kStateCount * sizeof(float)) ||
+          std::memcmp(pair_live_out.data(), outs[route].data(),
+                      kOut * sizeof(float)))
+        throw std::runtime_error("GDN pair changed full-pass arithmetic");
+      const auto pair_first_state_host =
+          Download(&pair_first_state, kStateCount + kCheckpointGuard);
+      const auto pair_first_conv_host =
+          Download(&pair_first_conv, kConvState + kCheckpointGuard);
+      const auto pair_second_state_host =
+          Download(&pair_second_state, kStateCount + kCheckpointGuard);
+      const auto pair_second_conv_host =
+          Download(&pair_second_conv, kConvState + kCheckpointGuard);
+      forward(pair_first, {});
+      const auto expected_first_state = Download(&d_state, kStateCount);
+      const auto expected_first_conv = Download(&d_conv_state, kConvState);
+      forward(pair_second, {});
+      const auto expected_second_state = Download(&d_state, kStateCount);
+      const auto expected_second_conv = Download(&d_conv_state, kConvState);
+      if (std::memcmp(pair_first_state_host.data(), expected_first_state.data(),
+                      kStateCount * sizeof(float)) ||
+          std::memcmp(pair_first_conv_host.data(), expected_first_conv.data(),
+                      kConvState * sizeof(float)))
+        throw std::runtime_error("GDN pair changed the earlier boundary");
+      if (std::memcmp(pair_second_state_host.data(),
+                      expected_second_state.data(),
+                      kStateCount * sizeof(float)) ||
+          std::memcmp(pair_second_conv_host.data(), expected_second_conv.data(),
+                      kConvState * sizeof(float)))
+        throw std::runtime_error("GDN pair changed the later boundary");
+      for (std::size_t i = 0; i < kCheckpointGuard; ++i)
+        if (pair_first_state_host[kStateCount + i] != kCheckpointSentinel ||
+            pair_first_conv_host[kConvState + i] != kCheckpointSentinel ||
+            pair_second_state_host[kStateCount + i] != kCheckpointSentinel ||
+            pair_second_conv_host[kConvState + i] != kCheckpointSentinel)
+          throw std::runtime_error("GDN pair wrote beyond its boundary");
       // Direct F16 output must equal narrowing the independently checked
       // F32 epilogue and must not change the recurrent state.
       constexpr std::size_t kHalfGuard = 16;

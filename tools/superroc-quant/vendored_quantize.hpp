@@ -2,8 +2,8 @@
 //
 // Byte-exact port of the reference quantization routines used to reproduce
 // llama.cpp/ggml fork quantized output. The bodies are copied VERBATIM from
-// ~/src/rocmfpx-ling-qlora/ggml/src/ggml-quants.c and
-// ~/src/rocmfpx-ling-qlora/ggml/src/ggml-impl.h with NO logic changes (same
+// rocmfpx-ling-qlora's ggml/src/ggml-quants.c and
+// rocmfpx-ling-qlora's ggml/src/ggml-impl.h with NO logic changes (same
 // float operations, same order, same rounding). Only ggml-specific types were
 // stripped for C++ compilation:
 //   const float * GGML_RESTRICT  -> const float*
@@ -388,8 +388,8 @@ static float make_qkx2_quants(int n, int nmax, const float* x, const float* weig
 }
 
 // ===================== Weighted k-quant helpers (QC 1273, 1356)
-// Used ONLY by the fork's weighted k-quant _impl paths (SPEC4). Copied VERBATIM
-// from ~/src/ROCmFPX/ggml/src/ggml-quants.c.
+// Used ONLY by the fork's weighted k-quant _impl paths. Copied VERBATIM
+// from ROCmFPX's ggml/src/ggml-quants.c.
 static float make_qkx3_quants(int n, int nmax, const float* x, const float* weights,
         uint8_t* L, float* the_min, uint8_t* Laux,
         float rmin, float rdelta, int nstep, bool use_mad) {
@@ -784,7 +784,7 @@ void quantize_row_q6_K_ref(const float* x, block_q6_K* y, int64_t k) {
     }
 }
 
-// ====================== Weighted k-quant _impl paths (SPEC4)
+// ====================== Weighted k-quant _impl paths
 // The fork's `quantize_qX_K` with a non-NULL quant_weights dispatches to these
 // `_impl` rowwise variants, which are a STRUCTURALLY DIFFERENT algorithm from
 // `_ref` (they use make_qkx3_quants + make_qp_quants with prepared

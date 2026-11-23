@@ -62,8 +62,13 @@ if (SUPERROC_BUILD_TOOLS)
   target_link_libraries(cache_slot_bench PRIVATE superroc_cache_fake)
 endif()
 
-add_executable(cache_retention_test retention_test.cpp)
-target_link_libraries(cache_retention_test PRIVATE superroc_cache_fake)
+add_executable(cache_retention_test retention_test.cpp
+  ${PROJECT_SOURCE_DIR}/src/cli/serve/component_text_cache.cpp
+  ${PROJECT_SOURCE_DIR}/src/cli/serve/continuation_cache.cpp
+  ${PROJECT_SOURCE_DIR}/src/cli/serve/continuation_disk_store.cpp
+  ${PROJECT_SOURCE_DIR}/src/cli/serve/text_model_runner.cpp)
+target_link_libraries(cache_retention_test PRIVATE superroc_cache_fake superroc_core
+  superroc_logging)
 add_test(NAME cache_retention_test COMMAND cache_retention_test)
 set_tests_properties(cache_retention_test PROPERTIES LABELS "cpu;cache" TIMEOUT 30)
 

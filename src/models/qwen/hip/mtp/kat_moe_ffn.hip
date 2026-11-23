@@ -74,7 +74,7 @@ void LaunchAxpy(const float* x, float scale, float* out, int n,
   SUPERROC_CHECK_LAUNCH("KatMtpAxpyKernel");
 }
 
-// KDG (SPEC1 step 2): per-slot axpy reading the weight on device.
+// Per-slot axpy reading the weight on device.
 __global__ void KatMtpAxpySlotKernel(const float* __restrict__ x,
                                      const float* __restrict__ d_weights,
                                      int slot, float* __restrict__ out,
@@ -95,7 +95,7 @@ void LaunchAxpySlot(const float* x, const float* d_weights, int slot,
   SUPERROC_CHECK_LAUNCH("KatMtpAxpySlotKernel");
 }
 
-// KDG (SPEC1 step 2): device-routed Q8_0 GEMV. Bit-identical to
+// Device-routed Q8_0 GEMV. Bit-identical to
 // SmallBatchQ8_0ExactFp32VecGEMMKernel<16, 1, 2, true, true> (the batch=1
 // Q8_0 route LaunchBatchedQuantGEMMFp32 takes in
 // kernels/prefill_quant_gemm.hip) on the same expert bytes: same LDS
@@ -213,7 +213,7 @@ __launch_bounds__(512, 1) __global__
   }
 }
 
-// KDG (SPEC1 step 2): device-routed Q8_K GEMV. Bit-identical to
+// Device-routed Q8_K GEMV. Bit-identical to
 // SmallBatchQ8KFp32GEMMKernel<8, 1> (the batch=1 Q8_K route
 // LaunchBatchedQuantGEMMFp32 takes) on the same expert bytes; only the
 // row address adds the on-device routed offset, as above.
@@ -302,7 +302,7 @@ void GemvQ8Device(core::GgmlType type, const void* base, const int* d_ids,
   throw std::runtime_error("KAT-MTP: expert matrix must be Q8_0 or Q8_K");
 }
 
-// KDG (SPEC1 step 2): device-routed ExpertSwiglu variant. Takes the
+// Device-routed ExpertSwiglu variant. Takes the
 // router's device id array plus the slot instead of a host expert id; each
 // GEMV below resolves base + d_ids[slot] * expert_bytes on device, so the
 // step launches with no D2H readback and no stream sync. Strides use
@@ -444,7 +444,7 @@ void LaunchKatMtpMoeFfn(const models::QwenLayerWeights& layer,
                         float* out, const KatMtpMoeScratch& scratch,
                         hipStream_t stream) {
   const int n_expert = static_cast<int>(config.expert_count);
-  const int n_used = static_cast<int>(config.expert_used_count);
+  const int n_used = static_cast<int>(config.ExpertsInFile());
   const int hidden = static_cast<int>(config.hidden_size);
   const int ff = static_cast<int>(config.expert_feed_forward_length);
   const int ff_s = static_cast<int>(config.expert_shared_feed_forward_length);
@@ -466,7 +466,7 @@ void LaunchKatMtpMoeFfn(const models::QwenLayerWeights& layer,
                   n_expert, n_used, scratch.logits, scratch.ids,
                   scratch.weights, stream),
               "route");
-  // KDG (SPEC1 step 2): device-side expert dispatch. The slot kernels below
+  // Device-side expert dispatch. The slot kernels below
   // read the routed ids and weights on device (scratch.ids[slot],
   // scratch.weights[slot]); the host loop only fixes the launch order
   // (slot 0..n_used-1 ascending), so there is no D2H readback and no stream

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <span>
 
 #include "src/models/qwen38_flash_next/mtp_costs.hpp"
@@ -13,6 +14,14 @@
 namespace superroc::models::qwen38_flash_next {
 
 inline constexpr std::uint32_t kMaxMtpDraftTokens = 7;
+/// What an extra draft row costs against its table price when a request decodes
+/// alone. Measured on 16 prose prompts at 5 of 10 routed experts, tokens per
+/// second: 1.0 54.0, 0.7 55.2, 0.5 56.1, 0.3 55.6. Greedy words do not depend
+/// on the width, so this moves speed only.
+inline constexpr float kMtpRowPriceAlone = 0.5F;
+/// Plain tokens a request in a shared batch decodes after its drafts stop
+/// paying.
+inline constexpr std::uint32_t kMtpSharedRetryTokens = 16;
 
 struct MtpLengthState {
   std::array<float, kMaxMtpDraftTokens> successes;
@@ -46,7 +55,7 @@ public:
     if (cap == 0 || state_.retry_tokens != 0) {
       return 0;
     }
-    // After a bounded AR interval, try one proposal to detect recovery.
+    // An unprofitable history still keeps one proposal to detect recovery.
     return std::min(cap, std::max({1U, BestLength(cap, context, concurrency),
                                    state_.probe_depth}));
   }
@@ -89,8 +98,11 @@ public:
         std::max<std::uint32_t>(state_.explored_depth, observed);
     if (accepted < drafted)
       state_.failed_depths |= 1U << accepted;
-    if (BestLength(limit_, context, concurrency) == 0)
-      state_.retry_tokens = 16;
+    // Alone, one proposal costs little and sees a recovery at once. In a shared
+    // batch an unprofitable draft also costs the others: wait a plain interval.
+    const auto sharing = concurrency != 0 ? concurrency : concurrency_;
+    if (sharing > 1 && BestLength(limit_, context, concurrency) == 0)
+      state_.retry_tokens = kMtpSharedRetryTokens;
   }
 
   void ObserveArToken() noexcept {
@@ -138,8 +150,9 @@ private:
   [[nodiscard]] std::uint32_t BestLength(
       std::uint32_t cap, std::uint32_t context,
       std::uint32_t concurrency) const noexcept {
-    const auto costs =
-        MtpCycleCosts(context, concurrency == 0 ? concurrency_ : concurrency);
+    const auto sharing = concurrency == 0 ? concurrency_ : concurrency;
+    const auto costs = MtpCycleCosts(context, sharing);
+    const float row_price = sharing <= 1 ? kMtpRowPriceAlone : 1.0F;
     float survival = 1.0F;
     float expected_tokens = 1.0F;  // The sampled target anchor.
     float best_score = 1.0F;       // Ordinary target decoding.
@@ -152,7 +165,7 @@ private:
       const float probability = Probability(depth);
       survival *= probability;
       expected_tokens += survival;
-      const float cost = costs[length] / costs[0];
+      const float cost = 1.0F + row_price * (costs[length] / costs[0] - 1.0F);
       const float score = expected_tokens / cost;
       if (score > best_score) {
         best_score = score;

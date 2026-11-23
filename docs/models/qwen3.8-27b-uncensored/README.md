@@ -21,7 +21,7 @@ This file is an abliterated build of Qwen3.8-27B, a dense 27B hybrid-attention m
 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Qwen3.8-27B-Uncensored-ROCmFP4-STRIX_LEAN.gguf --served-model-name qwen3.8-27b-uncensored --context 65536 --think off --speculative mtp --mtp-model /path/to/mtp-Qwen3.8-27B-Q4_0.gguf -d 4 --min-draft-tokens 1
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 
@@ -35,7 +35,7 @@ AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request a
 
 ## Quality
 
-Perplexity on long6k (n_ctx 4096): 5.39667 on Super ROC against 5.4187 ± 0.20479 on llama.cpp (ROCmFPX build) of the same file.
+Perplexity on long6k (n_ctx 4096): 5.39667 on Super Roc against 5.4187 ± 0.20479 on llama.cpp (ROCmFPX build) of the same file.
 
 ## Notes
 

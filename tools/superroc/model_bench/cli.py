@@ -20,10 +20,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--model", required=True, help="docs/models/<model> directory name")
     parser.add_argument("--superroc", type=Path, default=Path("result/bin/superroc"), help="SuperROC binary")
-# Compatibility with the previous binary-path flag spelling (hidden alias).
-    parser.add_argument("--" + "g" + "ufo", dest="superroc",
-                        type=Path, default=argparse.SUPPRESS,
-                        help=argparse.SUPPRESS)
 
     for role in FILE_ROLES:
         parser.add_argument(f"--{role}", action="append", default=[], metavar="[VARIANT=]PATH")

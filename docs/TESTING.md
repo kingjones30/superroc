@@ -101,14 +101,7 @@ Broaden testing when a change crosses shared ownership boundaries or a failure
 reveals an unresolved risk. Full model sweeps, media generation, and repeated
 timing runs are not the default development loop.
 
-Model-owned procedures and outstanding qualification gaps live with the model:
-
-- [DeepSeek V4 Flash](models/deepseek-v4-flash/QUALITY.md)
-- [Qwen3.8 27B](models/qwen3.8-27b/QUALITY.md)
-- [Qwen3.8 Flash-Next](models/qwen3.8-flash-next/QUALITY.md)
-- [MiniMax H3](models/minimax-h3/QUALITY.md)
-- [Qwen3-TTS](models/qwen3-tts/QUALITY.md)
-- [Qwen3-ASR](models/qwen3-asr/QUALITY.md)
+Model-owned procedures live with each model's tests under `tests/models/`.
 
 ## Independent references and artifacts
 

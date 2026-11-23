@@ -1,5 +1,5 @@
-# qwen35 protect preset v0 (QF_BRIEF §1.C; rule grammar from tools/superroc-quant/rules.hpp v0.5)
-# RULE grammar (verbatim from lqp1/tools/superroc-quant/rules.hpp):
+# qwen35 protect preset v0 (rule grammar from tools/superroc-quant/rules.hpp v0.5)
+# RULE grammar (verbatim from tools/superroc-quant/rules.hpp):
 #   =NAME      exact full-name match
 #   ^PREFIX    prefix match
 #   SUFFIX$    suffix match
@@ -7,10 +7,9 @@
 #   plain      substring match (pre-v0.5; kept for compat)
 # Protect file lines: `RULE TYPE  # why`. TYPE must be in TypeNameTable
 # (F32 F16 Q4_0 Q8_0 Q5_K Q6_K BF16 Q4_0_ROCMFP4 Q4_0_ROCMFP4_FAST G4_Q4 G4_Q4_FAST; case-insensitive).
-# Re-verified against superroc at 1194feaa9fbee6ca0438ca5af882ee09ac62bea4, 2026-10-10.
-# DECISIONS binding (16:21 CDT): rule LITERALS match the lqf/lqp in-tree file; this file
-# only adds `# why` tails (no rule change). DECISIONS condition: every rule matching
-# >= 1 tensor on the shipped arch file, OR listed allow-unmatched with a reason.
+# Re-verified against the engine, 2026-10-10.
+# Every rule matches at least one tensor of the shipped architecture's file, or is
+# listed allow-unmatched with a reason.
 # Allow-unmatched on this preset (reason per rule): the `*ffn_gate_inp.weight Q8_0`
 # rule matches 0 on a DENSE qwen35 (the rule only fires on qwen35moe; the dense router
 # set is F32 by the loader [repo:src/models/qwen/weights.cpp:84-91]). Always pass

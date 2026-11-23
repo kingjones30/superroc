@@ -1,4 +1,4 @@
-// ling3-chat-template test — runs on the Mac, no superroc_core needed.
+// ling3-chat-template test — runs on any host, no superroc_core needed.
 //
 // Renders the gate-(b) prompt and a few shapes, and checks the rendering
 // against the expected strings derived from the model's own

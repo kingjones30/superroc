@@ -20,7 +20,7 @@ The base model is described in its Hugging Face card as a 9B dense Qwen3.5 hybri
 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Ornith-1.5-9B-Q4_0_ROCMFP4_STRIX_LEAN.gguf --served-model-name ornith-1.5-9b --context 131072 --think off
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 
@@ -34,7 +34,7 @@ AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request a
 
 ## Quality
 
-Perplexity 9.71099 on long6k.txt at 4096 context, against 10.0318 ± 0.49546 for the same file on llama.cpp (ROCmFPX build), measured on an earlier Super ROC build.
+Perplexity 9.71099 on long6k.txt at 4096 context, against 10.0318 ± 0.49546 for the same file on llama.cpp (ROCmFPX build), measured on an earlier Super Roc build.
 
 ## Notes
 

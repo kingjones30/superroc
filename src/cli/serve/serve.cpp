@@ -7,6 +7,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <csignal>
 #include <cstdint>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <sstream>
@@ -33,18 +35,22 @@
 #include "src/cli/serve/image_api.hpp"
 #include "src/cli/serve/inference_backend.hpp"
 #include "src/cli/serve/logging.hpp"
+#include "src/cli/serve/openai_chat.hpp"
+#include "src/cli/serve/recipe.hpp"
 #include "src/cli/serve/sampling_request.hpp"
 #include "src/core/diagnostics/gpu_queues.h"
 #include "src/core/json.hpp"
 
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime_api.h>
+
+#include "src/core/hip/host_allocations.hpp"
 #endif
 #include "src/cli/serve/trace.hpp"
 #include "src/cli/serve/tts_service.hpp"
 #include "src/cli/serve/video_jobs.hpp"
 #include "src/cli/video/video.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/models/qwen3_tts/audio.hpp"
 
 namespace superroc::cli {
@@ -247,7 +253,8 @@ void AddServerOptions(superroc::cli::ArgParser& parser, std::string* host,
                       int* port, std::size_t* session_count,
                       std::size_t* max_connections,
                       std::size_t* max_request_body_bytes, std::string* api_key,
-                      std::string* api_key_file, ServerLogOptions* log) {
+                      std::string* api_key_file, std::string* cors_origin,
+                      ServerLogOptions* log) {
   parser.AddOption("-i", "--host", "IP", "Bind address", "Server", host);
   parser.AddOption("-p", "--port", "N", "Port to listen on", "Server", port);
   if (session_count != nullptr)
@@ -264,6 +271,10 @@ void AddServerOptions(superroc::cli::ArgParser& parser, std::string* host,
   parser.AddOption("", "--api-key-file", "PATH",
                    "Read the API key from the first line of PATH", "Server",
                    api_key_file);
+  parser.AddOption("", "--cors-origin", "ORIGIN",
+                   "Send CORS headers that allow ORIGIN ('*' for any "
+                   "origin); default: none",
+                   "Server", cors_origin);
   parser.AddCustomOption(
       "", "--log-level", "LEVEL", kLogLevelHelp, "Logging",
       [log](std::string_view flag, std::string_view value, std::string* error) {
@@ -289,6 +300,7 @@ struct ServerOptionHelpTargets {
       static_cast<std::size_t>(8) * 1024 * 1024;
   std::string api_key;
   std::string api_key_file;
+  std::string cors_origin;
   ServerLogOptions log;
 };
 
@@ -298,7 +310,8 @@ void AddServerOptionsForHelp(superroc::cli::ArgParser& parser,
   AddServerOptions(parser, &targets->host, &targets->port,
                    include_sessions ? &targets->session_count : nullptr,
                    &targets->max_connections, &targets->max_request_body_bytes,
-                   &targets->api_key, &targets->api_key_file, &targets->log);
+                   &targets->api_key, &targets->api_key_file,
+                   &targets->cors_origin, &targets->log);
 }
 
 // Split a `NAME=VALUE` CLI spec. Returns false when either side is empty.
@@ -406,58 +419,6 @@ bool BuildVoicePresets(
       *error = "--voice-lang names unknown voice '" + name + "'";
       return false;
     }
-  }
-  return true;
-}
-
-// Parses "--spec-plain-rates" into an ascending (context, tok/s) guard
-// table. Every pair must be "tokens:rate" with positive values, and the
-// contexts must be strictly ascending.
-bool ParsePlainDecodeRates(
-    const std::string& text,
-    std::vector<speculative::PlainDecodeRatePoint>* rates, std::string* error) {
-  rates->clear();
-  std::size_t start = 0;
-  while (start < text.size()) {
-    const auto comma = text.find(',', start);
-    const auto end = comma == std::string::npos ? text.size() : comma;
-    const auto pair = std::string_view(text).substr(start, end - start);
-    start = end == text.size() ? text.size() : end + 1;
-    const auto colon = pair.find(':');
-    if (colon == std::string_view::npos || colon == 0 ||
-        colon + 1 >= pair.size()) {
-      *error = "--spec-plain-rates entries must be 'context:tok_s' pairs";
-      return false;
-    }
-    std::uint32_t context = 0;
-    auto head = pair.substr(0, colon);
-    if (std::from_chars(head.data(), head.data() + head.size(), context).ec !=
-            std::errc{} ||
-        context == 0) {
-      *error = "--spec-plain-rates context must be a positive integer";
-      return false;
-    }
-    double rate = 0.0;
-    const auto tail = std::string(pair.substr(colon + 1));
-    try {
-      std::size_t parsed = 0;
-      rate = std::stod(tail, &parsed);
-      if (parsed != tail.size() || !std::isfinite(rate) || rate <= 0.0) {
-        throw std::invalid_argument("rate");
-      }
-    } catch (...) {
-      *error = "--spec-plain-rates tok_s must be a positive number";
-      return false;
-    }
-    if (!rates->empty() && context <= rates->back().context_tokens) {
-      *error = "--spec-plain-rates contexts must be strictly ascending";
-      return false;
-    }
-    rates->push_back({context, rate});
-  }
-  if (rates->empty()) {
-    *error = "--spec-plain-rates must list 'context:tok_s' pairs";
-    return false;
   }
   return true;
 }
@@ -577,6 +538,69 @@ void AddSpeechOptions(ArgParser& parser, bool tts, SpeechOptions* options) {
       });
 }
 
+// The GPU runtime registers some process memory with the driver while a
+// model loads and when a kernel first runs (the loaded GPU code, for one).
+// Pinning it keeps the kernel from moving those pages, which would stop the
+// GPU queues each time.
+void PinRuntimeMemory(std::string_view stage) {
+#if defined(ENGINE_ENABLE_HIP)
+  const auto report = ::superroc::hip::PinRuntimeRegisteredMemory();
+  // Logged with zero ranges too: the line says the pass ran.
+  std::string line =
+      "event=runtime_memory_pinned stage=" + std::string(stage) +
+      " ranges=" + std::to_string(report.ranges) +
+      " pinned_bytes=" + std::to_string(report.pinned_bytes) +
+      " huge_bytes=" + std::to_string(report.huge_bytes) +
+      " unlocked_bytes=" + std::to_string(report.unlocked_bytes) +
+      " refused_bytes=" + std::to_string(report.refused_bytes);
+  if (report.refused_ranges == 0) {
+    server::Logger::Info("loader", line);
+    return;
+  }
+  server::Logger::Warn(
+      "loader",
+      line +
+          "; this memory could be neither pinned (io_uring unavailable, or "
+          "the locked-memory limit is too small) nor put in huge pages. The "
+          "kernel may move it, and GPU work pauses each time it does. Raise "
+          "the limit (ulimit -l, LimitMEMLOCK) or enable transparent huge "
+          "pages to avoid that");
+#else
+  (void)stage;
+#endif
+}
+
+// Pins what the runtime registers while a model loads. The ranges appear in
+// the first seconds of a load, and the kernel starts moving memory as the
+// load allocates, so a single pass at the end comes too late for the load
+// itself.
+class RuntimePinWatch {
+public:
+  RuntimePinWatch() {
+#if defined(ENGINE_ENABLE_HIP)
+    thread_ = std::jthread([this](std::stop_token stop) {
+      // Nothing may leave the thread: an exception here would end the
+      // process. The watch then stops and the pass after the load remains.
+      try {
+        while (!stop.stop_requested()) {
+          (void)::superroc::hip::PinRuntimeRegisteredMemory();
+          std::unique_lock lock(mutex_);
+          // Ends early only on a stop request.
+          (void)wake_.wait_for(lock, stop, std::chrono::milliseconds{200},
+                               [] { return false; });
+        }
+      } catch (...) {
+      }
+    });
+#endif
+  }
+
+private:
+  std::mutex mutex_;
+  std::condition_variable_any wake_;
+  std::jthread thread_;
+};
+
 }  // namespace
 
 void PrintServeHelp(std::string_view program_name,
@@ -639,6 +663,7 @@ void PrintServeHelp(std::string_view program_name,
   if (subcommand == "llm") {
     std::string model;
     std::string served_model_name;
+    std::string recipe_setting = "off";
     std::uint32_t max_context = 0;
     std::int64_t max_tokens = -1;
     sampling::SamplingConfig sampling_config;
@@ -650,7 +675,6 @@ void PrintServeHelp(std::string_view program_name,
     std::string speculative_backend;
     std::string dflash_model_path;
     std::string draft_policy;
-    std::string spec_plain_rates;
     std::string dspark_model_path;
     std::string mtp_model_path;
     std::string vision_model_path;
@@ -675,6 +699,8 @@ void PrintServeHelp(std::string_view program_name,
         server::TextRunnerDiskCacheOptions::kDefaultCapacityBytes;
     std::size_t cache_disk_staging_bytes = 0;
     bool log_progress = false;
+    bool accept_any_model_name = false;
+    bool no_warmup = false;
     std::string trace_path;
 
     superroc::cli::ArgParser parser(
@@ -700,6 +726,13 @@ void PrintServeHelp(std::string_view program_name,
         "-n", "--max-tokens", "N",
         "Default new-token limit (default: -1 = until EOS or context full)",
         "Sampling Defaults", &max_tokens);
+    // NOTE (recipe): serve --help for llm is printed from a second parser in
+    // PrintServeHelp; the --recipe line below must stay identical in both.
+    parser.AddOption("", "--recipe", "off|auto|PATH",
+                     "Load a superroc-recipe/1 file with tuned settings: auto "
+                     "(superroc-recipe.json beside -m), a path, or off "
+                     "(default: off)",
+                     "Model", &recipe_setting);
     RegisterSamplingOptions(parser, &sampling_config, "Sampling Defaults", true,
                             true);
 
@@ -724,10 +757,19 @@ void PrintServeHelp(std::string_view program_name,
         "Reasoning tokens before </think> is forced: -1 unlimited, 0 none "
         "(default: -1)",
         "Reasoning Defaults", &reasoning_budget);
+    std::string unused_close_message;
+    parser.AddOption(
+        "", "--reasoning-close-message", "TEXT",
+        "Message emitted before the forced </think> when the reasoning "
+        "budget or loop guard fires (default: unset; wins over "
+        "SUPERROC_REASONING_CLOSE_MESSAGE)",
+        "Reasoning Defaults", &unused_close_message);
 
     // Speculative & Hardware
     parser.AddOption("", "--speculative", "MODE",
-                     "HTTP draft backend: dspark, dflash2, mtp, or off",
+                     "HTTP draft backend: dspark, dflash2, mtp, or off "
+                     "(default: mtp when a dense Qwen model file carries its "
+                     "own MTP block, otherwise off)",
                      "Speculative", &speculative_backend);
     parser.AddOption("", "--dflash-model", "PATH",
                      "Path to Qwen DFlash2 GGUF file", "Speculative",
@@ -751,11 +793,6 @@ void PrintServeHelp(std::string_view program_name,
     parser.AddOption("", "--min-draft-tokens", "N",
                      "Adaptive draft floor (default: 1)", "Speculative",
                      &min_draft_tokens);
-    parser.AddOption(
-        "", "--spec-plain-rates", "ctx:tps,...",
-        "Measured plain-decode tok/s per context length, ascending; a "
-        "request whose speculation runs slower switches to plain decoding",
-        "Speculative", &spec_plain_rates);
     parser.AddOption(
         "", "--prefill-chunk", "N",
         "Maximum prompt tokens between active decode rounds (default: 512)",
@@ -812,10 +849,18 @@ void PrintServeHelp(std::string_view program_name,
         "Other models: RAM limit for queued snapshots and each disk read "
         "(default: 0 = auto, at most the disk budget and 1/8 available RAM)",
         "Cache", &cache_disk_staging_bytes);
+    parser.AddFlag("", "--no-warmup",
+                   "Skip the short generation run at load that takes the "
+                   "first-use costs off the first request",
+                   "Model", &no_warmup);
     parser.AddFlag("", "--log-progress",
                    "Log live prefill and decode progress (needs "
                    "--log-level=info or debug)",
                    "Logging", &log_progress);
+    parser.AddFlag("", "--accept-any-model-name",
+                   "Accept any 'model' value in text requests (for launchers "
+                   "that forward their own model name, like llama-server)",
+                   "Model", &accept_any_model_name);
     parser.AddOption("", "--trace", "PATH", kTraceHelp, "Logging", &trace_path);
     ServerOptionHelpTargets server_help;
     AddServerOptionsForHelp(parser, &server_help);
@@ -853,6 +898,9 @@ void PrintServeHelp(std::string_view program_name,
       << "      --api-key-file <PATH>\n"
       << "                         Read the Bearer API key from the first line "
          "of PATH\n"
+      << "      --cors-origin <ORIGIN>\n"
+      << "                         Send CORS headers that allow ORIGIN ('*' "
+         "for any origin); default: none\n"
       << "\nLogging:\n"
       << "      --log-level <LEVEL>\n"
       << "                         " << kLogLevelHelp << "\n"
@@ -878,7 +926,7 @@ int RunServe(std::span<const char* const> args) {
       env_host != nullptr && *env_host != '\0') {
     host = env_host;
   } else if (const char* env_strix_host =
-                 ::superroc::core::GetEnvCompat("SUPERROC_HOST");
+                 ::superroc::core::GetEnv("SUPERROC_HOST");
              env_strix_host != nullptr && *env_strix_host != '\0') {
     host = env_strix_host;
   }
@@ -894,7 +942,7 @@ int RunServe(std::span<const char* const> args) {
       port = parsed_port;
     }
   } else if (const char* env_strix_port =
-                 ::superroc::core::GetEnvCompat("SUPERROC_PORT");
+                 ::superroc::core::GetEnv("SUPERROC_PORT");
              env_strix_port != nullptr && *env_strix_port != '\0') {
     const std::string_view sv(env_strix_port);
     int parsed_port = 0;
@@ -911,6 +959,7 @@ int RunServe(std::span<const char* const> args) {
       static_cast<std::size_t>(8) * 1024 * 1024;
   std::string api_key;
   std::string api_key_file;
+  std::string cors_origin;
   ServerLogOptions log_options;
 
   // Identify the modality only after leading server options. The selected
@@ -922,7 +971,7 @@ int RunServe(std::span<const char* const> args) {
     AddServerOptions(parser, &host, &port,
                      include_sessions ? &session_count : nullptr,
                      &max_connections, &max_request_body_bytes, &api_key,
-                     &api_key_file, &log_options);
+                     &api_key_file, &cors_origin, &log_options);
   };
   add_server_options(server_parser);
   std::string subcommand = "llm";
@@ -969,6 +1018,15 @@ int RunServe(std::span<const char* const> args) {
     if (port < 0 || port > 65535) {
       std::cerr << "Error: --port must be between 0 and 65535\n";
       return false;
+    }
+    // The origin is written into a response header: refuse control
+    // characters (CR/LF would split the header) and spaces.
+    for (const unsigned char c : cors_origin) {
+      if (c <= 0x20 || c == 0x7f) {
+        std::cerr << "Error: --cors-origin must not contain spaces or control "
+                     "characters\n";
+        return false;
+      }
     }
     if (session_count == 0 || max_connections == 0 ||
         max_request_body_bytes == 0) {
@@ -1245,6 +1303,7 @@ int RunServe(std::span<const char* const> args) {
     // Default to LLM server
     std::string model;
     std::string served_model_name;
+    std::string recipe_setting = "off";
     std::uint32_t max_context = 0;
     std::int64_t max_tokens = -1;
     sampling::SamplingConfig sampling_config;
@@ -1253,10 +1312,10 @@ int RunServe(std::span<const char* const> args) {
     std::string preserve_thinking = "auto";
     std::string chat_template_kwargs;
     std::int64_t reasoning_budget = -1;
+    std::string reasoning_close_message;
     std::string speculative_backend;
     std::string dflash_model_path;
     std::string draft_policy;
-    std::string spec_plain_rates;
     std::string dspark_model_path;
     std::string mtp_model_path;
     std::string vision_model_path;
@@ -1282,6 +1341,9 @@ int RunServe(std::span<const char* const> args) {
         server::TextRunnerDiskCacheOptions::kDefaultCapacityBytes;
     std::size_t cache_disk_staging_bytes = 0;
     bool log_progress = false;
+    bool accept_any_model_name = false;
+    bool no_warmup = false;
+    bool prompt_lookup = false;
     std::string trace_path;
 
     superroc::cli::ArgParser llm_parser(
@@ -1300,6 +1362,12 @@ int RunServe(std::span<const char* const> args) {
         "-c", "--context", "N",
         "Context tokens per session (default: 0 = model native context)",
         "Model", &max_context);
+    // NOTE (recipe): keep identical to the --recipe line in PrintServeHelp.
+    llm_parser.AddOption("", "--recipe", "off|auto|PATH",
+                         "Load a superroc-recipe/1 file with tuned settings: "
+                         "auto (superroc-recipe.json beside -m), a path, or "
+                         "off (default: off)",
+                         "Model", &recipe_setting);
     llm_parser.AddOption(
         "-n", "--max-tokens", "N",
         "Default new-token limit (default: -1 = until EOS or context full)",
@@ -1317,7 +1385,7 @@ int RunServe(std::span<const char* const> args) {
     llm_parser.AddOption("", "--preserve-thinking", "MODE",
                          "Replay prior reasoning: on, off, or auto",
                          "Reasoning Defaults", &preserve_thinking);
-    // GLM: same JSON object as the fork's --chat-template-kwargs.
+    // Same JSON object as the fork's --chat-template-kwargs.
     llm_parser.AddOption(
         "", "--chat-template-kwargs", "JSON",
         "Default chat template kwargs. Glimmer reads reasoning_strength.",
@@ -1327,8 +1395,16 @@ int RunServe(std::span<const char* const> args) {
         "Reasoning tokens before </think> is forced: -1 unlimited, 0 none "
         "(default: -1)",
         "Reasoning Defaults", &reasoning_budget);
+    llm_parser.AddOption(
+        "", "--reasoning-close-message", "TEXT",
+        "Message emitted before the forced </think> when the reasoning "
+        "budget or loop guard fires (default: unset; wins over "
+        "SUPERROC_REASONING_CLOSE_MESSAGE)",
+        "Reasoning Defaults", &reasoning_close_message);
     llm_parser.AddOption("", "--speculative", "MODE",
-                         "HTTP draft backend: dspark, dflash2, mtp, or off",
+                         "HTTP draft backend: dspark, dflash2, mtp, or off "
+                         "(default: mtp when a dense Qwen model file carries "
+                         "its own MTP block, otherwise off)",
                          "Speculative", &speculative_backend);
     llm_parser.AddOption("", "--dflash-model", "PATH",
                          "Path to Qwen DFlash2 GGUF file", "Speculative",
@@ -1353,11 +1429,11 @@ int RunServe(std::span<const char* const> args) {
     llm_parser.AddOption("", "--min-draft-tokens", "N",
                          "Adaptive draft floor (default: 1)", "Speculative",
                          &min_draft_tokens);
-    llm_parser.AddOption(
-        "", "--spec-plain-rates", "ctx:tps,...",
-        "Measured plain-decode tok/s per context length, ascending; a "
-        "request whose speculation runs slower switches to plain decoding",
-        "Speculative", &spec_plain_rates);
+    llm_parser.AddFlag(
+        "", "--prompt-lookup",
+        "Copy draft tokens from the session's own text when it repeats "
+        "(Qwen sessions)",
+        "Speculative", &prompt_lookup);
     llm_parser.AddOption(
         "", "--prefill-chunk", "N",
         "Maximum prompt tokens between active decode rounds (default: 512)",
@@ -1416,15 +1492,123 @@ int RunServe(std::span<const char* const> args) {
         "Other models: RAM limit for queued snapshots and each disk read "
         "(default: 0 = auto, at most the disk budget and 1/8 available RAM)",
         "Cache", &cache_disk_staging_bytes);
+    llm_parser.AddFlag("", "--no-warmup",
+                       "Skip the short generation run at load that takes the "
+                       "first-use costs off the first request",
+                       "Model", &no_warmup);
     llm_parser.AddFlag("", "--log-progress",
                        "Log live prefill and decode progress (needs "
                        "--log-level=info or debug)",
                        "Logging", &log_progress);
+    llm_parser.AddFlag("", "--accept-any-model-name",
+                       "Accept any 'model' value in text requests (for "
+                       "launchers that forward their own model name, like "
+                       "llama-server)",
+                       "Model", &accept_any_model_name);
     llm_parser.AddOption("", "--trace", "PATH", kTraceHelp, "Logging",
                          &trace_path);
 
     add_server_options(llm_parser);
-    if (!llm_parser.Parse(sub_args, &parse_err)) {
+    // Recipe: merge before parsing so command-line-wins is decided on the raw
+    // argv. The early pre-scan in main() already exported the env/files; the
+    // setenv below is idempotent (overwrite=0) and the flags merge here.
+    std::vector<std::string> recipe_owned;
+    std::vector<const char*> recipe_argv(sub_args.begin(), sub_args.end());
+    {
+      std::vector<std::string> raw;
+      raw.reserve(sub_args.size());
+      for (const char* a : sub_args) {
+        raw.emplace_back(a == nullptr ? "" : a);
+      }
+      const std::optional<std::string> recipe_opt =
+          ScanRawOption(raw, {"--recipe"});
+      if (!recipe_opt.has_value() || *recipe_opt == "off" ||
+          recipe_opt->empty()) {
+        SetAppliedRecipe(AppliedRecipe());
+      } else {
+        const std::optional<std::string> raw_model =
+            ScanRawOption(raw, {"-m", "--model"});
+        std::string recipe_path = *recipe_opt;
+        if (recipe_path == "auto") {
+          if (!raw_model.has_value() || raw_model->empty()) {
+            std::cerr << "Error: [recipe] --recipe auto needs --model <PATH>\n";
+            return 2;
+          }
+          recipe_path = (std::filesystem::path(*raw_model).parent_path() /
+                         "superroc-recipe.json")
+                            .string();
+        }
+        const auto known_flag = [&](std::string_view name, bool* takes_value,
+                                    std::string* canonical) {
+          const ArgParser::Option* option = llm_parser.FindOption(name);
+          if (option == nullptr) {
+            return false;
+          }
+          if (takes_value != nullptr) {
+            *takes_value = !option->is_flag;
+          }
+          if (canonical != nullptr) {
+            *canonical = option->long_name.empty() ? option->short_name
+                                                   : option->long_name;
+          }
+          return true;
+        };
+        RecipeSpec spec;
+        std::string recipe_err;
+        if (!ParseRecipeFile(recipe_path, &spec, &recipe_err)) {
+          std::cerr << "Error: " << recipe_err << "\n";
+          return 2;
+        }
+        std::string eff_model = raw_model.value_or("");
+        if (eff_model.empty()) {
+          eff_model = ScanRawOption(spec.args, {"-m", "--model"}).value_or("");
+        }
+        if (!ValidateRecipeForModel(spec, eff_model, known_flag, &recipe_err)) {
+          std::cerr << "Error: " << recipe_err << "\n";
+          return 2;
+        }
+        // The pre-scan normally applied these already; print what it did so
+        // the startup lines say applied vs kept truthfully.
+        AppliedRecipe applied;
+        applied.active = true;
+        applied.file = spec.file;
+        std::vector<std::string> env_log =
+            TakePrescanLog(spec.file, &applied.env, &applied.files);
+        if (env_log.empty()) {
+          env_log = ApplyRecipeEnv(spec, &applied.env, &applied.files);
+        }
+        for (const std::string& line : env_log) {
+          std::cerr << line << "\n";
+        }
+        RecipeMerge merged = MergeRecipeArgs(spec, raw, known_flag);
+        if (!merged.error.empty()) {
+          std::cerr << "Error: " << merged.error << "\n";
+          return 2;
+        }
+        for (const std::string& line : merged.log) {
+          std::cerr << line << "\n";
+        }
+        // The /props record holds only what took effect: the tokens actually
+        // appended, and the env/files keys actually set (not kept).
+        applied.args = merged.extra;
+        applied.ignored = spec.ignored;
+        for (const auto& kv : spec.file_args) {
+          for (std::size_t i = 0; i + 1 < merged.extra.size(); ++i) {
+            if (merged.extra[i] == kv.first &&
+                merged.extra[i + 1] == kv.second) {
+              applied.file_args[kv.first] = kv.second;
+              break;
+            }
+          }
+        }
+        SetAppliedRecipe(std::move(applied));
+        recipe_owned = std::move(merged.extra);
+        for (const std::string& tok : recipe_owned) {
+          recipe_argv.push_back(tok.c_str());
+        }
+      }
+    }
+    if (!llm_parser.Parse(recipe_argv, &parse_err)) {
       std::cerr << "Error: " << parse_err << "\n";
       PrintServeHelp("superroc", "llm");
       return 2;
@@ -1436,6 +1620,7 @@ int RunServe(std::span<const char* const> args) {
     if (!llm_parser.WasSupplied("--max-pending-per-client")) {
       max_pending_requests_per_client = max_pending_requests;
     }
+    server::SetAcceptAnyModelName(accept_any_model_name);
     if (!prepare_server_options()) {
       return 2;
     }
@@ -1519,11 +1704,20 @@ int RunServe(std::span<const char* const> args) {
     if (reasoning_budget >= 0)
       reasoning_defaults->budget_tokens =
           static_cast<std::size_t>(reasoning_budget);
+    // The flag wins over the variable; an empty flag leaves the variable in
+    // force.
+    if (!reasoning_close_message.empty())
+      server::SetSharedReasoningCloseMessage(reasoning_close_message);
 
     server::TextSpeculativeConfig speculative_config;
     if (speculative_backend.empty() && !dspark_model_path.empty()) {
       speculative_backend = "dspark";
     }
+    // No speculative option and no draft file: the backend may use an MTP
+    // block the model file carries.
+    speculative_config.automatic = speculative_backend.empty() &&
+                                   dflash_model_path.empty() &&
+                                   mtp_model_path.empty();
     if (speculative_backend.empty() || speculative_backend == "off") {
       speculative_config.backend = server::TextSpeculativeBackend::kDisabled;
     } else if (speculative_backend == "dflash2") {
@@ -1561,22 +1755,26 @@ int RunServe(std::span<const char* const> args) {
             : dflash_model_path;
     speculative_config.max_draft_tokens =
         static_cast<std::uint32_t>(draft_tokens);
+    speculative_config.default_draft_tokens =
+        !llm_parser.WasSupplied("--draft-tokens");
     speculative_config.min_draft_tokens =
         static_cast<std::uint32_t>(min_draft_tokens);
-    if (!spec_plain_rates.empty()) {
-      if (!ParsePlainDecodeRates(spec_plain_rates,
-                                 &speculative_config.plain_decode_rates,
-                                 &parse_err)) {
-        std::cerr << "Error: " << parse_err << '\n';
-        return 2;
-      }
-    }
+    speculative_config.prompt_lookup = prompt_lookup;
     if (model.empty()) {
       std::cerr << "Error: --model <PATH> is required\n";
       return 2;
     }
+    try {
+      // Fail fast on a malformed guard setting instead of failing the first
+      // reasoning request; the parsed periods are read once and reused.
+      (void)server::SharedReasoningLoopGuardPeriods();
+    } catch (const std::exception& error) {
+      std::cerr << "Error: " << error.what() << '\n';
+      return 2;
+    }
     std::string err;
     ModelLoadLog load_log("text", model);
+    std::optional<RuntimePinWatch> pin_watch(std::in_place);
     backend = std::make_shared<server::InferenceBackend>();
     // The disk snapshot tier is walked during load, which can take minutes.
     // Answer 503 `Loading model` on the port meanwhile, as llama-server does,
@@ -1618,6 +1816,7 @@ int RunServe(std::span<const char* const> args) {
       std::cerr << "Error loading model '" << model << "': " << err << "\n";
       return 1;
     }
+    PinRuntimeMemory("load");
     backend->set_model_id(served_model_name);
     // As `superroc --version` prints it; CMake defines both for this target.
     backend->set_served_artifact(
@@ -1626,6 +1825,35 @@ int RunServe(std::span<const char* const> args) {
         max_tokens < 0 ? 0 : static_cast<std::size_t>(max_tokens),
         sampling_config, SamplingOptionsSupplied(llm_parser));
     backend->set_reasoning_defaults(*reasoning_defaults);
+    // Build (and log) the reasoning word-ban token set and closing message
+    // before serving, so process start carries the per-word token counts.
+    backend->WarmReasoningCaches();
+    if (!no_warmup) {
+      // The first request after a load otherwise pays for kernel code, decode
+      // graphs, draft buffers and fresh scratch pages.
+      constexpr std::size_t kWarmupTokens = 24;
+      const auto warmup_start = std::chrono::steady_clock::now();
+      try {
+        const std::size_t generated = backend->warm_up(kWarmupTokens);
+        if (generated != 0) {
+          server::Logger::Info(
+              "loader",
+              "event=warmup generated_tokens=" + std::to_string(generated) +
+                  " elapsed_ms=" +
+                  std::to_string(
+                      std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::steady_clock::now() - warmup_start)
+                          .count()));
+        }
+      } catch (const std::exception& exception) {
+        server::Logger::Warn(
+            "loader", std::string("event=warmup_failed ") + exception.what());
+      }
+    }
+    // The first generation loads kernels the load itself did not need; one
+    // last pass covers them.
+    pin_watch.reset();
+    PinRuntimeMemory("ready");
     const auto effective_sampling =
         backend->sampling_defaults().Resolve(reasoning_defaults->enabled);
     server::ChatRequest default_request;
@@ -1652,6 +1880,11 @@ int RunServe(std::span<const char* const> args) {
         << " frequency_penalty=" << effective_sampling.frequency_penalty
         << " presence_penalty=" << effective_sampling.presence_penalty;
     server::Logger::Info("sampling", sampling_log.str());
+    // With no speculative option the backend may have picked the model
+    // file's own MTP block; its status says so.
+    const bool automatic_mtp = speculative_config.backend ==
+                                   server::TextSpeculativeBackend::kDisabled &&
+                               backend->speculative_status().starts_with("mtp");
     const char* speculation =
         speculative_config.backend == server::TextSpeculativeBackend::kDFlash
             ? "dflash2"
@@ -1659,24 +1892,46 @@ int RunServe(std::span<const char* const> args) {
             ? "dspark"
         : speculative_config.backend == server::TextSpeculativeBackend::kMtp
             ? "mtp"
-            : "off";
+        : automatic_mtp ? "mtp-auto"
+                        : "off";
     load_log.Complete(
         "model=" + backend->model_id() +
-        " sessions=" + std::to_string(session_count) + " context_tokens=" +
-        std::to_string(backend->max_context()) + " speculative=" + speculation +
-        " draft_limit=" + std::to_string(speculative_config.max_draft_tokens) +
+        " sessions=" + std::to_string(session_count) +
+        " context_tokens=" + std::to_string(backend->max_context()) +
+        " speculative=" + speculation + " draft_limit=" +
+        std::to_string(backend->speculative_draft_limit() != 0
+                           ? backend->speculative_draft_limit()
+                           : speculative_config.max_draft_tokens) +
         " disk_cache=" + (cache_disk_directory.empty() ? "off" : "enabled"));
+  }
+
+  // One line when the KFD CWSR rule fails: the GPU can hang under concurrent
+  // wavefront pressure until the sysfs topology reports the expected sizes.
+  if (const auto environment = server::CollectServerEnvironment();
+      !environment.cwsr_ok) {
+    server::Logger::Warn(
+        "serve",
+        "KFD CWSR check failed (gpu_arch=" + environment.gpu_arch +
+            " kernel=" + environment.kernel +
+            "); if the GPU hangs under load, verify the CWSR sysfs properties");
   }
 
   // run() joins every request thread, so no hook call outlives it.
   std::atomic<bool> device_lost{false};
-  // audit F06 F07: warn when a non-loopback listener has no API key.
+  // Warn when a non-loopback listener has no API key.
   if (host != "127.0.0.1" && host != "localhost" && host != "::1" &&
       api_key.empty()) {
+    std::string cors_note;
+    if (cors_origin == "*") {
+      cors_note = " (CORS allows any origin)";
+    } else if (!cors_origin.empty()) {
+      cors_note = " (CORS allows origin " + cors_origin + ")";
+    }
     server::Logger::Warn(
         "serve", "listening on " + host + ":" + std::to_string(port) +
                      " without --api-key; any client that can reach this port "
-                     "can use the model (CORS allows any origin)");
+                     "can use the model" +
+                     cors_note);
   }
   server::HttpServer server(
       host, port, backend, video_jobs, tts, asr,
@@ -1684,6 +1939,7 @@ int RunServe(std::span<const char* const> args) {
           .max_request_body_bytes = max_request_body_bytes,
           .max_connections = max_connections,
           .api_key = std::move(api_key),
+          .cors_origin = std::move(cors_origin),
           .on_device_lost =
               [&device_lost] {
                 device_lost.store(true);

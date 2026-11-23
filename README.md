@@ -1,13 +1,13 @@
-# Super ROC
+# Super Roc
 
-Super ROC is an LLM inference engine for AMD Strix Halo: Ryzen AI Max+ 395 systems with the Radeon 8060S GPU (`gfx1151`)
+Super Roc is an LLM inference engine for AMD Strix Halo: Ryzen AI Max+ 395 systems with the Radeon 8060S GPU (`gfx1151`)
 and up to 128 GB of unified memory. It serves GGUF models, including 4-bit ROCmFP4 builds, through an OpenAI- and
 Anthropic-compatible server with MTP and DSpark drafting and a prompt cache that can resume from any earlier
 conversation state.
 
-Super ROC is its own engine project. Issues, pull requests and forks are welcome.
+Super Roc is its own engine project. Issues, pull requests and forks are welcome.
 
-## What Super ROC adds
+## What Super Roc adds
 
 - **ROCmFP4 / ROCmFPX tensor types** (GGUF types 100 and above) in the loader, the kernels and the serving path, including
   spill-free dense prefill and decode kernels for the 4-bit types.
@@ -20,6 +20,8 @@ Super ROC is its own engine project. Issues, pull requests and forks are welcome
   (Nanbeige4.3-33B-Base, serve-only: [limits](docs/models/llama/README.md)) and Muse Glimmer.
 - **Drafting**: embedded and sidecar MTP heads with a per-request draft depth and exact verification, the DSpark
   drafter, and prompt-cache snapshots that keep working while a drafter is on.
+- **Speed settings**: a 4-bit prefill route for dense ROCmFP4 files, a tensor overlay and a routed-expert count for
+  mixture-of-experts files, and prompt-lookup drafting ([options](docs/CLI.md#llm-or-text)).
 - **Tool calls** in each model's native format (Qwen, GLM-style, Ling, Flint), constrained by a grammar built from the
   request's tools where the format allows it.
 - **Hardening**: HTTP header and body read deadlines and size caps, constant-time API key comparison, checked HIP kernel
@@ -60,12 +62,21 @@ exact files, the serve command, more measurements, quality numbers where they ex
 
 ¹ Flint was measured with its own method: a 512-token prompt and 128 generated tokens. Its card has the 4K and 16K numbers.
 
-Also from Gufo v0.19.0, with Gufo's documentation and measurements (not re-measured here):
+The table was measured on the 2026-10-25 build. Speed settings new in this release, each measured on the card's file
+with the setting off and on in alternating runs on one build (method and serve command in each card):
+
+| Model | Setting | Prompt tok/s | Generation tok/s | Perplexity |
+|---|---|---:|---:|---:|
+| Qwen3.8-27B, ROCmFP4 STRIX imatrix | 4-bit prefill route | 586 → 782 (1K), 577 → 754 (8K) | 30.2 → 31.4 | 4.641 → 4.645 |
+| Qwen3.8-Flash-Next Uncensored | tensor overlay, 6 of 10 experts | 1,393 → 1,523 | 52.4 → 58.2 | 5.128 → 5.046 |
+| KAT-Coder-V2.5-Dev Abliterated | 6 of 8 experts | 2,101 → 2,315 | 98.5 → 105.4 | 6.402 → 6.512 |
+
+Also supported, with the upstream project's guides (its measurements, not re-measured here):
 [DeepSeek V4 Flash](docs/models/deepseek-v4-flash/README.md), [Qwen3-ASR 1.7B](docs/models/qwen3-asr/README.md),
 [Qwen3-TTS 1.7B](docs/models/qwen3-tts/README.md), [Qwen-Image-2.1](docs/models/qwen-image-2.1/README.md) and
-[MiniMax H3](docs/models/minimax-h3/README.md). The upstream guides for
+[MiniMax H3](docs/models/minimax-h3/README.md). The upstream usage guides for
 [Qwen3.8 27B](docs/models/qwen3.8-27b/README.md) and [Qwen3.8 Flash-Next](docs/models/qwen3.8-flash-next/README.md)
-are kept next to the Super ROC cards for those models.
+are kept next to the Super Roc cards for those models.
 
 ## Build from source
 
@@ -97,7 +108,7 @@ cmake --build --preset release --parallel 4
 ./build/release/superroc diagnose
 ```
 
-`cmake --install build/release` installs Super ROC, its runtime data and the license notices. The build also creates a compatibility link under the previous binary name, so previously written commands keep working.
+`cmake --install build/release` installs Super Roc, its runtime data and the license notices.
 
 ## Run
 
@@ -116,6 +127,22 @@ curl http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "kat-coder", "messages": [{"role": "user", "content": "Write a Python function that reverses a list."}]}'
 ```
+
+### Recipes
+
+A tuned setup can travel with the model file as `superroc-recipe.json`: engine variables, sidecar files (such as an int4
+prefill route or a tensor overlay) and tuning flags. Put the recipe and its sidecars next to the model and start with
+`--recipe auto`; flags on the command line still take precedence:
+
+```sh
+./build/release/superroc serve --host 127.0.0.1 --port 8080 llm \
+  --model /path/to/Qwen3.8-27B-UD-Q4_K_XL.gguf --dflash-model /path/to/Qwen3.8-27B-DFlash2-Q4_K_M.gguf \
+  --speculative dflash2 --recipe auto
+```
+
+The recipe for that file is on Hugging Face at
+[kingjones777/Qwen3.8-27B-SuperROC-Recipe](https://huggingface.co/kingjones777/Qwen3.8-27B-SuperROC-Recipe). The format
+and its rules are in [docs/recipes.md](docs/recipes.md); measured results are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ### Anthropic API and Claude Code
 
@@ -151,20 +178,38 @@ the model's native context by default; `--context N` sets the context per sessio
 response limit that clients can override (reasoning tokens count toward it). The full API contract is in
 [docs/SERVER.md](docs/SERVER.md) and the command line in [docs/CLI.md](docs/CLI.md).
 
+### Lemonade
+
+Super Roc runs inside a stock [Lemonade](https://github.com/lemonade-sdk/lemonade) install today: point
+Lemonade's llama.cpp ROCm slot at the Super Roc launcher and add the Super Roc model list.
+
+```sh
+tools/lemonade/install.sh --superroc ./build/release/superroc --prefix /opt/superroc
+lemonade config set llamacpp.rocm_bin=/opt/superroc/lemonade
+```
+
+Models that Super Roc does not run go to the stock llama-server unchanged. Setup, the model list and
+troubleshooting: [docs/LEMONADE.md](docs/LEMONADE.md).
+
 ## Known gaps
 
-- Muse Glimmer loads, but its DFlash drafter does not yet, and without it Super ROC generates more slowly than
+- Muse Glimmer loads, but its DFlash drafter does not yet, and without it Super Roc generates more slowly than
   llama.cpp (ROCmFPX build) on that model.
 - A Qwen3.6-35B-A3B file with its MoE experts stored as Q8_0 does not load on this build.
 - Several GPU tests and tools read a model file; they take its path from an environment variable and fail without it.
 
 ## Lineage and credits
 
-Super ROC began as a fork of Gufo v0.19.0 (https://github.com/gufo-org/gufo). The code is released under the MIT License
-in [LICENSE](LICENSE). [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) list the code that came from
-Gufo, llama.cpp / ggml and other projects, with their licenses. The upstream project's original README is kept at
-[docs/lineage/GUFO-README.md](docs/lineage/GUFO-README.md). Model weights are not included; each Hugging Face card states
+Super Roc began as a fork of an MIT-licensed ROCm inference engine. The code is released under the MIT License in
+[LICENSE](LICENSE). [NOTICE](NOTICE) names the upstream project; it and
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) list the code that came from that project, from llama.cpp / ggml and
+from other projects, with their licenses. Model weights are not included; each Hugging Face card states
 the license of its weights.
+
+Thanks to the ROCmFPX team, Carlo Pasquale ([@charlie12345](https://github.com/charlie12345)) and the
+[ROCmFPX](https://github.com/charlie12345/ROCmFPX) contributors, for the ROCm-FP4 formats and the llama.cpp work they
+started from, and to Donato Capitella ([@kyuz0](https://github.com/kyuz0)) for the ROCmFPX builds in his Strix Halo
+toolboxes.
 
 ## Feedback
 

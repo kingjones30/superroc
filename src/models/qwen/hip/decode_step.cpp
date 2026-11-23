@@ -9,7 +9,7 @@
 #include "src/core/rocm_fp4/superroc_fp4_quant.hpp"    // KAT:
 #include "src/models/flint/hip/flint_decode.hpp"
 #include "src/models/glimmer/hip/glimmer_decode.hpp"  // GLIMMER
-#include "src/models/lfm2/hip/lfm2_decode.hpp"        // LFM2
+#include "src/models/lfm2/hip/lfm2_decode.hpp"
 #include "src/models/llama/hip/llama_decode.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/executor.hpp"
@@ -50,7 +50,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
                              image_input);
     return;
   }
-  if (weights.config.lfm2) {  // LFM2
+  if (weights.config.lfm2) {
     ExecuteLfm2DecodeStep(arena, weights, token_id, pos, compute_logits,
                           image_input);
     return;
@@ -312,7 +312,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
       const int moe_ffs =
           static_cast<int>(config.expert_shared_feed_forward_length);
       const int moe_hidden = static_cast<int>(hidden_size);
-      // QVB: the route and the shared-expert gate in one launch pair
+      // The route and the shared-expert gate in one launch pair
       // (bit-identical to LaunchQwenMoeRoute + LaunchQwenMoeShexpSigmoid).
       if (LaunchQwenMoeRouteRows(
               decode_scratch.normed.data(),
@@ -320,7 +320,8 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
               moe_expert, 1, moe_used, arena.d_moe_logits, arena.d_moe_ids,
               arena.d_moe_weights,
               static_cast<const float*>(layer.ffn_gate_inp_shexp.data),
-              arena.d_moe_sig, arena.stream) != 0) {
+              arena.d_moe_sig, arena.stream,
+              static_cast<int>(config.ExpertsInFile())) != 0) {
         throw std::runtime_error("qwen35moe decode route launch failed");
       }
       if (superroc_fp4_expert_ffn_dev(
@@ -332,7 +333,7 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
               arena.stream) != SUPERROC_FP4_OK) {
         throw std::runtime_error("qwen35moe decode experts failed");
       }
-      // QSM: same normed x on the same stream as the routed call above, so
+      // Same normed x on the same stream as the routed call above, so
       // the shared expert reuses its Q8 copy (bit-identical, one launch less).
       if (superroc_fp4_expert_ffn_dev_xq(
               static_cast<int>(layer.ffn_gate_shexp.type),
@@ -374,15 +375,15 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
     // KAT S3: the grouped expert FFN reports device-side errors (a bad router
     // id) through a status word; read and clear it once per token, never per
     // layer. A non-OK status means this token's MoE output was invalid.
-    // SQ10: name this stream's set, so concurrent sessions check only theirs.
-    // SPEC2 (R2): a refusal fails the step loudly; it cannot happen in
+    // Name this stream's set, so concurrent sessions check only theirs.
+    // A refusal fails the step loudly; it cannot happen in
     // serve (the session stream pre-attached at load).
     const int slot_set = superroc_fp4_slot_stream_attach_at(
         arena.stream, __func__, static_cast<long>(hidden_size));
     if (slot_set < 0) {
       throw std::runtime_error("qwen35moe decode slot set refused");
     }
-    // SPEC2 (R6): stream-ordered check (the bare read proved stale on the
+    // Stream-ordered check (the bare read proved stale on the
     // box: STALE_STATUS missed 1/200).
     if (superroc_fp4_moe_dev_check_set_on_stream(slot_set, arena.stream) !=
         SUPERROC_FP4_OK) {

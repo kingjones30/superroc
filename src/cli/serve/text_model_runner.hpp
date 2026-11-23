@@ -22,6 +22,7 @@
 #include "src/cli/serve/text_generation_backend.hpp"
 #include "src/cli/serve/text_publication_wait.hpp"
 #include "src/core/sampling.hpp"
+#include "src/core/text/content_spans.hpp"
 
 namespace superroc::server {
 
@@ -158,6 +159,13 @@ struct TextRunnerCapabilities {
   /// A completed prefill step leaves a consistent state, so a cancelled
   /// request can keep it as a live prefix for a superseding request.
   bool partial_prefill_retention{false};
+  /// Fewest rows a prompt pass may hold for its result to be independent of
+  /// where the passes before it ended, given that every such end is a
+  /// multiple of 64 rows. Zero: the state is the same wherever a prompt is
+  /// cut. With the canonical cache (SUPERROC_CANONICAL_CACHE) the pool cuts
+  /// and checkpoints such a runner's prompts only at those points. Read for
+  /// component-cache runners only.
+  std::size_t canonical_min_pass_rows{0};
 };
 
 /// Model-owned compatibility identity for restart-safe snapshots.
@@ -225,6 +233,9 @@ struct TextDecodeSelection {
   bool stop{false};
   TextRunnerToken token{0};
   std::string piece;
+  /// Target-model logprobs for this token, present only when the request
+  /// asked for logprobs and the runner captured them at emission.
+  std::optional<sampling::CapturedTokenLogprobs> logprobs = std::nullopt;
 };
 
 struct TextDecodeStep {
@@ -262,6 +273,17 @@ public:
     return prefill_lookahead_;
   }
 
+  /// Set for a Prefill step that may end the prompt: a runner calls it when
+  /// the prompt's final logits are readable, before that step's remaining work
+  /// (draft catch-up, in-pass checkpoint). Null outside such a step.
+  void SetPromptLogitsHook(const std::function<void()>* hook) noexcept {
+    prompt_logits_hook_ = hook;
+  }
+  [[nodiscard]] const std::function<void()>* prompt_logits_hook()
+      const noexcept {
+    return prompt_logits_hook_;
+  }
+
   /// Installs a request-scoped cancellation check for model calls that can
   /// yield internally. Implementations that only yield between work units may
   /// keep the default no-op behavior.
@@ -276,6 +298,7 @@ public:
 private:
   bool stop_at_eos_{true};
   std::span<const TextRunnerToken> prefill_lookahead_;
+  const std::function<void()>* prompt_logits_hook_{nullptr};
 };
 
 /// Immutable model-owned continuation payload.
@@ -297,19 +320,6 @@ struct TextRunnerAdvance {
   std::reference_wrapper<TextRunnerState> state;
   TextRunnerToken token{0};
   std::exception_ptr* failure{nullptr};
-};
-
-/// Frontier pieces of a prompt-boundary capture that must wait for the
-/// speculative drafter to prime. Priming is deferred out of time-to-first-
-/// token and drains with the first decoded token, so a prompt capture that
-/// finds the queue non-empty copies the boundary's frontier here and the
-/// capture itself is retried after the request's last token is sent, against
-/// device state that has since advanced past the boundary.
-struct TextDeferredPromptBoundary {
-  std::size_t position{0};
-  std::optional<TextRunnerToken> frontier;
-  std::vector<float> frontier_logits;
-  std::vector<TextRunnerToken> pending_tokens;
 };
 
 struct TextRunnerDecode {
@@ -375,9 +385,43 @@ public:
   [[nodiscard]] std::shared_ptr<const sampling::ReasoningBudget>
   BuildReasoningBudget(std::size_t tokens,
                        std::span<const TextRunnerToken> prompt) const;
+  /// A loop guard for a request that opens reasoning, armed from
+  /// `SUPERROC_REASONING_LOOP_GUARD` periods, or null when the tags are not
+  /// single tokens in this vocabulary. The guard scans only generated tokens,
+  /// so unlike the budget it needs no prompt tail.
+  [[nodiscard]] std::shared_ptr<const sampling::ReasoningLoopGuard>
+  BuildReasoningLoopGuard(sampling::ReasoningLoopGuardPeriods periods) const;
+  /// A word ban for a request that opens reasoning, armed from
+  /// `SUPERROC_REASONING_BAN`, or null when the variable is unset/empty, when
+  /// no word matches any vocabulary token, or when the tags are not single
+  /// tokens in this vocabulary. Built once per process and logged at startup.
+  [[nodiscard]] std::shared_ptr<const sampling::ReasoningWordBan>
+  BuildReasoningWordBan() const;
+  /// The closing-message tokens emitted before the forced reasoning end when
+  /// `SUPERROC_REASONING_CLOSE_MESSAGE` (or `--reasoning-close-message`) is
+  /// set, tokenized once per process with the normal tokenizer. Empty when
+  /// unset, so callers prepend nothing.
+  [[nodiscard]] const std::vector<TextRunnerToken>&
+  ReasoningCloseMessageTokens() const;
 
   [[nodiscard]] virtual std::vector<TextRunnerToken> Tokenize(
       std::string_view text) const = 0;
+  /// The BOS id a RAW prompt (no chat template) has to start with, or nullopt
+  /// when this model's tokenizer does not ask for one. Tokenize() stays
+  /// flag-blind because control text and rendered chat go through it too;
+  /// only TokenizeRawPrompt() consults this. nullopt is also right for the
+  /// families whose tokenizer already adds the framing (llama SPM encodes
+  /// add_special itself) or never reads the GGUF flag (ds4, ling3).
+  [[nodiscard]] virtual std::optional<TextRunnerToken> RawPromptBos() const {
+    return std::nullopt;
+  }
+  /// Tokenizes a RAW prompt the way /v1/completions and /completion must see
+  /// it: Tokenize() plus the BOS the model's GGUF asks for, unless the
+  /// encoding already starts with it (a prompt the client wrote with the BOS
+  /// text must not get two). Token-array inputs are the client's choice and
+  /// never reach here.
+  [[nodiscard]] std::vector<TextRunnerToken> TokenizeRawPrompt(
+      std::string_view text) const;
   /// Tokenizes control text such as `</think>` as the template renders it.
   [[nodiscard]] virtual std::vector<TextRunnerToken> TokenizeControl(
       std::string_view text) const {
@@ -421,7 +465,7 @@ public:
   InitialOutputState(const ChatRequest&) const {
     return TextGenerationBackend::InitialOutputState::kAuto;
   }
-  /// GLM: Muse Glimmer channel parse (to=self / to=user / tool), not <think>.
+  /// Muse Glimmer channel parse (to=self / to=user / tool), not <think>.
   [[nodiscard]] virtual bool MuseChannelParse() const { return false; }
   /// LFM2: LFM2.5 pythonic tool-call parse, not <tool_call> XML.
   [[nodiscard]] virtual bool Lfm2PythonicTools() const { return false; }
@@ -490,6 +534,49 @@ public:
       const std::function<std::unique_ptr<TextRunnerSnapshot>()>& = {}) const {
     throw std::logic_error("runner does not support in-pass checkpoints");
   }
+  /// Dual in-pass checkpoints: byte claim for capturing
+  /// the earlier `boundary_first` (P) and the stable `boundary` (S) in one
+  /// pass. Unsupported runners return nullopt and keep the single path.
+  struct PrefillCheckpointPair {
+    std::size_t bytes_first, bytes_second;
+  };
+  [[nodiscard]] virtual std::optional<PrefillCheckpointPair>
+  PrefillCheckpointPairBytes(const TextRunnerState&,
+                             std::span<const TextRunnerToken>, std::size_t,
+                             std::size_t, std::size_t, std::size_t) const {
+    return std::nullopt;
+  }
+  /// `capture` receives the boundary it must capture; the pair consumes it
+  /// ascending (P, then S). Both snapshots must validate against their
+  /// own reservations.
+  [[nodiscard]] virtual TextPrefillStep PrefillThroughPair(
+      TextRunnerState&, std::span<const TextRunnerToken>, std::size_t,
+      std::size_t, std::size_t, std::size_t,
+      std::unique_ptr<TextRunnerSnapshot>*,
+      std::unique_ptr<TextRunnerSnapshot>*,
+      const std::function<std::unique_ptr<TextRunnerSnapshot>(std::size_t)>&)
+      const {
+    throw std::logic_error("runner does not support dual checkpoints");
+  }
+  /// Byte claim for freezing `boundary` (P) inside its pass, not in the
+  /// text tail, while the pass runs on to the step end: one in-pass
+  /// checkpoint with no S view beside it. Unsupported runners return
+  /// nullopt and keep their split capture at the boundary.
+  [[nodiscard]] virtual std::optional<std::size_t>
+  PrefillCheckpointBoundaryBytes(const TextRunnerState&,
+                                 std::span<const TextRunnerToken>, std::size_t,
+                                 std::size_t, std::size_t) const {
+    return std::nullopt;
+  }
+  /// Freezes `boundary` inside its pass and reaches the step end; the
+  /// snapshot must validate against its reservation. The consumer is
+  /// invoked synchronously while the frozen view is readable.
+  [[nodiscard]] virtual TextPrefillStep PrefillThroughBoundary(
+      TextRunnerState&, std::span<const TextRunnerToken>, std::size_t,
+      std::size_t, std::size_t, std::unique_ptr<TextRunnerSnapshot>*,
+      const std::function<std::unique_ptr<TextRunnerSnapshot>()>&) const {
+    throw std::logic_error("runner does not support boundary checkpoints");
+  }
   [[nodiscard]] virtual TextDecodeSelection SelectNext(
       TextRunnerState& state, sampling::SamplerState& sampler) const = 0;
   virtual void Advance(TextRunnerState& state, TextRunnerToken token) const = 0;
@@ -531,39 +618,6 @@ public:
   [[nodiscard]] virtual std::unique_ptr<TextRunnerSnapshot>
   SnapshotForPersistence(const TextRunnerState& state) const;
 
-  /// True while speculative drafter priming is still queued, so a prompt
-  /// capture at the current committed boundary must defer to request end.
-  [[nodiscard]] virtual bool HasPendingSpeculativePrime(
-      const TextRunnerState& state) const {
-    (void)state;
-    return false;
-  }
-
-  /// Drains queued speculative priming into the drafter. Called at request
-  /// end, off the response path, before a deferred boundary is captured.
-  virtual void DrainSpeculativePrime(TextRunnerState& state) const {
-    (void)state;
-  }
-
-  /// Copies the frontier pieces of the current committed boundary for a
-  /// capture deferred to request end. The default fails explicitly.
-  [[nodiscard]] virtual TextDeferredPromptBoundary
-  CaptureDeferredPromptBoundary(const TextRunnerState& state) const;
-
-  /// Exact payload bytes of the deferred capture: the device state truncated
-  /// to the recorded boundary plus the drafter state at that boundary. The
-  /// default fails explicitly.
-  [[nodiscard]] virtual std::size_t DeferredPromptSnapshotPayloadBytes(
-      const TextRunnerState& state,
-      const TextDeferredPromptBoundary& boundary) const;
-
-  /// Captures the deferred prompt-boundary snapshot. The drafter priming must
-  /// have drained first. The default fails explicitly.
-  [[nodiscard]] virtual std::unique_ptr<TextRunnerSnapshot>
-  SnapshotDeferredPromptBoundary(
-      const TextRunnerState& state,
-      const TextDeferredPromptBoundary& boundary) const;
-
   virtual void RestoreOrFork(TextRunnerState& state,
                              const TextRunnerSnapshot& snapshot) const;
 
@@ -600,7 +654,31 @@ private:
   mutable std::vector<std::shared_ptr<const sampling::TokenConstraint>>
       constraints_;
   mutable std::shared_ptr<const std::vector<bool>> partial_utf8_;
+  mutable std::shared_ptr<const sampling::ReasoningWordBan> word_ban_;
+  mutable bool word_ban_built_{false};
+  mutable std::vector<TextRunnerToken> close_message_tokens_;
+  mutable bool close_message_built_{false};
 };
+
+/// Process-wide `SUPERROC_REASONING_LOOP_GUARD` periods, parsed once.
+/// Nullopt when the variable is unset or empty (the guard is off). Throws
+/// `std::runtime_error` on a malformed value; call once at server startup so
+/// a bad value fails fast instead of failing the first reasoning request.
+[[nodiscard]] std::optional<sampling::ReasoningLoopGuardPeriods>
+SharedReasoningLoopGuardPeriods();
+
+/// Overrides the `SUPERROC_REASONING_CLOSE_MESSAGE` variable with the
+/// `--reasoning-close-message` flag value (the flag wins). Call once at
+/// server startup when the flag is set; otherwise the variable is read.
+void SetSharedReasoningCloseMessage(std::string text);
+
+/// The process-wide reasoning closing message: the flag value when set, else
+/// `SUPERROC_REASONING_CLOSE_MESSAGE`, or empty when neither is set (off).
+[[nodiscard]] std::string SharedReasoningCloseMessageText();
+
+/// Process-wide `SUPERROC_REASONING_BAN` words, split on commas once.
+/// Empty when the variable is unset or empty (the ban is off).
+[[nodiscard]] std::vector<std::string> SharedReasoningWordBanWords();
 
 /// Bounded pool of opaque runner states with exact-prefix continuation reuse.
 class TextRunnerPool {
@@ -639,6 +717,16 @@ public:
     [[nodiscard]] bool cache_disk_hit() const noexcept;
     /// N-gram rows gathered since this request leased its state.
     [[nodiscard]] TextRunnerNgramRows ngram_rows() const;
+    /// The reasoning loop guard fired on this request: the sampler started
+    /// emitting its forced end sequence. False when the variable is unset.
+    [[nodiscard]] bool loop_guard_fired() const noexcept;
+    /// The repetition period that fired; valid only when `loop_guard_fired()`.
+    [[nodiscard]] std::uint32_t loop_guard_period() const noexcept;
+    /// The configured repeat count; valid only when `loop_guard_fired()`.
+    [[nodiscard]] std::uint32_t loop_guard_repeats() const noexcept;
+    /// Generated reasoning tokens accepted when the loop was found; valid
+    /// only when `loop_guard_fired()`.
+    [[nodiscard]] std::size_t loop_guard_reasoning_tokens() const noexcept;
     [[nodiscard]] std::optional<ComponentCacheMetrics> component_cache_metrics()
         const;
     [[nodiscard]] std::size_t prompt_tokens() const noexcept;
@@ -682,6 +770,11 @@ public:
     /// an already captured prompt snapshot. Does not advance or sample tokens.
     CommitMetrics Cancel() noexcept;
     [[nodiscard]] std::optional<TextDecodeSelection> PreviewFirstToken();
+    /// PreviewFirstToken from inside the prefill step that ends the prompt.
+    [[nodiscard]] std::optional<TextDecodeSelection> PreviewPromptLogits();
+    /// Called during Prefill when the prompt's final logits are readable, if
+    /// the runner can say so. The hook may only preview and publish.
+    void SetPromptLogitsHook(std::function<void()> hook);
     void CapturePromptSnapshot();
     /// Starts capture and polls completion without blocking other sessions.
     [[nodiscard]] bool PreparePromptSnapshot();
@@ -752,9 +845,17 @@ private:
 /// and framing_suffix (which carries structured-output instructions, as the
 /// Qwen template does). Llama has no tool template, so a request carrying
 /// tools is refused (nullopt) instead of silently dropped while the Qwen
-/// tool grammar constrains sampling.
+/// tool grammar constrains sampling. When `spans` is non-null, each
+/// message.content range (not framing_suffix) is recorded as a client-text
+/// span for SR-03 control-token protection.
 [[nodiscard]] std::optional<std::string> LlamaRenderPrompt(
-    const ChatRequest& request);
+    const ChatRequest& request, std::vector<core::TextSpan>* spans = nullptr);
+
+/// SUPERROC_CANONICAL_CACHE=1: a finished or cancelled request leaves only
+/// the state its prompt pass produced, so the next request reads the reply's
+/// tokens as prompt (see TextRunnerPool::Request::Commit). Read once from the
+/// environment.
+[[nodiscard]] bool SuperrocCanonicalCache();
 
 /// LLAMA (F14): llama pieces from TokenText join with a leading space that
 /// Decode() strips, so streamed/final text built from pieces is not the

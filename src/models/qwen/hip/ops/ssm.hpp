@@ -23,6 +23,16 @@ struct SsmReplayCapture {
   const std::uint32_t* enabled{nullptr};
 };
 
+/// Where one pass leaves its recurrent state at an inner row, for a prompt
+/// checkpoint inside the pass. `rows` counts the pass's rows before the
+/// checkpoint; zero means none. Both buffers hold every SSM layer, as the live
+/// state buffers do.
+struct SsmPassCheckpoint {
+  std::uint32_t rows{0};
+  float* conv{nullptr};
+  void* recurrent{nullptr};
+};
+
 /// Source and destination of one recurrent-state pass. The pass that follows a
 /// rollback pin reads the pinned buffers and writes the other pair; every
 /// other pass updates in place, so `*_in == *_out`. Every kernel loads its
@@ -158,7 +168,7 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
     std::size_t qkv_size, std::uint32_t num_key_heads, std::uint32_t num_heads,
     std::uint32_t key_dim, std::uint32_t val_dim, hipStream_t stream = nullptr,
     QwenRecurrentStateStorage state_storage = QwenRecurrentStateStorage::kFp32,
-    void* fp16_out = nullptr);
+    void* fp16_out = nullptr, SsmPassCheckpoint checkpoint = {});
 
 }  // namespace superroc::hip
 

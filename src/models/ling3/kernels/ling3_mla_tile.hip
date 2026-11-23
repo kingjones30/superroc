@@ -1,4 +1,4 @@
-// ling3_mla_tile.hip — LF1 (MiMo), wave 2: superroc's absorbed-MLA PREFILL
+// ling3_mla_tile.hip — superroc's absorbed-MLA PREFILL
 // attention as the fork's TILE kernel. 2026-10-03. Header: ling3_mla_tile.hpp.
 //
 // ATTRIBUTION — adapted from llama.cpp's ggml/src/ggml-cuda/fattn-tile.cuh
@@ -366,7 +366,7 @@ static __global__ __launch_bounds__(LT_NTHREADS, 1) void attn_tile_kernel(
 }
 
 // ---------------------------------------------------------------------------
-// De-absorb + gate as a batched GEMM (LR1 §6.8): out[t,h,r] =
+// De-absorb + gate as a batched GEMM: out[t,h,r] =
 // sigmoid(gate[t,h]) * sum_d wv_b[h][r][d] * latent[t,h,d]. One LDS copy of a
 // wv_b[h] r-tile serves every token of the chunk.
 // ---------------------------------------------------------------------------
@@ -509,7 +509,7 @@ void mla_attn_tile(const MlaShape & sh, const MlaScalars & sc, const MlaWeights 
     float * lat = lat_base;
     lt_audit(sh, in, out, cache, n_pos, tok_base, tok_count, chunk_tokens, l_tok);
 
-    // f16 cache scratch, converted once per call (SPEC2 2.6: converting per
+    // f16 cache scratch, converted once per call (converting per
     // workgroup in the staging loop measured ~90 ms of a 266 ms kernel).
     static __half * c16 = nullptr;
     static size_t c16_cap = 0;

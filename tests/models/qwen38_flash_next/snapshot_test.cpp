@@ -153,6 +153,131 @@ void CheckPrefillCheckpoint(const std::shared_ptr<qfn::Model>& model,
             << " warm=" << warm << " restore exact\n";
 }
 
+/// Dual in-pass checkpoints: one pass freezing a
+/// 64-aligned P in the widened kPairTailRows tail plus S in the text
+/// tail-8. Each frozen view equals a pass ending at its own boundary, the
+/// earlier view changes nothing a single capture at S leaves, and a restore
+/// at P resumes exactly. A speculative session keeps the draft's hidden rows
+/// only after S once any view is captured, so its live state is compared
+/// with a single capture rather than with an uncaptured pass.
+void CheckPrefillCheckpointPair(const std::shared_ptr<qfn::Model>& model,
+                                std::span<const std::int32_t> prompt,
+                                superroc::core::SessionMode mode) {
+  std::string error;
+  auto source = model->CreateSession(mode, 8192, &error);
+  auto single = model->CreateSession(mode, 8192, &error);
+  auto through = model->CreateSession(mode, 8192, &error);
+  auto split_p = model->CreateSession(mode, 8192, &error);
+  auto split_s = model->CreateSession(mode, 8192, &error);
+  Require(source && single && through && split_p && split_s, error);
+  const auto boundary_s = static_cast<std::uint32_t>(prompt.size() - 7);
+  const auto boundary_p =
+      static_cast<std::uint32_t>(prompt.size() - 255) / 64 * 64;
+  Require(boundary_p % 64 == 0 && boundary_s - boundary_p >= 64,
+          "pair geometry does not match the design definitions");
+  const auto claim_p = source->PrefillCheckpointBytes(boundary_p);
+  const auto claim_s = source->PrefillCheckpointBytes(boundary_s);
+  std::unique_ptr<qfn::SessionSnapshot> checkpoint_p;
+  std::unique_ptr<qfn::SessionSnapshot> checkpoint_s;
+  double capture_ms = -1;
+  Require(source->SyncThroughPair(prompt, boundary_p, boundary_s, &checkpoint_p,
+                                  &checkpoint_s, &error, &capture_ms),
+          error);
+  Require(std::isfinite(capture_ms) && capture_ms > 0,
+          "dual capture time was not reported");
+  Require(checkpoint_p != nullptr && checkpoint_s != nullptr,
+          "dual in-pass checkpoints were not returned");
+  Require(checkpoint_p->SizeBytes() == claim_p &&
+              checkpoint_s->SizeBytes() == claim_s,
+          "dual checkpoint differs from its admission claim");
+  const auto frozen_p = Payload(*checkpoint_p);
+  const auto frozen_s = Payload(*checkpoint_s);
+  std::unique_ptr<qfn::SessionSnapshot> single_s;
+  Require(single->SyncThrough(prompt, boundary_s, &single_s, &error), error);
+  Require(single_s != nullptr && Payload(*single_s) == frozen_s,
+          "dual stable view differs from a single capture at S");
+  Require(Payload(*source) == Payload(*single),
+          "the earlier view changed what a single capture leaves");
+  Require(through->Sync(prompt, &error), error);
+  const auto frontier = Payload(*through);
+  Require(mode == superroc::core::SessionMode::kSpeculative ||
+              Payload(*source) == frontier,
+          "dual capture changed the pass frontier");
+  Require(source->Logits().size() == through->Logits().size() &&
+              std::memcmp(source->Logits().data(), through->Logits().data(),
+                          source->Logits().size_bytes()) == 0,
+          "dual capture changed pass logits");
+  Require(split_p->Sync(prompt.first(boundary_p), &error), error);
+  Require(frozen_p == Payload(*split_p),
+          "dual earlier boundary differs from a pass ending at P");
+  Require(split_s->Sync(prompt.first(boundary_s), &error), error);
+  Require(frozen_s == Payload(*split_s),
+          "dual stable boundary differs from a pass ending at S");
+  const sampling::SamplingConfig config{
+      .temperature = 0.8F, .top_k = 20, .top_p = 0.95F, .seed = 73};
+  const Decoded expected = Decode(*through, 8, config, 8);
+  RequireSame(expected, Decode(*source, 8, config, 8),
+              "dual sampled continuation");
+  auto restored = model->CreateSession(mode, 8192, &error);
+  Require(restored != nullptr, error);
+  Require(restored->RestoreSnapshot(frozen_p, &error), error);
+  Require(restored->Position() == boundary_p, "restored P position");
+  Require(restored->Sync(prompt, &error), error);
+  Require(Payload(*restored) == frontier,
+          "restore at P did not resume the uninterrupted frontier");
+  RequireSame(expected, Decode(*restored, 8, config, 8),
+              "restore at P mid-pass continuation");
+  std::cout << "dual in-pass checkpoint mode=" << static_cast<int>(mode)
+            << " tokens=" << prompt.size() << " P=" << boundary_p
+            << " S=" << boundary_s << " restore exact\n";
+}
+
+/// Asking for log probabilities must not change what greedy decoding emits:
+/// the armed step verifies the same drafts on the host, and when it accepts
+/// all of them the next step still starts from the right target row. One
+/// report per token.
+void CheckLogprobsKeepGreedyTokens(const std::shared_ptr<qfn::Model>& model,
+                                   std::span<const std::int32_t> prompt,
+                                   superroc::core::SessionMode mode) {
+  constexpr std::size_t kTokens = 64;
+  std::string error;
+  auto plain = model->CreateSession(mode, 8192, &error);
+  auto armed = model->CreateSession(mode, 8192, &error);
+  Require(plain && armed, error);
+  Require(plain->Sync(prompt, &error) && armed->Sync(prompt, &error), error);
+  const sampling::SamplingConfig greedy{.temperature = 0.0F};
+  sampling::SamplingConfig reporting = greedy;
+  reporting.logprobs = true;
+  reporting.logprobs_top_n = 2;
+  const Decoded expected = Decode(*plain, kTokens, greedy, 8);
+  const auto history = armed->Tokens();
+  const std::vector<sampling::TokenId> initial(history.begin(), history.end());
+  sampling::SamplerState sampler(reporting, initial);
+  std::vector<std::int32_t> tokens;
+  std::size_t reports = 0;
+  while (tokens.size() < kTokens) {
+    qfn::Session::DecodeResult step;
+    Require(armed->DecodeStep(std::min<std::size_t>(8, kTokens - tokens.size()),
+                              sampler, &step, &error, false),
+            error);
+    Require(!step.tokens.empty(), "empty decode step");
+    Require(step.logprobs.size() == step.tokens.size(),
+            "log probability reports are not one per token");
+    for (std::size_t i = 0; i < step.tokens.size(); ++i) {
+      Require(
+          static_cast<std::int32_t>(step.logprobs[i].token) == step.tokens[i],
+          "a log probability report names another token");
+    }
+    reports += step.logprobs.size();
+    tokens.insert(tokens.end(), step.tokens.begin(), step.tokens.end());
+  }
+  Require(tokens == expected.tokens,
+          "requesting log probabilities changed the greedy tokens");
+  std::cout << "logprobs greedy mode=" << static_cast<int>(mode)
+            << " tokens=" << tokens.size() << " reports=" << reports
+            << " same as unarmed\n";
+}
+
 void CheckBorrowedSnapshots(const std::shared_ptr<qfn::Model>& model,
                             std::span<const std::int32_t> prompt,
                             superroc::core::SessionMode mode) {
@@ -380,6 +505,10 @@ int main(int argc, char** argv) {
                            superroc::core::SessionMode::kAutoregressive);
     CheckPrefillCheckpoint(model, prompt,
                            superroc::core::SessionMode::kSpeculative);
+    CheckPrefillCheckpointPair(model, prompt,
+                               superroc::core::SessionMode::kAutoregressive);
+    CheckPrefillCheckpointPair(model, prompt,
+                               superroc::core::SessionMode::kSpeculative);
     std::vector<std::int32_t> overflow_prompt(prompt);
     overflow_prompt.insert(overflow_prompt.end(), prompt.begin(),
                            prompt.begin() + 2051);
@@ -395,6 +524,10 @@ int main(int argc, char** argv) {
       CheckPrefillCheckpoint(
           model, std::span<const std::int32_t>(warm_prompt).first(2055), mode);
     }
+    CheckLogprobsKeepGreedyTokens(model, prompt,
+                                  superroc::core::SessionMode::kAutoregressive);
+    CheckLogprobsKeepGreedyTokens(model, prompt,
+                                  superroc::core::SessionMode::kSpeculative);
     CheckBorrowedSnapshots(model, prompt,
                            superroc::core::SessionMode::kAutoregressive);
     CheckBorrowedSnapshots(model, prompt,

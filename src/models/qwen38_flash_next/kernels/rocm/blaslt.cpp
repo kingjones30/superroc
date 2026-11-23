@@ -3,6 +3,7 @@
 #include <array>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include "src/core/canonical.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
 
 namespace superroc::models::qwen38_flash_next::rocm {
@@ -16,6 +17,12 @@ void AssignError(std::string* error, const char* message) {
 
 bool OwnF16(hipDataType type, int m, int k) {
   return type == HIP_R_16F && k == 2560 && (m == 96 || m == 513);
+}
+
+// SUPERROC_CANONICAL_CACHE=1: see BlasLt::Gemm.
+bool CanonicalHalf(hipDataType type, int k) {
+  return ::superroc::core::CanonicalCacheOn() && k % 32 == 0 &&
+         (type == HIP_R_16BF || type == HIP_R_16F);
 }
 
 }  // namespace
@@ -148,6 +155,16 @@ bool BlasLt::Gemm(const void* weights, const void* input, float* out,
     return UnquantizedF16Gemm(weights, static_cast<const __half*>(input), out,
                               n, m, k, stream_);
   }
+  // Canonical cache: the library picks its kernel per token count, and both
+  // it and DenseBf16Gemm start a token's K chain where its place in the pass
+  // says. Half-precision projections take one fixed order instead, whatever
+  // the pass holds.
+  if (CanonicalHalf(type, k)) {
+    return type == HIP_R_16BF
+               ? DenseBf16Gemm(weights, input, out, n, m, k, stream_, true)
+               : UnquantizedF16Gemm(weights, static_cast<const __half*>(input),
+                                    out, n, m, k, stream_);
+  }
   Plan* p = FindPlan(type, m, n, k, error);
   if (p == nullptr)
     return false;
@@ -162,7 +179,8 @@ bool BlasLt::Prepare(hipDataType type, int m, int n, int k,
     AssignError(error, "hipBLASLt dimensions must be positive");
     return false;
   }
-  return OwnF16(type, m, k) || FindPlan(type, m, n, k, error) != nullptr;
+  return OwnF16(type, m, k) || CanonicalHalf(type, k) ||
+         FindPlan(type, m, n, k, error) != nullptr;
 }
 
 BlasLt::Plan* BlasLt::FindPlan(hipDataType type, int m, int n, int k,

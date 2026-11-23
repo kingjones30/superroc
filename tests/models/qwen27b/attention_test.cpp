@@ -14,7 +14,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/sampling.hpp"
 #include "src/models/qwen/hip/kernels/dflash_kernels.hpp"
@@ -946,7 +946,7 @@ int main() {
     TestRouterShortHistoryUnchanged(history, 1);
   }
   if (const char* bench =
-          ::superroc::core::GetEnvCompat("SUPERROC_DFLASH_ATTN_BENCH");
+          ::superroc::core::GetEnv("SUPERROC_DFLASH_ATTN_BENCH");
       bench != nullptr && bench[0] == '1') {
     BenchLongHistory();
   }

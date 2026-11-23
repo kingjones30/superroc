@@ -15,7 +15,6 @@
 #include <sstream>
 #include <utility>
 
-#include "src/core/previous_name_compat.hpp"
 #include "src/models/minimax_h3/json.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
 
@@ -405,8 +404,7 @@ std::optional<ModelInventory> ModelInventory::Inspect(
     }
     const json::Value manifest =
         json::ParseFile(source_manifest, kMaximumJsonBytes);
-    if (!::superroc::core::MatchesCurrentOrPrevious(
-            RequireField(manifest, "schema").AsString(), kManifestSchema) ||
+    if ((RequireField(manifest, "schema").AsString()) != (kManifestSchema) ||
         RequireField(manifest, "model_kind").AsString() != kModelKind ||
         RequireField(manifest, "revision").AsString() != kRevision) {
       throw json::Error("source manifest identity does not match MiniMax H3");

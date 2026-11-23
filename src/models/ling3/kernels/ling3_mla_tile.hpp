@@ -1,11 +1,11 @@
-// ling3_mla_tile.hpp — LF1 (MiMo), wave 2: superroc's absorbed-MLA PREFILL
+// ling3_mla_tile.hpp — superroc's absorbed-MLA PREFILL
 // attention as the fork's TILE kernel. 2026-10-03. Companion:
 // ling3_mla_tile.hip.
 //
 // WHAT — a port of llama.cpp ROCmFPX's `flash_attn_tile<DKQ=576, DV=512,
 // ncols1=2, ncols2=16>` (ggml/src/ggml-cuda/fattn-tile.cuh, MIT; attribution in
-// the .hip) to superroc's absorbed MLA prefill, per Jay's DECISIONS 2026-10-03
-// 01:05. The fork's kernel is the proven design on gfx1151: one launch per
+// the .hip) to superroc's absorbed MLA prefill.
+// The fork's kernel is the proven design on gfx1151: one launch per
 // layer per chunk, 16 heads x 2 tokens per block sharing each K/V tile,
 // f16 K/V in LDS (half2), Q f32->f16 pre-scaled, register-blocked KQ and VKQ
 // dot2 products with NO shuffles in the inner loop, online softmax with one
@@ -16,14 +16,14 @@
 //     cache (MQA): every column reads the same K/V tile, so the tile is staged
 //     once and reused 32x;
 //   - K = the f16 copy of the cache slice, made ONCE per layer per chunk by
-//     cache_to_f16_kernel (SPEC2 2.6 measured this: converting per workgroup
-//     in the staging loop costs ~90 ms of a 266 ms kernel at 8 K);
+//     cache_to_f16_kernel (converting per workgroup in the staging loop costs
+//     ~90 ms of a 266 ms kernel at 8 K);
 //   - causal limit per query column (token t sees [0, (n_pos-chunk)+t+1)),
 //     replacing the fork's mask tensor;
 //   - scale 1/sqrt(192) is applied to Q at staging (the fork does the same);
 //   - attention outputs the 512-dim latent per (token, head), and the wv_b
 //     de-absorb + sigmoid gate run as a SEPARATE batched GEMM kernel
-//     (LR1 §6.8): one LDS copy of wv_b[h] per (head, r-tile) serves all
+//     One LDS copy of wv_b[h] per (head, r-tile) serves all
 //     tokens, instead of ~4.2 GB of wv_b re-reads inside attention.
 //
 // ARITHMETIC — identical to mla_attn_tok up to f16 inputs and the reordered

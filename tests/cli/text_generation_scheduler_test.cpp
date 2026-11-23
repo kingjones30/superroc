@@ -132,6 +132,14 @@ struct FakeControl {
     Expect(entered, "timed out waiting for blocked prefill");
   }
 
+  void WaitForPromptLogits(TextRunnerToken label) {
+    std::unique_lock<std::mutex> lock(mutex);
+    const bool entered = condition.wait_for(lock, kTestTimeout, [&] {
+      return prompt_logits_gate_entered && prompt_logits_gate_label == label;
+    });
+    Expect(entered, "timed out waiting for blocked prompt logits");
+  }
+
   void ReleaseAdvance() {
     {
       const std::lock_guard<std::mutex> lock(mutex);
@@ -144,6 +152,14 @@ struct FakeControl {
     {
       const std::lock_guard<std::mutex> lock(mutex);
       release_prefill = true;
+    }
+    condition.notify_all();
+  }
+
+  void ReleasePromptLogits() {
+    {
+      const std::lock_guard<std::mutex> lock(mutex);
+      release_prompt_logits = true;
     }
     condition.notify_all();
   }
@@ -186,10 +202,16 @@ struct FakeControl {
       TextModelRunner::DeviceProbeStatus::kUsable};
   TextRunnerToken advance_gate_label{0};
   TextRunnerToken prefill_gate_label{0};
+  TextRunnerToken prompt_logits_gate_label{0};
   bool advance_gate_entered{false};
   bool prefill_gate_entered{false};
+  bool prompt_logits_gate_entered{false};
   bool release_advance{false};
   bool release_prefill{false};
+  bool release_prompt_logits{false};
+  bool call_prompt_logits_hook{false};
+  bool block_after_prompt_logits{false};
+  std::atomic<bool> prefill_returned{false};
   std::atomic<std::size_t> invalidations{0};
   std::atomic<std::size_t> states_created{0};
   bool structured_output{false};
@@ -394,6 +416,22 @@ public:
     if (ready) {
       fake.frontier = fake.label * 100;
     }
+    if (ready && control_->call_prompt_logits_hook &&
+        state.prompt_logits_hook() != nullptr && *state.prompt_logits_hook()) {
+      (*state.prompt_logits_hook())();
+    }
+    if (ready && control_->block_after_prompt_logits) {
+      std::unique_lock<std::mutex> lock(control_->mutex);
+      control_->prompt_logits_gate_entered = true;
+      control_->prompt_logits_gate_label = fake.label;
+      control_->condition.notify_all();
+      const bool released = control_->condition.wait_for(
+          lock, kTestTimeout, [&] { return control_->release_prompt_logits; });
+      if (!released) {
+        throw std::runtime_error("prompt logits gate timed out");
+      }
+    }
+    control_->prefill_returned.store(true, std::memory_order_relaxed);
     return {
         .consumed_tokens = consumed,
         .decode_ready = ready,
@@ -402,7 +440,7 @@ public:
 
   [[nodiscard]] TextDecodeSelection SelectNext(
       TextRunnerState& state,
-      superroc::sampling::SamplerState&) const override {
+      superroc::sampling::SamplerState& sampler) const override {
     const auto& fake = RequireFakeState(state);
     if (!fake.frontier.has_value()) {
       throw std::logic_error("scheduler fake has no frontier");
@@ -417,7 +455,19 @@ public:
           static_cast<std::size_t>(*fake.frontier - fake.label * 100);
       if (index >= control_->output_pieces.size())
         return {.stop = true};
-      return {.token = *fake.frontier, .piece = control_->output_pieces[index]};
+      TextDecodeSelection selection{.token = *fake.frontier,
+                                    .piece = control_->output_pieces[index]};
+      // The fake mirrors an armed runner: the report names the token with a
+      // fixed logprob and one top entry, so the scheduler leg is pinned.
+      if (sampler.logprobs_enabled()) {
+        superroc::sampling::CapturedTokenLogprobs logged;
+        logged.token = selection.token;
+        logged.logprob = -0.5;
+        logged.text = selection.piece;
+        logged.top.push_back({selection.token, -0.5, selection.piece});
+        selection.logprobs = std::move(logged);
+      }
+      return selection;
     }
     return {
         .stop = false,
@@ -1071,6 +1121,78 @@ void TestRequestTotalsDoNotNeedAConsumer() {
             metrics::TotalDraftTokens().load() - drafts_before == 7 &&
             metrics::TotalDraftAcceptedTokens().load() - accepted_before == 5,
         "draft totals count at completion");
+  }
+}
+
+void TestWarmupIsNotCountedInRequestMetrics() {
+  namespace metrics = superroc::server::detail;
+  superroc::server::TextRequestMetadata warmup;
+  warmup.client_id = "warmup";
+  warmup.cache_prompt = false;
+  warmup.warmup = true;
+  auto control = std::make_shared<FakeControl>();
+  control->incremental_prefill = false;
+  control->multi_token_decode = true;
+  control->prefix_reuse = false;
+  auto scheduler = MakeScheduler(control, 1);
+  const auto rounds_before = metrics::TotalDraftRounds().load();
+  const auto drafts_before = metrics::TotalDraftTokens().load();
+  const auto warmed = scheduler->Submit({7}, 5, 0.0F, {}, false, warmup).Wait();
+  Expect(warmed.tokens.size() == 5 && warmed.draft_rounds == 2 &&
+             warmed.draft_tokens == 7,
+         "a warm-up generates and reports like any request");
+  Expect(metrics::TotalDraftRounds().load() == rounds_before &&
+             metrics::TotalDraftTokens().load() == drafts_before,
+         "a warm-up is not counted in the request totals");
+  // The same request without the mark counts, as
+  // TestRequestTotalsDoNotNeedAConsumer pins.
+  (void)scheduler->Submit({7}, 5, 0.0F).Wait();
+  Expect(metrics::TotalDraftRounds().load() - rounds_before == 2 &&
+             metrics::TotalDraftTokens().load() - drafts_before == 7,
+         "a client request after the warm-up is counted");
+
+  // A finished request leaves its state for the conversation to continue
+  // from; a warm-up leaves nothing.
+  for (const bool mark : {false, true}) {
+    auto retained = MakeScheduler(std::make_shared<FakeControl>(), 1);
+    superroc::server::TextRequestMetadata first;
+    first.warmup = mark;
+    std::vector<TextRunnerToken> prompt{1, 10, 11, 12};
+    const auto opened =
+        retained->Submit(prompt, 3, 0.0F, {}, false, first).Wait();
+    Expect(opened.tokens == ExpectedTokens(1, 3),
+           "the first request generates its tokens");
+    prompt.insert(prompt.end(), opened.tokens.begin(), opened.tokens.end());
+    const auto next = retained->Submit(prompt, 2, 0.0F).Wait();
+    Expect(next.tokens.size() == 2, "the continuation generates");
+    Expect(
+        mark ? next.cached_prompt_tokens == 0 : next.cached_prompt_tokens > 0,
+        mark ? "a warm-up leaves no state to continue from"
+             : "an ordinary request leaves its state to continue from");
+  }
+
+  // The same holds when the request is cancelled while it generates: an
+  // ordinary request keeps what it reached, a warm-up keeps nothing.
+  for (const bool mark : {false, true}) {
+    auto blocked = std::make_shared<FakeControl>();
+    blocked->snapshot_callback = [] {};
+    blocked->block_advance_label = 1;
+    auto retained = MakeScheduler(blocked, 1);
+    superroc::server::TextRequestMetadata first;
+    first.warmup = mark;
+    const std::vector<TextRunnerToken> prompt{1, 10, 11, 12};
+    auto opened = retained->Submit(prompt, 3, 0.0F, {}, false, first);
+    blocked->WaitForAdvance(1);
+    opened.Cancel();
+    blocked->ReleaseAdvance();
+    Expect(opened.Wait().cancelled, "the request is cancelled");
+    std::vector<TextRunnerToken> longer = prompt;
+    longer.push_back(13);
+    const auto next = retained->Submit(longer, 2, 0.0F).Wait();
+    Expect(
+        mark ? next.cached_prompt_tokens == 0 : next.cached_prompt_tokens > 0,
+        mark ? "a cancelled warm-up leaves no state"
+             : "a cancelled request leaves the prompt it prefilled");
   }
 }
 
@@ -2290,6 +2412,60 @@ void TestStopSequenceChunkBoundaries() {
   check({"STOP"}, "STOP", "", "STOP");
 }
 
+// A reply that opens with reasoning: stop sequences belong to the answer.
+void TestStopSequencesSkipReasoning() {
+  using superroc::server::StopSequenceFilter;
+  const auto check = [](std::vector<std::string> stops,
+                        std::vector<std::string> ends, std::string text,
+                        std::string expected, std::string matched) {
+    for (std::size_t split = 0; split <= text.size() + 1; ++split) {
+      StopSequenceFilter filter(stops, ends);
+      std::string output;
+      if (split > text.size()) {
+        for (const char byte : text)
+          output += filter.Push(std::string_view(&byte, 1));
+      } else {
+        output += filter.Push(std::string_view(text).substr(0, split));
+        output += filter.Push(std::string_view(text).substr(split));
+      }
+      output += filter.Finish();
+      Expect(output == expected,
+             "reasoning-aware stop matching is independent of token "
+             "boundaries");
+      Expect(filter.stopped() == !matched.empty(),
+             "correct stop detection after reasoning");
+      if (filter.stopped())
+        Expect(filter.matched_sequence() == matched,
+               "correct matched sequence after reasoning");
+    }
+  };
+  const std::vector<std::string> think = {"</think>"};
+  // The GSM8K case: the task's stop string appears in the reasoning first.
+  check({"Question:"}, think,
+        "The Question: asks for a sum.</think>It is 5.\nQuestion: next",
+        "The Question: asks for a sum.</think>It is 5.\n", "Question:");
+  // Reasoning that never ends is returned whole.
+  check({"Question:"}, think, "Still on the Question: here",
+        "Still on the Question: here", "");
+  // Directly after the marker, and a marker lookalike before it.
+  check({"A"}, think, "A A</think>A", "A A</think>", "A");
+  check({"STOP"}, think, "</thin STOP</think>STOP", "</thin STOP</think>",
+        "STOP");
+  // A sequence that names the boundary is matched everywhere.
+  check({"</think>"}, think, "abc</think>def", "abc", "</think>");
+  check({"</think>\n\nFinal"}, think, "x</think>\n\nFinal answer", "x",
+        "</think>\n\nFinal");
+  check({"</think>\n\nFinal", "END"}, think, "END x</think>\n\nFinish END",
+        "END x</think>\n\nFinish ", "END");
+  // The first of several end markers ends the reasoning.
+  check({"STOP"}, {"</think>", "<tool_call>"},
+        "plan STOP <tool_call>{\"a\":1} STOP</think>",
+        "plan STOP <tool_call>{\"a\":1} ", "STOP");
+  // Without markers nothing changes; markers without sequences are inert.
+  check({"STOP"}, {}, "a STOP b</think>STOP", "a ", "STOP");
+  check({}, think, "a STOP b</think>STOP", "a STOP b</think>STOP", "");
+}
+
 void TestStopSequencesPreserveExecutedState() {
   using Finish = superroc::server::TextGenerationBackend::FinishReason;
   for (const bool multi : {false, true}) {
@@ -2404,6 +2580,102 @@ void TestCancellationWithBufferedStopPrefix() {
     Expect(!replacement.cancelled && replacement.text == "safe<STOP>tailend",
            "cancellation with a partial stop releases the runner");
   }
+}
+
+// The Ling-3 stop fix: a runner whose published pieces are the exact decoded
+// text (Ling3TextRunner, tokenizer Decode == per-token TokenText
+// concatenation) runs stop matching on the streamed bytes. This is the gate
+// matrix a Ling-3 request with stop exercises: at the token level a match can
+// land at the very start of the answer, inside one token, or across two
+// tokens, and a held-back partial prefix must never stream early.
+void TestLingStopMatchCasesAndHoldBack() {
+  using Finish = superroc::server::TextGenerationBackend::FinishReason;
+  struct Case {
+    const char* name;
+    std::vector<std::string> pieces;
+    std::string stop;
+    std::string expected_text;
+    std::string matched;
+    std::vector<std::string> expected_stream;
+  };
+  const Case cases[] = {
+      // At the very start of the answer: nothing streams at all.
+      {"very start", {"STOPtail", "later"}, "STOP", "", "STOP", {}},
+      // Inside one token: the byte prefix inside the same token ("ST")
+      // survives, the stop and its suffix are trimmed.
+      {"inside one token",
+       {"ab", "ST<NR>OPtail", "x"},
+       "<NR>",
+       "abST",
+       "<NR>",
+       {"ab", "ST"}},
+      // Across two tokens: "ST" is held back until "OP" completes the match.
+      {"across tokens",
+       {"pre", "ST", "OPend", "z"},
+       "STOP",
+       "pre",
+       "STOP",
+       {"pre"}},
+      // Never matching: the held "ST" prefix is released unchanged once the
+      // next token proves it cannot complete a stop.
+      {"never matching",
+       {"an", "ST", "Q", "!"},
+       "STOPX",
+       "anSTQ!",
+       "",
+       {"an", "STQ", "!"}},
+  };
+  for (const Case& c : cases) {
+    for (const bool multi : {false, true}) {
+      auto control = std::make_shared<FakeControl>();
+      control->incremental_text_is_exact = true;
+      control->multi_token_decode = multi;
+      control->output_pieces = c.pieces;
+      auto scheduler = MakeScheduler(control, 1);
+      TextGenerationScheduler::RequestMetadata metadata;
+      metadata.stop_sequences = {c.stop};
+      std::vector<std::string> streamed;
+      const auto result = scheduler->Submit({1}, 8, 0.0F, {}, true, metadata)
+                              .Wait([&](std::string_view piece) {
+                                streamed.emplace_back(piece);
+                                return true;
+                              });
+      const bool stopped = !c.matched.empty();
+      Expect(result.text == c.expected_text &&
+                 (stopped ? result.finish_reason == Finish::kStopSequence &&
+                                result.stop_sequence == c.stop
+                          : result.stop_sequence.empty() &&
+                                result.finish_reason == Finish::kStop),
+             std::string(c.name) + ": text and finish are exact");
+      std::string joined;
+      for (const auto& piece : streamed)
+        joined += piece;
+      Expect(joined == result.text,
+             std::string(c.name) + ": stream and final text agree");
+      if (!multi) {
+        Expect(streamed == c.expected_stream,
+               std::string(c.name) + ": held-back prefixes never stream early");
+      }
+    }
+  }
+}
+
+// The remaining non-exact runner family (llama SPM pieces are not Decode()
+// exact) still fails closed instead of streaming trimmed pieces and then
+// rebuilding an untrimmed final text.
+void TestStopSequencesStillRequireExactIncrementalText() {
+  auto control = std::make_shared<FakeControl>();
+  control->incremental_text_is_exact = false;
+  auto scheduler = MakeScheduler(control, 1);
+  TextGenerationScheduler::RequestMetadata metadata;
+  metadata.stop_sequences = {"STOP"};
+  bool refused = false;
+  try {
+    (void)scheduler->Submit({1}, 8, 0.0F, {}, true, metadata);
+  } catch (const std::invalid_argument&) {
+    refused = true;
+  }
+  Expect(refused, "non-exact incremental text still refuses stop sequences");
 }
 
 }  // namespace
@@ -2978,6 +3250,228 @@ void TestEmptyTokenIsPublished() {
          "an empty streamed piece still charges the output budget");
 }
 
+void TestLogprobsCarryThroughScheduler() {
+  auto control = std::make_shared<FakeControl>();
+  control->incremental_text_is_exact = true;
+  control->output_pieces = {"hello", " world"};
+  auto scheduler = MakeScheduler(control, 1);
+  superroc::sampling::SamplingConfig sampling;
+  sampling.logprobs = true;
+  sampling.logprobs_top_n = 2;
+  auto request = scheduler->Submit({1}, 2, sampling, {}, true);
+  std::vector<superroc::server::TextGenerationBackend::TokenMeta> metas;
+  request.SetTokenMetaCallback(
+      [&](const superroc::server::TextGenerationBackend::TokenMeta& meta) {
+        metas.push_back(meta);
+        return true;
+      });
+  std::string streamed;
+  const auto result = request.Wait([&](std::string_view piece) {
+    streamed += piece;
+    return true;
+  });
+  Expect(result.tokens == ExpectedTokens(1, 2), "two tokens stream in order");
+  Expect(result.token_logprobs.size() == result.tokens.size(),
+         "one logprobs report per emitted token");
+  for (std::size_t i = 0; i < result.tokens.size(); ++i) {
+    Expect(result.token_logprobs[i].token == result.tokens[i] &&
+               result.token_logprobs[i].logprob == -0.5 &&
+               result.token_logprobs[i].top.size() == 1,
+           "the armed runner report rides the result");
+  }
+  Expect(metas.size() == 2 && metas[0].piece == "hello" &&
+             metas[1].piece == " world" && streamed == "hello world",
+         "one meta precedes each streamed piece in order");
+  // Unarmed requests do no logprobs work: the result vector stays empty and
+  // no transport callback fires.
+  auto plain = scheduler->Submit({1}, 1, 0.0F, {}, true);
+  bool meta_fired = false;
+  plain.SetTokenMetaCallback(
+      [&](const superroc::server::TextGenerationBackend::TokenMeta&) {
+        meta_fired = true;
+        return true;
+      });
+  const auto plain_result = plain.Wait();
+  Expect(plain_result.tokens.size() == 1 &&
+             plain_result.token_logprobs.empty() && !meta_fired,
+         "unarmed requests record no logprobs and fire no metas");
+}
+
+// Reports follow the text a stop sequence lets through: a token whose text is
+// held back as a possible stop still reports (on an empty piece, ahead of the
+// text that releases it), and a token the match swallows whole reports
+// nothing, in the stream and in the result.
+void TestLogprobsFollowStopSequences() {
+  using Meta = superroc::server::TextGenerationBackend::TokenMeta;
+  struct Run {
+    std::vector<Meta> metas;
+    std::vector<std::string> pieces;
+    TextGenerationScheduler::Result result;
+  };
+  const auto run = [](std::vector<std::string> output, std::size_t limit) {
+    auto control = std::make_shared<FakeControl>();
+    control->incremental_text_is_exact = true;
+    control->output_pieces = std::move(output);
+    auto scheduler = MakeScheduler(control, 1);
+    superroc::sampling::SamplingConfig sampling;
+    sampling.logprobs = true;
+    TextGenerationScheduler::RequestMetadata metadata;
+    metadata.stop_sequences = {"<STOP>"};
+    auto request = scheduler->Submit({1}, limit, sampling, {}, true, metadata);
+    Run out;
+    request.SetTokenMetaCallback([&](const Meta& meta) {
+      out.metas.push_back(meta);
+      return true;
+    });
+    out.result = request.Wait([&](std::string_view piece) {
+      out.pieces.emplace_back(piece);
+      return true;
+    });
+    return out;
+  };
+  {
+    // "<S" could open the stop, so it waits for "x".
+    const auto got = run({"ab", "<S", "x", "cd"}, 4);
+    Expect(got.result.text == "ab<Sxcd" && got.result.stop_sequence.empty(),
+           "an unmatched stop prefix is released");
+    Expect(got.result.token_logprobs.size() == 4 && got.metas.size() == 4,
+           "every released token reports, held or not");
+    Expect(got.pieces == std::vector<std::string>{"ab", "", "<Sx", "cd"} &&
+               got.metas[1].logprobs.text == "<S" &&
+               got.metas[2].logprobs.text == "x",
+           "a held token reports ahead of the text that releases it");
+  }
+  {
+    const auto got = run({"ab", "<ST", "OP>tail", "later"}, 4);
+    Expect(got.result.text == "ab" && got.result.stop_sequence == "<STOP>",
+           "the stop sequence ends the text");
+    Expect(got.result.token_logprobs.size() == 1 &&
+               got.result.token_logprobs[0].text == "ab",
+           "tokens the stop sequence swallowed are not in the result");
+    Expect(got.metas.size() == 2 && got.pieces.size() == 2 &&
+               got.pieces[1].empty() && got.metas[1].logprobs.text == "<ST",
+           "the token that completes the stop reports nothing");
+  }
+  {
+    // The first token is cut by the stop: its text before the stop stays.
+    const auto got = run({"ab<ST", "OP>"}, 4);
+    Expect(got.result.text == "ab" && got.result.token_logprobs.size() == 1 &&
+               got.result.token_logprobs[0].text == "ab<ST" &&
+               got.metas.size() == 1,
+           "a token cut by the stop keeps its report");
+  }
+}
+
+void TestEarlyFirstTokenFromPromptLogits() {
+  const auto make_hooked = [](bool gate) {
+    auto control = std::make_shared<FakeControl>();
+    control->multi_token_decode = true;
+    control->incremental_prefill = true;
+    control->preview_first_token = true;
+    control->call_prompt_logits_hook = true;
+    control->block_after_prompt_logits = gate;
+    return control;
+  };
+  {
+    auto control = make_hooked(true);
+    auto scheduler = MakeScheduler(control, 1);
+    auto request = scheduler->Submit({7}, 5, 0.0F, {}, true);
+    std::mutex piece_mutex;
+    std::condition_variable piece_condition;
+    bool got_piece = false;
+    auto completed = std::async(std::launch::async, [&] {
+      return request.Wait([&](std::string_view) {
+        const std::lock_guard<std::mutex> lock(piece_mutex);
+        got_piece = true;
+        piece_condition.notify_all();
+        return true;
+      });
+    });
+    {
+      std::unique_lock<std::mutex> lock(piece_mutex);
+      const bool delivered = piece_condition.wait_for(
+          lock, kTestTimeout, [&] { return got_piece; });
+      Expect(delivered, "first piece streams while prefill is gated");
+    }
+    Expect(!control->prefill_returned.load(std::memory_order_relaxed),
+           "first piece arrives before the prefill step returns");
+    // The step keeps working after the first token is out (a draft model's
+    // catch-up, the prompt snapshot). That time is the prompt's tail.
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    control->ReleasePromptLogits();
+    Expect(completed.wait_for(kTestTimeout) == std::future_status::ready,
+           "gated prompt logits request completes after release");
+    const auto result = completed.get();
+    Expect(result.tokens == ExpectedTokens(7, 5),
+           "gated early first token is not repeated or lost");
+    Expect(result.ttft_ms >= 0, "gated request reports first token timing");
+    Expect(result.prefill_tail_ms >= 30.0,
+           "work after the early first token is reported as the prompt tail");
+    Expect(result.prefill_ms <= result.ttft_ms + 1.0,
+           "prompt time ends when the first token goes out");
+  }
+  {
+    auto hooked = make_hooked(false);
+    const auto with_hook =
+        MakeScheduler(hooked, 1)->Submit({7}, 5, 0.0F).Wait();
+    auto plain = std::make_shared<FakeControl>();
+    plain->multi_token_decode = true;
+    plain->incremental_prefill = true;
+    plain->preview_first_token = true;
+    plain->call_prompt_logits_hook = false;
+    const auto without_hook =
+        MakeScheduler(plain, 1)->Submit({7}, 5, 0.0F).Wait();
+    Expect(with_hook.tokens == without_hook.tokens &&
+               with_hook.text == without_hook.text,
+           "prompt logits hook preserves tokens and text");
+    Expect(without_hook.prefill_tail_ms == 0.0,
+           "a prompt whose first token comes from decode has no tail");
+  }
+  {
+    auto control = make_hooked(false);
+    control->eos_after = 0;
+    auto scheduler = MakeScheduler(control, 1);
+    const auto result = scheduler->Submit({7}, 5, 0.0F).Wait();
+    Expect(result.tokens.empty() && !result.cancelled,
+           "immediate EOS ends normally with no tokens");
+  }
+  {
+    auto control = make_hooked(false);
+    auto scheduler =
+        MakeScheduler(control, 1, {}, {.max_output_bytes_per_request = 2});
+    bool output_limited = false;
+    bool returned_before_throw = false;
+    try {
+      (void)scheduler->Submit({7}, 5, 0.0F, {}, true)
+          .Wait([&](std::string_view) { return true; });
+    } catch (const TextGenerationError& error) {
+      output_limited = error.code() == TextGenerationErrorCode::kOutputLimit;
+      returned_before_throw =
+          control->prefill_returned.load(std::memory_order_relaxed);
+    }
+    Expect(output_limited, "tiny output budget fails the first piece");
+    Expect(returned_before_throw,
+           "output limit surfaces after the prefill step returns");
+    const auto next = scheduler->Submit({0}, 2, 0.0F).Wait();
+    Expect(!next.cancelled && next.tokens == ExpectedTokens(0, 2),
+           "scheduler serves the next request after an output limit");
+  }
+  {
+    auto control = make_hooked(true);
+    auto scheduler = MakeScheduler(control, 1);
+    auto request = scheduler->Submit({7}, 5, 0.0F, {}, true);
+    control->WaitForPromptLogits(7);
+    request.Cancel();
+    control->ReleasePromptLogits();
+    const auto result = request.Wait([&](std::string_view) { return true; });
+    Expect(result.cancelled, "cancellation during the logits gate is reported");
+    control->block_after_prompt_logits = false;
+    const auto next = scheduler->Submit({8}, 2, 0.0F).Wait();
+    Expect(!next.cancelled && next.tokens == ExpectedTokens(8, 2),
+           "scheduler serves the next request after a gate cancellation");
+  }
+}
+
 int main() {
   TestPublicationWaitUsesRecentSubstantialPrefill();
   // Log assertions in this binary match the plain "[LEVEL] [component]" text
@@ -2991,9 +3485,15 @@ int main() {
   TestPromptProgressCancellation();
   TestIgnoreEosIsRequestScoped();
   TestEmptyTokenIsPublished();
+  TestLogprobsCarryThroughScheduler();
+  TestLogprobsFollowStopSequences();
+  TestEarlyFirstTokenFromPromptLogits();
   TestStopSequenceChunkBoundaries();
+  TestStopSequencesSkipReasoning();
   TestStopSequencesPreserveExecutedState();
   TestStopPrefixFlushAndBatchIsolation();
+  TestLingStopMatchCasesAndHoldBack();
+  TestStopSequencesStillRequireExactIncrementalText();
   TestCancellationWithBufferedStopPrefix();
   for (const bool speculative : {false, true}) {
     for (const bool preview : {false, true}) {
@@ -3057,6 +3557,7 @@ int main() {
   TestGenerationTraceRecordsPromptAndOutput();
   TestMultiTokenDecodePublishesDraftMetricsAndDisablesPrefixReuse();
   TestRequestTotalsDoNotNeedAConsumer();
+  TestWarmupIsNotCountedInRequestMetrics();
   TestMultiTokenRunnerCanSwitchToBatchedExecution();
   TestModelOwnedBatchMetrics();
   TestBatchFailureIsolation();

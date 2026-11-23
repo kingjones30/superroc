@@ -18,8 +18,8 @@ namespace superroc::tokenization {
 inline constexpr std::string_view kLfm2ChatTemplateSha256 =
     "ea663864491de7ade391839479860ca95541f892f72665c73251fbd4643b1bef";
 
-/// Super ROC: LFM2 chat-template variants rendered natively, keyed by the
-/// GGUF template's SHA-256. Each switch is a difference Jay found between
+/// Super Roc: LFM2 chat-template variants rendered natively, keyed by the
+/// GGUF template's SHA-256. Each switch is a difference between
 /// the three templates (verified against Jinja references).
 enum class Lfm2KeepThinking : std::uint8_t {
   kAfterLastUser,      // assistants after the last user turn keep thinking
@@ -42,7 +42,7 @@ inline constexpr std::array<Lfm2TemplateVariant, 3> kLfm2TemplateVariants{{
      "lfm2.5-1.2b-instruct", true, false, false,
      Lfm2KeepThinking::kLastAssistantOnly},
 }};
-/// nullptr = not an LFM2 template Super ROC renders.
+/// nullptr = not an LFM2 template Super Roc renders.
 [[nodiscard]] const Lfm2TemplateVariant* FindLfm2TemplateVariant(
     std::string_view sha256) noexcept;
 /// The variant of a GGUF whose template passes the LFM2 pin (nullptr if none).

@@ -1,12 +1,12 @@
 #pragma once
-// LI1: LS2 phase-14 dropped-stream fixes -- see superroc_fp4_moe.hpp.
+// Dropped-stream fixes -- see superroc_fp4_moe.hpp.
 #include <hip/hip_runtime.h>
 
-// SQ10: slot-set ownership. Defined when this header declares the ownership
+// Slot-set ownership. Defined when this header declares the ownership
 // API below (configure/attach/warm/check_set/peek_set); tests use it to
 // compile their ownership checks only against a patched tree.
 #define SUPERROC_FP4_SLOT_OWNER 1
-// LS1 2026-10-01: activation-quantised ROCmFP4 GEMV.
+// Activation-quantised ROCmFP4 GEMV.
 //
 // The decode step's matvecs are ~78 % of GPU time and move only ~54 GB/s of the
 // box's ~256 GB/s, so the bottleneck is the per-element work:
@@ -41,16 +41,16 @@ enum {
   SUPERROC_FP4_Q8_SLOT_FFN_X = 1,
   SUPERROC_FP4_Q8_SLOT_FFN_H = 2,
   SUPERROC_FP4_Q8_SLOT_MOE_H = 3,
-  // LS1 PHASE7 item 3: st->normed, quantised ONCE per layer and shared by that
+  // st->normed, quantised ONCE per layer and shared by that
   // layer's attention projections instead of being re-quantised by each of
   // them.
   SUPERROC_FP4_Q8_SLOT_ATTN_NORM = 4,
-  // lqw:capture-warmup. Slot count for WarmupRocmFp4Slots; keep in step
+  // Slot count for WarmupRocmFp4Slots; keep in step
   // with the kernel enum in superroc_fp4_gemv_q8.hip.
   SUPERROC_FP4_Q8_SLOT_COUNT = SUPERROC_FP4_Q8_SLOT_ATTN_NORM + 1,
 };
 
-/// Quantise x[0..k) into a caller-chosen slot (k % 32 == 0). LS1 PHASE7 item 3.
+/// Quantise x[0..k) into a caller-chosen slot (k % 32 == 0).
 ///
 /// This is the ONLY supported way to quantise once and reuse: the caller NAMES
 /// the slot, so nothing can go stale. A pointer-keyed cache must never be used
@@ -88,7 +88,7 @@ int superroc_fp4_expert_ffn_dev(int qtype, const void* gate, const void* up,
                                 float limit, float* y,
                                 hipStream_t stream = nullptr);
 
-/// Super ROC QSM: superroc_fp4_expert_ffn_dev that does NOT quantise x: it
+/// Super Roc QSM: superroc_fp4_expert_ffn_dev that does NOT quantise x: it
 /// reuses the Q8 copy of x already in this stream's FFN_X slot. Valid only
 /// right after a superroc_fp4_expert_ffn_dev on the SAME stream with the SAME x
 /// and k (the shared expert after the routed experts of one token), with
@@ -101,6 +101,29 @@ int superroc_fp4_expert_ffn_dev_xq(int qtype, const void* gate, const void* up,
                                    float limit, float* y,
                                    hipStream_t stream = nullptr);
 
+/// moebatch: the same FFN over `rows` rows of one layer in one launch per stage
+/// (gate/up+SwiGLU, then the weighted down projection). Bit-identical to
+/// calling superroc_fp4_expert_ffn_dev once per row. quantize_x == 0 reuses the
+/// FFN_X slot exactly as the _xq entry point does. Refused with
+/// SUPERROC_FP4_ERR_ARG when the geometry is not covered, so the caller can
+/// fall back to a per-row loop; a refusal has queued nothing that is read.
+int superroc_fp4_expert_ffn_dev_batch(
+    int qtype, const void* gate, const void* up, const void* down,
+    const float* x, const int* ids_d, const float* weights_d, int rows,
+    int n_used, int n_expert, int k, int n_ff, float limit, float* y,
+    hipStream_t stream = nullptr, int quantize_x = 1);
+
+/// moefuse: the routed experts and the shared expert of a verify round in one
+/// launch per stage, the shared combine folded into the down launch. Refused
+/// with SUPERROC_FP4_ERR_ARG so the caller falls back to its per-row loop when
+/// the geometry is not covered.
+int superroc_fp4_expert_ffn_dev_batch_all(
+    int qtype, const void* gate, const void* up, const void* down,
+    const void* gate_s, const void* up_s, const void* down_s, const float* x,
+    const int* ids_d, const float* weights_d, const float* sig_d, int rows,
+    int n_used, int n_expert, int k, int n_ff, int n_ff_s, float limit,
+    float* out, hipStream_t stream = nullptr);
+
 /// Register the router's device status word so superroc_fp4_moe_dev_check() can
 /// read it. Called once by superroc_fp4_route, when it allocates the word it
 /// owns.
@@ -112,10 +135,10 @@ void superroc_fp4_moe_dev_register_route_rc(int* rc_d);
 int superroc_fp4_moe_dev_check(void);
 
 // ---------------------------------------------------------------------------
-// LS1 phase 4 item 3: the small-m decode forward, for MTP verification.
+// The small-m decode forward, for MTP verification.
 // ---------------------------------------------------------------------------
 
-/// LM1 SPEC4 item 2: quantise n_tokens * k floats (token-major) into the
+/// Quantise n_tokens * k floats (token-major) into the
 /// small-m path's Q8_1 pair and hand the pair back, so a caller running several
 /// matrices against ONE activation pays for one quantise instead of one per
 /// matrix. This is the m-row counterpart of superroc_fp4_act_prepare +
@@ -128,6 +151,12 @@ int superroc_fp4_moe_dev_check(void);
 int superroc_fp4_quant_m(const float* x, int n_tokens, int k,
                          hipStream_t stream, const int8_t** xq,
                          const float** xd);
+
+/// The same quantisation into the caller's buffers (n_tokens * k bytes,
+/// n_tokens * k / 32 floats), for an activation that other quantisations come
+/// between.
+int superroc_fp4_quant_to(const float* x, int n_tokens, int k, int8_t* xq,
+                          float* xd, hipStream_t stream);
 
 /// Matvec of n rows against m activation columns (m = 1..4), reading each
 /// weight row ONCE for all columns -- llama.cpp's `mul_mat_vec_q` with
@@ -155,7 +184,31 @@ int superroc_fp4_expert_ffn_m(int qtype, const void* gate, const void* up,
                               int n_ff, float limit, float* y,
                               hipStream_t stream = nullptr);
 
-/// LV1 R3: n_used == 1 and n_tokens > 1 reads each weight row once. Otherwise
+/// superroc_fp4_expert_ffn_m on tensors moved by superroc_fp4_group_rows; xq,
+/// xd may hold x quantised already.
+int superroc_fp4_expert_ffn_grouped(int qtype, const void* gate, const void* up,
+                                    const void* down, const float* x,
+                                    const int* ids_d, const float* weights_d,
+                                    int n_tokens, int n_used, int n_expert,
+                                    int k, int n_ff, float limit, float* y,
+                                    const int8_t* xq, const float* xd,
+                                    int group, hipStream_t stream);
+/// Moves a row-major FP4 tensor of `rows` rows to groups of `group` rows, in
+/// place: inside a group the blocks go from [row][block] to [block][row], so a
+/// wave's rows read contiguous bytes. rows counts every expert's rows and must
+/// be a multiple of the group, which is a power of two.
+int superroc_fp4_group_rows(void* w, int qtype, size_t rows, int cols,
+                            int group, hipStream_t stream);
+/// superroc_fp4_expert_ffn_m with x already quantised into xq, xd.
+int superroc_fp4_expert_ffn_m_preq(int qtype, const void* gate, const void* up,
+                                   const void* down, const float* x,
+                                   const int* ids_d, const float* weights_d,
+                                   int n_tokens, int n_used, int n_expert,
+                                   int k, int n_ff, float limit, float* y,
+                                   const int8_t* xq, const float* xd,
+                                   hipStream_t stream = nullptr);
+
+/// n_used == 1 and n_tokens > 1 reads each weight row once. Otherwise
 /// this is superroc_fp4_expert_ffn_m. Same status word;
 /// superroc_fp4_expert_ffn_m_check covers it.
 int superroc_fp4_expert_ffn_shared_m(int qtype, const void* gate,
@@ -170,7 +223,7 @@ int superroc_fp4_expert_ffn_shared_m(int qtype, const void* gate,
 /// batch.
 int superroc_fp4_expert_ffn_m_check(void);
 
-// PHASE6: the warp-per-row variant of the plain matvec and of the grouped down
+// The warp-per-row variant of the plain matvec and of the grouped down
 // projection. Both must agree BIT-EXACTLY with the CTA-per-row kernels above,
 // which tools/superroc_fp4_gemv_q8_test.cpp checks, and
 // SUPERROC_FP4_GEMV_VARIANT=1 makes the shipped entry points use them (default
@@ -200,18 +253,18 @@ int superroc_fp4_moe_hs_peek(float* out, int n);
 /// Copy a slot's quantised activation back to the host (test-only diagnostic).
 int superroc_fp4_q8_peek(int slot, int8_t* qs_out, float* ds_out, int k);
 
-/// lqw:spec6. Pre-grow the small-m verify Q8 buffer (m * k floats). No-op once
+/// Pre-grow the small-m verify Q8 buffer (m * k floats). No-op once
 /// the capacity is enough. Not safe to call inside a captured graph.
 int superroc_fp4_verify_m_reserve(int total);
 
-/// lqw:spec6. Matvec of n rows against m = 2..8 token-major activation rows.
+/// Matvec of n rows against m = 2..8 token-major activation rows.
 /// y[t * n + row] matches m calls to superroc_fp4_gemv_fp4 bitwise. Returns
 /// SUPERROC_FP4_ERR_ARG (no allocation) when the reserve is short.
 int superroc_fp4_gemv_verify_m(int qtype, const void* W, const float* x,
                                float* y, int k, int n, int m,
                                hipStream_t stream = nullptr);
 
-/// Super ROC QVO: superroc_fp4_gemv_verify_m without its input quantisation. It
+/// Super Roc QVO: superroc_fp4_gemv_verify_m without its input quantisation. It
 /// reuses the Q8 copy the calling stream's set already holds and refuses
 /// (SUPERROC_FP4_ERR_ARG) unless the last verify_m quantisation in that set was
 /// of this same x, m and k. For the second and later members of a projection
@@ -226,18 +279,18 @@ int superroc_fp4_gemv_verify_m_xq(int qtype, const void* W, const float* x,
 int superroc_fp4_gemv_q8_codebook_check(void);
 
 // ---------------------------------------------------------------------------
-// SQ10: slot-set ownership. Every Q8/MoE/verify scratch buffer above exists
+// Slot-set ownership. Every Q8/MoE/verify scratch buffer above exists
 // once per SET, and streams attach to sets 1:1, so two decode streams can
 // never share scratch -- except a session's helper (drafter) stream, which
-// is ALIASED to its owner's set (SPEC2 R1). Existing entries keep their
+// is ALIASED to its owner's set. Existing entries keep their
 // signatures and resolve the calling stream's set internally, attaching
 // lazily; when no set is free they refuse at once with -SUPERROC_FP4_ERR_BUSY
-// (SPEC2 R2) and the caller declines to its eager fallback -- nothing in
+// and the caller declines to its eager fallback -- nothing in
 // production waits. At `-j 1` everything resolves to set 0 and is
 // bit-identical.
 // ---------------------------------------------------------------------------
 
-/// SPEC2 ownership revision: alias + refuse-at-once + wait-only test entry.
+/// Ownership revision: alias + refuse-at-once + wait-only test entry.
 /// The unit test ifdefs the new cases on this.
 #define SUPERROC_FP4_SLOT_HAS_ALIAS 1
 
@@ -257,14 +310,14 @@ int superroc_fp4_slot_sets_count(void);
 /// Host-side only; legal inside capture.
 int superroc_fp4_slot_stream_attach(hipStream_t stream);
 
-/// SPEC3 (S3-5): attach that names the declining launch in the WARN
+/// Attach that names the declining launch in the WARN
 /// (`func`, e.g. __func__, and the tensor width, e.g. k) so a fallback is
 /// diagnosable. Production attach sites use this; the plain attach labels
 /// the WARN with its own name.
 int superroc_fp4_slot_stream_attach_at(hipStream_t stream, const char* func,
                                        long width);
 
-/// SQ19-2: load-time attach. Same resolution as attach_at, but with no free
+/// Load-time attach. Same resolution as attach_at, but with no free
 /// set it grows the table by one set (up to 64) instead of refusing,
 /// configured or not. The caller must warm the set's buffers before any
 /// step (a first hipMalloc inside a captured decode step poisons the
@@ -276,7 +329,7 @@ int superroc_fp4_slot_stream_attach_grow(hipStream_t stream, const char* func,
 
 /// The waiting attach. Unit test only: same resolution, but an unseen stream
 /// with no free set blocks until a detach frees one. Production must never
-/// call this (R2).
+/// call this.
 int superroc_fp4_slot_stream_attach_wait(hipStream_t stream);
 
 /// Alias `helper` (a session's drafter/helper stream) to `owner`'s set.
@@ -290,7 +343,7 @@ int superroc_fp4_slot_stream_alias(hipStream_t helper, hipStream_t owner);
 /// directions (as helper and as owner). Returns SUPERROC_FP4_ERR_ARG when the
 /// stream is neither attached nor aliased. Call before destroying the
 /// stream: a destroyed address that HIP later reuses would otherwise inherit
-/// the old set (R3).
+/// the old set.
 int superroc_fp4_slot_stream_detach(hipStream_t stream);
 
 /// Lifetime count of slot hipMallocs (every set, plus SwiGLU pairs via
@@ -329,19 +382,19 @@ int superroc_fp4_slots_warm_moe(int hs_elems, int hs_m_elems, int m_total);
 /// do not name one (Flash-Next, prefill, tools).
 int superroc_fp4_moe_dev_check_set(int set);
 
-/// SPEC2 (R6): stream-ordered check. The arena stream is non-blocking, so a
+/// Stream-ordered check. The arena stream is non-blocking, so a
 /// default-stream DtoH can read the word before this token's kernels ran
-/// (proven on the box: STALE_STATUS missed 1/200 same-token checks); draining
-/// the stream first makes the same token's check report its own error. The
-/// decode path (never captured for MoE) uses this; callers that already
-/// synced (Flash-Next) keep the bare check.
+/// (proven on the test machine: STALE_STATUS missed 1/200 same-token
+/// checks); draining the stream first makes the same token's check report
+/// its own error. The decode path (never captured for MoE) uses this;
+/// callers that already synced (Flash-Next) keep the bare check.
 #define SUPERROC_FP4_SLOT_HAS_STREAM_CHECK 1
 int superroc_fp4_moe_dev_check_set_on_stream(int set, hipStream_t stream);
 
 /// Read and clear one set's small-m status word; the bare check aggregates.
 int superroc_fp4_expert_ffn_m_check_set(int set);
 
-/// SPEC3 (S3-2): stream-ordered small-m check, mirroring the R6 decode
+/// Stream-ordered small-m check, mirroring the R6 decode
 /// wrapper: the prefill MoE kernels run on the non-blocking arena stream,
 /// so the bare aggregate read can precede them and miss a bad-router-id
 /// error (same stale class as R6). Prefill names its own set, which also

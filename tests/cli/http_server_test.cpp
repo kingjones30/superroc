@@ -27,6 +27,7 @@
 #include <utility>
 #include <vector>
 
+#include "src/cli/serve/environment.hpp"
 #include "src/cli/serve/logging.hpp"
 #include "src/cli/serve/trace.hpp"
 
@@ -62,7 +63,33 @@ public:
         break;
       }
     }
-    return inner_->Wait(on_token, on_progress, on_start);
+    // Mirror the scheduler for an armed request: one fabricated meta per
+    // streamed piece, delivered before the piece. Only tests that set the
+    // transport callback observe it.
+    std::size_t index = 0;
+    auto wrapped = [&](std::string_view piece) {
+      if (meta_callback_) {
+        TextGenerationBackend::TokenMeta meta;
+        meta.token = static_cast<superroc::tokenization::TokenId>(index);
+        meta.piece = std::string(piece);
+        meta.logprobs.token = meta.token;
+        meta.logprobs.logprob = -0.1 * static_cast<double>(index + 1);
+        meta.logprobs.text = std::string(piece);
+        meta.logprobs.top.push_back(
+            {meta.token, meta.logprobs.logprob, std::string(piece)});
+        if (!meta_callback_(meta)) {
+          inner_->Cancel();
+          return false;
+        }
+      }
+      ++index;
+      return !on_token || on_token(piece);
+    };
+    return inner_->Wait(wrapped, on_progress, on_start);
+  }
+  void SetTokenMetaCallback(
+      const TextGenerationBackend::TokenMetaCallback& callback) override {
+    meta_callback_ = callback;
   }
   void Cancel() noexcept override { inner_->Cancel(); }
 
@@ -70,6 +97,7 @@ private:
   std::shared_ptr<GenerationRequest> inner_;
   std::vector<TextGenerationBackend::PromptProgress> progress_;
   bool admit_;
+  TextGenerationBackend::TokenMetaCallback meta_callback_;
 };
 
 class FakeBackend final : public TextGenerationBackend {
@@ -205,6 +233,25 @@ public:
     result.prefill_tokens = 2;
     result.prefill_ms = 4;
     result.completion_tokens = 1;
+    if (sampling.logprobs) {
+      for (std::size_t i = 0; i < result.tokens.size(); ++i) {
+        superroc::sampling::CapturedTokenLogprobs logged;
+        logged.token = result.tokens[i];
+        logged.logprob = -0.1 * static_cast<double>(i + 1);
+        logged.text = "tok" + std::to_string(i);
+        // Mirror the runner: the top list holds at most logprobs_top_n
+        // alternatives, so depth 0 reports only the sampled token.
+        if (sampling.logprobs_top_n >= 1) {
+          logged.top.push_back({result.tokens[i], logged.logprob, logged.text});
+        }
+        if (sampling.logprobs_top_n >= 2) {
+          logged.top.push_back(
+              {static_cast<superroc::sampling::TokenId>(1000 + i), -1.0,
+               "runner-top"});
+        }
+        result.token_logprobs.push_back(std::move(logged));
+      }
+    }
     result.decode_ms = 2;
     result.finish_reason =
         limit == 1 ? FinishReason::kLength : FinishReason::kStop;
@@ -214,10 +261,19 @@ public:
     }
     if (token && failure != 8) {
       std::this_thread::sleep_for(token_delay);
-      (void)token(result.text);
+      if (stream_pieces.empty()) {
+        (void)token(result.text);
+      } else {
+        for (const auto& piece : stream_pieces) {
+          if (!token(piece))
+            break;
+        }
+      }
     }
     if (failure == 6)
       throw std::runtime_error("context exceeded");
+    if (failure == 9)
+      throw std::runtime_error("HIP error in /secret/path.cpp:12");
     if (failure == 7) {
       lost = true;
       throw superroc::server::TextGenerationError(
@@ -248,6 +304,9 @@ public:
   std::atomic<int> failure{0};
   std::atomic<bool> lost{false};
   std::string forced_stop_sequence;
+  // When set, a stream delivers these pieces one by one instead of the whole
+  // output at once.
+  std::vector<std::string> stream_pieces;
   superroc::ReasoningOptions reasoning;
   std::optional<InitialOutputState> initial_output_state_override;
   bool wait_for_disconnect{false};
@@ -308,6 +367,19 @@ public:
                 (void)write("data: last\n\n");
                 (void)write("data: [DONE]\n\n");
               },
+      };
+    });
+    server.add("POST", "/sse-idle-data", [](const auto&, auto&) {
+      return superroc::server::HttpResponse{
+          .headers = {{"Content-Type", "text/event-stream"}},
+          .streaming_body =
+              [](const auto& write) {
+                (void)write("data: first\n\n");
+                std::this_thread::sleep_for(std::chrono::milliseconds(90));
+                (void)write("data: last\n\n");
+                (void)write("data: [DONE]\n\n");
+              },
+          .sse_heartbeat_payload = "data: {\"keepalive\":true}\n\n",
       };
     });
     server.add("POST", "/sse-finish", [](const auto& request, auto&) {
@@ -394,6 +466,13 @@ public:
   std::jthread worker;
 };
 
+void Expect(bool condition, const std::string& message) {
+  if (!condition) {
+    std::cerr << "Assertion failed: " << message << "\n";
+    std::exit(1);
+  }
+}
+
 void ExpectStatus(const std::string& response, int status) {
   if (!response.starts_with("HTTP/1.1 " + std::to_string(status) + " ")) {
     std::cerr << response << '\n';
@@ -433,6 +512,48 @@ void TestAuthorization() {
                             std::to_string(body.size()) + "\r\n\r\n" + body),
                200);
   assert(secured.backend->calls == 1);
+}
+
+// CORS headers are opt-in (SEC-A-01): absent unless cors_origin is set, and
+// a handler exception's text never reaches the client (U-02).
+void TestCorsAndInternalErrors() {
+  {
+    RunningServer server;
+    const auto health = server.Send("GET /health HTTP/1.1\r\n\r\n");
+    ExpectStatus(health, 200);
+    assert(health.find("Access-Control-Allow-Origin") == std::string::npos);
+    const auto preflight =
+        server.Send("OPTIONS /v1/chat/completions HTTP/1.1\r\n\r\n");
+    ExpectStatus(preflight, 204);
+    assert(preflight.find("Access-Control-Allow-Origin") == std::string::npos);
+
+    server.server.add("GET", "/throw",
+                      [](const auto&, auto&) -> superroc::server::HttpResponse {
+                        throw std::runtime_error("secret /path");
+                      });
+    const auto failed = server.Send("GET /throw HTTP/1.1\r\n\r\n");
+    ExpectStatus(failed, 500);
+    const auto body = failed.substr(failed.find("\r\n\r\n") + 4);
+    assert(body.find("secret") == std::string::npos);
+    assert(body.find("/path") == std::string::npos);
+    assert(body.find("\"message\":\"internal server error\"") !=
+           std::string::npos);
+  }
+  {
+    RunningServer server({.cors_origin = "https://example.test"});
+    const auto health = server.Send("GET /health HTTP/1.1\r\n\r\n");
+    ExpectStatus(health, 200);
+    assert(
+        health.find("Access-Control-Allow-Origin: https://example.test\r\n") !=
+        std::string::npos);
+    assert(health.find("Vary: Origin\r\n") != std::string::npos);
+    const auto preflight =
+        server.Send("OPTIONS /v1/chat/completions HTTP/1.1\r\n\r\n");
+    ExpectStatus(preflight, 204);
+    assert(preflight.find(
+               "Access-Control-Allow-Origin: https://example.test\r\n") !=
+           std::string::npos);
+  }
 }
 
 struct CapturedLogs {
@@ -485,6 +606,11 @@ void TestRequestLogging() {
   assert(log.find("cache=memory") != std::string::npos);
   assert(log.find("acceptance_pct=50.0") != std::string::npos);
   assert(log.find("rss_mib=") != std::string::npos);
+  // The request log line names the canonical cache mode of the server.
+  const char* canonical_env = std::getenv("SUPERROC_CANONICAL_CACHE");
+  const bool canonical_on =
+      canonical_env != nullptr && std::string(canonical_env) == "1";
+  assert((log.find("canonical=1") != std::string::npos) == canonical_on);
   assert(log.find("error_code=server_exception") != std::string::npos);
   // A successful poll is quiet at the default level, and so is the received
   // line for a GET that is not on the inference list.
@@ -586,7 +712,12 @@ void TestContentTrace() {
     ExpectStatus(streamed, 200);
     stream_id = ResponseRequestId(streamed);
     stream_wire = ChunkedBody(streamed);
-    assert(stream_wire.find(": ping\n\n") != std::string::npos);
+    // Completions keepalives are empty-text data chunks, not SSE comments:
+    // one lands before the delayed first token.
+    const auto keepalive = stream_wire.find("\"text\":\"\"");
+    assert(keepalive != std::string::npos);
+    assert(keepalive < stream_wire.find("<tool_call>leak"));
+    assert(stream_wire.find(": ping") == std::string::npos);
     assert(server.backend->LastCall().trace_request == stream_id);
     const auto invalid = post("/v1/completions", "{");
     ExpectStatus(invalid, 400);
@@ -678,7 +809,7 @@ void TestLogLevelFilter() {
   Logger::Info("probe", "hidden-info");
   Logger::Warn("probe", "hidden-warn");
   Logger::Error("probe", "visible-error");
-  // The printf-style entry point the imported DeepSeek runtime uses has to
+  // The printf-style entry point the imported runtime uses has to
   // filter before it formats: an INFO loader line stays silent at an absolute
   // threshold while an ERROR line survives.
   Logger::LogFormatted(LogLevel::kInfo, "ds4", "hidden-ds4-info %d", 1);
@@ -910,6 +1041,13 @@ void TestLlamaProps() {
   assert(!bare.contains("model_path"));
   assert(!bare.contains("build_info"));
   assert(!bare.contains("total_slots"));
+  // The canonical cache switch is reported, so a client can record which
+  // mode answered it.
+  const char* canonical_env = std::getenv("SUPERROC_CANONICAL_CACHE");
+  const bool canonical_expected =
+      canonical_env != nullptr && std::string(canonical_env) == "1";
+  assert(bare.contains("canonical_cache"));
+  assert(bare.find("canonical_cache")->as_bool() == canonical_expected);
   const auto* generation = bare.find("default_generation_settings");
   assert(generation != nullptr && generation->member_size("n_ctx") == 65536);
   const auto* params = generation->find("params");
@@ -924,7 +1062,8 @@ void TestLlamaProps() {
   server.backend->image_support = true;
   server.backend->defaults.max_tokens = 512;
   const auto full = props("/props");
-  assert(full.member_str("model_path") == "/models/model-00001-of-00002.gguf");
+  assert(full.member_str("model_path") == "model-00001-of-00002.gguf");
+  assert(full.member_str("model_path").find('/') == std::string::npos);
   assert(full.member_str("build_info") == "0.2.0 (abc1234)");
   assert(full.member_size("total_slots") == 2);
   assert(full.find("default_generation_settings")
@@ -937,6 +1076,236 @@ void TestLlamaProps() {
   assert(named.member_str("model") == "alias");
   assert(named.member_str("model_alias") == "test");
   assert(named.member_str("build_info") == "0.2.0 (abc1234)");
+}
+
+void TestKfdCwsrParser() {
+  using superroc::server::CheckKfdCwsrOk;
+  using superroc::server::IsKfdGpuNode;
+  using superroc::server::ParseKfdNodeProperties;
+  // A Strix Halo GPU node (Radeon 8060S): simd_count 80, cwsr_size 19185664,
+  // ctl_stack_size 16384, capability 0x2803A280.
+  const auto gpu = ParseKfdNodeProperties(
+      "cpu_cores_count 1\nsimd_count 80\nmem_banks_count 16\n"
+      "caches_count 8\nio_links_count 5\ncpu_core_id_base 32\n"
+      "simd_id_base 2147483648\nmax_waves_per_simd 32\nlds_size_in_kb "
+      "64\ngfx_target_version 110501\nvendor_id 4098\ndevice_id "
+      "29888\nlocation_id 9\ndomain 0\ndrm_render_minor 129\n"
+      "num_sdma_engines 2\nnum_sdma_xgmi_engines 0\nnum_sdma_queues_per_engine "
+      "2\nnum_cp_queues 8\ncwsr_size 19185664\nctl_stack_size 16384\n"
+      "capability 671326848\ndebug_prop 12\nsram_edc_support 1\n");
+  assert(gpu.simd_count == 80 && gpu.cwsr_size == 19185664 &&
+         gpu.ctl_stack_size == 16384 && gpu.capability == 671326848);
+  assert(IsKfdGpuNode(gpu));
+  assert(CheckKfdCwsrOk(gpu));
+  const auto cpu = ParseKfdNodeProperties("cpu_cores_count 32\nsimd_count 0\n");
+  assert(!IsKfdGpuNode(cpu));
+  auto no_bit = gpu;
+  no_bit.capability &= ~std::uint64_t{0x08000000};
+  assert(!CheckKfdCwsrOk(no_bit));
+  auto short_cwsr = gpu;
+  short_cwsr.cwsr_size -= 479232;
+  assert(!CheckKfdCwsrOk(short_cwsr));
+  const auto garbage =
+      ParseKfdNodeProperties("simd_count many\n\nno-space-here\n");
+  assert(garbage.simd_count == 0 && garbage.cwsr_size == 0);
+}
+
+void TestCompletionsLogprobsValidation() {
+  RunningServer server;
+  const auto post = [&](std::string_view body) {
+    return server.Post("/v1/completions", body);
+  };
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":"yes"})"), 400);
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":true})"), 400);
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":21})"), 400);
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":6})"), 400);
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":-1})"), 400);
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":2.5})"), 400);
+  ExpectStatus(post(R"({"prompt":"hi","top_logprobs":2})"), 400);
+  ExpectStatus(post(R"({"prompt":"hi"})"), 200);
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":null})"), 200);
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":0})"), 200);
+  ExpectStatus(post(R"({"prompt":"hi","logprobs":5})"), 200);
+}
+
+void TestCompletionsLogprobsShape() {
+  RunningServer server;
+  server.backend->SetOutput("hello");
+  using superroc::json::parse;
+  const auto body_of = [](const std::string& response) {
+    ExpectStatus(response, 200);
+    return parse(response.substr(response.find("\r\n\r\n") + 4));
+  };
+  const auto armed = body_of(server.Post(
+      "/v1/completions",
+      R"({"prompt":"hi","max_tokens":8,"logprobs":2,"stream":false})"));
+  const auto& choice = armed.find("choices")->items()[0];
+  assert(choice.member_str("text") == "hello");
+  const auto* logprobs = choice.find("logprobs");
+  assert(logprobs != nullptr);
+  assert(logprobs->find("tokens")->dump() == R"(["tok0","tok1","tok2"])");
+  const auto& tlps = logprobs->find("token_logprobs")->items();
+  assert(tlps.size() == 3);
+  for (std::size_t i = 0; i < 3; ++i)
+    assert(tlps[i].as_double() == -0.1 * static_cast<double>(i + 1));
+  const auto& tops = logprobs->find("top_logprobs")->items();
+  assert(tops.size() == 3);
+  assert(tops[1].find("tok1")->as_double() == -0.2);
+  assert(tops[1].find("runner-top")->as_double() == -1.0);
+  assert(logprobs->find("text_offset")->dump() == "[0,4,8]");
+  const auto plain = body_of(server.Post(
+      "/v1/completions", R"({"prompt":"hi","max_tokens":8,"stream":false})"));
+  assert(plain.find("choices")->items()[0].find("logprobs")->is_null());
+  // Depth 0 arms reporting with only the sampled token's logprob: the token
+  // logprobs stay, every top list is empty.
+  const auto zero = body_of(server.Post(
+      "/v1/completions",
+      R"({"prompt":"hi","max_tokens":8,"logprobs":0,"stream":false})"));
+  const auto* zero_logprobs = zero.find("choices")->items()[0].find("logprobs");
+  assert(zero_logprobs != nullptr && !zero_logprobs->is_null());
+  const auto& zero_tlps = zero_logprobs->find("token_logprobs")->items();
+  assert(zero_tlps.size() == 3);
+  for (std::size_t i = 0; i < 3; ++i)
+    assert(zero_tlps[i].as_double() == -0.1 * static_cast<double>(i + 1));
+  for (const auto& top : zero_logprobs->find("top_logprobs")->items())
+    assert(top.members().empty());
+  // Explicit null stays off, exactly like an omitted field.
+  const auto nulled = body_of(server.Post(
+      "/v1/completions",
+      R"({"prompt":"hi","max_tokens":8,"logprobs":null,"stream":false})"));
+  assert(nulled.find("choices")->items()[0].find("logprobs")->is_null());
+}
+
+void TestCompletionsLogprobsStreamingShape() {
+  RunningServer server;
+  server.backend->SetOutput("Hi");
+  using superroc::json::parse;
+  const auto response = server.Post(
+      "/v1/completions",
+      R"({"prompt":"hi","max_tokens":8,"stream":true,"logprobs":1})");
+  ExpectStatus(response, 200);
+  std::vector<superroc::json::Value> events;
+  std::size_t offset = 0;
+  while ((offset = response.find("data: ", offset)) != std::string::npos) {
+    const auto begin = offset + 6;
+    const auto end = response.find("\n\n", begin);
+    assert(end != std::string::npos);
+    const auto data = std::string_view(response).substr(begin, end - begin);
+    if (data != "[DONE]")
+      events.push_back(parse(data));
+    offset = end + 2;
+  }
+  assert(!events.empty());
+  const auto& first = events[0].find("choices")->items()[0];
+  assert(first.member_str("text") == "Hi");
+  const auto* logprobs = first.find("logprobs");
+  assert(logprobs != nullptr);
+  assert(logprobs->find("tokens")->dump() == R"(["Hi"])");
+  assert(logprobs->find("token_logprobs")->items()[0].as_double() == -0.1);
+  assert(logprobs->find("text_offset")->dump() == "[0]");
+  const auto* top = logprobs->find("top_logprobs")->items()[0].find("Hi");
+  assert(top != nullptr && top->as_double() == -0.1);
+}
+
+// A character split across two tokens is sent once it is complete, with both
+// tokens' entries beside it and offsets that count each token's own bytes.
+void TestCompletionsLogprobsFollowSplitCharacters() {
+  RunningServer server;
+  server.backend->SetOutput("\xE2\x82\xAC!");
+  server.backend->stream_pieces = {"\xE2", "\x82\xAC", "!"};
+  using superroc::json::parse;
+  const auto response = server.Post(
+      "/v1/completions",
+      R"({"prompt":"hi","max_tokens":8,"stream":true,"logprobs":1})");
+  ExpectStatus(response, 200);
+  std::string text;
+  std::vector<superroc::json::Value> reported;
+  std::size_t offset = 0;
+  while ((offset = response.find("data: ", offset)) != std::string::npos) {
+    const auto begin = offset + 6;
+    const auto end = response.find("\n\n", begin);
+    assert(end != std::string::npos);
+    const auto data = std::string_view(response).substr(begin, end - begin);
+    offset = end + 2;
+    if (data == "[DONE]")
+      continue;
+    const auto event = parse(data);
+    const auto* choices = event.find("choices");
+    if (choices == nullptr || choices->items().empty())
+      continue;
+    const auto& choice = choices->items()[0];
+    text += choice.member_str("text");
+    const auto* logprobs = choice.find("logprobs");
+    if (logprobs != nullptr && !logprobs->is_null()) {
+      // No entry may arrive ahead of its text.
+      assert(!choice.member_str("text").empty());
+      reported.push_back(choice);
+    }
+  }
+  assert(text == "\xE2\x82\xAC!");
+  assert(reported.size() == 2);
+  assert(reported[0].member_str("text") == "\xE2\x82\xAC");
+  assert(reported[0].find("logprobs")->find("tokens")->dump() ==
+         R"(["bytes:\\xe2","bytes:\\x82\\xac"])");
+  assert(reported[0].find("logprobs")->find("text_offset")->dump() == "[0,1]");
+  assert(reported[1].member_str("text") == "!");
+  assert(reported[1].find("logprobs")->find("text_offset")->dump() == "[3]");
+}
+
+void TestPropsEnvironmentAndSupport() {
+  RunningServer server;
+  const auto response = server.Send("GET /props HTTP/1.1\r\n\r\n");
+  ExpectStatus(response, 200);
+  const auto props =
+      superroc::json::parse(response.substr(response.find("\r\n\r\n") + 4));
+  const auto* environment = props.find("environment");
+  assert(environment != nullptr);
+  assert(environment->find("gpu_arch") != nullptr);
+  assert(environment->find("rocm_version") != nullptr);
+  assert(environment->find("kernel") != nullptr);
+  assert(environment->find("cwsr_ok")->is_bool());
+  assert(environment->find("hip_launch_blocking")->is_bool());
+  const auto* support = props.find("support");
+  assert(support != nullptr);
+  bool chat_logprobs = false, chat_tools = false, chat_stop = false,
+       chat_response_format = false;
+  for (const auto& field : support->find("chat_completions")->items()) {
+    const auto name = field.str();
+    chat_logprobs |= name == "logprobs";
+    chat_tools |= name == "tools";
+    chat_stop |= name == "stop";
+    chat_response_format |= name == "response_format";
+  }
+  assert(chat_logprobs && chat_tools && chat_stop && chat_response_format);
+  bool completions_logprobs = false;
+  for (const auto& field : support->find("completions")->items()) {
+    completions_logprobs |= field.str() == "logprobs";
+  }
+  assert(completions_logprobs);
+}
+
+void TestCompletionsSupportListIsAccepted() {
+  RunningServer server;
+  server.backend->SetOutput("ok");
+  using superroc::json::parse;
+  auto body = parse(R"({
+    "model": "test", "prompt": "hi", "max_tokens": 16,
+    "stream": false, "ignore_eos": false, "return_progress": false,
+    "echo": false, "store": false, "background": false, "n": 1, "best_of": 1,
+    "cache_prompt": true, "stop": ["STOP"], "logprobs": 5,
+    "temperature": 0.7, "top_k": 40, "top_p": 0.9, "min_p": 0.05,
+    "min_keep": 1, "seed": 7, "repeat_penalty": 1.1, "repeat_last_n": 64,
+    "frequency_penalty": 0.1, "presence_penalty": 0.1
+  })");
+  body["stream_options"] = parse(R"({"include_usage": false})");
+  body["stream"] = true;
+  for (const std::string_view field :
+       superroc::server::CompletionsAcceptedFields()) {
+    Expect(body.find(std::string(field)) != nullptr,
+           std::string("support list field present in probe: ") +
+               std::string(field));
+  }
+  ExpectStatus(server.Post("/v1/completions", body.dump()), 200);
 }
 
 void TestLlamaSlotsAndMetrics() {
@@ -2228,8 +2597,11 @@ void TestRawCompletionStreaming() {
 
   for (const int failure : {1, 5, 6}) {
     server.backend->failure = failure;
+    // Before streaming, the client gets the fixed internal-error text;
+    // the thrown cause stays in the server log. A failure after streaming
+    // starts keeps its in-stream error event, also with fixed text.
     const std::string message =
-        failure == 5 ? "generation failed" : "context exceeded";
+        failure == 6 ? "generation failed" : "internal server error";
     for (
         const auto& [path, body] : {
             std::pair{
@@ -2318,6 +2690,29 @@ void TestGenerationFailureLogsCause() {
   assert(count("event=server_exception reason=context exceeded") == 3);
   // After streaming starts, each endpoint logs it once beside its stable code.
   assert(count("[ERROR] [chat] context exceeded") == 3);
+}
+
+// SR-02: a backend failure mid-stream reaches the SSE error event only as
+// fixed text; backend internals (paths, HIP errors) stay in the server log.
+void TestStreamErrorEventHidesBackendDetail() {
+  RunningServer server;
+  server.backend->failure = 9;
+  for (
+      const auto& [path, body] : {
+          std::pair{"/v1/completions", R"({"prompt":"hello","stream":true})"},
+          std::pair{
+              "/v1/chat/completions",
+              R"({"model":"test","messages":[{"role":"user","content":"hello"}],"stream":true})"},
+          std::pair{"/v1/responses", R"({"input":"hello","stream":true})"},
+      }) {
+    const auto failed = server.Post(path, body);
+    ExpectStatus(failed, 200);
+    assert(failed.find("\"message\":\"generation failed\"") !=
+           std::string::npos);
+    assert(failed.find("/secret/path") == std::string::npos);
+    assert(failed.find("HIP error") == std::string::npos);
+  }
+  server.backend->failure = 0;
 }
 
 void TestDeviceLoss() {
@@ -2917,6 +3312,21 @@ void TestSseHeartbeat() {
   assert(legacy.find(": ping\n\n") != std::string::npos);
   assert(legacy.ends_with("data: [DONE]\n\n"));
 
+  // A handler-supplied data payload replaces the comment: proxies that drop
+  // comment lines still forward data lines, so the stream stays non-silent.
+  const auto data_response = server.Post("/sse-idle-data", "");
+  ExpectStatus(data_response, 200);
+  const auto data_first = data_response.find("data: first\n\n");
+  const auto keepalive =
+      data_response.find("data: {\"keepalive\":true}\n\n", data_first);
+  const auto data_last = data_response.find("data: last\n\n", keepalive);
+  assert(data_first != std::string::npos);
+  assert(keepalive != std::string::npos);
+  assert(data_last != std::string::npos);
+  assert(data_response.find(": ping") == std::string::npos);
+  assert(data_response.find("data: [DONE]\n\n", data_last) !=
+         std::string::npos);
+
   RunningServer disabled({.sse_heartbeat_interval = {}});
   assert(disabled.Post("/sse-idle", "").find(": ping") == std::string::npos);
 }
@@ -2991,11 +3401,17 @@ void TestAdmittedStreamHeaders() {
        R"({"model":"test","messages":[{"role":"user","content":"hello"}],"stream":true})"},
       {"/v1/responses", R"({"input":"hello","stream":true})"}};
   // Admission commits headers, so keepalives cover prefill before a token.
+  // Chat and completions keepalives are no-op data chunks; the Responses
+  // dialect still uses an SSE comment.
   server.backend->token_delay = std::chrono::milliseconds(40);
   for (const auto& [path, body] : requests) {
     const auto response = server.Post(path, body);
     ExpectStatus(response, 200);
-    const auto ping = response.find(": ping\n\n");
+    const std::string_view keepalive =
+        std::string_view(path) == "/v1/completions"        ? "\"text\":\"\""
+        : std::string_view(path) == "/v1/chat/completions" ? "\"delta\":{}"
+                                                           : ": ping\n\n";
+    const auto ping = response.find(keepalive);
     assert(ping != std::string::npos);
     const auto token = response.find(R"("ok")");
     assert(token != std::string::npos);
@@ -3009,7 +3425,11 @@ void TestAdmittedStreamHeaders() {
     lost.backend->failure = 3;
     const auto failed = lost.Post(path, body);
     ExpectStatus(failed, 200);
-    assert(failed.find(superroc::server::kDeviceLostMessage) !=
+    // SR-02: the Responses dialect sends fixed "generation failed" for every
+    // stream failure; the other dialects keep the typed device-lost message.
+    assert(failed.find(std::string_view(path) == "/v1/responses"
+                           ? "generation failed"
+                           : superroc::server::kDeviceLostMessage) !=
            std::string::npos);
     assert(failed.find("data: ") != std::string::npos);
     assert(failed.ends_with("0\r\n\r\n"));
@@ -3161,10 +3581,18 @@ int main() {
   TestLoadingResponder();
   TestQueryParameters();
   TestAuthorization();
+  TestCorsAndInternalErrors();
   TestFramingAndMetrics();
   TestExpectContinue();
   TestFallbackBackendMetrics();
   TestLlamaProps();
+  TestKfdCwsrParser();
+  TestCompletionsLogprobsValidation();
+  TestCompletionsLogprobsShape();
+  TestCompletionsLogprobsStreamingShape();
+  TestCompletionsLogprobsFollowSplitCharacters();
+  TestPropsEnvironmentAndSupport();
+  TestCompletionsSupportListIsAccepted();
   TestLlamaSlotsAndMetrics();
   TestCompatibilityRequests();
   TestTextOnlyBackendRefusesImagesBeforeReading();
@@ -3172,6 +3600,7 @@ int main() {
   TestModelInputModalities();
   TestRawCompletionStreaming();
   TestGenerationFailureLogsCause();
+  TestStreamErrorEventHidesBackendDetail();
   TestDeviceLoss();
   TestDeviceLossWhileWriterBlocked();
   TestRawCompletionPromptProgress();

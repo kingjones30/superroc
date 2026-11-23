@@ -157,6 +157,16 @@ inline constexpr std::int8_t kValuesIq4Nl[16] = {
 // Standard 16-bit float helper
 float Fp16ToFloat(std::uint16_t h) noexcept;
 
+/// float -> IEEE half, round to nearest even (overflow gives infinity).
+[[nodiscard]] std::uint16_t FloatToFp16(float f) noexcept;
+
+/// Quantizes k floats (a multiple of 32) to ggml Q4_0 blocks: a half scale d
+/// and 32 four-bit codes, value = d * (code - 8). The scale is the block's
+/// largest-magnitude value over -8, as in ggml's reference quantizer, so that
+/// value is stored exactly (to half precision). A value that is not finite
+/// is treated as zero.
+void QuantizeQ4_0(const float* src, void* dst, std::size_t k) noexcept;
+
 // Dequantize row of Q4_K to float
 void DequantizeQ4_K(const void* src, float* dst, std::size_t k);
 
@@ -218,7 +228,7 @@ float DotProductIQ3_S(const void* row_data, std::span<const float> vec,
 float DotProductQ8_0(const void* row_data, std::span<const float> vec,
                      std::size_t k);
 
-// lqw:dequant-api. Type 100 is 18 B / 32 with two UE4M3 scales. Type 101 is 17
+// Type 100 is 18 B / 32 with two UE4M3 scales. Type 101 is 17
 // B / 32.
 void DequantizeROCMFP4_Dual(const void* src, float* dst, std::size_t k);
 void DequantizeROCMFP4_Fast(const void* src, float* dst, std::size_t k);

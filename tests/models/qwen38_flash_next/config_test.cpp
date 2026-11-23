@@ -27,6 +27,7 @@ void CheckSidecarCompatibility() {
   trunk.hc_low_rank = 320;
   trunk.num_experts = 512;
   trunk.num_experts_used = 10;
+  trunk.num_experts_file = 10;
   trunk.expert_ff = trunk.shared_expert_ff = 640;
   trunk.num_heads = 24;
   trunk.num_kv_heads = 2;
@@ -38,7 +39,7 @@ void CheckSidecarCompatibility() {
   sidecar.nextn_layers = 1;
   Require(sidecar.MtpMatches(trunk), "matching MTP constants rejected");
   for (auto member : {&qfn::Config::hc_low_rank, &qfn::Config::context_length,
-                      &qfn::Config::rotary_dim, &qfn::Config::num_experts_used,
+                      &qfn::Config::rotary_dim, &qfn::Config::num_experts_file,
                       &qfn::Config::shared_expert_ff}) {
     auto wrong = sidecar;
     ++(wrong.*member);
@@ -239,7 +240,7 @@ void CheckMalformedMetadata() {
   assert(draft && trunk && draft->MtpMatches(*trunk));
 }
 
-// FLASHNEXT regression for the LB1 load blocker: King's ROCmFP4 quantizer
+// FLASHNEXT regression for the load blocker: Super Roc's ROCmFP4 quantizer
 // writes an all-zero attention.compress_ratios array. With the QSA indexer
 // metadata present the loader must reconstruct the pinned ratio 4 for that
 // fully degenerate case -- and for nothing else.

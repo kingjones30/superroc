@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -22,22 +24,30 @@
 #include <utility>
 #include <vector>
 
+#include "src/cli/serve/component_text_cache.hpp"
 #include "src/cli/serve/continuation_disk_store.hpp"
 #include "src/core/json.hpp"
 #include "src/models/qwen/control_tokens.hpp"
 #include "src/models/qwen/vision/prompt.hpp"
+#include "tests/cache/fake_adapter.hpp"
 
 using superroc::tokenization::kImEnd;
 using superroc::tokenization::kImStart;
 
 namespace {
 
+namespace cc = superroc::cache;
+namespace ct = superroc::cache::testing;
+
 using superroc::server::ChatRequest;
+using superroc::server::ComponentCacheResources;
+using superroc::server::ComponentCaptureBuffer;
 using superroc::server::TextDecodeSelection;
 using superroc::server::TextExecutionPlan;
 using superroc::server::TextExecutionPlanKind;
 using superroc::server::TextModelRunner;
 using superroc::server::TextPrefillStep;
+using superroc::server::TextPromptContext;
 using superroc::server::TextRunnerAdvance;
 using superroc::server::TextRunnerCapabilities;
 using superroc::server::TextRunnerDescriptor;
@@ -308,6 +318,52 @@ public:
 
 private:
 };
+
+// /v1/completions and /completion tokenize RAW prompts through
+// TokenizeRawPrompt: the GGUF BOS goes in front exactly once, token arrays
+// and chat renders are never touched. FakeRunner's Tokenize maps text bytes
+// one to one, so a BOS of 'H' (72) reads as a prompt that starts with the
+// BOS text.
+void TestRawPromptBosRule() {
+  class BosRunner final : public FakeRunner {
+  public:
+    using FakeRunner::FakeRunner;
+    std::optional<TextRunnerToken> raw_bos;
+    [[nodiscard]] std::optional<TextRunnerToken> RawPromptBos() const override {
+      return raw_bos;
+    }
+  };
+
+  const auto stats = std::make_shared<FakeStats>();
+  const TextRunnerToken kFakeBos = static_cast<TextRunnerToken>('H');
+
+  // Flag false: the encoding reaches the executor unchanged.
+  BosRunner plain(stats);
+  Expect(plain.RawPromptBos() == std::nullopt,
+         "a runner without a raw-prompt BOS reports none");
+  Expect(
+      plain.TokenizeRawPrompt("Hi") == std::vector<TextRunnerToken>{'H', 'i'},
+      "no GGUF BOS leaves the raw prompt untouched");
+  Expect(plain.TokenizeRawPrompt("") == std::vector<TextRunnerToken>{},
+         "no GGUF BOS leaves an empty raw prompt empty");
+
+  // Flag true: one BOS in front, and the prompt_tokens count carries it.
+  BosRunner bos(stats);
+  bos.raw_bos = kFakeBos;
+  Expect(bos.TokenizeRawPrompt("i") == std::vector<TextRunnerToken>{'H', 'i'},
+         "the GGUF BOS is prepended to the raw prompt");
+  Expect(bos.TokenizeRawPrompt("") == std::vector<TextRunnerToken>{kFakeBos},
+         "an empty raw prompt becomes just the BOS");
+  Expect(bos.TokenizeRawPrompt("Hi") == std::vector<TextRunnerToken>{'H', 'i'},
+         "a prompt that starts with the BOS text gets exactly one BOS");
+  Expect(bos.TokenizeRawPrompt("H") == std::vector<TextRunnerToken>{'H'},
+         "a bare BOS text prompt is not doubled");
+
+  // Tokenize() itself stays flag-blind: control text and chat renders go
+  // through it and must not grow a BOS.
+  Expect(bos.Tokenize("i") == std::vector<TextRunnerToken>{'i'},
+         "Tokenize ignores the raw-prompt BOS");
+}
 
 void TestPromptCountingValidatesCapabilitiesBeforeInference() {
   const auto stats = std::make_shared<FakeStats>();
@@ -605,6 +661,378 @@ void TestInPassStableCheckpoint() {
   Expect(third.cached_prompt_tokens() == 6,
          "the stable checkpoint advances on warm turns");
   third.Invalidate();
+}
+
+struct ComponentFakeState final : TextRunnerState {
+  ct::FakeAdapter& adapter;
+  cc::Slot& slot;
+  ComponentFakeState(ct::FakeAdapter& adapter, cc::Slot& slot)
+      : adapter(adapter), slot(slot) {}
+  void Invalidate() noexcept override { (void)adapter.Invalidate(slot); }
+};
+
+/// Component-cache fake for the dual in-pass plumbing: one pass, the runner
+/// leases captured ascending by boundary.
+class ComponentInPassRunner final : public TextModelRunner {
+public:
+  mutable ct::FakeAdapter* adapter{};
+  bool refuse_pair{false};
+  bool refuse_boundary{false};
+  std::size_t canonical_min_pass_rows{0};
+  bool partial_retention{false};
+  mutable std::size_t pair_byte_queries{0};
+  mutable std::size_t pair_through_calls{0};
+  mutable std::vector<std::pair<std::size_t, std::size_t>> pair_boundaries;
+  mutable std::size_t boundary_byte_queries{0};
+  mutable std::size_t boundary_through_calls{0};
+  mutable std::vector<std::size_t> boundary_positions;
+
+  [[nodiscard]] bool UsesComponentCache() const override { return true; }
+  std::unique_ptr<TextRunnerState> CreateState() const override {
+    throw std::logic_error("legacy state must never be constructed");
+  }
+  [[nodiscard]] TextRunnerDescriptor Descriptor() const override {
+    return {
+        .model_id = "component-in-pass-fake",
+        .state_abi = "component-in-pass-fake-v1",
+        .max_context = 16384,
+        .capabilities = {.incremental_prefill = true,
+                         .snapshot = true,
+                         .fork = true,
+                         .final_token_advance_required = false,
+                         .prefix_reuse = true,
+                         .in_pass_checkpoint = true,
+                         .partial_prefill_retention = partial_retention,
+                         .canonical_min_pass_rows = canonical_min_pass_rows},
+        .persistence = std::nullopt};
+  }
+  [[nodiscard]] TextRunnerResourceClaim ResourceClaim() const override {
+    return {.resident_weights_bytes = std::nullopt,
+            .state_capacity_bytes = 1ULL << 30,
+            .per_request_state_bytes = 256,
+            .temporary_scratch_bytes = 0,
+            .retained_snapshot_capacity_bytes = 16ULL << 20,
+            .retained_snapshot_ceiling_bytes = 64ULL << 20,
+            .requires_device_runtime_lock = false};
+  }
+  [[nodiscard]] std::vector<TextExecutionPlan> SupportedPlans() const override {
+    return {{.kind = TextExecutionPlanKind::kSerial, .physical_width = 1}};
+  }
+  [[nodiscard]] std::vector<TextRunnerToken> Tokenize(
+      std::string_view) const override {
+    return {1};
+  }
+  [[nodiscard]] std::optional<std::vector<TextRunnerToken>> RenderAndTokenize(
+      const ChatRequest&) const override {
+    return std::vector<TextRunnerToken>{1};
+  }
+  std::string Decode(std::span<const TextRunnerToken>) const override {
+    return "";
+  }
+  void SetPromptContext(
+      TextRunnerState&,
+      std::shared_ptr<const TextPromptContext>) const override {}
+  [[nodiscard]] std::unique_ptr<ComponentCacheResources>
+  CreateComponentCacheResources(cc::ResourceLedger& ledger,
+                                std::size_t) const override {
+    struct Block {
+      cc::ResourceCharge pool;
+      std::span<std::byte> data;
+      std::shared_ptr<const void> owner;
+    };
+    const std::size_t private_blocks = 128;
+    auto blocks = std::make_shared<std::vector<Block>>();
+    auto data = std::make_shared<std::vector<std::byte>>(2048 * 16 +
+                                                         private_blocks * 64);
+    for (std::size_t i = 0; i < 2048 + private_blocks; ++i) {
+      const auto size = i < 2048 ? std::size_t{16} : std::size_t{64};
+      const auto offset = i < 2048 ? i * 16 : 2048 * 16 + (i - 2048) * 64;
+      auto reservation =
+          ledger.Reserve(cc::ResourceCategory::kBackingFree, size);
+      auto bytes = std::span(*data).subspan(offset, size);
+      blocks->push_back({reservation.Convert(), bytes,
+                         std::shared_ptr<const void>(data, bytes.data())});
+    }
+    auto resources = std::make_unique<ComponentCacheResources>();
+    resources->adapter = std::make_unique<ct::FakeAdapter>();
+    adapter = dynamic_cast<ct::FakeAdapter*>(resources->adapter.get());
+    resources->owner = blocks;
+    resources->stream = []() -> std::unique_ptr<cc::Stream> {
+      return std::make_unique<ct::FakeStream>(true);
+    };
+    resources->transfer_batch_size = 4;
+    resources->allocate = [blocks, data](const cc::PayloadRequest& request) {
+      for (const auto& block : *blocks) {
+        if ((request.category == cc::ResourceCategory::kPrivateState) !=
+            (block.data.size() == 64))
+          continue;
+        try {
+          auto reservation = std::make_shared<cc::ResourceReservation>(
+              block.pool.ReserveBacking(request.category));
+          return ComponentCaptureBuffer{
+              block.data,
+              [reservation, owner = block.owner] {
+                return cc::Payload::Committed(reservation->Convert(), owner);
+              },
+              data.get(),
+              [reservation, owner = block.owner, bytes = block.data, request](
+                  cc::SlotLease& lease, auto source) {
+                return cc::Payload::Borrowed(
+                    lease.Borrow(request.component, request.first, request.end,
+                                 std::move(*reservation), owner,
+                                 bytes.first(request.bytes), source));
+              }};
+        } catch (const std::bad_alloc&) {
+        }
+      }
+      throw cc::ResourceExhausted();
+    };
+    resources->staging = [](std::size_t size) {
+      auto staged = std::make_shared<std::vector<std::uint8_t>>(size);
+      return cc::StagingAllocation{staged, *staged};
+    };
+    resources->copy_observed_rows = [](auto source, auto destination,
+                                       cc::Stream& stream) {
+      return dynamic_cast<ct::FakeStream&>(stream).Submit(
+          [source, destination] {
+            std::memcpy(destination.data(), source.data(), destination.size());
+            return cc::TransferResult::kSucceeded;
+          });
+    };
+    return resources;
+  }
+  std::unique_ptr<TextRunnerState> BindComponentState(
+      cc::Adapter& adapter, cc::Slot& slot) const override {
+    return std::make_unique<ComponentFakeState>(
+        dynamic_cast<ct::FakeAdapter&>(adapter), slot);
+  }
+  void ReconcileComponentState(TextRunnerState& state,
+                               std::size_t position) const override {
+    const auto& fake = dynamic_cast<ComponentFakeState&>(state);
+    assert(fake.adapter.Positions(fake.slot).front().valid_rows == position);
+  }
+  TextPrefillStep Prefill(TextRunnerState& state,
+                          std::span<const TextRunnerToken> prompt,
+                          std::size_t offset,
+                          std::size_t budget) const override {
+    auto& s = dynamic_cast<ComponentFakeState&>(state);
+    const auto count = std::min(budget, prompt.size() - offset);
+    s.adapter.Append(s.slot, prompt.subspan(offset, count),
+                     prompt.subspan(offset, count));
+    return {count, offset + count == prompt.size()};
+  }
+  std::optional<std::size_t> PrefillCheckpointBytes(
+      const TextRunnerState&, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget,
+      std::size_t boundary) const override {
+    const auto end = offset + std::min(budget, prompt.size() - offset);
+    return boundary > offset && boundary < end && end - boundary <= 8
+               ? std::optional<std::size_t>(1)
+               : std::nullopt;
+  }
+  TextPrefillStep PrefillThrough(
+      TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget, std::size_t boundary,
+      std::unique_ptr<TextRunnerSnapshot>* checkpoint,
+      const std::function<std::unique_ptr<TextRunnerSnapshot>()>& capture)
+      const override {
+    auto& s = dynamic_cast<ComponentFakeState&>(state);
+    const auto count = std::min(budget, prompt.size() - offset);
+    const auto head = prompt.subspan(offset, boundary - offset);
+    s.adapter.Append(s.slot, head, head);
+    try {
+      *checkpoint = capture();
+    } catch (...) {
+      checkpoint->reset();
+    }
+    const auto tail = prompt.subspan(boundary, offset + count - boundary);
+    s.adapter.Append(s.slot, tail, tail);
+    return {count, offset + count == prompt.size()};
+  }
+  std::optional<PrefillCheckpointPair> PrefillCheckpointPairBytes(
+      const TextRunnerState&, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget, std::size_t boundary_first,
+      std::size_t boundary) const override {
+    ++pair_byte_queries;
+    if (refuse_pair)
+      return std::nullopt;
+    const auto end = offset + std::min(budget, prompt.size() - offset);
+    return boundary_first > offset + 1 && boundary_first >= offset + 64 &&
+                   boundary_first + 64 <= boundary && boundary < end &&
+                   end - boundary <= 8 && end - boundary_first <= 256
+               ? std::optional<PrefillCheckpointPair>({16, 16})
+               : std::nullopt;
+  }
+  TextPrefillStep PrefillThroughPair(
+      TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget, std::size_t boundary_first,
+      std::size_t boundary,
+      std::unique_ptr<TextRunnerSnapshot>* checkpoint_first,
+      std::unique_ptr<TextRunnerSnapshot>* checkpoint,
+      const std::function<std::unique_ptr<TextRunnerSnapshot>(std::size_t)>&
+          capture) const override {
+    ++pair_through_calls;
+    pair_boundaries.push_back({boundary_first, boundary});
+    auto& s = dynamic_cast<ComponentFakeState&>(state);
+    const auto count = std::min(budget, prompt.size() - offset);
+    auto append = [&](std::size_t first, std::size_t last) {
+      const auto span = prompt.subspan(first, last - first);
+      s.adapter.Append(s.slot, span, span);
+    };
+    append(offset, boundary_first);
+    try {
+      *checkpoint_first = capture(boundary_first);
+    } catch (...) {
+      checkpoint_first->reset();
+    }
+    append(boundary_first, boundary);
+    try {
+      *checkpoint = capture(boundary);
+    } catch (...) {
+      checkpoint->reset();
+    }
+    append(boundary, offset + count);
+    return {count, offset + count == prompt.size()};
+  }
+  std::optional<std::size_t> PrefillCheckpointBoundaryBytes(
+      const TextRunnerState&, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget,
+      std::size_t boundary) const override {
+    ++boundary_byte_queries;
+    if (refuse_boundary)
+      return std::nullopt;
+    const auto end = offset + std::min(budget, prompt.size() - offset);
+    return boundary > offset && boundary < end && end - boundary <= 256
+               ? std::optional<std::size_t>(16)
+               : std::nullopt;
+  }
+  TextPrefillStep PrefillThroughBoundary(
+      TextRunnerState& state, std::span<const TextRunnerToken> prompt,
+      std::size_t offset, std::size_t budget, std::size_t boundary,
+      std::unique_ptr<TextRunnerSnapshot>* checkpoint,
+      const std::function<std::unique_ptr<TextRunnerSnapshot>()>& capture)
+      const override {
+    ++boundary_through_calls;
+    boundary_positions.push_back(boundary);
+    auto& s = dynamic_cast<ComponentFakeState&>(state);
+    const auto count = std::min(budget, prompt.size() - offset);
+    auto append = [&](std::size_t first, std::size_t last) {
+      const auto span = prompt.subspan(first, last - first);
+      s.adapter.Append(s.slot, span, span);
+    };
+    append(offset, boundary);
+    try {
+      *checkpoint = capture();
+    } catch (...) {
+      checkpoint->reset();
+    }
+    append(boundary, offset + count);
+    return {count, offset + count == prompt.size()};
+  }
+  TextDecodeSelection SelectNext(
+      TextRunnerState& state,
+      superroc::sampling::SamplerState&) const override {
+    auto& s = dynamic_cast<ComponentFakeState&>(state);
+    return {.token = static_cast<TextRunnerToken>(
+                s.adapter.RecurrentHash(s.slot) % 100000),
+            .piece = "x"};
+  }
+  void Advance(TextRunnerState& state, TextRunnerToken token) const override {
+    auto& s = dynamic_cast<ComponentFakeState&>(state);
+    s.adapter.Append(s.slot, {&token, 1}, {&token, 1});
+  }
+  std::size_t CheckpointPosition(const TextRunnerState& state) const override {
+    const auto& s = dynamic_cast<const ComponentFakeState&>(state);
+    return s.adapter.Positions(s.slot).front().valid_rows;
+  }
+};
+
+void TestInPassPairPlumbing() {
+  // Below the 2048-row grid interval so only the tail point is planned; the
+  // stable boundary sits in the pass tail-8, P = (1024 - 192) rounded to 64.
+  const std::vector<TextRunnerToken> prompt(1024, 1);
+  const std::size_t stable = 1016;
+  const std::size_t tail_point = 832;
+  {
+    auto runner = std::make_shared<ComponentInPassRunner>();
+    TextRunnerPool pool(runner, 1);
+    auto request = pool.Acquire(prompt, {}, {}, {}, true, stable);
+    while (!request.prefill_complete())
+      (void)request.Prefill(2048);
+    if (superroc::server::SuperrocTailCaptureTokens() == 0) {
+      // Default-off audit: with
+      // SUPERROC_TAIL_CAPTURE unset the pair is never even queried.
+      Expect(runner->pair_byte_queries == 0 && runner->pair_through_calls == 0,
+             "SUPERROC_TAIL_CAPTURE unset must never query the pair");
+      request.Invalidate();
+      return;
+    }
+    Expect(runner->pair_byte_queries == 1 && runner->pair_through_calls == 1,
+           "one pair query, one dual pass");
+    Expect(runner->pair_boundaries.size() == 1 &&
+               runner->pair_boundaries.front().first == tail_point &&
+               runner->pair_boundaries.front().second == stable,
+           "the dual pass froze the aligned tail point before the boundary");
+    request.Commit();
+    auto at_p = pool.Acquire(std::vector<TextRunnerToken>(
+                                 prompt.begin(), prompt.begin() + tail_point),
+                             {}, {}, {}, true, tail_point);
+    Expect(at_p.cached_prompt_tokens() == tail_point,
+           "the dual pass published the earlier P snapshot");
+    at_p.Invalidate();
+    auto at_s = pool.Acquire(
+        std::vector<TextRunnerToken>(prompt.begin(), prompt.begin() + stable),
+        {}, {}, {}, true, stable);
+    Expect(at_s.cached_prompt_tokens() == stable,
+           "the dual pass published the stable boundary");
+    at_s.Invalidate();
+  }
+  {
+    // Fallback to single on pair refusal: the claim fails, the tail split
+    // point returns, and the request completes with both points captured
+    // as in today's split passes.
+    auto runner = std::make_shared<ComponentInPassRunner>();
+    runner->refuse_pair = true;
+    TextRunnerPool pool(runner, 1);
+    auto request = pool.Acquire(prompt, {}, {}, {}, true, stable);
+    while (!request.prefill_complete())
+      (void)request.Prefill(2048);
+    Expect(runner->pair_byte_queries == 1 && runner->pair_through_calls == 0,
+           "a refused claim keeps the single-capture path");
+    request.Commit();
+    auto at_p = pool.Acquire(std::vector<TextRunnerToken>(
+                                 prompt.begin(), prompt.begin() + tail_point),
+                             {}, {}, {}, true, tail_point);
+    Expect(at_p.cached_prompt_tokens() == tail_point,
+           "the split fallback still captures the tail point");
+    at_p.Invalidate();
+  }
+  {
+    // A step budget ends the first pass 320 rows before the tail point. The
+    // 512-token rule counts from the frontier the request reused (0 here),
+    // so the last step still freezes P and the stable boundary in one pass
+    // instead of ending a pass at P.
+    auto runner = std::make_shared<ComponentInPassRunner>();
+    TextRunnerPool pool(runner, 1);
+    auto request = pool.Acquire(prompt, {}, {}, {}, true, stable);
+    std::vector<std::size_t> rows;
+    while (!request.prefill_complete())
+      rows.push_back(request.Prefill(512).consumed_tokens);
+    Expect(rows == std::vector<std::size_t>({512, 512}),
+           "a short last step is one pass, not one pass per checkpoint");
+    Expect(runner->pair_through_calls == 1 &&
+               runner->pair_boundaries.size() == 1 &&
+               runner->pair_boundaries.front().first == tail_point &&
+               runner->pair_boundaries.front().second == stable,
+           "the short last step froze the tail point and the boundary");
+    request.Commit();
+    auto at_p = pool.Acquire(std::vector<TextRunnerToken>(
+                                 prompt.begin(), prompt.begin() + tail_point),
+                             {}, {}, {}, true, tail_point);
+    Expect(at_p.cached_prompt_tokens() == tail_point,
+           "the short last step published the tail point");
+    at_p.Invalidate();
+  }
 }
 
 void TestInPassFailureRetainsOnlyCompletedCheckpoints() {
@@ -2565,11 +2993,12 @@ void TestServerInstructionsAreFraming() {
            "message content");
     const auto tokens = QwenChatTemplate::RenderAndTokenize(
         *tokenizer, constrained->messages, options);
-    Expect(tokens && std::count(tokens->begin(), tokens->end(),
-                                *tokenizer->FindSpecialToken("<tool_call>")) ==
-                         (schema ? 2 : 1),
-           "generated description/schema instruction tags retain framing token "
-           "identity");
+    // The description and the schema are client text: a tag spelled in them
+    // stays characters, as in message content.
+    Expect(
+        tokens && std::count(tokens->begin(), tokens->end(),
+                             *tokenizer->FindSpecialToken("<tool_call>")) == 0,
+        "description/schema tags from the client stay text");
   }
   ChatRequest native({{ChatRole::kUser, "Call record."}});
   native.reasoning.enabled = false;
@@ -2649,6 +3078,13 @@ void TestLlamaRenderPrompt() {
   const auto rendered = superroc::server::LlamaRenderPrompt(plain);
   Expect(rendered.has_value() && *rendered == "hi [suffix]",
          "llama render keeps content and framing_suffix");
+  // SEC-FINAL-1: client ranges of the suffix are spans, the rest is not.
+  plain.messages.front().framing_client_ranges = {{2, 6}};
+  std::vector<superroc::core::TextSpan> spans;
+  const auto with_spans = superroc::server::LlamaRenderPrompt(plain, &spans);
+  Expect(with_spans.has_value() && spans.size() == 2 && spans[0].offset == 0 &&
+             spans[0].size == 2 && spans[1].offset == 4 && spans[1].size == 6,
+         "llama spans cover content and the suffix's client range");
   // F13: tool requests are refused, not silently dropped.
   for (const auto choice :
        {ChatRequest::ToolChoice::kAuto, ChatRequest::ToolChoice::kRequired}) {
@@ -2676,9 +3112,259 @@ void TestLlamaIncrementalTextNotExact() {
          "non-llama incremental text stays exact");
 }
 
-int main() {
+// SUPERROC_CANONICAL_CACHE=1: a finished or cancelled request leaves only the
+// state its prompt pass produced, so a follow-up restores the prompt
+// checkpoint and reads the reply's tokens as prompt.
+void TestCanonicalCacheKeepsOnlyPromptState() {
+  Expect(superroc::server::SuperrocCanonicalCache(),
+         "the switch is read from the environment");
+  {
+    auto stats = std::make_shared<FakeStats>();
+    TextRunnerPool pool(std::make_shared<SnapshotRunner>(stats), 1);
+    {
+      auto root = pool.Acquire({1, 2, 3, 4});
+      Expect(root.Prefill(4).decode_ready, "canonical root prefill");
+      Expect(root.SelectNext().token == 90, "canonical root first token");
+      root.Advance();
+      Expect(root.SelectNext().token == 91, "canonical root second token");
+      root.Advance();
+      const auto commit = root.Commit();
+      Expect(commit.snapshot_bytes == sizeof(FakeSnapshot),
+             "the prompt checkpoint is still published");
+    }
+    auto continuation = pool.Acquire({1, 2, 3, 4, 90, 91, 7});
+    Expect(continuation.cache_hit() &&
+               continuation.cached_prompt_tokens() == 4 &&
+               continuation.cache_restore_bytes() > 0,
+           "the follow-up restores the prompt checkpoint, not the state "
+           "after the reply");
+    const auto suffix = continuation.Prefill(7);
+    Expect(suffix.consumed_tokens == 3 && suffix.decode_ready,
+           "the reply's tokens are read through the prompt path");
+    continuation.Invalidate();
+  }
+  {
+    auto stats = std::make_shared<FakeStats>();
+    TextRunnerPool pool(std::make_shared<SnapshotRunner>(stats), 1);
+    auto request = pool.Acquire({1, 2});
+    request.Prefill(2);
+    Expect(request.SelectNext().token == 90, "canonical cancel first token");
+    request.Advance();
+    request.Cancel();
+    auto continuation = pool.Acquire({1, 2, 90, 7});
+    Expect(continuation.cached_prompt_tokens() == 2 &&
+               continuation.cache_restore_bytes() > 0,
+           "a request cancelled while generating leaves the prompt "
+           "checkpoint only");
+    continuation.Invalidate();
+  }
+  {
+    auto stats = std::make_shared<FakeStats>();
+    TextRunnerPool pool(
+        std::make_shared<PartialRetentionRunner>(stats, 64, 256, 1), 1);
+    auto request =
+        pool.Acquire({1, 2, 3, 4, 5, 6}, {}, [] { return false; }, {}, true, 5);
+    const auto step = request.Prefill(4);
+    Expect(step.consumed_tokens == 4 && !step.decode_ready,
+           "canonical partial prefill");
+    request.Cancel();
+    auto continuation =
+        pool.Acquire({1, 2, 3, 4, 5, 6, 7}, {}, {}, {}, true, 6);
+    Expect(continuation.cached_prompt_tokens() == 4 &&
+               continuation.cache_restore_bytes() == 0,
+           "a cancelled prompt pass keeps its completed rows");
+    continuation.Invalidate();
+  }
+}
+
+// A runner whose prompt state depends on the cut points
+// (canonical_min_pass_rows): with the canonical cache a prompt is cut and
+// checkpointed only on multiples of 64 rows with that many rows on both
+// sides. SUPERROC_TAIL_CAPTURE (192 in this process) moves the planned cut
+// to (prompt - 16 - tail) rounded down to a 64-row multiple (the far
+// checkpoint) when it stays past the reused frontier; without it the last
+// allowed cut before the prompt end is planned. A cut inside the 256-row
+// in-pass window is frozen inside the one pass that reaches the prompt end;
+// a runner that refuses, or that window, keeps the pass end at the cut. The
+// stable boundary and the complete prompt are not kept.
+void TestCanonicalCacheCutsOnAllowedRows() {
+  const auto steps = [](TextRunnerPool::Request& request) {
+    std::vector<std::size_t> rows;
+    while (!request.prefill_complete())
+      rows.push_back(request.Prefill(2048).consumed_tokens);
+    return rows;
+  };
+  auto runner = std::make_shared<ComponentInPassRunner>();
+  runner->canonical_min_pass_rows = 16;
+  TextRunnerPool pool(runner, 1);
+  const std::vector<TextRunnerToken> prompt(1024, 1);
+  {
+    auto request = pool.Acquire(prompt, {}, {}, {}, true, 1016);
+    Expect(steps(request) == std::vector<std::size_t>{1024},
+           "one pass: the planned cut is frozen inside it");
+    Expect(runner->pair_byte_queries == 0 && runner->pair_through_calls == 0,
+           "no dual capture in canonical mode");
+    // The far checkpoint: 1024 - 16 - 192 = 816, rounded down to a 64-row
+    // multiple = 768 (256 rows before the prompt end, inside the runner's
+    // in-pass window; today's point would be 960).
+    Expect(runner->boundary_byte_queries == 1 &&
+               runner->boundary_through_calls == 1 &&
+               runner->boundary_positions == std::vector<std::size_t>{768},
+           "the planned far cut is the one in-pass checkpoint");
+    request.Commit();
+  }
+  for (const std::size_t tokens : {std::size_t{1016}, std::size_t{1024}}) {
+    auto again = pool.Acquire(
+        std::vector<TextRunnerToken>(prompt.begin(), prompt.begin() + tokens),
+        {}, {}, {}, true, tokens);
+    Expect(again.cached_prompt_tokens() == 768,
+           "only the cut is a checkpoint: not the stable boundary, not the "
+           "complete prompt");
+    again.Invalidate();
+  }
+  {
+    // A follow-up that keeps the first prompt's rows except its last 40
+    // (1024 - 40 = 984 shared rows) restores the far checkpoint 768.
+    auto followup = pool.Acquire(std::vector<TextRunnerToken>(984, 1), {}, {},
+                                 {}, true, 976);
+    Expect(followup.cached_prompt_tokens() == 768,
+           "a follow-up that changes only the closing rows restores the far "
+           "checkpoint");
+    followup.Invalidate();
+  }
+  {
+    auto next = pool.Acquire(std::vector<TextRunnerToken>(1100, 1), {}, {}, {},
+                             true, 1092);
+    Expect(next.cached_prompt_tokens() == 768,
+           "the follow-up restores the cut");
+    // Its own far cut is 1100 - 16 - 192 = 892, rounded down to 832, which
+    // trails the prompt end by 268 rows: outside the runner's 256-row
+    // in-pass window, so the pass splits at the cut and the rest runs as
+    // one pass (832 == 768 + 64, then 268).
+    Expect(steps(next) == std::vector<std::size_t>{64, 268},
+           "a far cut past the in-pass window splits its pass");
+    next.Commit();
+  }
+  {
+    // A runner that refuses the in-pass boundary keeps the split end.
+    auto refusing = std::make_shared<ComponentInPassRunner>();
+    refusing->canonical_min_pass_rows = 16;
+    refusing->refuse_boundary = true;
+    TextRunnerPool other(refusing, 1);
+    auto request = other.Acquire(prompt, {}, {}, {}, true, 1016);
+    Expect(steps(request) == std::vector<std::size_t>{768, 256},
+           "a refused in-pass cut falls back to the split pass");
+    Expect(refusing->boundary_byte_queries == 1 &&
+               refusing->boundary_through_calls == 0,
+           "the refusal never runs the in-pass step");
+    request.Commit();
+  }
+  {
+    // Step budgets cut too. 100 rows per step from row 832 (the far
+    // checkpoint of the 1100-row prompt committed before): the steps end on
+    // multiples of 64; this prompt's own far cut is 1300 - 16 - 192 = 1092,
+    // rounded down to 1088, so the fourth step's pass ends on it and the
+    // checkpoint publishes there; from 1088 the steps run 64 rows to 1216,
+    // and the final 84 rows fit the budget as one pass.
+    auto budgeted = pool.Acquire(std::vector<TextRunnerToken>(1300, 1), {}, {},
+                                 {}, true, 1292);
+    Expect(budgeted.cached_prompt_tokens() == 832, "budgeted restore");
+    std::vector<std::size_t> rows;
+    while (!budgeted.prefill_complete())
+      rows.push_back(budgeted.Prefill(100).consumed_tokens);
+    Expect(rows == std::vector<std::size_t>{64, 64, 64, 64, 64, 64, 84},
+           "budgeted steps end on allowed rows, the pass on the far cut "
+           "splits there");
+    rows.clear();
+    budgeted.Invalidate();
+    auto tiny = pool.Acquire(std::vector<TextRunnerToken>(1100, 1), {}, {}, {},
+                             true, 1092);
+    while (!tiny.prefill_complete())
+      rows.push_back(tiny.Prefill(5).consumed_tokens);
+    // The far checkpoint published at 1088 is inside this 1100-row prompt:
+    // 12 rows remain, below the 16-row rule, and no allowed cut lies before
+    // the prompt end, so the budget is exceeded to it.
+    Expect(rows == std::vector<std::size_t>{12},
+           "a budget below the rule is exceeded up to the next allowed end");
+    tiny.Invalidate();
+  }
+  {
+    // A checkpoint shared with a waiting request lands on an allowed row
+    // too: 500 common rows give a cut at 448.
+    auto sharing = std::make_shared<ComponentInPassRunner>();
+    sharing->canonical_min_pass_rows = 16;
+    TextRunnerPool other(sharing, 1);
+    auto request = other.Acquire(prompt, {}, {}, {}, true, 1016);
+    Expect(request.ShareCheckpoint(500) == 448,
+           "a shared checkpoint is moved back to an allowed row");
+    Expect(request.ShareCheckpoint(10) == 0,
+           "no allowed row before a short common prefix");
+    Expect(steps(request) == std::vector<std::size_t>{448, 576},
+           "the shared cut splits its pass, the planned cut is in-pass");
+    Expect(sharing->boundary_through_calls == 1 &&
+               sharing->boundary_positions == std::vector<std::size_t>{768},
+           "the shared cut is not the in-pass view");
+    request.Invalidate();
+  }
+  {
+    // A prefill cancelled between two steps: a runner without a cut rule
+    // keeps the completed rows as its live prefix, this one does not.
+    auto retaining = std::make_shared<ComponentInPassRunner>();
+    retaining->canonical_min_pass_rows = 16;
+    retaining->partial_retention = true;
+    TextRunnerPool other(retaining, 1);
+    auto request =
+        other.Acquire(prompt, {}, [] { return false; }, {}, true, 1016);
+    Expect(request.Prefill(100).consumed_tokens == 64,
+           "one budgeted step of a cancelled prefill");
+    request.Cancel();
+    auto again = other.Acquire(prompt, {}, {}, {}, true, 1016);
+    Expect(again.cached_prompt_tokens() == 0,
+           "a cancelled prompt pass leaves no live rows on a runner with a "
+           "cut rule");
+    again.Invalidate();
+  }
+  {
+    // 11 more rows do not reach the next allowed cut beyond the far
+    // checkpoint 1088 (published where the budgeted prefill's pass ended on
+    // it): one pass, no new checkpoint.
+    auto next = pool.Acquire(std::vector<TextRunnerToken>(1099, 1), {}, {}, {},
+                             true, 1091);
+    Expect(next.cached_prompt_tokens() == 1088,
+           "the deepest allowed checkpoint is restored");
+    Expect(steps(next) == std::vector<std::size_t>{11},
+           "a short suffix is one pass");
+    next.Invalidate();
+  }
+}
+
+int main(int argc, char** argv) {
+  if (argc == 2 && std::string_view(argv[1]) == "--canonical-cache") {
+    // SUPERROC_CANONICAL_CACHE is read once, so arm it before the first
+    // request in this process.
+    if (::setenv("SUPERROC_CANONICAL_CACHE", "1", 1) != 0)
+      return 2;
+    // The late checkpoint is asked for as well: without the cut rule this
+    // makes the component runner capture inside its pass.
+    if (::setenv("SUPERROC_TAIL_CAPTURE", "192", 1) != 0)
+      return 2;
+    TestCanonicalCacheKeepsOnlyPromptState();
+    TestCanonicalCacheCutsOnAllowedRows();
+    return 0;
+  }
+  if (argc == 2 && std::string_view(argv[1]) == "--tail-capture") {
+    // Dual in-pass capture: SUPERROC_TAIL_CAPTURE is read
+    // once, so arm it before the first request in this process. This mode
+    // runs the pair plumbing alone; the default invocation (env unset)
+    // asserts the pair is never queried.
+    if (::setenv("SUPERROC_TAIL_CAPTURE", "192", 1) != 0)
+      return 2;
+    TestInPassPairPlumbing();
+    return 0;
+  }
   TestLlamaRenderPrompt();
   TestLlamaIncrementalTextNotExact();
+  TestRawPromptBosRule();
   TestPromptCountingValidatesCapabilitiesBeforeInference();
   TestFlintToolGrammarStartsInTheAutoPhase();
   TestServerInstructionsAreFraming();
@@ -2689,6 +3375,7 @@ int main() {
   ::setenv("NO_COLOR", "1", 1);
   TestInPassStableCheckpoint();
   TestInPassFailureRetainsOnlyCompletedCheckpoints();
+  TestInPassPairPlumbing();
   TestNewImageGetsAStableCheckpoint();
   TestGeneratedFrontierForksBeforeMutation();
   TestGeneratedFrontierPersistsForForks();
@@ -2811,7 +3498,7 @@ void TestSnapshotFloorFlagOptions() {
 }
 
 void TestFloorRefusesDiskCaptureWithoutRamReserve() {
-  // SPEC3B fix 3: a refused RAM reserve can still leave a disk capture
+  // A refused RAM reserve can still leave a disk capture
   // reserved; the floor refuses that device copy too. No Snapshot call
   // without the check directly before it.
   std::ifstream meminfo("/proc/meminfo");
@@ -2857,10 +3544,10 @@ void TestFloorRefusesDiskCaptureWithoutRamReserve() {
 }
 
 void TestFloorOffMatchesMainNumbers() {
-  // SPEC3B fix 4: with the floor off the capacity callable takes main's
+  // With the floor off the capacity callable takes main's
   // numbers (cgroup included), not the 32 GiB static cap. Claims above any
   // test host's headroom, so the host binds deterministically: every Strix
-  // Halo box has 128 GiB total, hence a ceiling below 128 GiB.
+  // A Strix Halo machine has 128 GiB total, hence a ceiling below 128 GiB.
   if (superroc::server::HostSnapshotCeilingBytes() >= (std::size_t{128} << 30))
     return;
   auto stats = std::make_shared<FakeStats>();
@@ -2897,7 +3584,7 @@ void TestFloorOffMatchesMainNumbers() {
 }
 
 void TestFloorBindingAtLoadWarns() {
-  // SPEC3B fix 5: floor active and no room at load → one WARN line.
+  // Floor active and no room at load → one WARN line.
   std::ifstream meminfo("/proc/meminfo");
   std::ostringstream text;
   text << meminfo.rdbuf();
@@ -2933,7 +3620,7 @@ void TestFloorBindingAtLoadWarns() {
 }
 
 void TestSnapshotFloorNotApplicableToSharedRows() {
-  // SPEC3C fix 1: a runner whose copies share session rows keeps main's
+  // A runner whose copies share session rows keeps main's
   // static budget whatever --cache-floor-bytes says. An explicit floor
   // only notes that once; the server starts normally, even above MemTotal.
   class SharedRowsRunner final : public SnapshotRunner {

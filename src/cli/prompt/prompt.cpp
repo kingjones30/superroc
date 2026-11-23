@@ -24,7 +24,7 @@
 #include "src/models/deepseek_v4_flash/engine.hpp"
 #include "src/models/flint/flint_chat.hpp"
 #include "src/models/glimmer/glimmer_chat.hpp"
-#include "src/models/lfm2/lfm2_chat.hpp"  // LFM2
+#include "src/models/lfm2/lfm2_chat.hpp"
 #include "src/models/qwen/chat_template.hpp"
 #include "src/models/qwen/generator.hpp"
 #include "src/models/qwen/tokenizer.hpp"
@@ -32,7 +32,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R1): alias.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // alias.
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 #include "src/models/qwen/hip/executor.hpp"
@@ -635,12 +635,27 @@ std::shared_ptr<models::qwen::vision::Encoder> LoadQwenVision(
     const PromptOptions& opt, const core::GgufReader& reader) {
   if (opt.image_paths.empty() && opt.vision_model_path.empty())
     return {};
-  if (reader.GetMetadataUint64("qwen35.embedding_length") != 5120) {
+  std::uint32_t width = 0;
+  if (reader.GetMetadataUint64("qwen35.embedding_length") == 5120) {
+    width = 5120;
+  } else if (const auto moe =
+                 reader.GetMetadataUint64("qwen35moe.embedding_length");
+             !opt.vision_model_path.empty() && (moe == 2048 || moe == 3072)) {
+    width = static_cast<std::uint32_t>(
+        *moe);  // Qwen3.5/3.6 MoE: 2048 (35B-A3B) or 3072 (122B-A10B) merger
+  } else if (const auto dense =
+                 reader.GetMetadataUint64("qwen35.embedding_length");
+             !opt.vision_model_path.empty() &&
+             (dense == 4096 || dense == 2048)) {
+    width = static_cast<std::uint32_t>(
+        *dense);  // Qwen3.5 dense 9B (4096) and 2048-wide sizes
+  } else {
     throw std::invalid_argument(
-        "image input supports Qwen3.8-27B and Flash-Next");
+        "image input supports Qwen3.8-27B, Flash-Next, the Qwen3.5 dense "
+        "9B/2048 sizes and the Qwen3.5/3.6 MoE family");
   }
   auto encoder = models::qwen::vision::Encoder::Open(
-      opt.model_path, opt.vision_model_path, 5120);
+      opt.model_path, opt.vision_model_path, width);
   if (!encoder)
     throw std::invalid_argument(
         "image input requires a matching --mmproj BF16 sidecar");
@@ -793,7 +808,7 @@ std::unique_ptr<speculative::SpeculativeVerifier> CreateQwenVerifier(
     if (draft_backend == nullptr) {
       throw std::runtime_error("Failed to initialize MTP backend: " + err);
     }
-    // SQ10 SPEC2 (R1): the drafter's stream uses this session's slot set.
+    // The drafter's stream uses this session's slot set.
     if (superroc_fp4_slot_stream_alias(
             static_cast<hip::QwenMtpGpuDraftBackend*>(draft_backend.get())
                 ->DraftStream(),
@@ -864,7 +879,7 @@ void GenerateQwenGpuResponse(
   }
 }
 
-// GLM: prompt must apply the same Glimmer policy serve sets before load.
+// Prompt must apply the same Glimmer policy serve sets before load.
 superroc::hip::QwenExecutionPolicy GlimmerAwarePolicy(
     const superroc::core::GgufReader& reader) {
   auto policy = superroc::hip::QwenExecutionPolicy::Production();
@@ -873,12 +888,11 @@ superroc::hip::QwenExecutionPolicy GlimmerAwarePolicy(
           superroc::core::ModelFamilyId::kMuseGlimmer)) {
     policy.kv_cache_storage = superroc::hip::QwenKvCacheStorage::kFp32;
     policy.fuse_qk_norm_rope_kv = false;
-    policy.glimmer_fp16_kv = true;  // LGA: Glimmer fp16-KV plane
+    policy.glimmer_fp16_kv = true;  // Glimmer fp16-KV plane
   } else if (superroc::core::IsLfm2Family(
                  reader.GetMetadataString("general.architecture")
-                     .value_or(""))) {  // LFM2
-    policy.kv_cache_storage =
-        superroc::hip::Lfm2KvCacheStorage();  // LFM2 (SPEC3)
+                     .value_or(""))) {
+    policy.kv_cache_storage = superroc::hip::Lfm2KvCacheStorage();  // LFM2
     policy.fuse_qk_norm_rope_kv = false;
   } else if (superroc::core::IsModelFamily(
                  reader.GetMetadataString("general.architecture").value_or(""),
@@ -1087,7 +1101,8 @@ int RunPrompt(std::span<const char* const> args) {
     const auto reasoning = PromptReasoningOptions(opt);
     const auto chat_options =
         tokenization::ResolveQwenChatOptions(reasoning, opt.add_vision_id);
-    // GLIMMER: the static Qwen renderer emits ChatML. Muse must not.
+    // The static Qwen renderer emits ChatML; Muse Glimmer uses its own
+    // renderer.
     std::optional<std::string> rendered;
     if (superroc::core::IsModelFamily(
             reader->GetMetadataString("general.architecture").value_or(""),
@@ -1112,7 +1127,7 @@ int RunPrompt(std::span<const char* const> args) {
       }
     } else if (superroc::core::IsLfm2Family(
                    reader->GetMetadataString("general.architecture")
-                       .value_or(""))) {  // LFM2
+                       .value_or(""))) {
       std::string chat_error;
       const tokenization::Lfm2TemplateVariant* lfm2_variant =
           tokenization::Lfm2TemplateVariantForGguf(*reader);

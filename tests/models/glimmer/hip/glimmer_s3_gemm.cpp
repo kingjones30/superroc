@@ -1,4 +1,4 @@
-// GLM: one layer of real Glimmer FP4 weights, batch 2048.
+// One layer of real Glimmer FP4 weights, batch 2048.
 // Each projection: W8A8 prequantized GEMM versus dequant-to-BF16 hipBLAS.
 // Tolerance, fixed before the run: cosine >= 0.995 and
 // rms(delta) / rms(reference) <= 0.05. Q8_1 activations are not bit-exact.

@@ -197,7 +197,7 @@ void CheckSsmProjection(const void* w, const __half* x, float* projected,
   }
   // A rejected geometry must not touch any pointer.
   if (q::DenseF16SsmGemm(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                         1023, m, k, channels, 4, nullptr) ||
+                         127, m, k, channels, 4, nullptr) ||
       q::DenseF16SsmGemm(nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
                          batch, m, k, channels, 3, nullptr)) {
     throw std::runtime_error("SSM projection accepted an unsupported shape");
@@ -289,7 +289,7 @@ void CheckAttentionProjection(const void* weights, const __half* input,
                           static_cast<float*>(actual[0]) + 8,
                           static_cast<float*>(actual[1]) + 8,
                           static_cast<__half*>(actual[2]) + 8,
-                          static_cast<__half*>(actual[3]) + 8, 1023, position,
+                          static_cast<__half*>(actual[3]) + 8, 127, position,
                           1e7F, 1e-6F, nullptr))
     throw std::runtime_error("attention fusion accepted a short batch");
   CheckHip(hipGraphExecDestroy(replay), "attention graph free");
@@ -600,7 +600,7 @@ double Run(std::size_t batch, std::size_t m, std::size_t k, std::uint32_t seed,
       0) {
     throw std::runtime_error("F16 replay changed the output");
   }
-  if (batch >= 1024 && m == 2560 && k == 6144) {
+  if (batch >= 128 && m == 2560 && k == 6144) {
     const std::size_t stride = k + 32;
     __half* padded = nullptr;
     // The ragged final row ends at the allocation boundary. NaN padding
@@ -645,7 +645,7 @@ double Run(std::size_t batch, std::size_t m, std::size_t k, std::uint32_t seed,
             << worst_f16_vs_mmq << ", worst |W8A8 - F64| " << worst_vs_ref
             << ", worst |F16 - F64| " << worst_f16 << " (reference scale "
             << ref_scale << ")\n";
-  if (m == 16384 && k == 2560 && batch >= 1024) {
+  if (m == 16384 && k == 2560 && batch >= 128) {
     CheckSsmProjection(d_w, d_x_half, d_f16, f16,
                        static_cast<std::uint32_t>(batch));
   }
@@ -653,7 +653,7 @@ double Run(std::size_t batch, std::size_t m, std::size_t k, std::uint32_t seed,
     CheckHcDownProjection(d_w, d_tiled, d_w8,
                           static_cast<std::uint32_t>(batch));
   }
-  if (m == 13312 && k == 2560 && batch >= 1024) {
+  if (m == 13312 && k == 2560 && batch >= 128) {
     CheckAttentionProjection(d_w, d_x_half, d_f16,
                              static_cast<std::uint32_t>(batch));
   }
@@ -969,6 +969,15 @@ int main() {
     // HC down fusion: its first supported batch and a partial final tile.
     ok = Run(96, 320, 10240, 0x320A96U, 2) < 1e-2 && ok;
     ok = Run(2049, 320, 10240, 0x320A2049U, 2) < 1e-2 && ok;
+    // The wide routes from their first row count, and ragged sizes under a
+    // tile.
+    for (const std::size_t rows : {128U, 129U, 255U, 1023U}) {
+      const auto seed = 0x128AU + static_cast<std::uint32_t>(rows);
+      ok = Run(rows, 2560, 6144, seed, 2) < 1e-2 && ok;
+      ok = Run(rows, 16384, 2560, seed + 1U, 2) < 1e-2 && ok;
+      ok = Run(rows, 13312, 2560, seed + 2U, 2) < 1e-2 && ok;
+      ok = Run(rows, 10240, 320, seed + 3U, 2) < 1e-2 && ok;
+    }
     return ok ? 0 : 1;
   } catch (const std::exception& error) {
     std::cerr << error.what() << '\n';

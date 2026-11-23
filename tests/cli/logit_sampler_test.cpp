@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -627,6 +628,132 @@ void TestResponsePenaltyScope() {
          "new request resets generated counts");
 }
 
+void TestCaptureLogprobsMatchesSamplerDistribution() {
+  using namespace superroc::sampling;
+  const std::array<float, 5> logits = {2.0F, 1.0F, 0.0F, -1.0F, -2.0F};
+  SamplingConfig config;
+  config.temperature = 0.7F;
+  SamplerState sampler(config);
+  const auto token = sampler.Sample(logits);
+  // Capture after the draw but before any Accept: the distribution is the
+  // one the sampler drew from, so the token's mass is positive and the
+  // entries are the distribution's top in order.
+  SamplerState probe(config);
+  const auto captured = probe.CaptureLogprobs(logits, token, 3);
+  Expect(captured.token == token, "capture names the emitted token");
+  Expect(std::isfinite(captured.logprob) && captured.logprob <= 0.0,
+         "the emitted token has a finite non-positive logprob");
+  Expect(captured.top.size() == 3, "capture returns the requested top-N");
+  Expect(captured.top[0].token == 0, "the argmax leads the ranking");
+  Expect(std::abs(captured.top[0].logprob -
+                  std::log(probe.Distribution(logits).probability(0))) < 1e-9,
+         "top entries quote the sampler distribution");
+  const auto quoted = probe.Distribution(logits);
+  double mass = 0.0;
+  for (const auto& entry : quoted.entries())
+    mass += entry.value;
+  Expect(std::abs(mass - 1.0) < 1e-12, "the quoted distribution is normalized");
+  SamplingConfig greedy;
+  SamplerState greedy_sampler(greedy);
+  const auto greedy_token = greedy_sampler.Sample(logits);
+  SamplerState greedy_probe(greedy);
+  const auto greedy_captured =
+      greedy_probe.CaptureLogprobs(logits, greedy_token, 3);
+  Expect(greedy_captured.top.size() == 3 && greedy_captured.top[0].token == 0,
+         "greedy ranking still leads with the argmax");
+  Expect(std::isfinite(greedy_captured.logprob),
+         "greedy reports a finite logprob");
+}
+
+void TestTopLogprobEntriesAreRanked() {
+  using namespace superroc::sampling;
+  SamplingDistribution distribution(
+      std::vector<Probability>{{4, 0.1}, {1, 0.5}, {2, 0.3}, {3, 0.1}});
+  const auto top = TopLogprobEntries(distribution, 2);
+  Expect(top.size() == 2 && top[0].token == 1 && top[1].token == 2,
+         "top entries rank by probability");
+  Expect(std::abs(top[0].logprob - std::log(0.5)) < 1e-12 &&
+             std::abs(top[1].logprob - std::log(0.3)) < 1e-12,
+         "top entries quote log probabilities");
+  const auto all = TopLogprobEntries(distribution, 20);
+  Expect(all.size() == 4, "top-N beyond the vocabulary returns every entry");
+}
+
+void TestCaptureLogprobsHonoursFilters() {
+  using namespace superroc::sampling;
+  const std::array<float, 4> logits = {3.0F, 2.0F, 1.0F, 0.0F};
+  SamplingConfig config;
+  config.temperature = 1.0F;
+  config.top_k = 2;
+  SamplerState sampler(config);
+  const auto token = sampler.Sample(logits);
+  Expect(token == 0 || token == 1, "top-k sampling draws from the kept set");
+  SamplerState probe(config);
+  const auto captured = probe.CaptureLogprobs(logits, token, 4);
+  Expect(captured.top.size() == 2, "the report covers the filtered set");
+  SamplerState depthless(config);
+  const auto bare = depthless.CaptureLogprobs(logits, token, 0);
+  Expect(bare.top.empty() && bare.token == token &&
+             std::abs(bare.logprob - captured.logprob) < 1e-12,
+         "depth zero keeps the token logprob with no top entries");
+}
+
+void TestCaptureLogprobsForcedAndEmptyLogits() {
+  using namespace superroc::sampling;
+  const std::array<float, 4> logits = {1.0F, 2.0F, 0.5F, -1.0F};
+  SamplingConfig config;
+  auto budget = std::make_shared<ReasoningBudget>();
+  budget->tokens = 0;
+  budget->forced = {2};
+  config.reasoning_budget = std::move(budget);
+  SamplerState forcing(config);
+  const auto pointed = forcing.CaptureLogprobs(logits, 2, 2);
+  Expect(pointed.token == 2 && pointed.logprob == 0.0 &&
+             pointed.top.size() == 1 && pointed.top[0].token == 2 &&
+             pointed.top[0].logprob == 0.0,
+         "a forced token reports a point mass with its candidate on top");
+  const auto shallow = forcing.CaptureLogprobs(logits, 2, 0);
+  Expect(shallow.token == 2 && shallow.logprob == 0.0 && shallow.top.empty(),
+         "a forced token reports no top candidate when depth is zero");
+  const auto rejected = forcing.CaptureLogprobs(logits, 1, 2);
+  Expect(rejected.token == 1 &&
+             rejected.logprob == -std::numeric_limits<double>::infinity() &&
+             rejected.top.empty(),
+         "a non-forced token has zero mass under a forcing distribution");
+  const auto missing = forcing.CaptureLogprobs(std::span<const float>{}, 0, 2);
+  Expect(
+      missing.token == 0 && std::isnan(missing.logprob) && missing.top.empty(),
+      "missing logits report a NaN logprob, never 0.0");
+}
+
+void TestDeferredSampleCarriesLogprobs() {
+  using namespace superroc::sampling;
+  // The argmax is token 0, so only an honoured deferral can return token 1.
+  const std::array<float, 3> logits = {2.0F, 1.0F, 0.5F};
+  SamplingConfig config;
+  config.logprobs = true;
+  config.logprobs_top_n = 2;
+  SamplerState sampler(config);
+  CapturedTokenLogprobs report;
+  report.token = 1;
+  report.logprob = -0.25;
+  sampler.DeferSample(1, report);
+  const auto pending = sampler.pending_sample();
+  Expect(pending.has_value() && pending->token == 1 && pending->logprobs &&
+             pending->logprobs->logprob == -0.25,
+         "a deferred draw retains its logprobs report");
+  const auto state = sampler.SaveDrawState();
+  SamplerState other(config);
+  other.RestoreDrawState(state);
+  const auto replayed = other.pending_sample();
+  Expect(replayed.has_value() && replayed->logprobs &&
+             replayed->logprobs->token == 1,
+         "draw-state save/restore preserves the logprobs report");
+  Expect(other.Sample(logits) == 1, "the deferred token is drawn next");
+  Expect(!other.pending_sample().has_value(),
+         "consuming the draw clears the retained report");
+}
+
 }  // namespace
 
 int main() {
@@ -662,7 +789,13 @@ int main() {
   TestFastTopKSamplingNeverEscapesSelectedSet();
   TestFastMinPSamplingNeverEscapesRelativeThreshold();
   TestSeedAndStateAreRequestLocal();
+
   TestDistributionIsNormalized();
+  TestCaptureLogprobsMatchesSamplerDistribution();
+  TestTopLogprobEntriesAreRanked();
+  TestCaptureLogprobsHonoursFilters();
+  TestCaptureLogprobsForcedAndEmptyLogits();
+  TestDeferredSampleCarriesLogprobs();
   TestGreedySparsePenaltyWalk();
   TestSamplingFailsClosedOnInvalidInputs();
   TestZeroDrawAndNonFiniteCandidates();

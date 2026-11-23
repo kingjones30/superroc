@@ -18,12 +18,18 @@ inline constexpr std::uint32_t kTiledAttentionHeadDim{256};
 // all three.
 inline constexpr std::uint32_t kKatFullAttentionQueryHeads{16};
 inline constexpr std::uint32_t kKatFullAttentionKvHeads{2};
-// SQ17: MiMo-9B full-attention head config (GQA 4). Third WMMA prefill
+// MiMo-9B full-attention head config (GQA 4). Third WMMA prefill
 // instantiation, (16,4); head_dim stays 256. Without it MiMo falls back to
 // the scalar baseline kernel, whose per-block LDS grows with depth.
 inline constexpr std::uint32_t kMimoFullAttentionQueryHeads{16};
 inline constexpr std::uint32_t kMimoFullAttentionKvHeads{4};
-// LGA: Muse Glimmer 30B prefill head config (GQA 16, head_dim 128). The
+// Ornith-1.5-122B full-attention head config (GQA 16): a fourth WMMA prefill
+// instantiation, (32,2) with head_dim 256. Without it the 122B falls back to
+// the scalar baseline kernel, whose per-block LDS passes the limit beyond a
+// 16K visible span.
+inline constexpr std::uint32_t kOrnith122FullAttentionQueryHeads{32};
+inline constexpr std::uint32_t kOrnith122FullAttentionKvHeads{2};
+// Muse Glimmer 30B prefill head config (GQA 16, head_dim 128). The
 // WMMA prefill kernel instantiates for (32,2,128) windowed and windowless.
 inline constexpr std::uint32_t kGlimmerQueryHeads{32};
 inline constexpr std::uint32_t kGlimmerKvHeads{2};
@@ -146,7 +152,7 @@ struct AttentionSupportParams {
 // NOT widen IsTiledAttentionSupported (which also gates the still-(24,4)
 // tiled kernel and its pack launcher); only LaunchQwenWmmaAttention's
 // dispatcher checks it, routing (24,4) and (16,2) to their instantiations.
-// LGA: kHeadDim (default 256) extends the gate to Glimmer's (32,2,128).
+// kHeadDim (default 256) extends the gate to Glimmer's (32,2,128).
 template<std::uint32_t kHq, std::uint32_t kHkv,
          std::uint32_t kHeadDim = kTiledAttentionHeadDim>
 [[nodiscard]] constexpr bool IsWmmaAttentionSupportedFor(

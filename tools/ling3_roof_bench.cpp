@@ -1,14 +1,15 @@
-// ling3-roof-bench — what read bandwidth does amdaimax2 ACTUALLY achieve?
+// ling3-roof-bench — what read bandwidth does the box ACTUALLY achieve?
 //
-// PHASE5 item 1. Every "the GEMVs run at 43 % of the roof" statement in this lane is
-// meaningless until the roof is a measured number on the same box, in the same units.
+// PHASE5 item 1. Every "the GEMVs run at 43 % of the roof" statement here
+// is meaningless until the roof is a measured number on the same box, in the
+// same units.
 //
 // The number that matters is not a spec sheet. Strix Halo is an APU: the "128 GiB of
 // GTT" is system memory behind the SoC interconnect, and the brief's own NUDGE warns
 // that this box has a **32 MB Infinity Cache (MALL)** that reports 3-7x the real
-// bandwidth to any working set that fits inside it. I measured 461 GB/s earlier in this
-// lane on a microbenchmark whose weights were 22 MB, which is not a bandwidth, it is the
-// MALL.
+// bandwidth to any working set that fits inside it. Measured 461 GB/s earlier
+// on a microbenchmark whose weights were 22 MB, which is not a bandwidth, it
+// is the MALL.
 //
 // So this benchmark:
 //   * works over a buffer far larger than the MALL (default 1 GiB) and reports the size
@@ -21,7 +22,7 @@
 //   * plus hipMemcpyDeviceToDevice, the number everyone quotes as "the roof";
 //   * uses the ROCm agent's own notion of the MALL size if it will tell us.
 //
-// Run it inside gpu-run. It allocates; it never touches the model.
+// Run it on an otherwise idle GPU. It allocates; it never touches the model.
 
 #include <hip/hip_runtime.h>
 

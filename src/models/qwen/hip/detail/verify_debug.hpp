@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::hip::detail {
 
@@ -28,20 +28,20 @@ struct VerifyDebugStage {
 
 [[nodiscard]] inline bool VerifyDebugEnabled() {
   static const bool on = [] {
-    const char* env = ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_DEBUG");
+    const char* env = ::superroc::core::GetEnv("SUPERROC_VERIFY_DEBUG");
     return env != nullptr && env[0] == '1';
   }();
   return on;
 }
 
-// sq16 SPEC2 (S2-3): the snapshot buffer is bounded (default 512 MiB per
+// The snapshot buffer is bounded (default 512 MiB per
 // arena; SUPERROC_VERIFY_DEBUG_MAX_BYTES overrides for tests). Recording stops
 // with one warning when the next stage would exceed it.
 [[nodiscard]] inline std::size_t VerifyDebugMaxBytes() {
   static const std::size_t cap = [] {
     constexpr std::size_t kDefault = 512ULL << 20;
     const char* env =
-        ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_DEBUG_MAX_BYTES");
+        ::superroc::core::GetEnv("SUPERROC_VERIFY_DEBUG_MAX_BYTES");
     if (env == nullptr || env[0] == '\0') {
       return kDefault;
     }

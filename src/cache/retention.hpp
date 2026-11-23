@@ -30,6 +30,19 @@ struct CapturePlanRequest {
   std::span<const Rows> already_retained;
   // Keeps the shallowest eligible grid points, including retained ones.
   std::size_t grid_limit{4};
+  // Optional late point this many tokens before the prompt end (0 = off), so
+  // a request that keeps the same body and changes only a short closing tail
+  // resumes inside the new message instead of at its start.
+  Rows tail{0};
+  // Canonical cache on a model whose prompt state depends on the cut points:
+  // plan only cuts on multiples of 64 rows with at least this many rows on
+  // both sides (0 = off). The stable, prompt-end and learned points are then
+  // left out. Grid points stay where they meet the rule, and one more point
+  // is planned as close to the prompt end as the rule allows, so the next
+  // turn restores there. With tail set, that point instead sits tail rows
+  // further from the prompt end when the prompt reaches that far and the
+  // point stays past the reused frontier.
+  Rows canonical_min_pass{0};
 };
 // One optional grid point per twelve private states the RAM budget holds,
 // up to four. Speculative edit boundaries then cannot crowd out the
@@ -37,8 +50,11 @@ struct CapturePlanRequest {
 [[nodiscard]] std::size_t GridLimit(std::size_t ram_bytes,
                                     std::size_t private_bytes);
 // Queries the adapter once. Required stable/prompt/reused boundaries remain
-// exact. Optional grids reuse a preceding pass end within 128 tokens; learned
-// points coalesce with a planned capture within the existing 64-token slack.
+// exact. An optional grid point moves back to the preceding pass end when one
+// lies within 4,096 tokens, so it does not split a pass; it is dropped when
+// that leaves it on the reused frontier. Learned points coalesce with a
+// planned capture within the existing 64-token slack. With
+// canonical_min_pass set, see CapturePlanRequest.
 [[nodiscard]] std::vector<CaptureCandidate> PlanCaptures(
     const Adapter&, const Slot&, const CapturePlanRequest&);
 

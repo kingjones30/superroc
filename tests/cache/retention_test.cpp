@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cassert>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 
+#include "src/cli/serve/component_text_cache.hpp"
 #include "tests/cache/fake_adapter.hpp"
 #include "tests/cache/prefix_index_fixture.hpp"
 using namespace superroc::cache;
@@ -64,9 +66,114 @@ void Planning() {
   assert(plan.size() == 4 && plan[2].purpose == CheckpointPurpose::kLearned);
   adapter.SetPrefillPassRows(2000);
   plan = PlanCaptures(adapter, *slot, {10000, 0, 1501, 0, true, true, {}});
-  assert(plan[0].boundary == 1501 && plan[0].required && plan[0].splits_pass);
-  assert(plan[1].boundary == 2048 && plan[1].splits_pass);
-  assert(plan[2].boundary == 4000 && !plan[2].splits_pass);
+  // Optional grid points sit on pass ends. The first one would sit 2,000
+  // rows past the frontier, closer than the 2,048-row minimum: no point.
+  expected = {1501, 4000, 6000, 8000, 10000};
+  assert(plan.size() == expected.size());
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    assert(plan[i].boundary == expected[i]);
+    assert(plan[i].splits_pass == (plan[i].boundary == 1501));
+  }
+  // Flash-Next's 4,096-row passes. A prompt inside one pass has no grid
+  // point; a long one takes pass ends; a restored frontier shifts them.
+  adapter.SetPrefillPassRows(4096);
+  plan = PlanCaptures(adapter, *slot, {3252, 0, 3244, 0, true, false, {}});
+  assert(plan.size() == 2 && plan[0].boundary == 3244 &&
+         plan[1].boundary == 3252);
+  plan = PlanCaptures(adapter, *slot, {24832, 0, 24824, 0, true, false, {}});
+  expected = {4096, 12288, 16384, 24576, 24824, 24832};
+  assert(plan.size() == expected.size());
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    assert(plan[i].boundary == expected[i]);
+    assert(plan[i].splits_pass == (plan[i].boundary == 24824));
+    assert((plan[i].purpose == CheckpointPurpose::kGrid) == (i < 4));
+  }
+  plan = PlanCaptures(adapter, *slot, {20000, 3000, 19992, 0, true, false, {}});
+  expected = {3000, 7096, 11192, 15288, 19992, 20000};
+  assert(plan.size() == expected.size());
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    assert(plan[i].boundary == expected[i]);
+    assert(plan[i].splits_pass == (plan[i].boundary == 19992));
+  }
+  // Two grid points that move back to the same pass end count once.
+  plan = PlanCaptures(adapter, *slot, {10000, 0, 0, 0, true, false, {}});
+  expected = {4096, 8192, 10000};
+  assert(plan.size() == expected.size());
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    assert(plan[i].boundary == expected[i] && !plan[i].splits_pass);
+  }
+  // Canonical plans (canonical_min_pass 16): only cuts on multiples of 64
+  // rows with 16 rows on both sides. The stable and prompt-end points are
+  // left out, and the last allowed cut before the prompt end is planned.
+  const auto canonical = [&](Rows prompt, Rows reused, Rows stable) {
+    return PlanCaptures(
+        adapter, *slot,
+        {prompt, reused, stable, 0, true, false, {}, std::size_t{4}, 0, 16});
+  };
+  plan = canonical(3252, 0, 3244);
+  assert(plan.size() == 1 && plan[0].boundary == 3200 && plan[0].splits_pass &&
+         !plan[0].required);
+  plan = canonical(3216, 0, 3200);
+  assert(plan.size() == 1 && plan[0].boundary == 3200);
+  plan = canonical(3215, 0, 0);
+  assert(plan.size() == 1 && plan[0].boundary == 3136);
+  plan = canonical(3300, 3200, 3292);
+  assert(plan.size() == 2 && plan[0].boundary == 3200 && plan[0].required &&
+         plan[1].boundary == 3264 && !plan[1].required);
+  plan = canonical(3250, 3200, 3242);
+  assert(plan.size() == 1 && plan[0].boundary == 3200);
+  assert(canonical(40, 0, 32).empty());
+  plan = canonical(24832, 0, 24824);
+  expected = {4096, 12288, 16384, 24576, 24768};
+  assert(plan.size() == expected.size());
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    assert(plan[i].boundary == expected[i] && !plan[i].required);
+    assert(plan[i].splits_pass == (plan[i].boundary == 24768));
+  }
+  // A frontier off the 64-row positions (a cache written without the
+  // switch) puts no pass end on an allowed row: only the last cut is planned.
+  plan = canonical(20000, 3000, 19992);
+  assert(plan.size() == 2 && plan[0].boundary == 3000 &&
+         plan[1].boundary == 19968);
+  // The tail distance moves the canonical restore point (r.tail = 64): the
+  // cut sits (prompt - canonical - tail) rounded down to a 64-row multiple
+  // instead, but only when it stays past the reused frontier and the rule
+  // allows it; otherwise the position of today stands.
+  const auto canonical_tail = [&](Rows prompt, Rows reused, Rows stable) {
+    return PlanCaptures(
+        adapter, *slot,
+        {prompt, reused, stable, 0, true, false, {}, std::size_t{4}, 64, 16});
+  };
+  // 3252 - 16 - 64 = 3172 -> 3136, not today's 3200.
+  plan = canonical_tail(3252, 0, 0);
+  assert(plan.size() == 1 && plan[0].boundary == 3136 && plan[0].splits_pass &&
+         !plan[0].required);
+  // far = 3300 - 16 - 64 = 3220 -> 3200 is not past the reused frontier
+  // 3200: today's (3300 - 16) / 64 * 64 = 3264.
+  plan = canonical_tail(3300, 3200, 0);
+  assert(plan.size() == 2 && plan[0].boundary == 3200 && plan[0].required &&
+         plan[1].boundary == 3264 && !plan[1].required);
+  // far = 100 - 16 - 64 = 20 -> 0 is not allowed; today's 64 is.
+  plan = canonical_tail(100, 0, 0);
+  assert(plan.size() == 1 && plan[0].boundary == 64 && plan[0].splits_pass);
+  // 24832 - 16 - 64 = 24752 -> 24704 replaces today's 24768.
+  plan = canonical_tail(24832, 0, 0);
+  expected = {4096, 12288, 16384, 24576, 24704};
+  assert(plan.size() == expected.size());
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    assert(plan[i].boundary == expected[i] && !plan[i].required);
+    assert(plan[i].splits_pass == (plan[i].boundary == 24704));
+  }
+  // Without a pass end within 4,096 rows the point still splits the pass.
+  adapter.SetPrefillPassRows(20000);
+  plan = PlanCaptures(adapter, *slot, {20000, 0, 0, 0, true, false, {}});
+  expected = {8192, 12288, 18432, 20000};
+  assert(plan.size() == expected.size());
+  for (std::size_t i = 0; i < plan.size(); ++i) {
+    assert(plan[i].boundary == expected[i]);
+    assert(plan[i].splits_pass == (i < 3));
+  }
+  adapter.SetPrefillPassRows(2000);
   assert(PlanCaptures(adapter, *slot, {}).empty());
   std::array<Rows, 1> retained{2048};
   plan = PlanCaptures(adapter, *slot, {4096, 0, 0, 0, true, false, retained});
@@ -1064,6 +1171,33 @@ void RealCapacityAndUniqueAdmission() {
            f.Cached({129}) == 1);
   }
 }
+
+// The dual-checkpoint tail point helper.
+void SuperrocTailPointHelper() {
+  using superroc::server::SuperrocTailPoint;
+  // P = (prompt_tokens - tail_tokens) / 64 * 64, rounded down and aligned.
+  assert(SuperrocTailPoint(8260, 192, 0, 8192) ==
+         std::optional<std::size_t>(8064));
+  assert(SuperrocTailPoint(8261, 21, 0, 8256) ==
+         std::optional<std::size_t>(8192));
+  // At least 512 new tokens must precede P (P <= reused refuses).
+  assert(!SuperrocTailPoint(8260, 192, 8064, 8192));
+  assert(!SuperrocTailPoint(8260, 192, 7600, 8192));
+  // P must stay strictly below S with a >=64 gap (P >= S refuses).
+  assert(!SuperrocTailPoint(8260, 192, 0, 8064));
+  assert(!SuperrocTailPoint(8260, 192, 0, 8094));
+  assert(!SuperrocTailPoint(8261, 21, 0, 8192));
+  assert(!SuperrocTailPoint(8260, 192, 0, 8260));
+  assert(!SuperrocTailPoint(8260, 192, 0, 8261));
+  // T = 0 (or a prompt no longer than the tail) keeps the default plan.
+  assert(!SuperrocTailPoint(8260, 0, 0, 8192));
+  assert(!SuperrocTailPoint(200, 8260, 0, 128));
+  // T > 192 would leave P more than
+  // kPairTailRows - 1 = 255 rows behind the pass end; T = 192 is the widest
+  // admitted tail (prompt_end - P <= T + 63 <= 255).
+  assert(!SuperrocTailPoint(8260, 193, 0, 8192));
+  assert(!SuperrocTailPoint(8260, 8260, 0, 8192));
+}
 }  // namespace
 int main() {
   Planning();
@@ -1091,4 +1225,5 @@ int main() {
   RealCapacityAndUniqueAdmission();
   SharedChunkAccounting();
   InvalidInventoriesPreserveReplacement();
+  SuperrocTailPointHelper();
 }

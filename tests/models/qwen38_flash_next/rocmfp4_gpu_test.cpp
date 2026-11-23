@@ -1,4 +1,4 @@
-// FLASHNEXT G1-GPU (RV22 S6): dense-path type-mix qualification against the
+// FLASHNEXT G1-GPU: dense-path type-mix qualification against the
 // real ROC artifact. For every sampled matrix this compares
 //   1. the float SmallGemm path (B3 device decode through RowElement) with
 //      the superroc::quant::DotProductROCMFP4_* CPU oracle: cosine >= 0.999999;
@@ -8,7 +8,7 @@
 //   3. the executor's <=4-token chunk loop at m = 6 (4 + 2), which the
 //      Dense intercept runs for decode batches above gemv_m's limit.
 // Weights are mmapped from the file and copied to the device raw -- the
-// artifact itself is never copied. Run under gpu-run.
+// artifact itself is never copied. Run on an otherwise idle GPU.
 #include <hip/hip_runtime.h>
 
 #include <algorithm>

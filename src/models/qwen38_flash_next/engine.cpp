@@ -11,6 +11,8 @@
 #include <optional>
 #include <type_traits>
 
+#include "src/core/canonical.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/models/qwen38_flash_next/continuation_hooks.hpp"
 #include "src/models/qwen38_flash_next/draft_vocab.hpp"
@@ -29,10 +31,24 @@ namespace {
 // chunk's n-gram gather doubles; next-chunk prefetch overlaps that read.
 // Prefill logits do not depend on the chunk size
 // (pre-budget queries always take the dense attention tiles).
-constexpr std::uint32_t kPrefillChunkTokens = 4096;
+std::uint32_t PrefillChunkTokens() {
+  static const std::uint32_t value = [] {
+    const char* env = std::getenv("LFN_PREFILL_CHUNK");
+    const long parsed = env != nullptr ? std::strtol(env, nullptr, 10) : 0;
+    const std::uint32_t chunk = parsed >= 1024 && parsed <= 65536
+                                    ? static_cast<std::uint32_t>(parsed)
+                                    : std::uint32_t{4096};
+    // Canonical cache: a pass may only end on a multiple of 64 rows.
+    return ::superroc::core::CanonicalCacheOn() ? chunk / 64 * 64 : chunk;
+  }();
+  return value;
+}
 // A prompt ending this close past a chunk finishes in that chunk: a separate
-// tail pass costs about as much as this many more chunk rows.
-constexpr std::uint32_t kPrefillTailTokens = 128;
+// tail pass costs about as much as this many more chunk rows. Measured at
+// 24,000 tokens of context: a 128-row pass takes 190 ms and a 256-row pass
+// 250 ms (the routed-expert kernels sweep nearly every expert whatever the
+// row count), against about 0.5 ms per row inside a full pass.
+constexpr std::uint32_t kPrefillTailTokens = 512;
 
 /// Negative when LFN_MTP_P_MIN is unset: the draft path is unchanged.
 /// A set value in [0, 1] skips a draft whose top-10 softmax is below it,
@@ -56,6 +72,47 @@ float LfnMtpPMin() {
     return clamped;
   }();
   return value;
+}
+
+/// LFN_MTP_P_CHAIN in (0, 1], read with LFN_MTP_P_MIN set: a draft chain also
+/// ends when the product of its drafts' top probabilities falls below this
+/// value. A draft is kept only when every draft before it was accepted, so
+/// the product, not the last factor, is what a further draft is worth. The
+/// trunk verifies every token either way. Negative when unset.
+float LfnMtpPChain() {
+  static const float value = [] {
+    const char* env = std::getenv("LFN_MTP_P_CHAIN");
+    if (env == nullptr || env[0] == '\0') {
+      return -1.f;
+    }
+    char* end = nullptr;
+    const float parsed = std::strtof(env, &end);
+    if (end == env || *end != '\0' || !std::isfinite(parsed) ||
+        !(parsed > 0.f) || parsed > 1.f) {
+      std::fprintf(stderr,
+                   "LFN_MTP_P_CHAIN=%s ignored: expected a number in (0, 1]\n",
+                   env);
+      return -1.f;
+    }
+    return parsed;
+  }();
+  return value;
+}
+
+/// LFN_MTP_TRACE=1: one stderr line per decode cycle, for tuning the draft
+/// policy.
+void LfnMtpTrace(std::uint32_t position, std::uint32_t drafts,
+                 std::uint32_t accepted, std::uint32_t lookup) {
+  static const bool on = std::getenv("LFN_MTP_TRACE") != nullptr;
+  if (!on)
+    return;
+  static auto last = std::chrono::steady_clock::now();
+  const auto now = std::chrono::steady_clock::now();
+  std::fprintf(stderr,
+               "MTPTRACE pos=%u drafts=%u accepted=%u lookup=%u ms=%.2f\n",
+               position, drafts, accepted, lookup,
+               std::chrono::duration<double, std::milli>(now - last).count());
+  last = now;
 }
 
 bool LfnPromptDump() {
@@ -243,8 +300,9 @@ std::shared_ptr<Model> Model::Load(const std::string& model_path,
     }
   }
   if (!options.mtp_model_path.empty()) {
-    m->mtp_reader_ =
-        core::GgufReader::OpenFile(options.mtp_model_path, error_msg);
+    m->mtp_reader_ = core::GgufReader::OpenFile(
+        options.mtp_model_path, error_msg,
+        core::GgufReader::SidecarRole(options.mtp_model_path, model_path));
     if (!m->mtp_reader_) {
       return nullptr;
     }
@@ -278,11 +336,18 @@ std::shared_ptr<Model> Model::Load(const std::string& model_path,
   }
   rocm::Executor::Options exec;
   exec.max_batch = m->PrefillThroughCapacity();
+  // Neural drafts stop at max_draft_tokens, the length controller's limit. A
+  // copy from the prompt may fill every row the verify serves;
+  // SUPERROC_FN_COPY_WIDE=0 keeps copies at the same limit.
+  const char* copy_wide = ::superroc::core::GetEnv("SUPERROC_FN_COPY_WIDE");
+  const std::uint32_t verify_drafts =
+      copy_wide != nullptr && copy_wide[0] == '0'
+          ? options.max_draft_tokens
+          : std::max(options.max_draft_tokens, kMaxMtpDraftTokens);
   exec.max_logit_rows =
-      m->mtp_weights_
-          ? static_cast<std::uint32_t>(std::min<std::uint64_t>(
-                exec.max_batch, std::uint64_t{options.max_draft_tokens} + 1))
-          : 1;
+      m->mtp_weights_ ? static_cast<std::uint32_t>(std::min<std::uint64_t>(
+                            exec.max_batch, std::uint64_t{verify_drafts} + 1))
+                      : 1;
   exec.max_speculative = exec.max_logit_rows;
   m->executor_ =
       rocm::Executor::Create(*m->device_, m->ngram_.get(), exec, error_msg);
@@ -337,11 +402,11 @@ std::uint32_t Model::VocabSize() const noexcept {
 }
 
 std::uint32_t Model::PrefillCapacity() const noexcept {
-  return std::min(kPrefillChunkTokens, options_.max_context);
+  return std::min(PrefillChunkTokens(), options_.max_context);
 }
 
 std::uint32_t Model::PrefillThroughCapacity() const noexcept {
-  return std::min(kPrefillChunkTokens + kPrefillTailTokens,
+  return std::min(PrefillChunkTokens() + kPrefillTailTokens,
                   options_.max_context);
 }
 
@@ -784,7 +849,9 @@ bool Session::Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
                    bool prefill, std::uint32_t boundary,
                    std::unique_ptr<SessionSnapshot>* checkpoint,
                    double* capture_ms, std::span<const std::int32_t> after,
-                   const PrefillCapture& consume) {
+                   const PrefillCapture& consume, std::uint32_t boundary2,
+                   const PrefillCapturePair& capture_pair,
+                   std::unique_ptr<SessionSnapshot>* checkpoint2) {
   rocm::Executor& exec = *model_->executor_;
   for (std::size_t off = 0; off < tokens.size();) {
     const auto remaining = tokens.size() - off;
@@ -800,7 +867,40 @@ bool Session::Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
     const auto mode = prefill ? rocm::Executor::ForwardMode::kPrefill
                               : rocm::Executor::ForwardMode::kDecode;
     std::unique_ptr<rocm::PrefillCheckpoint> capture;
-    if ((checkpoint || consume) && boundary > tokens_.size() &&
+    std::unique_ptr<rocm::PrefillCheckpoint> capture2;
+    // The pair path with only P (no S anywhere): the executor freezes a
+    // view beside every earlier one, so its pass also makes a scratch view
+    // at its end that is dropped before it is ever published.
+    const bool boundary_view = boundary2 > 0 && boundary == 0;
+    if ((capture_pair || checkpoint2) && boundary2 > tokens_.size() &&
+        boundary2 <= tokens_.size() + n) {
+      // Dual in-pass capture: both boundaries share the
+      // chunk the runner hands the pair; P freezes into the widened-tail
+      // arena, S keeps today's view.
+      if (boundary_view) {
+        // Without S the scratch view ends this chunk beside P, which must
+        // precede it: a pass end is not an in-pass view.
+        if (boundary2 == tokens_.size() + n) {
+          AssignError(error_msg, "in-pass boundary must precede its pass end");
+          return false;
+        }
+        capture = exec.MakePrefillCheckpoint(
+            *session_, chunk, static_cast<std::uint32_t>(n), error_msg);
+        if (!capture)
+          return false;
+      } else if (!(boundary > tokens_.size() &&
+                   boundary <= tokens_.size() + n)) {
+        AssignError(error_msg, "dual prefill checkpoints must share a chunk");
+        return false;
+      }
+      capture2 = exec.MakePrefillCheckpoint(
+          *session_, chunk,
+          static_cast<std::uint32_t>(boundary2 - tokens_.size()), error_msg,
+          rocm::kPairTailRows);
+      if (!capture2)
+        return false;
+    }
+    if ((checkpoint || consume || capture_pair) && boundary > tokens_.size() &&
         boundary <= tokens_.size() + n) {
       capture = exec.MakePrefillCheckpoint(
           *session_, chunk,
@@ -814,8 +914,19 @@ bool Session::Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
         rest.size() <= exec.max_batch() ? exec.max_batch()
                                         : model_->PrefillCapacity(),
         rest.size()));
+    const std::function<void()> logits_ready = [this] {
+      struct Restore {
+        bool& valid;
+        ~Restore() { valid = false; }
+      } restore{valid_};
+      valid_ = true;
+      (*logits_hook_)();
+    };
+    const bool hooked = prefill && logits_hook_ != nullptr && *logits_hook_ &&
+                        off + n == tokens.size();
     if (!exec.Forward(*session_, chunk, 1, logits_.data(), mode, error_msg,
-                      capture.get(), next)) {
+                      capture.get(), capture2.get(), next,
+                      hooked ? &logits_ready : nullptr)) {
       return false;
     }
     const auto kept = capture && capture->tokens < n ? n - capture->tokens : n;
@@ -825,7 +936,30 @@ bool Session::Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
     tokens_.insert(tokens_.end(), chunk.begin(), chunk.end());
     if (capture) {
       const auto started = std::chrono::steady_clock::now();
-      if (consume) {
+      if (boundary_view) {
+        // Only P is published; the scratch view beside it is never
+        // consumed and is dropped with its unique_ptr.
+        if (capture_pair) {
+          capture_pair(*capture2, boundary2);
+        } else {
+          *checkpoint2 = SaveSnapshotImpl(
+              *capture2->state,
+              std::span<const std::int32_t>(tokens_).first(boundary2),
+              capture2->logits, capture2->hidden_rows, error_msg,
+              SnapshotMode::kBorrowed);
+          if (capture_ms)
+            *capture_ms += std::chrono::duration<double, std::milli>(
+                               std::chrono::steady_clock::now() - started)
+                               .count();
+          if (!*checkpoint2)
+            return false;
+        }
+      } else if (capture_pair) {
+        // Ascending order: the earlier P view first, then S.
+        if (capture2)
+          capture_pair(*capture2, boundary2);
+        capture_pair(*capture, boundary);
+      } else if (consume) {
         consume(*capture);
       } else {
         *checkpoint = SaveSnapshotImpl(
@@ -833,11 +967,18 @@ bool Session::Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
             std::span<const std::int32_t>(tokens_).first(boundary),
             capture->logits, capture->hidden_rows, error_msg,
             SnapshotMode::kBorrowed);
+        if (checkpoint2 && capture2 && *checkpoint) {
+          *checkpoint2 = SaveSnapshotImpl(
+              *capture2->state,
+              std::span<const std::int32_t>(tokens_).first(boundary2),
+              capture2->logits, capture2->hidden_rows, error_msg,
+              SnapshotMode::kBorrowed);
+        }
         if (capture_ms)
           *capture_ms += std::chrono::duration<double, std::milli>(
                              std::chrono::steady_clock::now() - started)
                              .count();
-        if (!*checkpoint)
+        if (!*checkpoint || (checkpoint2 && !*checkpoint2))
           return false;
       }
     }
@@ -887,11 +1028,97 @@ bool Session::SyncThroughComponents(std::span<const std::int32_t> prompt,
   return SyncImpl(prompt, error_msg, boundary, nullptr, nullptr, {}, capture);
 }
 
+bool Session::SyncThroughPair(
+    std::span<const std::int32_t> prompt, std::uint32_t boundary_first,
+    std::uint32_t boundary, std::unique_ptr<SessionSnapshot>* checkpoint_first,
+    std::unique_ptr<SessionSnapshot>* checkpoint, std::string* error_msg,
+    double* capture_ms) {
+  if (continuation_hooks_)
+    continuation_hooks_->BeforeExecution();
+  if (!checkpoint_first || !checkpoint || prompt.empty() ||
+      boundary_first == 0 || boundary_first >= boundary ||
+      boundary > prompt.size() || prompt.size() - boundary > 8 ||
+      boundary <= tokens_.size() || boundary_first <= tokens_.size()) {
+    AssignError(error_msg,
+                "dual prefill checkpoints must extend the frontier in "
+                "ascending order in the text tail");
+    return false;
+  }
+  checkpoint_first->reset();
+  checkpoint->reset();
+  if (capture_ms)
+    *capture_ms = 0;
+  return SyncImpl(prompt, error_msg, boundary, checkpoint, capture_ms, {}, {},
+                  boundary_first, {}, checkpoint_first);
+}
+
+bool Session::SyncThroughBoundary(std::span<const std::int32_t> prompt,
+                                  std::uint32_t boundary,
+                                  std::unique_ptr<SessionSnapshot>* checkpoint,
+                                  std::string* error_msg, double* capture_ms) {
+  if (continuation_hooks_)
+    continuation_hooks_->BeforeExecution();
+  if (!checkpoint || boundary == 0 || boundary >= prompt.size() ||
+      prompt.size() - boundary > rocm::kPairTailRows ||
+      boundary <= tokens_.size()) {
+    AssignError(error_msg,
+                "in-pass boundary must extend the frontier within the pass "
+                "tail");
+    return false;
+  }
+  checkpoint->reset();
+  if (capture_ms)
+    *capture_ms = 0;
+  return SyncImpl(prompt, error_msg, 0, nullptr, capture_ms, {}, {}, boundary,
+                  {}, checkpoint);
+}
+
+bool Session::SyncThroughComponentsBoundary(
+    std::span<const std::int32_t> prompt, std::uint32_t boundary,
+    const PrefillCapturePair& capture, std::string* error_msg) {
+  if (continuation_hooks_)
+    continuation_hooks_->BeforeExecution();
+  if (!capture || boundary == 0 || boundary >= prompt.size() ||
+      prompt.size() - boundary > rocm::kPairTailRows ||
+      boundary <= tokens_.size()) {
+    AssignError(error_msg,
+                "in-pass boundary must extend the frontier within the pass "
+                "tail");
+    return false;
+  }
+  return SyncImpl(prompt, error_msg, 0, nullptr, nullptr, {}, {}, boundary,
+                  capture, nullptr);
+}
+
+bool Session::SyncThroughComponentsPair(std::span<const std::int32_t> prompt,
+                                        std::uint32_t boundary_first,
+                                        std::uint32_t boundary,
+                                        const PrefillCapturePair& capture,
+                                        std::string* error_msg) {
+  if (continuation_hooks_)
+    continuation_hooks_->BeforeExecution();
+  if (!capture || prompt.empty() || boundary_first == 0 ||
+      boundary_first >= boundary || boundary > prompt.size() ||
+      prompt.size() - boundary > 8 || boundary <= tokens_.size() ||
+      boundary_first <= tokens_.size()) {
+    AssignError(error_msg,
+                "dual component checkpoint must extend the frontier in "
+                "ascending order in the text tail");
+    return false;
+  }
+  // The text-tail-8 rule governs S only; P may trail the pass end by up to
+  // kPairTailRows.
+  return SyncImpl(prompt, error_msg, boundary, nullptr, nullptr, {}, {},
+                  boundary_first, capture, nullptr);
+}
+
 bool Session::SyncImpl(std::span<const std::int32_t> prompt,
                        std::string* error_msg, std::uint32_t boundary,
                        std::unique_ptr<SessionSnapshot>* checkpoint,
                        double* capture_ms, std::span<const std::int32_t> next,
-                       const PrefillCapture& capture) {
+                       const PrefillCapture& capture, std::uint32_t boundary2,
+                       const PrefillCapturePair& capture_pair,
+                       std::unique_ptr<SessionSnapshot>* checkpoint2) {
   if (prompt.empty()) {
     AssignError(error_msg, "prompt is empty");
     return false;
@@ -918,8 +1145,9 @@ bool Session::SyncImpl(std::span<const std::int32_t> prompt,
     common = 0;
   }
   valid_ = false;
-  const bool ok = Feed(prompt.subspan(common), error_msg, true, boundary,
-                       checkpoint, capture_ms, next, capture);
+  const bool ok =
+      Feed(prompt.subspan(common), error_msg, true, boundary, checkpoint,
+           capture_ms, next, capture, boundary2, capture_pair, checkpoint2);
   valid_ = ok;
   if (ok && LfnPromptDump()) {
     std::fprintf(stderr, "LFN_PROMPT n=%zu", prompt.size());
@@ -952,6 +1180,9 @@ bool Session::Evaluate(std::int32_t token, std::string* error_msg) {
 struct Session::PendingDecode {
   std::vector<std::int32_t> chain;
   std::vector<MtpProposal> proposals;
+  /// Target-model logprobs for the anchor (chain[0]), captured at Sample
+  /// time. Set only when the request armed logprobs.
+  std::optional<sampling::CapturedTokenLogprobs> anchor_logprobs;
   std::uint32_t base{0};
   bool speculative{false};
   bool sampled{false};
@@ -999,8 +1230,12 @@ bool Session::AppendLookup(PendingDecode& pending, bool stop_at_eos,
   if (match.length == 0) {
     return false;
   }
-  const std::size_t available = std::min(cap - pending.chain.size(),
-                                         lookup_.IndexedTokens() - match.start);
+  std::size_t room = cap - pending.chain.size();
+  if (!lookup_.Continues(match.start)) {
+    room = std::min(room, PromptLookup::kFreshCopyTokens);
+  }
+  const std::size_t available =
+      std::min(room, lookup_.IndexedTokens() - match.start);
   if (available < minimum)
     return false;
   std::size_t count = 0;
@@ -1057,9 +1292,18 @@ bool Session::PrepareDecode(const DecodeRequest& request,
   // jointly planned (DecodeBatchImpl), so a sampled request decides the same
   // way alone and in any batch. Every request keeps the established length
   // controller and AR backoff.
-  const bool unmodified = !sampler.config().uses_random_sampling() &&
-                          !sampler.config().penalties_enabled() &&
-                          !sampler.config().constraint;
+  // Greedy requests with penalties draft through the small head too: the
+  // target verifies every draft with the same penalties
+  // (GreedyMtpPredictions), so only proposals change, never text.
+  // LFN_MTP_SUBSET_PENALTIES=0 restores the full head for them.
+  static const bool subset_penalties = [] {
+    const char* v = std::getenv("LFN_MTP_SUBSET_PENALTIES");
+    return !(v != nullptr && v[0] == '0' && v[1] == '\0');
+  }();
+  const bool unmodified =
+      !sampler.config().uses_random_sampling() &&
+      (subset_penalties || !sampler.config().penalties_enabled()) &&
+      !sampler.config().constraint;
   const bool allow_subset =
       MtpDraftSubsetAllowed(sampler.config().uses_random_sampling(), unmodified,
                             concurrency, batch_drafts.has_value());
@@ -1082,7 +1326,20 @@ bool Session::PrepareDecode(const DecodeRequest& request,
     result->stop = true;
     return true;
   }
+  // A deferred residual draw belongs to the previous step's target
+  // distribution, so the next step must not recompute it from these logits.
+  const auto deferred = sampler.pending_sample();
   const auto anchor = static_cast<std::int32_t>(sampler.Sample(logits_));
+  if (sampler.logprobs_enabled()) {
+    if (deferred && deferred->logprobs &&
+        deferred->token == static_cast<sampling::TokenId>(anchor)) {
+      pending->anchor_logprobs = deferred->logprobs;
+    } else {
+      pending->anchor_logprobs = sampler.CaptureLogprobs(
+          std::span<const float>(logits_),
+          static_cast<sampling::TokenId>(anchor), sampler.logprobs_top_n());
+    }
+  }
   if (is_stop(anchor)) {
     result->stop = true;
     return true;
@@ -1143,17 +1400,21 @@ bool Session::PrepareDecode(const DecodeRequest& request,
                           draft_vocab_.Fits(anchor, [&](std::int32_t token) {
                             return model_->InDraftSubset(token);
                           });
-  if (!defer_head && !DraftCatchUp(anchor, true, error_msg,
-                                   sampled ? &pending->candidates : nullptr,
-                                   pending->draft_subset)) {
+  if (!defer_head &&
+      !DraftCatchUp(anchor, true, error_msg,
+                    sampled || gate || dump ? &pending->candidates : nullptr,
+                    pending->draft_subset)) {
     return false;
   }
   pending->draft = draft_token_;
   if (!defer_head) {
+    const float pchain = LfnMtpPChain();
+    float chain_p = 1.f;
     while (pending->chain.size() < width) {
       if (gate || dump) {
         const float p = ForkDraftTopProbability(pending->candidates, 10);
-        const bool skip = gate && p < pmin;
+        chain_p *= p;
+        const bool skip = gate && (p < pmin || chain_p < pchain);
         LfnTraceDraft(pending->draft, pending->candidates, p, skip);
         if (dump) {
           const std::uint32_t mtp_at = exec.MtpPosition(*session_);
@@ -1208,15 +1469,33 @@ bool Session::FinishDecode(const DecodeRequest& request,
   const auto anchor = chain.front();
   const auto k = static_cast<std::uint32_t>(chain.size());
   const auto vocab = model_->VocabSize();
+  const bool armed = sampler.logprobs_enabled();
+  // Parallel to the emitted tokens below; moved to result->logprobs only
+  // when armed, so an unarmed step allocates nothing here.
+  std::vector<sampling::CapturedTokenLogprobs> row_logprobs;
+  if (armed) {
+    row_logprobs.reserve(k);
+    // Armed implies PrepareDecode captured the anchor (or carried the
+    // deferred residual's report); a missing entry fails loudly below.
+    if (!pending.anchor_logprobs) {
+      AssignError(error_msg, "logprobs-armed decode has no anchor report");
+      return false;
+    }
+    row_logprobs.push_back(*pending.anchor_logprobs);
+  }
   const auto is_stop = [&](std::int32_t token) {
     return request.stop_at_eos && model_->IsStopToken(token);
   };
   if (!pending.speculative) {
     draft_length_.ObserveArToken();
+    LfnMtpTrace(base, 0, 0, 0);
     hidden_base_ = base;
     tokens_.push_back(anchor);
     sampler.Accept(static_cast<sampling::TokenId>(anchor));
     result->tokens.push_back(anchor);
+    if (armed) {
+      result->logprobs.push_back(std::move(row_logprobs.front()));
+    }
     return true;
   }
   sampler.Accept(static_cast<sampling::TokenId>(anchor));
@@ -1228,7 +1507,22 @@ bool Session::FinishDecode(const DecodeRequest& request,
   }
   std::uint32_t keep = 1;
   std::optional<std::int32_t> correction;
+  std::optional<sampling::CapturedTokenLogprobs> correction_logprobs;
   bool cpu_rows = false;
+  // The device greedy path never downloads target rows; logprobs need them,
+  // so an armed request verifies on the host from a single upfront download.
+  // The decisions match the device path token for token (both are exact
+  // target argmaxes with the same penalties), only the row source changes.
+  // All k rows: rows 0..k-2 judge the drafts, and row k-1 is the frontier
+  // the next step samples from when every draft is accepted.
+  if (armed && gpu_greedy && k >= 2) {
+    verify_logits_.resize(exec.max_speculative() * vocab);
+    auto rows = std::span(verify_logits_).subspan(0, k * vocab);
+    if (!exec.ReadVerificationRows(0, rows, error_msg)) {
+      return false;
+    }
+    cpu_rows = true;
+  }
   while (keep < k) {
     if (gpu_greedy && !cpu_rows) {
       const auto& prediction = greedy[keep - 1];
@@ -1262,10 +1556,11 @@ bool Session::FinishDecode(const DecodeRequest& request,
       continue;
     }
     if (sampled) {
-      const auto verified =
-          VerifyMtpProposal(std::span<const float>(verify_logits_)
-                                .subspan((keep - 1) * vocab, vocab),
-                            proposals[keep - 1], sampler);
+      sampling::CapturedTokenLogprobs verified_logprobs;
+      const auto verified = VerifyMtpProposal(
+          std::span<const float>(verify_logits_)
+              .subspan((keep - 1) * vocab, vocab),
+          proposals[keep - 1], sampler, armed ? &verified_logprobs : nullptr);
       const auto token = static_cast<std::int32_t>(verified.token);
       const bool accepted = verified.accepted;
       if (is_stop(token)) {
@@ -1274,18 +1569,27 @@ bool Session::FinishDecode(const DecodeRequest& request,
       }
       if (!accepted) {
         correction = token;
+        correction_logprobs = std::move(verified_logprobs);
         break;
       }
       sampler.Accept(static_cast<sampling::TokenId>(token));
+      if (armed) {
+        row_logprobs.push_back(std::move(verified_logprobs));
+      }
       ++keep;
       continue;
     }
+    sampling::CapturedTokenLogprobs draft_logprobs;
     const auto decision = VerifyDraft(std::span<const float>(verify_logits_)
                                           .subspan((keep - 1) * vocab, vocab),
-                                      chain[keep], sampler, is_stop);
+                                      chain[keep], sampler, is_stop,
+                                      armed ? &draft_logprobs : nullptr);
     if (decision != DraftDecision::kAccept) {
       result->stop = decision == DraftDecision::kStop;
       break;
+    }
+    if (armed) {
+      row_logprobs.push_back(std::move(draft_logprobs));
     }
     ++keep;
   }
@@ -1301,6 +1605,16 @@ bool Session::FinishDecode(const DecodeRequest& request,
   hidden_base_ = base;
   tokens_.insert(tokens_.end(), chain.begin(), chain.begin() + keep);
   result->tokens.assign(chain.begin(), chain.begin() + keep);
+  if (armed) {
+    // One entry per emitted token: the anchor plus one per accepted row.
+    // A stop or rejected correction breaks before pushing, so sizes match.
+    if (row_logprobs.size() != static_cast<std::size_t>(keep)) {
+      AssignError(error_msg, "logprobs report does not match emitted tokens");
+      return false;
+    }
+    result->logprobs.assign(std::make_move_iterator(row_logprobs.begin()),
+                            std::make_move_iterator(row_logprobs.end()));
+  }
   stats_.cycles += 1;
   stats_.drafted += k - 1;
   stats_.accepted += keep - 1;
@@ -1325,6 +1639,7 @@ bool Session::FinishDecode(const DecodeRequest& request,
   draft_length_.Observe(observed,
                         result->stop || mtp_all ? observed : mtp_drafts, base,
                         pending.policy_concurrency);
+  LfnMtpTrace(base, mtp_drafts, mtp_accepted, pending.lookup);
 
   // The next call knows the next sampled anchor. Defer draft catch-up until
   // then, retaining this session's target hidden rows across interleaving.
@@ -1332,7 +1647,14 @@ bool Session::FinishDecode(const DecodeRequest& request,
   if (correction) {
     // Evaluate the residual as the next cycle's anchor, avoiding a separate
     // target pass. Preserve the actual draw: resampling p would be biased.
-    sampler.DeferSample(static_cast<sampling::TokenId>(*correction));
+    // Its logprobs ride along so the next step reports the distribution
+    // that drew it, not the next position's target.
+    if (armed && correction_logprobs) {
+      sampler.DeferSample(static_cast<sampling::TokenId>(*correction),
+                          std::move(*correction_logprobs));
+    } else {
+      sampler.DeferSample(static_cast<sampling::TokenId>(*correction));
+    }
   }
   return true;
 }
@@ -1528,9 +1850,11 @@ bool Session::DecodeBatchImpl(std::span<const DecodeRequest> requests,
       const auto& r = requests[i];
       const auto cap = std::min<std::size_t>(
           r.max_tokens, r.session->ContextSize() - r.session->Position());
+      const std::size_t neural_rows =
+          std::size_t{r.session->model_->options_.max_draft_tokens} + 1;
       rows[i] = {&r.session->draft_length_,
-                 static_cast<std::uint32_t>(
-                     std::min<std::size_t>(cap, exec.max_speculative())) -
+                 static_cast<std::uint32_t>(std::min<std::size_t>(
+                     {cap, exec.max_speculative(), neural_rows})) -
                      (cap != 0)};
       batch_context = std::max(batch_context, r.session->Position());
     }

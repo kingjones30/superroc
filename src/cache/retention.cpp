@@ -18,6 +18,15 @@ std::uint32_t MaxRank(RetentionPurpose p) {
          : p == RetentionPurpose::kHistory ? 1
                                            : 3;
 }
+// How far an optional grid point moves back to reach a pass end. A point
+// inside a pass splits it, and two narrow passes run slower than one wide one:
+// Flash-Next on a Radeon 8060S prefills a 3,252-token prompt in 1.61 s as one
+// pass and in 1.78 s as 2,048 + 1,204 rows with the capture between them.
+// A pass is split only when no pass end is this close.
+constexpr Rows kGridSnapRows = 4096;
+// Canonical plans cut on multiples of this many rows: a multiple of every
+// model's own cut unit (Flash-Next: 4-row key blocks).
+constexpr Rows kCanonicalCutRows = 64;
 }  // namespace
 std::size_t GridLimit(std::size_t ram_bytes, std::size_t private_bytes) {
   return private_bytes
@@ -57,28 +66,69 @@ std::vector<CaptureCandidate> PlanCaptures(const Adapter& adapter,
         {boundary, purpose, required,
          boundary > r.reused && !std::ranges::binary_search(passes, boundary)});
   };
+  const Rows canonical = r.canonical_min_pass;
+  const auto allowed = [&](Rows position) {
+    return !canonical || (position % kCanonicalCutRows == 0 &&
+                          position - r.reused >= canonical &&
+                          r.prompt - position >= canonical);
+  };
   add(r.reused, CheckpointPurpose::kPrompt, true);
-  add(r.stable, CheckpointPurpose::kPrompt, true);
-  add(r.prompt, CheckpointPurpose::kPrompt, true);
+  if (!canonical) {
+    add(r.stable, CheckpointPurpose::kPrompt, true);
+    add(r.prompt, CheckpointPurpose::kPrompt, true);
+  }
   if (r.grid && r.prompt) {
     const Rows grid = (r.prompt - 1) / 2048;
     const Rows count = std::min<Rows>(grid, 4);
     std::size_t planned = 0;
+    Rows last = 0;
     for (Rows i = 1; i <= count && planned < r.grid_limit; ++i) {
       Rows position = (grid / count * i + grid % count * i / count) * 2048;
-      auto pass = std::ranges::upper_bound(passes, position);
-      if (pass != passes.begin() && position - *std::prev(pass) <= 128 &&
-          *std::prev(pass) > r.reused && *std::prev(pass) - r.reused >= 2048)
-        position = *std::prev(pass);
+      if (position <= r.reused)
+        continue;
+      // Take the point where a pass already ends. The frontier counts as a
+      // pass end: a point that would move back onto it is dropped.
+      const auto pass = std::ranges::upper_bound(passes, position);
+      const Rows before = pass != passes.begin() ? *std::prev(pass) : r.reused;
+      if (position - before <= kGridSnapRows)
+        position = before;
       if (position > r.reused && position - r.reused >= 2048 &&
-          r.prompt - position > 128) {
+          r.prompt - position > 128 && position != last && allowed(position)) {
         add(position, CheckpointPurpose::kGrid, false);
         ++planned;
+        last = position;
       }
     }
   }
-  if (r.learn && r.common >= r.reused && r.common - r.reused >= 512 &&
-      r.prompt - r.common > 64) {
+  if (canonical) {
+    // The turn's own restore point: the last allowed cut before the prompt
+    // end. The pass after it holds canonical to canonical + 63 rows. With
+    // r.tail set and a prompt that reaches past canonical + r.tail, the cut
+    // moves r.tail rows further from the end (far = (r.prompt - canonical -
+    // r.tail) rounded down to a cut row), so a follow-up that changes only
+    // its closing rows restores there; the pass after it then holds
+    // canonical + r.tail to canonical + r.tail + 63 rows. A far cut on or
+    // before the reused frontier, or one the rule refuses, keeps the
+    // position of today.
+    if (r.prompt > canonical) {
+      Rows position =
+          (r.prompt - canonical) / kCanonicalCutRows * kCanonicalCutRows;
+      if (r.tail && r.prompt > canonical + r.tail) {
+        const Rows far = (r.prompt - canonical - r.tail) / kCanonicalCutRows *
+                         kCanonicalCutRows;
+        if (far > r.reused && allowed(far))
+          position = far;
+      }
+      if (position > r.reused && allowed(position))
+        add(position, CheckpointPurpose::kGrid, false);
+    }
+  } else if (r.tail && r.grid_limit && r.prompt > r.tail) {
+    const Rows position = (r.prompt - r.tail) / 64 * 64;
+    if (position > r.reused && position - r.reused >= 512)
+      add(position, CheckpointPurpose::kGrid, false);
+  }
+  if (!canonical && r.learn && r.common >= r.reused &&
+      r.common - r.reused >= 512 && r.prompt - r.common > 64) {
     Rows position = r.common;
     Rows planned = 0;
     for (const auto& c : result)

@@ -150,10 +150,35 @@ public:
                                  std::unique_ptr<SessionSnapshot>* checkpoint,
                                  std::string* error_msg = nullptr,
                                  double* capture_ms = nullptr);
+  /// Prefills through a stable text boundary S while freezing the earlier
+  /// boundary P in the same pass (dual in-pass capture;
+  /// P takes the widened kPairTailRows tail). Returns both checkpoints:
+  /// checkpoint_first is P, checkpoint is S. P must extend the frontier and
+  /// precede S by at least one row; the pair is refused when either boundary
+  /// cannot be captured in-pass and the whole sync fails.
+  [[nodiscard]] bool SyncThroughPair(
+      std::span<const std::int32_t> prompt, std::uint32_t boundary_first,
+      std::uint32_t boundary,
+      std::unique_ptr<SessionSnapshot>* checkpoint_first,
+      std::unique_ptr<SessionSnapshot>* checkpoint,
+      std::string* error_msg = nullptr, double* capture_ms = nullptr);
+  /// Freezes `boundary` (P) inside its pass while the pass continues to the
+  /// prompt end: the pair path with only P. The executor freezes a view
+  /// beside every earlier view, so this pass also makes a scratch view at
+  /// its end that is dropped before it is published. Refused when P equals
+  /// its pass end (a pass end is today's split capture, not an in-pass view);
+  /// the whole sync fails on refusal.
+  [[nodiscard]] bool SyncThroughBoundary(
+      std::span<const std::int32_t> prompt, std::uint32_t boundary,
+      std::unique_ptr<SessionSnapshot>* checkpoint,
+      std::string* error_msg = nullptr, double* capture_ms = nullptr);
   [[nodiscard]] bool Evaluate(std::int32_t token,
                               std::string* error_msg = nullptr);
   struct DecodeResult {
     std::vector<std::int32_t> tokens;
+    /// Target-model logprobs parallel to `tokens`, filled only when the
+    /// request armed logprobs; empty otherwise.
+    std::vector<sampling::CapturedTokenLogprobs> logprobs;
     bool stop{false};
   };
   /// Greedy decoding verifies deterministic drafts. Sampled decoding draws
@@ -197,6 +222,12 @@ public:
       std::string* error_msg = nullptr);
   [[nodiscard]] std::span<const float> Logits() const noexcept {
     return valid_ ? std::span<const float>(logits_) : std::span<const float>{};
+  }
+  /// Runs inside the next Sync when its final logits are readable, before the
+  /// draft catch-up and any checkpoint of that step. Logits() is valid during
+  /// the call; the session must not be used otherwise.
+  void SetLogitsHook(const std::function<void()>* hook) noexcept {
+    logits_hook_ = hook;
   }
   [[nodiscard]] std::uint32_t Position() const noexcept;
   [[nodiscard]] std::uint32_t ContextSize() const noexcept;
@@ -261,21 +292,38 @@ private:
   void ResetImpl(bool reuse_mtp);
 
   using PrefillCapture = std::function<void(const rocm::PrefillCheckpoint&)>;
+  /// Dual in-pass capture: invoked once per frozen view
+  /// in ascending boundary order, with that view's boundary.
+  using PrefillCapturePair =
+      std::function<void(const rocm::PrefillCheckpoint&, std::uint32_t)>;
   bool SyncThroughComponents(std::span<const std::int32_t>, std::uint32_t,
                              const PrefillCapture&, std::string*);
+  /// Component view of SyncThroughBoundary: the consumer runs once for the
+  /// P view, synchronously while it is readable.
+  bool SyncThroughComponentsBoundary(std::span<const std::int32_t>,
+                                     std::uint32_t boundary,
+                                     const PrefillCapturePair&, std::string*);
+  bool SyncThroughComponentsPair(std::span<const std::int32_t>,
+                                 std::uint32_t boundary_first,
+                                 std::uint32_t boundary,
+                                 const PrefillCapturePair&, std::string*);
 
   bool Feed(std::span<const std::int32_t> tokens, std::string* error_msg,
             bool prefill = false, std::uint32_t boundary = 0,
             std::unique_ptr<SessionSnapshot>* checkpoint = nullptr,
             double* capture_ms = nullptr,
             std::span<const std::int32_t> after = {},
-            const PrefillCapture& capture = {});
+            const PrefillCapture& capture = {}, std::uint32_t boundary2 = 0,
+            const PrefillCapturePair& capture_pair = {},
+            std::unique_ptr<SessionSnapshot>* checkpoint2 = nullptr);
   bool SyncImpl(std::span<const std::int32_t> prompt, std::string* error_msg,
                 std::uint32_t boundary,
                 std::unique_ptr<SessionSnapshot>* checkpoint,
                 double* capture_ms = nullptr,
                 std::span<const std::int32_t> next = {},
-                const PrefillCapture& capture = {});
+                const PrefillCapture& capture = {}, std::uint32_t boundary2 = 0,
+                const PrefillCapturePair& capture_pair = {},
+                std::unique_ptr<SessionSnapshot>* checkpoint2 = nullptr);
   std::unique_ptr<SessionSnapshot> SaveSnapshotImpl(
       const rocm::Session& state, std::span<const std::int32_t> tokens,
       std::span<const float> logits, std::uint32_t hidden_rows,
@@ -327,6 +375,7 @@ private:
   [[nodiscard]] std::span<const std::uint8_t> ImageIdentity(
       std::size_t token_count) const;
   bool valid_{true};
+  const std::function<void()>* logits_hook_{nullptr};
   ContinuationHooks* continuation_hooks_{nullptr};
   /// This request's draft vocabulary; the device table follows it.
   MtpDraftVocab draft_vocab_;

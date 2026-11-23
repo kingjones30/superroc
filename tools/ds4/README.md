@@ -1,7 +1,6 @@
 # DS4 development tools
 
-Run from the repository root inside `nix develop`. Build, correctness, and benchmark requirements
-are in [the DS4 benchmark README](../../docs/models/deepseek-v4-flash/BENCHMARKS.md).
+Run from the repository root inside `nix develop`.
 
 | Tool | Purpose |
 | --- | --- |
@@ -53,12 +52,10 @@ difference, and top-token agreement; these diagnostics do not relax a gate.
 
 Model inference timings always use the release `result/bin/superroc`. Do not use
 CTest/debug model executables for performance claims. Temporary profiler traces
-and experiment artifacts stay outside Git; retained experiment decisions belong
-in the benchmark README. There are no production reference-route switches.
+and experiment artifacts stay outside Git. There are no production
+reference-route switches.
 
 For HTTP A/B comparisons, use a fixed `--suite` corpus and a fresh server per
 variant. The ordinary `--prompt` benchmark inserts a random nonce into the
 prompt; separate invocations therefore cannot establish identical-input output
-or acceptance comparisons. Report cache hits explicitly. Sampling contracts
-and the retained confidence/proposal controls are in the
-[DSpark sampling report](../../docs/models/deepseek-v4-flash/QUALITY.md).
+or acceptance comparisons. Report cache hits explicitly.

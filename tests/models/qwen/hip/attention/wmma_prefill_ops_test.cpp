@@ -292,7 +292,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
     std::cout << "  chunk boundaries: byte-identical\n";
   }
 
-  if (start_pos >= 8192 || batch_size >= 1024) {
+  if (start_pos >= 8192 || batch_size >= 256) {
     const std::size_t length = start_pos + batch_size;
     const std::array<std::size_t, 2> words{
         length * kv_size / 2,
@@ -350,7 +350,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size, bool want_lse,
         const bool untouched = std::all_of(
             first.begin(), first.end(), [](auto byte) { return byte == 0xA5; });
         if (untouched ==
-            (key_heads != 0 && value_heads != 0 && batch_size >= 1024 &&
+            (key_heads != 0 && value_heads != 0 && batch_size >= 256 &&
              key_begin < length && key_begin % 16 == 0))
           std::abort();
         for (std::size_t off : {std::size_t{0}, sizes[i] + 16}) {

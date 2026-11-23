@@ -1,4 +1,4 @@
-// KPF2 SPEC1 step 4: the 32k multi-block grouper is bit-identical to the
+// The 32k multi-block grouper is bit-identical to the
 // serial oracle. For slots in {4096, 8192, 8193, 16384, 24576, 32768} with
 // three seeded random routings each (ids in [0, 256), top-8 per token,
 // random weights), run the oracle (SUPERROC_FP4_MOE_GROUP_SERIAL=1 path) and

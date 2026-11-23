@@ -6,7 +6,7 @@
 // ForwardTokenBatch path serve uses is covered with N sessions against
 // single ForwardToken references. With SUPERROC_VERIFY_DEBUG=1 the first
 // differing per-stage snapshot is also reported.
-// Forced modes (SPEC2 S2-1): SUPERROC_FP4_FORCE_REFUSE=1 declines every FP4
+// Forced modes: SUPERROC_FP4_FORCE_REFUSE=1 declines every FP4
 // GEMV intercept (decode and verify alike); SUPERROC_VERIFY_DISCARD_WARMUP=1
 // drops the FP4 warm mark after load so every ShapeOk fails. Both must give
 // verify == decode, bit for bit, with no exception.
@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
 #include "src/models/qwen/hip/detail/verify_debug.hpp"
@@ -58,7 +58,7 @@ constexpr std::string_view kText =
     "across many instructions at once.";
 
 bool EnvOn(const char* name) {
-  const char* env = ::superroc::core::GetEnvCompat(name);
+  const char* env = ::superroc::core::GetEnv(name);
   return env != nullptr && env[0] == '1';
 }
 
@@ -261,8 +261,7 @@ bool CheckRow(std::size_t width, std::size_t row, std::span<const float> dd,
 int main(int argc, const char* const* argv) {
   try {
     const char* model =
-        argc > 1 ? argv[1]
-                 : ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_MODEL");
+        argc > 1 ? argv[1] : ::superroc::core::GetEnv("SUPERROC_VERIFY_MODEL");
     if (model == nullptr) {
       std::cout << "Set SUPERROC_VERIFY_MODEL for verify_equals_decode.\n";
       return kSkipped;
@@ -426,7 +425,7 @@ int main(int argc, const char* const* argv) {
       failed = failed || !width_ok;
     }
 
-    // S2-2: the >8-row integer path in both forms (<=8-row verify_m chunks
+    // The >8-row integer path in both forms (<=8-row verify_m chunks
     // vs the per-row loop) must be bit-identical; report both timings
     // (min of 3 runs each).
     const std::vector<std::size_t> form_widths =
@@ -502,7 +501,7 @@ int main(int argc, const char* const* argv) {
       failed = failed || !forms_ok;
     }
 
-    // S2-4: the ForwardTokenBatch path serve uses, N sessions against
+    // The ForwardTokenBatch path serve uses, N sessions against
     // single ForwardToken references from identical per-session states.
     const std::size_t batch_n = smoke ? 2 : 4;
     {

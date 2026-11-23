@@ -9,7 +9,7 @@
 #include <span>
 #include <stdexcept>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/sampling.hpp"
 #include "src/models/deepseek_v4_flash/runtime/model.h"
 
@@ -143,7 +143,7 @@ private:
                   std::span(proposal.ids).first(proposal.size),
                   std::span(proposal.probabilities).first(proposal.size),
                   self.working_.mutable_rng_state());
-    if (::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_DSPARK_TRACE"))
+    if (::superroc::core::GetEnv("SUPERROC_DEEPSEEK_DSPARK_TRACE"))
       std::fprintf(stderr,
                    "ds4: DSpark sample row=%u confidence=%.6f accepted=%d "
                    "p=%.6f q=%.6f\n",

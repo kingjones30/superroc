@@ -1,11 +1,11 @@
-Super ROC
+Super Roc
 Copyright (c) 2026 Myron Jones
 
-Super ROC's own code (ROCmFP4 serving and kernels, the superroc-quant quantizer, the ling3, flint, muse-glimmer,
+Super Roc's own code (ROCmFP4 serving and kernels, the superroc-quant quantizer, the ling3, flint, muse-glimmer,
 qwen35moe and lfm2moe model support, the DSpark/MTP drafting work and the serving hardening) is released under
 the MIT License in LICENSE.
 
-Super ROC began as a fork of Gufo v0.19.0 (https://github.com/gufo-org/gufo). The Gufo notice below and the MIT
+Super Roc began as a fork of Gufo v0.19.0 (https://github.com/gufo-org/gufo). The Gufo notice below and the MIT
 License in LICENSE apply to the code that came from Gufo.
 
 Gufo

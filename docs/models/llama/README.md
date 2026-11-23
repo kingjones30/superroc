@@ -1,4 +1,4 @@
-# Nanbeige4.3-33B-Base (`llama`) on Super ROC
+# Nanbeige4.3-33B-Base (`llama`) on Super Roc
 
 Dense 33B Llama-architecture model (52 layers). Serve-only: `prompt` and
 `chat` refuse llama models with a clear error (`superroc serve` instead).
@@ -39,7 +39,7 @@ superroc serve --host 127.0.0.1 --port 8080 llm \
 
 Ryzen AI Max+ 395, the file above, 128 greedy tokens after the prompt; llama.cpp ran the same file on the same machine.
 
-| prompt | Super ROC prefill tok/s | llama.cpp prefill tok/s | Super ROC decode tok/s | llama.cpp decode tok/s |
+| prompt | Super Roc prefill tok/s | llama.cpp prefill tok/s | Super Roc decode tok/s | llama.cpp decode tok/s |
 | --- | --- | --- | --- | --- |
 | 512 | 573.8 | 317.3 | 10.2 | 10.8 |
 | 4,096 | 524.0 | 279.2 | 9.1 | 10.0 |

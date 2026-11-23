@@ -490,7 +490,7 @@ void LaunchFusedSwiGLUGEMV(const void* gate_w, core::GgmlType gate_type,
                            const float* x, float* out,
                            std::size_t intermediate_size,
                            std::size_t hidden_size, hipStream_t stream) {
-  // lqw:swiglu. Gate and up land in private scratch, then the existing SiLU.
+  // Gate and up land in private scratch, then the existing SiLU.
   // rv27 fix 2: require the load-time scratch grow to have covered this
   // width, so the RocmFp4SwigluScratch call below only fetches pointers and
   // can never allocate inside the captured decode graph.

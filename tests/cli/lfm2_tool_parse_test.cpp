@@ -95,7 +95,7 @@ void TestSpaces() {
 }
 
 void TestJsonLiterals() {
-  // LFM2 (Super ROC): JSON spellings and escapes the tool grammar admits.
+  // LFM2 (Super Roc): JSON spellings and escapes the tool grammar admits.
   const auto calls = ParseLfm2PythonicCalls(
       "[f(a=true, b=false, c=null, d={\"k\": [true, null]}, e='x\\/y\\b')]");
   Check(calls.has_value(), "json literals parse");
@@ -125,7 +125,7 @@ void TestErrors() {
   Check(!ParseLfm2PythonicCalls("").has_value(), "error: empty string");
 }
 
-// HTC (RVW C3): deep nesting fails closed instead of exhausting the stack;
+// Deep nesting fails closed instead of exhausting the stack;
 // nesting within the cap still parses.
 void TestNestingCap() {
   const std::string deep = "[f(a=" + std::string(100000, '[') + "1" +

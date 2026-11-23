@@ -1,4 +1,4 @@
-// ling3_tokenize_dump.cpp — LQ1's tokenizer parity probe.
+// ling3_tokenize_dump.cpp — tokenizer parity probe.
 //
 // Prints superroc's token ids for a text file so they can be diffed against
 // llama.cpp's `llama-tokenize`. Loads ONLY the vocabulary from the GGUF: no

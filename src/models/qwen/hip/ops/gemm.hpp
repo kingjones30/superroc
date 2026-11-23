@@ -161,7 +161,7 @@ namespace detail {
     case core::GgmlType::kIQ4_NL:
     case core::GgmlType::kIQ4_XS:
     case core::GgmlType::kIQ3_S:
-    case core::GgmlType::kQ4_0_ROCMFP4:  // lqw:native-wmma
+    case core::GgmlType::kQ4_0_ROCMFP4:
     case core::GgmlType::kQ4_0_ROCMFP4_FAST:
       return true;
     default:

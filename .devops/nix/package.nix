@@ -45,6 +45,10 @@ let
       || lib.hasPrefix "cmake/" relativePath
       || relativePath == "src"
       || lib.hasPrefix "src/" relativePath
+      # CMake names sources under tools/ (the quantizer and the model tools),
+      # so configuring needs them even where the targets are not built.
+      || relativePath == "tools"
+      || lib.hasPrefix "tools/" relativePath
       || relativePath == "tests"
       || relativePath == "tests/models"
       || relativePath == "tests/models/deepseek_v4_flash"
@@ -102,10 +106,8 @@ stdenv.mkDerivation {
   installCheckPhase = ''
     runHook preInstallCheck
 
-    test "$($out/bin/superroc --version)" = "Super ROC ${versionLabel} (${revision}) - engine lineage: upstream v0.19.0 (MIT)"
+    test "$($out/bin/superroc --version)" = "Super Roc ${versionLabel} (${revision}) - engine lineage: upstream v0.19.0 (MIT)"
     $out/bin/superroc --help >/dev/null
-    test "$($out/bin/superroc-server --version)" = "Super ROC ${versionLabel} (${revision}) - engine lineage: upstream v0.19.0 (MIT)"
-    $out/bin/superroc-server --help >/dev/null
     test ! -e $out/bin/superroc-kernel-bench
     test -f $out/share/licenses/superroc/LICENSE
     test -f $out/share/licenses/superroc/third-party/LICENSE.ds4

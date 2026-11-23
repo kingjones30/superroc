@@ -1,18 +1,18 @@
-// tools/qfn_gemm_bench.cpp — LFT SPEC1 item 2 + SPEC2 item 2: per-shape GEMM
+// tools/qfn_gemm_bench.cpp — per-shape GEMM
 // microbench.
 //
 // Times, per dense (m, k) of the Flash-Next shapes in lft/DECISIONS.md:
 //   * DenseF16Gemm over Q8_0 weights (F16 WMMA, pre-narrowed activations),
 //   * the stock int8 W8A8Gemm over Q8_0 (QuantizeQ8Tiled + GEMM),
 //   * today's ROC route over type-101 weights (superroc_fp4_wmma_quant + GEMM),
-//   * --with-lfp: LFP's Fp4DenseF16Gemm over type-101 weights (v1.4+),
+//   * --with-lfp: Fp4DenseF16Gemm over type-101 weights (v1.4+),
 // and per routed geometry (512 experts, 10 used):
 //   * stock RoutedCompact + Narrow + gate/up (gated when the executor uses
 //     it) + down + MoeEpilogueVec4F16,
 //   * ROC superroc_fp4_moe_group_batch + quant + 3x gemm_grp + Swiglu + gather,
-//   * --with-lfq: LFQ's RoutedCompact + Narrow + gated/down over type-101
-//     weights (needs the LFQ stack tree; on v1.4 the launcher declines and
-//     the cells report failed-or-no-LFQ).
+//   * --with-lfq: RoutedCompact + Narrow + gated/down over type-101
+//     weights (on v1.4 the launcher declines and the cells report
+//     failed-or-no-LFQ).
 // Random weights/activations (timing only), HIP-event timing, median of N
 // reps, finite-output smoke check per route. Routed total rows carry the
 // tile width and the weight bytes the cell moves (the LFR mechanism:
@@ -20,7 +20,7 @@
 //
 // Usage: qfn_gemm_bench [tokens=2048] [reps=20] [--csv] [--dense-only]
 //        [--routed-only] [--with-lfp] [--with-lfq]
-// Run inside gpu-run (see ~/ls/kit/gemm_shapes.sh <tree>).
+// Run on an otherwise idle GPU.
 // No model load; peak device use is ~4 GB (routed cells at 2048 tokens).
 
 #include <hip/hip_runtime.h>
@@ -341,7 +341,7 @@ static void BenchDense(std::size_t T, int reps, hipStream_t stream,
   }
 }
 
-// ---- dense LFP cells (SPEC2 item 2): Fp4DenseF16Gemm over type-101 ----
+// ---- dense FP4 cells: Fp4DenseF16Gemm over type-101 ----
 
 static void BenchDenseLFP(std::size_t T, int reps, hipStream_t stream,
                           std::mt19937& rng) {
@@ -780,10 +780,10 @@ static void BenchRouted(std::size_t T, int reps, hipStream_t stream,
   }
 }
 
-// ---- routed LFQ cells (SPEC2 item 2): RoutedCompact + gated/down over
+// ---- routed LFQ cells: RoutedCompact + gated/down over
 // type-101 weights. Mirrors the stock block in BenchRouted exactly (same
 // routing, same tile plan, same epilogue); only the weight bytes and the
-// launcher type change. Needs the LFQ stack tree: on v1.4 the launcher
+// launcher type change. On v1.4 the launcher
 // declines FP4 types and every GEMM row reports failed-or-no-LFQ.
 
 static void BenchRoutedLFQ(std::size_t T, int reps, hipStream_t stream,

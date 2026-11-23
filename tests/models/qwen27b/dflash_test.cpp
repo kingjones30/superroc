@@ -19,7 +19,7 @@
 #include <string_view>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/core/json.hpp"
 #include "src/core/speculative/speculative_verifier.hpp"
@@ -54,6 +54,19 @@ void TestLengthController() {
     for (int round = 0; round < 32; ++round)
       adaptive.Observe(0, adaptive.Choose(7));
     Expect(adaptive.Choose(7) == 1, "rejections reduce wasted verification");
+    // A short context drafts the whole limit once acceptance is not near zero.
+    DFlashLengthController wide(DFlashDraftPolicy::kAdaptive, 7, false, true);
+    DFlashLengthController kquant(DFlashDraftPolicy::kAdaptive, 7);
+    for (int round = 0; round < 8; ++round)
+      wide.Observe(1, wide.Choose(7, 4096)),
+          kquant.Observe(1, kquant.Choose(7));
+    const auto narrow = wide.Choose(7, 4096);
+    Expect(wide.Choose(7, 4095) == 7 && wide.Choose(3, 0) == 3,
+           "one request in a short context drafts the limit");
+    Expect(narrow < 7, "past 4096 the running mean decides");
+    Expect(wide.Choose(7, 0, 2) < 7, "the floor is for one request");
+    Expect(kquant.Choose(7) < 7,
+           "the floor is for a target with flat verify rows");
     for (int round = 0; round < 32; ++round) {
       const auto drafted = adaptive.Choose(7);
       adaptive.Observe(drafted, drafted);
@@ -722,12 +735,10 @@ int main(int argc, const char* const* argv) {
   try {
     TestLengthController();
     const char* base_path =
-        argc > 1 ? argv[1]
-                 : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
+        argc > 1 ? argv[1] : ::superroc::core::GetEnv("SUPERROC_QWEN27B_MODEL");
     const char* draft_path =
-        argc > 2
-            ? argv[2]
-            : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_DFLASH_MODEL");
+        argc > 2 ? argv[2]
+                 : ::superroc::core::GetEnv("SUPERROC_QWEN27B_DFLASH_MODEL");
     if (base_path == nullptr || draft_path == nullptr) {
       std::cout << "qwen_dflash_gpu_test: skipped "
                    "(pass base and DFlash GGUF paths)\n";

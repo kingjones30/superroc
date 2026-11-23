@@ -59,6 +59,12 @@ public:
   [[nodiscard]] std::string TokenText(std::int32_t token) const;
   [[nodiscard]] std::string Decode(std::span<const std::int32_t> tokens) const;
 
+  /// SR-03: the text of every token with type kControl or kUnknown that is
+  /// non-empty. These are exactly the spellings Encode matches verbatim
+  /// against the input, so client text overlapping one of them is encoded
+  /// with special parsing off and cannot become a control token.
+  [[nodiscard]] std::vector<std::string> SpecialSpellings() const;
+
   [[nodiscard]] std::int32_t Bos() const noexcept { return bos_; }
   [[nodiscard]] std::int32_t Eos() const noexcept { return eos_; }
   [[nodiscard]] std::int32_t Pad() const noexcept { return pad_; }
@@ -107,7 +113,12 @@ private:
   /// CONTROL / USER_DEFINED / UNKNOWN ids, longest text first, so a literal
   /// marker in the input wins over a shorter overlapping one.
   std::vector<std::int32_t> special_cache_;
+  /// Raw texts of the kControl / kUnknown tokens, captured where the types
+  /// are known (FromGguf). Returned by SpecialSpellings().
+  std::vector<std::string> special_spellings_;
   std::vector<std::uint8_t> control_;
+  /// kUnknown ids; like control_, skipped by Encode when parse_special is off.
+  std::vector<std::uint8_t> unknown_;
   std::vector<std::uint8_t> eog_;
   std::int32_t bos_{0};
   std::int32_t eos_{-1};

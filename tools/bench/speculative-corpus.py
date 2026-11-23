@@ -3,16 +3,9 @@
 
 from __future__ import annotations
 
-# Previous engine-name schema spellings are built from parts so the
-# old name never appears here; readers accept files written by
-# previous releases.
-_PREVIOUS_SCHEMA_PREFIX = "g" + "ufo."
-
-
 def _schema_matches(value, current):
-    """True when a stored schema uses the current or previous spelling."""
-    return (value == current or
-            value == _PREVIOUS_SCHEMA_PREFIX + current[len("superroc."):])
+    """True when a stored schema uses the current spelling."""
+    return value == current
 
 import argparse
 import hashlib
@@ -176,7 +169,7 @@ def autoregressive_key(args: argparse.Namespace, prompt: str) -> str:
         "command": build_prompt_command(args, prompt, speculative=False),
         "environment": {
             key: value for key, value in os.environ.items()
-            if key.startswith(("SUPERROC_", "G" + "UFO_", "HIP_", "ROCR_", "HSA_"))
+            if key.startswith(("SUPERROC_", "HIP_", "ROCR_", "HSA_"))
         },
     }
     return hashlib.sha256(

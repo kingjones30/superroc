@@ -14,7 +14,7 @@
 #include <string>
 #include <vector>
 
-#include "src/models/qwen/hip/ops/norm_residual.hpp"  // LKF reference
+#include "src/models/qwen/hip/ops/norm_residual.hpp"  // reference
 #include "tests/models/qwen/hip/support/device.hpp"
 
 #if !defined(ENGINE_ENABLE_HIP)
@@ -495,7 +495,7 @@ void CaseRouteOne(std::mt19937& rng,
           " worst_logits_scaled=" + F(worst_l) +
           " worst_wsum_gap=" + F(worst_sum));
 }
-// Case e (Super ROC): exact sel ties. Experts e and e + n_expert/2 share the
+// Case e (Super Roc): exact sel ties. Experts e and e + n_expert/2 share the
 // gate row and the bias, so their sel values are equal; ids must equal the
 // CPU scan (lower id wins), weights within 1e-6.
 void CaseRouteTies(std::mt19937& rng,
@@ -728,7 +728,7 @@ bool DeviceUnchanged(float* d_ptr, const std::vector<float>& expect) {
                      expect.size() * sizeof(float)) == 0;
 }
 
-// Case f (LKF): LaunchLfm2AddRMSNorm must equal LaunchResidualAdd followed by
+// Case f: LaunchLfm2AddRMSNorm must equal LaunchResidualAdd followed by
 // LaunchRMSNorm bit for bit (hidden and normed), for dims 2048 and 3072, with
 // and without a weight.
 void CaseAddRMSNorm(std::mt19937& rng,

@@ -952,7 +952,7 @@ __global__ void dflash_noncausal_attention_kernel(
 }
 
 constexpr uint32_t kSelectorThreads = 128;
-// NBFAST T1: the Nanbeige DFlash2 drafter is trained with selector_top_k 32
+// the Nanbeige DFlash2 drafter is trained with selector_top_k 32
 // where the Qwen drafter uses 16. The selector device code below is templated
 // on the list width and instantiated for both, so a top-k <= 16 drafter runs
 // the original 16-wide kernels unchanged; only wider drafters pay for the
@@ -1024,10 +1024,11 @@ template <uint32_t MaxTopK>
 __global__ void dflash_selector_partial_topk_kernel(
     const float* __restrict__ logits, float* __restrict__ partial_scores,
     uint32_t* __restrict__ partial_ids, uint32_t vocab_size,
-    uint32_t selector_top_k) {
+    uint32_t selector_top_k, uint32_t partial_count, uint32_t first_block,
+    uint32_t first_id) {
   logits += uint64_t(blockIdx.y) * vocab_size;
-  partial_scores += uint64_t(blockIdx.y) * gridDim.x * selector_top_k;
-  partial_ids += uint64_t(blockIdx.y) * gridDim.x * selector_top_k;
+  partial_scores += uint64_t(blockIdx.y) * partial_count * selector_top_k;
+  partial_ids += uint64_t(blockIdx.y) * partial_count * selector_top_k;
   __shared__ float shared_scores[kSelectorThreads * MaxTopK];
   __shared__ uint32_t shared_ids[kSelectorThreads * MaxTopK];
 
@@ -1043,8 +1044,8 @@ __global__ void dflash_selector_partial_topk_kernel(
   const uint32_t requested_end = begin + kSelectorTokensPerBlock;
   const uint32_t end = requested_end < vocab_size ? requested_end : vocab_size;
   for (uint32_t token = begin + threadIdx.x; token < end; token += blockDim.x) {
-    InsertSelectorCandidate(logits[token], token, local_scores, local_ids,
-                            selector_top_k);
+    InsertSelectorCandidate(logits[token], token + first_id, local_scores,
+                            local_ids, selector_top_k);
   }
 
   const uint32_t shared_offset = threadIdx.x * MaxTopK;
@@ -1056,7 +1057,7 @@ __global__ void dflash_selector_partial_topk_kernel(
 
   MergeSelectorLists<MaxTopK>(shared_scores, shared_ids, selector_top_k);
 
-  const uint32_t output_offset = blockIdx.x * selector_top_k;
+  const uint32_t output_offset = (blockIdx.x + first_block) * selector_top_k;
   for (uint32_t index = threadIdx.x; index < selector_top_k;
        index += blockDim.x) {
     partial_scores[output_offset + index] = shared_scores[index];
@@ -1573,11 +1574,13 @@ void LaunchDFlashSelectorStep(
   if (selector_top_k <= 16U) {
     dflash_selector_partial_topk_kernel<16U><<<partial_count, kSelectorThreads,
                                                0, stream>>>(
-        logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+        logits, partial_scores, partial_ids, vocab_size, selector_top_k,
+        partial_count, 0U, 0U);
   } else {
     dflash_selector_partial_topk_kernel<32U><<<partial_count, kSelectorThreads,
                                                0, stream>>>(
-        logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+        logits, partial_scores, partial_ids, vocab_size, selector_top_k,
+        partial_count, 0U, 0U);
   }
   SUPERROC_CHECK_LAUNCH("dflash_selector_partial_topk_kernel");
   if (selector_top_k <= 16U) {
@@ -1608,7 +1611,8 @@ void LaunchDFlashSelectorBatch(
     std::uint32_t* candidate_ids, float* candidate_probabilities,
     std::span<const DFlashSelectorSequence> sequences, std::uint32_t vocab_size,
     std::uint32_t selector_rank, std::uint32_t selector_top_k,
-    hipStream_t stream) {
+    hipStream_t stream, std::uint32_t head_rows, const float* tail_logits,
+    std::uint32_t tail_start) {
   if (sequences.empty() || sequences.size() > 8 || logits == nullptr ||
       projected_hidden == nullptr || predecessor_codebook_bf16 == nullptr ||
       successor_codebook_bf16 == nullptr || tokens == nullptr ||
@@ -1616,6 +1620,11 @@ void LaunchDFlashSelectorBatch(
       selector_rank == 0 || selector_top_k == 0 ||
       selector_top_k > kMaxSelectorTopK || selector_top_k > vocab_size)
     throw std::invalid_argument("invalid DFlash selector batch or scratch");
+  // A trimmed head covers [0, head_rows) and the tail [tail_start, vocab).
+  if ((head_rows == 0U && tail_start != 0U) ||
+      (head_rows != 0U && (tail_logits == nullptr || head_rows > tail_start ||
+                           tail_start >= vocab_size)))
+    throw std::invalid_argument("invalid DFlash selector trim");
   SelectorBatch batch{};
   std::uint32_t rows = 0;
   for (std::size_t index = 0; index < sequences.size(); ++index) {
@@ -1631,17 +1640,38 @@ void LaunchDFlashSelectorBatch(
     batch.token_offsets[index] = rows + static_cast<std::uint32_t>(index);
     rows += sequence.count;
   }
-  const auto partial_count = static_cast<std::uint32_t>(
-      (static_cast<std::uint64_t>(vocab_size) + kSelectorTokensPerBlock - 1U) /
-      kSelectorTokensPerBlock);
+  const std::uint32_t head = head_rows != 0U ? head_rows : vocab_size;
+  const std::uint32_t tail = head_rows != 0U ? vocab_size - tail_start : 0U;
+  const auto blocks = [](std::uint32_t tokens) {
+    return static_cast<std::uint32_t>(
+        (static_cast<std::uint64_t>(tokens) + kSelectorTokensPerBlock - 1U) /
+        kSelectorTokensPerBlock);
+  };
+  const std::uint32_t head_blocks = blocks(head);
+  const std::uint32_t tail_blocks = blocks(tail);
+  const std::uint32_t partial_count = head_blocks + tail_blocks;
   if (selector_top_k <= 16U) {
-    dflash_selector_partial_topk_kernel<16U><<<dim3(partial_count, rows),
+    dflash_selector_partial_topk_kernel<16U><<<dim3(head_blocks, rows),
                                                kSelectorThreads, 0, stream>>>(
-        logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+        logits, partial_scores, partial_ids, head, selector_top_k,
+        partial_count, 0U, 0U);
+    if (tail_blocks != 0U) {
+      dflash_selector_partial_topk_kernel<16U><<<dim3(tail_blocks, rows),
+                                                 kSelectorThreads, 0, stream>>>(
+          tail_logits, partial_scores, partial_ids, tail, selector_top_k,
+          partial_count, head_blocks, tail_start);
+    }
   } else {
-    dflash_selector_partial_topk_kernel<32U><<<dim3(partial_count, rows),
+    dflash_selector_partial_topk_kernel<32U><<<dim3(head_blocks, rows),
                                                kSelectorThreads, 0, stream>>>(
-        logits, partial_scores, partial_ids, vocab_size, selector_top_k);
+        logits, partial_scores, partial_ids, head, selector_top_k,
+        partial_count, 0U, 0U);
+    if (tail_blocks != 0U) {
+      dflash_selector_partial_topk_kernel<32U><<<dim3(tail_blocks, rows),
+                                                 kSelectorThreads, 0, stream>>>(
+          tail_logits, partial_scores, partial_ids, tail, selector_top_k,
+          partial_count, head_blocks, tail_start);
+    }
   }
   SUPERROC_CHECK_LAUNCH("dflash_selector_partial_topk_kernel");
   if (selector_top_k <= 16U) {

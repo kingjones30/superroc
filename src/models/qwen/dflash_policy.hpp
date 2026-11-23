@@ -39,10 +39,11 @@ public:
   static constexpr std::uint32_t kMaxDraftTokens = 7;
 
   DFlashLengthController(DFlashDraftPolicy policy, std::uint32_t limit,
-                         bool q8_target = false)
+                         bool q8_target = false, bool flat_verify = false)
       : policy_(policy),
         limit_(std::clamp(limit, 1U, kMaxDraftTokens)),
-        q8_target_(q8_target) {
+        q8_target_(q8_target),
+        flat_verify_(flat_verify) {
     Reset();
   }
 
@@ -117,6 +118,14 @@ public:
         best_length = length;
       }
     }
+    // One request in a short context, on a target whose verify rows read no
+    // extra weights (FP4): a row costs about 1 % of the cycle, and acceptance
+    // on prose comes in bursts the running mean misses. Past 4096 each row
+    // attends to too many keys to pay, and a request that keeps rejecting still
+    // narrows. K-quant rows cost more: 27B UD lost 10 % on prose to this.
+    if (flat_verify_ && greedy_batch_size == 1 &&
+        position < kWideDraftContext && mean_ >= kWideDraftMean)
+      best_length = std::max(best_length, cap);
     return best_length;
   }
 
@@ -274,6 +283,8 @@ private:
   static constexpr std::array<float, kMaxDraftTokens>
       kQ8EightRequestRelativeCost{1.0F,   1.610F, 1.561F, 2.231F,
                                   2.183F, 2.850F, 2.813F};
+  static constexpr std::uint32_t kWideDraftContext = 4096;
+  static constexpr float kWideDraftMean = 0.5F;
   static constexpr std::array<float, kMaxDraftTokens> kQ4RelativeCost{
       1.0F, 1.02F, 1.045F, 1.08F, 1.14F, 1.20F, 1.29F};
   // Two greedy requests verify 4–16 rows together. Crossing eight rows has a
@@ -307,6 +318,7 @@ private:
   DFlashDraftPolicy policy_;
   std::uint32_t limit_;
   bool q8_target_;
+  bool flat_verify_;
   float mean_{0.0F};
   std::uint32_t last_full_width_{0};
 };

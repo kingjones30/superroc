@@ -10,8 +10,12 @@
 #include <string_view>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/hip/hip_utils.hpp"
+#include "src/models/flint/hip/flint_attention.hpp"  // Flint
+#include "src/models/glimmer/hip/glimmer_decode.hpp"  // LFM2 (fp32 KV + attention)
+#include "src/models/lfm2/hip/lfm2_attention.hpp"
+#include "src/models/lfm2/hip/lfm2_kernels.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/detail/decode_step.hpp"
 #include "src/models/qwen/hip/executor.hpp"
@@ -24,8 +28,10 @@ namespace superroc::hip {
 namespace {
 
 constexpr std::size_t kMaxDecodeBatch = 8;
+static_assert(kQwenMaxDraftTokens + 1 == kMaxDecodeBatch,
+              "a verification item is the anchor token plus the drafts");
 
-// lqw:spec5-prof. GPU spans inside one verification forward.
+// GPU spans inside one verification forward.
 struct VerifyProf {
   bool on{false};
   hipEvent_t a{};
@@ -100,20 +106,20 @@ struct VerifyProf {
       tensor.type == core::GgmlType::kBF16) {
     return once;
   }
-  // lqw:spec6. The small-m FP4 path reads each weight tile once.
+  // The small-m FP4 path reads each weight tile once.
   if (IsRocmFp4(tensor.type) && batch >= 2 && batch <= 8) {
     return once;
   }
   return once * batch;
 }
 
-// sq16 SPEC2 (S2-2): chunked-vs-per-row switch for the >8-row integer path.
+// Chunked-vs-per-row switch for the >8-row integer path.
 // Read per call (only multi-row verify with batch > 8 reaches it): the test
-// toggles it mid-process to compare both forms bit for bit. SPEC3 (2): one
+// toggles it mid-process to compare both forms bit for bit. One
 // stderr line per process the first time it is seen on (the read stays per
 // call; only the announcement is once).
 [[nodiscard]] bool VerifyNoChunk() {
-  const char* env = ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_NO_CHUNK");
+  const char* env = ::superroc::core::GetEnv("SUPERROC_VERIFY_NO_CHUNK");
   const bool on = env != nullptr && env[0] == '1';
   if (on) {
     static bool warned = false;
@@ -127,8 +133,8 @@ struct VerifyProf {
   return on;
 }
 
-// sq16 SPEC2 (S2-2): batch > 8 as <= 8-row verify_m calls (bit-identical to
-// the one-row arithmetic, SQ10 REPORT3 S3-6), with a single tail row via the
+// Batch > 8 as <= 8-row verify_m calls (bit-identical to
+// the one-row arithmetic), with a single tail row via the
 // per-row integer GEMV (likewise identical). False when any chunk refuses;
 // the caller then runs the same fallback as for any refused integer launch.
 bool TryLaunchChunkedVerifyM(core::GgmlType type, const void* weights,
@@ -155,7 +161,7 @@ bool TryLaunchChunkedVerifyM(core::GgmlType type, const void* weights,
   return true;
 }
 
-// sq16 SPEC2 (S2-1): the integer attempt for one FP4 tensor. Precondition:
+// The integer attempt for one FP4 tensor. Precondition:
 // IsRocmFp4(weight.type) && RocmFp4ShapeOk(output_size, input_size). True
 // when the integer launches were accepted; false on any refusal, in which
 // case the caller runs the path decode would use. Never throws: under
@@ -164,7 +170,7 @@ bool TryLaunchVerifyInteger(const models::QwenTensorRef& weight,
                             const float* input, float* output,
                             std::size_t batch_size, std::size_t output_size,
                             std::size_t input_size, hipStream_t stream) {
-  // lqw:spec6. Intercept m = 2..8 first, including the LM head (n > 8192
+  // Intercept m = 2..8 first, including the LM head (n > 8192
   // takes the 2048-wide grid stride).
   if (batch_size >= 2 && batch_size <= 8) {
     const int rc = superroc_fp4_gemv_verify_m(
@@ -204,7 +210,7 @@ bool TryLaunchVerifyInteger(const models::QwenTensorRef& weight,
   return true;
 }
 
-// Super ROC QVO (Muse Wonder W7-B R1): the members of a verify projection
+// Super Roc QVO: the members of a verify projection
 // group read one input, but each superroc_fp4_gemv_verify_m call quantised it
 // again (SSM group 4x, QKV 3x, dense FFN gate/up 2x per layer). The first
 // member quantises; the rest reuse that Q8 copy (_xq), which is bit-identical.
@@ -219,7 +225,7 @@ struct VerifyGroupMember {
 
 bool VerifyQ8ReuseOn() {
   static const bool on = [] {
-    const char* e = ::superroc::core::GetEnvCompat("SUPERROC_VERIFY_Q8_REUSE");
+    const char* e = ::superroc::core::GetEnv("SUPERROC_VERIFY_Q8_REUSE");
     return !(e != nullptr && e[0] == '0');
   }();
   return on;
@@ -269,7 +275,7 @@ void LaunchVerifyProjection(const models::QwenTensorRef& weight,
   // LaunchGEMV), false when decode runs the fused fp32 dot. Anything else
   // changes accepted drafts' logits and flips greedy output (v1-LEAN
   // DIFF@218, layer-0 qkv 3e-2 on ~21).
-  // SPEC2 (S2-1): a launch failure is retried on the path decode would use,
+  // A launch failure is retried on the path decode would use,
   // never thrown: under sq10-3 a refused scratch set is normal and means
   // "fall back". Fused-group members do not come here with integer_path
   // true; the group wrappers below keep the group atomic instead.
@@ -327,7 +333,7 @@ void LaunchFfnActivation(const models::QwenLayerWeights& layer,
                          std::size_t hidden_size, hipStream_t stream) {
   const auto& gate = layer.ffn_gate;
   const auto& up = layer.ffn_up;
-  // sq16 SPEC2 (S2-1): decode runs gate/up through the fused SwiGLU GEMV,
+  // Decode runs gate/up through the fused SwiGLU GEMV,
   // which takes the integer path only when both are FP4 with an acceptable
   // shape and ready scratch (swiglu.hip). Mirror it atomically: both
   // integer, or decode's literal fused call per row (which declines exactly
@@ -426,7 +432,7 @@ void LaunchVerifyFfn(const models::QwenLayerWeights& layer,
   const int moe_hidden = static_cast<int>(hidden_size);
   const int gate_type = static_cast<int>(layer.ffn_gate_exps.type);
   const int shexp_type = static_cast<int>(layer.ffn_gate_shexp.type);
-  // QVB: the route and the shared-expert gate for up to 4 rows per launch
+  // The route and the shared-expert gate for up to 4 rows per launch
   // pair (the router read once per chunk), the experts per row as before,
   // one combine for all rows. Every row's outputs are bit-identical to the
   // former per-row sequence, so row 0 still matches a plain Step.
@@ -441,11 +447,50 @@ void LaunchVerifyFfn(const models::QwenLayerWeights& layer,
             moe_ids + r0 * static_cast<std::size_t>(moe_used),
             moe_weights + r0 * static_cast<std::size_t>(moe_used),
             static_cast<const float*>(layer.ffn_gate_inp_shexp.data),
-            moe_sig + r0, stream) != 0) {
+            moe_sig + r0, stream,
+            static_cast<int>(config.ExpertsInFile())) != 0) {
       throw std::runtime_error("qwen35moe verify route launch failed");
     }
   }
-  for (std::size_t row = 0; row < batch_size; ++row) {
+  // Routed and shared experts in one launch per stage, each weight row read
+  // once; writes `out` directly, the combine included. Bit-identical to the
+  // paths below.
+  static const bool all_on = [] {
+    const char* e = ::superroc::core::GetEnv("SUPERROC_MOE_VERIFY_ALL");
+    return e == nullptr || e[0] != '0';
+  }();
+  if (all_on && batch_size >= 2 && batch_size <= 8 && gate_type == shexp_type &&
+      superroc_fp4_expert_ffn_dev_batch_all(
+          gate_type, layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+          layer.ffn_down_exps.data, layer.ffn_gate_shexp.data,
+          layer.ffn_up_shexp.data, layer.ffn_down_shexp.data, normed, moe_ids,
+          moe_weights, moe_sig, static_cast<int>(batch_size), moe_used,
+          moe_expert, moe_hidden, moe_ff, moe_ffs, 0.0F, out,
+          stream) == SUPERROC_FP4_OK) {
+    return;
+  }
+  // moebatch: every row of this layer in one launch per stage. Bit-identical to
+  // the loop below, which stays as the fallback (a refused batch has queued
+  // nothing that is read).
+  static const bool batch_on = [] {
+    const char* e = ::superroc::core::GetEnv("SUPERROC_MOE_VERIFY_BATCH");
+    return e == nullptr || e[0] != '0';
+  }();
+  bool experts_done = false;
+  if (batch_on && batch_size > 1) {
+    experts_done =
+        superroc_fp4_expert_ffn_dev_batch(
+            gate_type, layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+            layer.ffn_down_exps.data, normed, moe_ids, moe_weights,
+            static_cast<int>(batch_size), moe_used, moe_expert, moe_hidden,
+            moe_ff, 0.0F, moe_y, stream, 1) == SUPERROC_FP4_OK &&
+        superroc_fp4_expert_ffn_dev_batch(
+            shexp_type, layer.ffn_gate_shexp.data, layer.ffn_up_shexp.data,
+            layer.ffn_down_shexp.data, normed, moe_zero_ids, moe_sig,
+            static_cast<int>(batch_size), 1, 1, moe_hidden, moe_ffs, 0.0F,
+            moe_shexp_y, stream, 0) == SUPERROC_FP4_OK;
+  }
+  for (std::size_t row = 0; !experts_done && row < batch_size; ++row) {
     const float* const x = normed + row * hidden_size;
     int* const ids = moe_ids + row * static_cast<std::size_t>(moe_used);
     float* const wts = moe_weights + row * static_cast<std::size_t>(moe_used);
@@ -459,7 +504,7 @@ void LaunchVerifyFfn(const models::QwenLayerWeights& layer,
             moe_hidden, moe_ff, 0.0F, y, stream) != SUPERROC_FP4_OK) {
       throw std::runtime_error("qwen35moe verify experts failed");
     }
-    // QSM: reuses the routed call's Q8 copy of this row's x (same stream).
+    // Reuses the routed call's Q8 copy of this row's x (same stream).
     if (superroc_fp4_expert_ffn_dev_xq(
             shexp_type, layer.ffn_gate_shexp.data, layer.ffn_up_shexp.data,
             layer.ffn_down_shexp.data, x, zero, sig, 1, 1, moe_hidden, moe_ffs,
@@ -541,7 +586,7 @@ SsmControls LaunchSsmControls(const models::QwenLayerWeights& layer,
          RocmFp4ShapeOk(kv_size, hidden_size);
 }
 
-// sq16 SPEC2 (S2-1): decode's per-tensor integer condition (LaunchGEMV in
+// Decode's per-tensor integer condition (LaunchGEMV in
 // gemv.hip, reached via QuantGemm for attn_output and directly for ssm_out,
 // ffn_down and the head): FP4 with an acceptable shape. The launch itself
 // may still refuse; LaunchVerifyProjection retries that on decode's path.
@@ -877,15 +922,15 @@ std::vector<tokenization::TokenId> QwenGpuExecutor::ForwardTokenBatch(
     }
   }
 
-  // SQ10: name the coordinator stream's set, so concurrent sessions check
-  // theirs. SPEC2 (R2): a refusal fails the step loudly (unreachable in serve).
+  // Name the coordinator stream's set, so concurrent sessions check
+  // theirs. A refusal fails the step loudly (unreachable in serve).
   if (config.is_moe) {
     const int slot_set = superroc_fp4_slot_stream_attach_at(
         arena.stream, __func__, static_cast<long>(hidden_size));
     if (slot_set < 0) {
       throw std::runtime_error("qwen35moe verify slot set refused");
     }
-    // SPEC2 (R6): stream-ordered check (the bare read proved stale on the
+    // Stream-ordered check (the bare read proved stale on the
     // box: STALE_STATUS missed 1/200).
     if (superroc_fp4_moe_dev_check_set_on_stream(slot_set, arena.stream) !=
         SUPERROC_FP4_OK) {
@@ -1082,7 +1127,7 @@ QwenGpuExecutor::ForwardVerificationBatch(
   static hipEvent_t prof_a = nullptr;
   static hipEvent_t prof_b = nullptr;
   static const bool prof_on = [] {
-    const char* env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PROFILE");
+    const char* env = ::superroc::core::GetEnv("SUPERROC_MTP_PROFILE");
     return env != nullptr && env[0] != '\0' && env[0] != '0';
   }();
   if (prof_on && prof_a == nullptr) {
@@ -1437,15 +1482,15 @@ QwenGpuExecutor::ForwardVerificationBatch(
       executor.last_hidden_offset_ = 0;
     }
   }
-  // SQ10: name the coordinator stream's set, so concurrent sessions check
-  // theirs. SPEC2 (R2): a refusal fails the step loudly (unreachable in serve).
+  // Name the coordinator stream's set, so concurrent sessions check
+  // theirs. A refusal fails the step loudly (unreachable in serve).
   if (config.is_moe) {
     const int slot_set = superroc_fp4_slot_stream_attach_at(
         arena_.stream, __func__, static_cast<long>(hidden_size));
     if (slot_set < 0) {
       throw std::runtime_error("qwen35moe verify slot set refused");
     }
-    // SPEC2 (R6): stream-ordered check (the bare read proved stale on the
+    // Stream-ordered check (the bare read proved stale on the
     // box: STALE_STATUS missed 1/200).
     if (superroc_fp4_moe_dev_check_set_on_stream(slot_set, arena_.stream) !=
         SUPERROC_FP4_OK) {
@@ -1523,6 +1568,695 @@ QwenGpuExecutor::ForwardVerificationBatch(
         host_predictions.begin() + offsets[index],
         host_predictions.begin() + offsets[index] + item.tokens.size());
   }
+  return predictions;
+}
+
+namespace {
+
+// LFM2: lfm2_decode.hip's Require pattern, for both launcher status types.
+void Require(const Lfm2LaunchStatus& status) {
+  if (!status.ok) {
+    throw std::runtime_error(status.error != nullptr ? status.error
+                                                     : "lfm2moe launch failed");
+  }
+}
+
+void Require(const GlimmerLaunchStatus& status) {
+  if (!status.ok) {
+    throw std::runtime_error(status.error != nullptr ? status.error
+                                                     : "glimmer launch failed");
+  }
+}
+
+void Require(const FlintLaunchStatus& status) {
+  if (!status.ok) {
+    throw std::runtime_error(status.error != nullptr ? status.error
+                                                     : "flint launch failed");
+  }
+}
+
+}  // namespace
+
+// LFM2: speculative verification for lfm2moe, rows 2..8. The projections run
+// once for all rows through the verify_m intercepts (shared weight reads);
+// the short-conv decode, the KV write and the attention stay per row and in
+// row order, because each row reads the conv columns and the K/V entries the
+// row before it wrote. Every kernel and its arguments are the row's exact
+// decode launches (ExecuteLfm2DecodeStep), so logits and states are
+// bit-identical to walking the chunk token by token.
+std::vector<tokenization::TokenId> QwenGpuExecutor::ForwardLfm2VerificationRows(
+    std::span<const tokenization::TokenId> tokens, std::uint32_t start_pos,
+    bool capture_logits) {
+  CheckReset();
+  if (vision_input_.Bytes() != 0) {
+    throw std::runtime_error("lfm2moe vision is not supported");
+  }
+  const auto& config = weights_.config;
+  if (!config.lfm2) {
+    throw std::runtime_error("lfm2moe verify called for a non-lfm2 config");
+  }
+  if (arena_.d_kv_cache == nullptr && arena_.d_attention_kv_f16 == nullptr) {
+    throw std::runtime_error("lfm2moe requires a KV cache");  // LFM2
+  }
+  if (arena_.d_ssm_conv_state == nullptr) {
+    throw std::runtime_error("lfm2moe requires ssm conv state");
+  }
+  const std::size_t rows = tokens.size();
+  if (start_pos > arena_.GetMaxContext() ||
+      rows > arena_.GetMaxContext() - start_pos) {
+    throw std::length_error("lfm2moe verify exceeds the GPU context length");
+  }
+  last_verification_rows_ = rows;
+  h_verification_hidden_.clear();
+  h_verification_logits_.clear();
+  replaying_ssm_state_ = false;
+  arena_.DisableSsmReplayCapture();
+  (void)arena_.BeginRecurrentWrite();
+  EnsureVerificationLogits(rows);
+
+  const std::size_t H = config.hidden_size;
+  const std::size_t attn =
+      static_cast<std::size_t>(config.num_attention_heads) * config.head_dim;
+  const std::size_t kv =
+      static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
+  const std::size_t I = config.intermediate_size;
+  const float eps = config.norm_eps_pre;
+  const auto scratch = arena_.GetScratchView(rows);
+  if (scratch.decode.hidden.size() < rows * H ||
+      scratch.decode.normed.size() < rows * H ||
+      scratch.attention.q.size() < rows * attn ||
+      scratch.attention.k.size() < rows * kv ||
+      scratch.attention.v.size() < rows * kv ||
+      scratch.ssm.out.size() < rows * std::max(H, attn) ||
+      scratch.attention.output.size() < rows * H ||
+      scratch.ffn.activation.size() < rows * std::max(I, 3 * H) ||
+      scratch.ffn.out.size() < rows * H ||
+      scratch.decode.prompt_tokens.size() < rows) {
+    throw std::runtime_error("lfm2 verify scratch is short");
+  }
+
+  const std::size_t vocab_size = config.vocab_size;
+  const std::size_t captured_layer_count =
+      arena_.GetTargetLayerCapture().size();
+  const std::size_t feature_width = captured_layer_count * H;
+  const std::size_t feature_elements =
+      capture_prompt_hidden_ ? rows * feature_width : 0;
+  const std::size_t feature_rows =
+      feature_elements / vocab_size + (feature_elements % vocab_size != 0);
+  // The head writes the rows' logits into the same buffer that held the
+  // drafter features, exactly as the single-session ForwardVerificationBatch
+  // does: the features leave for the host and the tap plane before it runs.
+  if (capture_prompt_hidden_) {
+    EnsureVerificationLogits(std::max(rows, feature_rows));
+    h_verification_hidden_.resize(rows * (feature_width ? feature_width : H));
+  }
+  auto* const feature_buffer = d_verification_logits_;
+  auto* const logits_buffer = d_verification_logits_;
+
+  // LFM2: one saved conv state per row (the size QwenGpuArena::SaveState
+  // copies), so CommitVerificationChunk can accept any prefix of the rows.
+  const std::size_t conv_floats = config.Lfm2ConvStateFloats();
+  const std::size_t total_conv =
+      static_cast<std::size_t>(config.SsmLayerCount()) * config.SsmQkvSize() *
+      config.ssm_conv_kernel;
+  if (d_lfm2_row_conv_ == nullptr) {
+    HIP_CHECK(hipMalloc(&d_lfm2_row_conv_, 8 * total_conv * sizeof(float)));
+  }
+
+  std::vector<std::uint32_t> host_rows(rows);
+  for (std::size_t r = 0; r < rows; ++r) {
+    host_rows[r] = static_cast<std::uint32_t>(tokens[r]);
+  }
+  HIP_CHECK(hipMemcpyAsync(scratch.decode.prompt_tokens.data(),
+                           host_rows.data(), rows * sizeof(std::uint32_t),
+                           hipMemcpyHostToDevice, arena_.stream));
+  LaunchBatchedEmbeddingLookup(
+      weights_.token_embd.data, weights_.token_embd.type,
+      scratch.decode.prompt_tokens.data(), scratch.decode.hidden.data(), rows,
+      H, arena_.stream);
+  // LFM2: NO norm after the embedding. The positions replace the token ids
+  // so every row carries its own d_pos word, as the decode step's pair does.
+  for (std::size_t r = 0; r < rows; ++r) {
+    host_rows[r] = start_pos + static_cast<std::uint32_t>(r);
+  }
+  HIP_CHECK(hipMemcpyAsync(scratch.decode.prompt_tokens.data(),
+                           host_rows.data(), rows * sizeof(std::uint32_t),
+                           hipMemcpyHostToDevice, arena_.stream));
+  const std::uint32_t* d_pos = scratch.decode.prompt_tokens.data();
+
+  const std::uint32_t max_ctx = arena_.GetMaxContext();
+  const std::uint32_t heads = config.num_attention_heads;
+  const std::uint32_t kv_heads = config.num_key_value_heads;
+  const std::uint32_t head_dim = config.head_dim;
+  const std::uint32_t rotary_dim = config.rotary_dim;
+  const float rope_theta = config.rope_theta;
+  const std::uint32_t n_expert = config.expert_count;
+  const std::uint32_t n_used = config.expert_used_count;
+  const std::uint32_t expert_ff = config.expert_feed_forward_length;
+  const std::uint32_t l_cache = config.shortconv_l_cache;
+  const std::size_t plane = arena_.GetAttentionKvPlaneElements();
+  // LFM2: fp16 token-major plane when the arena has one, else fp32.
+  const bool kv_f16 = arena_.d_attention_kv_f16 != nullptr;
+  float* v_cache = kv_f16 ? nullptr : arena_.d_kv_cache + plane;
+  auto* k_f16 = static_cast<std::uint16_t*>(arena_.d_attention_kv_f16);
+  std::uint16_t* v_f16 = kv_f16 ? k_f16 + plane : nullptr;
+  // LFM2: normed holds attn_norm(hidden) at the top of every layer.
+  // Layer 0 norms here; every residual add below is fused with the RMSNorm
+  // that follows it (ffn_norm, the next layer's attn_norm, output_norm).
+  for (std::size_t r = 0; r < rows; ++r) {
+    LaunchRMSNorm(scratch.decode.hidden.data() + r * H,
+                  static_cast<const float*>(weights_.layers[0].attn_norm.data),
+                  scratch.decode.normed.data() + r * H,
+                  static_cast<std::uint32_t>(H), eps, arena_.stream);
+  }
+  for (std::uint32_t l = 0; l < config.num_layers; ++l) {
+    const auto& layer = weights_.layers[l];
+    if (layer.is_shortconv) {
+      // Rows B | C | X of the in-projection land in ffn.activation [3H].
+      LaunchVerifyProjection(
+          layer.shortconv_in_proj, scratch.decode.normed.data(),
+          scratch.ffn.activation.data(), rows, 3 * H, H, arena_.stream,
+          DecodeSingleIntegerPath(layer.shortconv_in_proj, 3 * H, H));
+      const std::size_t kind = config.Lfm2KindIndex(l);
+      for (std::size_t r = 0; r < rows; ++r) {
+        Require(LaunchLfm2ShortConvDecode(
+            scratch.ffn.activation.data() + r * 3 * H,
+            static_cast<const float*>(layer.shortconv_conv.data),
+            arena_.d_ssm_conv_state + kind * conv_floats,
+            scratch.ssm.out.data() + r * H, static_cast<std::uint32_t>(H),
+            l_cache, arena_.stream));
+        HIP_CHECK(hipMemcpyAsync(
+            d_lfm2_row_conv_ + r * total_conv + kind * conv_floats,
+            arena_.d_ssm_conv_state + kind * conv_floats,
+            conv_floats * sizeof(float), hipMemcpyDeviceToDevice,
+            arena_.stream));
+      }
+      LaunchVerifyProjection(
+          layer.shortconv_out_proj, scratch.ssm.out.data(),
+          scratch.attention.output.data(), rows, H, H, arena_.stream,
+          DecodeSingleIntegerPath(layer.shortconv_out_proj, H, H));
+    } else {  // LFM2 attention layer
+      // LFM2: with ROCmFP4 q/k/v the group quantises normed once and
+      // shares that Q8 copy, the same quant and matvec kernels the decode
+      // step's slot path runs; any refusal falls back per tensor to the
+      // launches LaunchGEMV serves decode.
+      const bool shared_qkv = IsRocmFp4(layer.attn_q.type) &&
+                              IsRocmFp4(layer.attn_k.type) &&
+                              IsRocmFp4(layer.attn_v.type) &&
+                              RocmFp4ShapeOk(attn, H) && RocmFp4ShapeOk(kv, H);
+      if (!shared_qkv ||
+          !TryLaunchVerifyIntegerGroup(
+              {{&layer.attn_q, scratch.attention.q.data(), attn},
+               {&layer.attn_k, scratch.attention.k.data(), kv},
+               {&layer.attn_v, scratch.attention.v.data(), kv}},
+              scratch.decode.normed.data(), rows, H, arena_.stream)) {
+        LaunchVerifyProjection(layer.attn_q, scratch.decode.normed.data(),
+                               scratch.attention.q.data(), rows, attn, H,
+                               arena_.stream,
+                               DecodeSingleIntegerPath(layer.attn_q, attn, H));
+        LaunchVerifyProjection(layer.attn_k, scratch.decode.normed.data(),
+                               scratch.attention.k.data(), rows, kv, H,
+                               arena_.stream,
+                               DecodeSingleIntegerPath(layer.attn_k, kv, H));
+        LaunchVerifyProjection(layer.attn_v, scratch.decode.normed.data(),
+                               scratch.attention.v.data(), rows, kv, H,
+                               arena_.stream,
+                               DecodeSingleIntegerPath(layer.attn_v, kv, H));
+      }
+      // Row order matters: row r reads the K/V rows the rows before it wrote.
+      for (std::size_t r = 0; r < rows; ++r) {
+        float* q = scratch.attention.q.data() + r * attn;
+        float* k = scratch.attention.k.data() + r * kv;
+        float* v = scratch.attention.v.data() + r * kv;
+        const std::uint32_t* row_pos = d_pos + r;
+        LaunchPerHeadRMSNorm(q,
+                             static_cast<const float*>(layer.attn_q_norm.data),
+                             q, heads, head_dim, eps, arena_.stream);
+        LaunchPerHeadRMSNorm(k,
+                             static_cast<const float*>(layer.attn_k_norm.data),
+                             k, kv_heads, head_dim, eps, arena_.stream);
+        LaunchRoPE(q, k, heads, kv_heads, head_dim, rotary_dim, row_pos,
+                   rope_theta, arena_.stream, nullptr);  // LFM2 (NEOX)
+        if (kv_f16) {                                    // LFM2
+          Require(LaunchLfm2WriteKvDevF16(
+              k, v, k_f16, v_f16, config.Lfm2KindIndex(l), row_pos, max_ctx,
+              kv_heads, head_dim, arena_.stream));
+          Require(LaunchLfm2DecodeAttentionF16(
+              q, k_f16, v_f16, scratch.ssm.out.data() + r * attn,
+              config.Lfm2KindIndex(l), row_pos, max_ctx, heads, kv_heads,
+              head_dim, 32, arena_.d_lfm2_attn_partial, arena_.stream));
+        } else {
+          Require(LaunchLfm2WriteKvDev(
+              k, v, arena_.d_kv_cache, v_cache, config.Lfm2KindIndex(l),
+              row_pos, max_ctx, kv_heads, head_dim, arena_.stream));
+          Require(LaunchLfm2DecodeAttention(
+              q, arena_.d_kv_cache, v_cache, scratch.ssm.out.data() + r * attn,
+              config.Lfm2KindIndex(l), row_pos, max_ctx, heads, kv_heads,
+              head_dim, 32, arena_.d_lfm2_attn_partial, arena_.stream));
+        }
+      }
+      LaunchVerifyProjection(
+          layer.attn_output, scratch.ssm.out.data(),
+          scratch.attention.output.data(), rows, H, attn, arena_.stream,
+          DecodeSingleIntegerPath(layer.attn_output, H, attn));
+    }
+    for (std::size_t r = 0; r < rows; ++r) {
+      Require(LaunchLfm2AddRMSNorm(  // LFM2
+          scratch.decode.hidden.data() + r * H,
+          scratch.attention.output.data() + r * H,
+          static_cast<const float*>(layer.ffn_norm.data),
+          scratch.decode.normed.data() + r * H, static_cast<std::uint32_t>(H),
+          eps, arena_.stream));
+    }
+    if (!layer.is_moe) {  // LFM2 dense lead layer
+      LaunchFfnActivation(layer, scratch, rows, I, H, arena_.stream);
+      LaunchVerifyProjection(layer.ffn_down, scratch.ffn.activation.data(),
+                             scratch.ffn.out.data(), rows, H, I, arena_.stream,
+                             DecodeSingleIntegerPath(layer.ffn_down, H, I));
+    } else {  // LFM2 MoE layer
+      for (std::size_t r = 0; r < rows; ++r) {
+        Require(LaunchLfm2MoeRoute(
+            scratch.decode.normed.data() + r * H,
+            static_cast<const float*>(layer.ffn_gate_inp.data),
+            static_cast<const float*>(layer.exp_probs_b.data),
+            static_cast<std::uint32_t>(H), n_expert, n_used,
+            arena_.d_moe_logits + r * n_expert, arena_.d_moe_ids + r * n_used,
+            arena_.d_moe_weights + r * n_used, arena_.stream));
+      }
+      if (superroc_fp4_expert_ffn_dev_batch(
+              static_cast<int>(layer.ffn_gate_exps.type),
+              layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+              layer.ffn_down_exps.data, scratch.decode.normed.data(),
+              arena_.d_moe_ids, arena_.d_moe_weights, static_cast<int>(rows),
+              static_cast<int>(n_used), static_cast<int>(n_expert),
+              static_cast<int>(H), static_cast<int>(expert_ff), 0.0F,
+              scratch.ffn.out.data(), arena_.stream) != SUPERROC_FP4_OK) {
+        // Same per-row launches the decode step runs, on the same refusal.
+        for (std::size_t r = 0; r < rows; ++r) {
+          if (superroc_fp4_expert_ffn_dev(
+                  static_cast<int>(layer.ffn_gate_exps.type),
+                  layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+                  layer.ffn_down_exps.data,
+                  scratch.decode.normed.data() + r * H,
+                  arena_.d_moe_ids + r * n_used,
+                  arena_.d_moe_weights + r * n_used, static_cast<int>(n_used),
+                  static_cast<int>(n_expert), static_cast<int>(H),
+                  static_cast<int>(expert_ff), 0.0F,
+                  scratch.ffn.out.data() + r * H,
+                  arena_.stream) != SUPERROC_FP4_OK) {
+            throw std::runtime_error("lfm2moe decode experts failed");
+          }
+        }
+      }
+    }
+    // LFM2: residual + the next RMSNorm (next layer's attn_norm, or
+    // output_norm after the last layer).
+    const float* next_norm =
+        l + 1U < config.num_layers
+            ? static_cast<const float*>(weights_.layers[l + 1U].attn_norm.data)
+            : static_cast<const float*>(weights_.output_norm.data);
+    for (std::size_t r = 0; r < rows; ++r) {
+      Require(LaunchLfm2AddRMSNorm(
+          scratch.decode.hidden.data() + r * H, scratch.ffn.out.data() + r * H,
+          next_norm, scratch.decode.normed.data() + r * H,
+          static_cast<std::uint32_t>(H), eps, arena_.stream));
+    }
+    // DSpark tap: the layer output is the hidden state the drafter's
+    // feature-fusion encoder consumes (same point as the Qwen paths).
+    if (capture_prompt_hidden_) {
+      if (const auto tap = arena_.GetTargetLayerCaptureIndex(l);
+          tap.has_value()) {
+        float* const destination = feature_buffer + (*tap * H);
+        HIP_CHECK(hipMemcpy2DAsync(destination, feature_width * sizeof(float),
+                                   scratch.decode.hidden.data(),
+                                   H * sizeof(float), H * sizeof(float), rows,
+                                   hipMemcpyDeviceToDevice, arena_.stream));
+      }
+    }
+  }
+
+  if (capture_prompt_hidden_) {  // LFM2 (feature rows leave before the head)
+    if (captured_layer_count > 0) {
+      HIP_CHECK(hipMemcpyAsync(h_verification_hidden_.data(), feature_buffer,
+                               rows * feature_width * sizeof(float),
+                               hipMemcpyDeviceToHost, arena_.stream));
+      HIP_CHECK(hipMemcpyAsync(arena_.d_target_layer_features,
+                               feature_buffer + (rows - 1) * feature_width,
+                               feature_width * sizeof(float),
+                               hipMemcpyDeviceToDevice, arena_.stream));
+    } else {
+      HIP_CHECK(hipMemcpyAsync(
+          h_verification_hidden_.data(), scratch.decode.hidden.data(),
+          rows * H * sizeof(float), hipMemcpyDeviceToHost, arena_.stream));
+    }
+  }
+  // LFM2: normed already holds output_norm(hidden) of every row.
+  LaunchVerifyProjection(
+      weights_.output, scratch.decode.normed.data(), logits_buffer, rows,
+      vocab_size, H, arena_.stream,
+      DecodeSingleIntegerPath(weights_.output, vocab_size, H));
+  auto* const d_out_tokens = scratch.decode.prompt_tokens.data();
+  LaunchBatchedGPUArgmax(logits_buffer, d_out_tokens, rows, vocab_size,
+                         scratch.ffn.out, arena_.stream);
+  std::vector<tokenization::TokenId> host_predictions(rows, 0);
+  HIP_CHECK(hipMemcpyAsync(host_predictions.data(), d_out_tokens,
+                           rows * sizeof(tokenization::TokenId),
+                           hipMemcpyDeviceToHost, arena_.stream));
+  if (capture_logits) {
+    h_verification_logits_.resize(rows * vocab_size);
+    HIP_CHECK(hipMemcpyAsync(h_verification_logits_.data(), logits_buffer,
+                             rows * vocab_size * sizeof(float),
+                             hipMemcpyDeviceToHost, arena_.stream));
+  }
+  HIP_CHECK(hipStreamSynchronize(arena_.stream));
+  std::vector<tokenization::TokenId> predictions;
+  predictions.reserve(rows);
+  for (std::size_t r = 0; r < rows; ++r) {
+    predictions.push_back(
+        CheckedSampleToken(host_predictions[r], config.vocab_size));
+  }
+  last_hidden_offset_ = (rows - 1) * H;
+  lfm2_rows_verified_ = true;
+  return predictions;
+}
+
+// Flint: speculative verification for flint, rows 2..8. The projections run
+// once for all rows through the verify_m intercepts (shared weight reads);
+// the KV write and the attention stay per row and in row order, because each
+// row reads the K/V entries the row before it wrote. Every kernel and its
+// arguments are the row's exact decode launches (ExecuteFlintDecodeStep), so
+// logits are bit-identical to walking the chunk token by token.
+std::vector<tokenization::TokenId>
+QwenGpuExecutor::ForwardFlintVerificationRows(
+    std::span<const tokenization::TokenId> tokens, std::uint32_t start_pos,
+    bool capture_logits) {
+  CheckReset();
+  if (vision_input_.Bytes() != 0) {
+    throw std::runtime_error("flint vision is not supported");
+  }
+  const auto& config = weights_.config;
+  if (!config.flint) {
+    throw std::runtime_error("flint verify called for a non-flint config");
+  }
+  if (arena_.d_kv_cache == nullptr) {
+    throw std::runtime_error("flint verify requires the fp32 KV cache");
+  }
+  const std::size_t rows = tokens.size();
+  if (start_pos > arena_.GetMaxContext() ||
+      rows > arena_.GetMaxContext() - start_pos) {
+    throw std::length_error("flint verify exceeds the GPU context length");
+  }
+  last_verification_rows_ = rows;
+  h_verification_hidden_.clear();
+  h_verification_logits_.clear();
+  replaying_ssm_state_ = false;
+  arena_.DisableSsmReplayCapture();
+  EnsureVerificationLogits(rows);
+
+  const std::size_t H = config.hidden_size;
+  const std::size_t attn =
+      static_cast<std::size_t>(config.num_attention_heads) * config.head_dim;
+  const std::size_t kv =
+      static_cast<std::size_t>(config.num_key_value_heads) * config.head_dim;
+  const std::size_t I = config.intermediate_size;
+  const std::size_t S = config.expert_shared_feed_forward_length;
+  const float eps = config.norm_eps_pre;
+  const auto scratch = arena_.GetScratchView(rows);
+  if (scratch.decode.hidden.size() < rows * H ||
+      scratch.decode.normed.size() < rows * H ||
+      scratch.attention.q.size() < rows * attn ||
+      scratch.attention.k.size() < rows * kv ||
+      scratch.attention.v.size() < rows * kv ||
+      scratch.ssm.out.size() < rows * std::max(H, attn) ||
+      scratch.attention.output.size() < rows * H ||
+      scratch.ffn.activation.size() < rows * std::max(I, S) ||
+      scratch.ffn.out.size() < rows * H ||
+      scratch.decode.prompt_tokens.size() < rows) {
+    throw std::runtime_error("flint verify scratch is short");
+  }
+
+  const std::size_t vocab_size = config.vocab_size;
+  const std::size_t captured_layer_count =
+      arena_.GetTargetLayerCapture().size();
+  const std::size_t feature_width = captured_layer_count * H;
+  const std::size_t feature_elements =
+      capture_prompt_hidden_ ? rows * feature_width : 0;
+  const std::size_t feature_rows =
+      feature_elements / vocab_size + (feature_elements % vocab_size != 0);
+  // The head writes the rows' logits into the same buffer that held the
+  // drafter features, exactly as the single-session ForwardVerificationBatch
+  // does: the features leave for the host and the tap plane before it runs.
+  if (capture_prompt_hidden_) {
+    EnsureVerificationLogits(std::max(rows, feature_rows));
+    h_verification_hidden_.resize(rows * (feature_width ? feature_width : H));
+  }
+  auto* const feature_buffer = d_verification_logits_;
+  auto* const logits_buffer = d_verification_logits_;
+
+  std::vector<std::uint32_t> host_rows(rows);
+  for (std::size_t r = 0; r < rows; ++r) {
+    host_rows[r] = static_cast<std::uint32_t>(tokens[r]);
+  }
+  HIP_CHECK(hipMemcpyAsync(scratch.decode.prompt_tokens.data(),
+                           host_rows.data(), rows * sizeof(std::uint32_t),
+                           hipMemcpyHostToDevice, arena_.stream));
+  LaunchBatchedEmbeddingLookup(
+      weights_.token_embd.data, weights_.token_embd.type,
+      scratch.decode.prompt_tokens.data(), scratch.decode.hidden.data(), rows,
+      H, arena_.stream);
+  // Flint: the decode step norms the embedded rows before layer 0, unlike
+  // LFM2. The positions below replace the token ids so every row carries its
+  // own d_pos word, as the decode step's pair does.
+  if (config.num_layers != 0) {
+    for (std::size_t r = 0; r < rows; ++r) {
+      LaunchRMSNorm(
+          scratch.decode.hidden.data() + r * H,
+          static_cast<const float*>(weights_.layers[0].attn_norm.data),
+          scratch.decode.normed.data() + r * H, static_cast<std::uint32_t>(H),
+          eps, arena_.stream);
+    }
+  }
+  for (std::size_t r = 0; r < rows; ++r) {
+    host_rows[r] = start_pos + static_cast<std::uint32_t>(r);
+  }
+  HIP_CHECK(hipMemcpyAsync(scratch.decode.prompt_tokens.data(),
+                           host_rows.data(), rows * sizeof(std::uint32_t),
+                           hipMemcpyHostToDevice, arena_.stream));
+  const std::uint32_t* d_pos = scratch.decode.prompt_tokens.data();
+
+  const std::uint32_t max_ctx = arena_.GetMaxContext();
+  const std::uint32_t heads = config.num_attention_heads;
+  const std::uint32_t kv_heads = config.num_key_value_heads;
+  const std::uint32_t head_dim = config.head_dim;
+  const std::uint32_t rotary_dim = config.rotary_dim;
+  const float rope_theta = config.rope_theta;
+  const std::uint32_t n_expert = config.expert_count;
+  const std::uint32_t n_used = config.expert_used_count;
+  const std::uint32_t expert_ff = config.expert_feed_forward_length;
+  const std::size_t plane = arena_.GetAttentionKvPlaneElements();
+  // Flint: fp32 KV only.
+  float* v_cache = arena_.d_kv_cache + plane;
+  for (std::uint32_t l = 0; l < config.num_layers; ++l) {
+    const auto& layer = weights_.layers[l];
+    // Flint: with ROCmFP4 q/k/v the group quantises normed once and shares
+    // that Q8 copy, the same quant and matvec kernels the decode step's slot
+    // path runs; any refusal falls back per tensor to the launches LaunchGEMV
+    // serves decode.
+    const bool shared_qkv = IsRocmFp4(layer.attn_q.type) &&
+                            IsRocmFp4(layer.attn_k.type) &&
+                            IsRocmFp4(layer.attn_v.type) &&
+                            RocmFp4ShapeOk(attn, H) && RocmFp4ShapeOk(kv, H);
+    if (!shared_qkv ||
+        !TryLaunchVerifyIntegerGroup(
+            {{&layer.attn_q, scratch.attention.q.data(), attn},
+             {&layer.attn_k, scratch.attention.k.data(), kv},
+             {&layer.attn_v, scratch.attention.v.data(), kv}},
+            scratch.decode.normed.data(), rows, H, arena_.stream)) {
+      LaunchVerifyProjection(layer.attn_q, scratch.decode.normed.data(),
+                             scratch.attention.q.data(), rows, attn, H,
+                             arena_.stream,
+                             DecodeSingleIntegerPath(layer.attn_q, attn, H));
+      LaunchVerifyProjection(layer.attn_k, scratch.decode.normed.data(),
+                             scratch.attention.k.data(), rows, kv, H,
+                             arena_.stream,
+                             DecodeSingleIntegerPath(layer.attn_k, kv, H));
+      LaunchVerifyProjection(layer.attn_v, scratch.decode.normed.data(),
+                             scratch.attention.v.data(), rows, kv, H,
+                             arena_.stream,
+                             DecodeSingleIntegerPath(layer.attn_v, kv, H));
+    }
+    // Row order matters: row r reads the K/V rows the rows before it wrote.
+    const float* sinks = static_cast<const float*>(layer.attn_sinks.data);
+    for (std::size_t r = 0; r < rows; ++r) {
+      float* q = scratch.attention.q.data() + r * attn;
+      float* k = scratch.attention.k.data() + r * kv;
+      float* v = scratch.attention.v.data() + r * kv;
+      const std::uint32_t* row_pos = d_pos + r;
+      const std::uint32_t pos = start_pos + static_cast<std::uint32_t>(r);
+      LaunchPerHeadRMSNorm(q, static_cast<const float*>(layer.attn_q_norm.data),
+                           q, heads, head_dim, eps, arena_.stream);
+      LaunchPerHeadRMSNorm(k, static_cast<const float*>(layer.attn_k_norm.data),
+                           k, kv_heads, head_dim, eps, arena_.stream);
+      if (config.LayerUsesRope(l)) {
+        LaunchRoPE(q, k, heads, kv_heads, head_dim, rotary_dim, row_pos,
+                   rope_theta, arena_.stream, nullptr);
+      }
+      Require(LaunchGlimmerWriteKv(k, v, arena_.d_kv_cache, v_cache, l, pos,
+                                   max_ctx, kv_heads, head_dim, kv, plane,
+                                   arena_.stream));
+      if (FlintSplitKEnabled()) {
+        const std::uint32_t n_splits =
+            config.LayerSwaWindow(l) == 0U ? 32U : 16U;
+        Require(LaunchFlintDecodeAttention(
+            q, arena_.d_kv_cache, v_cache, scratch.ssm.out.data() + r * attn, l,
+            row_pos, config.LayerSwaWindow(l), max_ctx, heads, kv_heads,
+            head_dim, n_splits, arena_.d_lfm2_attn_partial, sinks,
+            arena_.stream));
+      } else {
+        Require(LaunchGlimmerWindowAttention(
+            q, nullptr, arena_.d_kv_cache, v_cache,
+            scratch.ssm.out.data() + r * attn, l, pos, config.LayerSwaWindow(l),
+            max_ctx, heads, kv_heads, head_dim, attn, 0, plane,
+            scratch.ssm.out.size() - r * attn, arena_.stream, sinks));
+      }
+    }
+    LaunchVerifyProjection(layer.attn_output, scratch.ssm.out.data(),
+                           scratch.attention.output.data(), rows, H, attn,
+                           arena_.stream,
+                           DecodeSingleIntegerPath(layer.attn_output, H, attn));
+    for (std::size_t r = 0; r < rows; ++r) {
+      Require(LaunchLfm2AddRMSNorm(  // Flint: residual + ffn_norm
+          scratch.decode.hidden.data() + r * H,
+          scratch.attention.output.data() + r * H,
+          static_cast<const float*>(layer.ffn_norm.data),
+          scratch.decode.normed.data() + r * H, static_cast<std::uint32_t>(H),
+          eps, arena_.stream));
+    }
+    if (!layer.is_moe) {  // Flint dense layer
+      LaunchFfnActivation(layer, scratch, rows, I, H, arena_.stream);
+      LaunchVerifyProjection(layer.ffn_down, scratch.ffn.activation.data(),
+                             scratch.ffn.out.data(), rows, H, I, arena_.stream,
+                             DecodeSingleIntegerPath(layer.ffn_down, H, I));
+    } else {  // Flint MoE layer
+      // The ungated shared expert stays per row: the decode step's launches.
+      for (std::size_t r = 0; r < rows; ++r) {
+        LaunchFusedSwiGLUGEMV(
+            layer.ffn_gate_shexp.data, layer.ffn_gate_shexp.type,
+            layer.ffn_up_shexp.data, layer.ffn_up_shexp.type,
+            scratch.decode.normed.data() + r * H,
+            scratch.ffn.activation.data() + r * S, S, H, arena_.stream);
+        LaunchGEMV(layer.ffn_down_shexp.data, layer.ffn_down_shexp.type,
+                   scratch.ffn.activation.data() + r * S,
+                   scratch.attention.output.data() + r * H, H, S,
+                   arena_.stream);
+      }
+      for (std::size_t r = 0; r < rows; ++r) {
+        Require(LaunchLfm2MoeRoute(
+            scratch.decode.normed.data() + r * H,
+            static_cast<const float*>(layer.ffn_gate_inp.data),
+            static_cast<const float*>(layer.exp_probs_b.data),
+            static_cast<std::uint32_t>(H), n_expert, n_used,
+            arena_.d_moe_logits + r * n_expert, arena_.d_moe_ids + r * n_used,
+            arena_.d_moe_weights + r * n_used, arena_.stream));
+      }
+      if (superroc_fp4_expert_ffn_dev_batch(
+              static_cast<int>(layer.ffn_gate_exps.type),
+              layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+              layer.ffn_down_exps.data, scratch.decode.normed.data(),
+              arena_.d_moe_ids, arena_.d_moe_weights, static_cast<int>(rows),
+              static_cast<int>(n_used), static_cast<int>(n_expert),
+              static_cast<int>(H), static_cast<int>(expert_ff), 0.0F,
+              scratch.ffn.out.data(), arena_.stream) != SUPERROC_FP4_OK) {
+        // Same per-row launches the decode step runs, on the same refusal.
+        for (std::size_t r = 0; r < rows; ++r) {
+          if (superroc_fp4_expert_ffn_dev(
+                  static_cast<int>(layer.ffn_gate_exps.type),
+                  layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+                  layer.ffn_down_exps.data,
+                  scratch.decode.normed.data() + r * H,
+                  arena_.d_moe_ids + r * n_used,
+                  arena_.d_moe_weights + r * n_used, static_cast<int>(n_used),
+                  static_cast<int>(n_expert), static_cast<int>(H),
+                  static_cast<int>(expert_ff), 0.0F,
+                  scratch.ffn.out.data() + r * H,
+                  arena_.stream) != SUPERROC_FP4_OK) {
+            throw std::runtime_error("flint decode experts failed");
+          }
+        }
+      }
+      for (std::size_t r = 0; r < rows; ++r) {
+        LaunchResidualAdd(scratch.ffn.out.data() + r * H,
+                          scratch.attention.output.data() + r * H,
+                          scratch.ffn.out.data() + r * H, H, arena_.stream);
+      }
+    }
+    // Flint: residual + the next RMSNorm (next layer's attn_norm, or
+    // output_norm after the last layer).
+    const float* next_norm =
+        l + 1U < config.num_layers
+            ? static_cast<const float*>(weights_.layers[l + 1U].attn_norm.data)
+            : static_cast<const float*>(weights_.output_norm.data);
+    for (std::size_t r = 0; r < rows; ++r) {
+      Require(LaunchLfm2AddRMSNorm(
+          scratch.decode.hidden.data() + r * H, scratch.ffn.out.data() + r * H,
+          next_norm, scratch.decode.normed.data() + r * H,
+          static_cast<std::uint32_t>(H), eps, arena_.stream));
+    }
+    // DSpark tap: the layer output is the hidden state the drafter's
+    // feature-fusion encoder consumes (same point as the Qwen paths).
+    if (capture_prompt_hidden_) {
+      if (const auto tap = arena_.GetTargetLayerCaptureIndex(l);
+          tap.has_value()) {
+        float* const destination = feature_buffer + (*tap * H);
+        HIP_CHECK(hipMemcpy2DAsync(destination, feature_width * sizeof(float),
+                                   scratch.decode.hidden.data(),
+                                   H * sizeof(float), H * sizeof(float), rows,
+                                   hipMemcpyDeviceToDevice, arena_.stream));
+      }
+    }
+  }
+
+  if (capture_prompt_hidden_) {  // Flint (feature rows leave before the head)
+    if (captured_layer_count > 0) {
+      HIP_CHECK(hipMemcpyAsync(h_verification_hidden_.data(), feature_buffer,
+                               rows * feature_width * sizeof(float),
+                               hipMemcpyDeviceToHost, arena_.stream));
+      HIP_CHECK(hipMemcpyAsync(arena_.d_target_layer_features,
+                               feature_buffer + (rows - 1) * feature_width,
+                               feature_width * sizeof(float),
+                               hipMemcpyDeviceToDevice, arena_.stream));
+    } else {
+      HIP_CHECK(hipMemcpyAsync(
+          h_verification_hidden_.data(), scratch.decode.hidden.data(),
+          rows * H * sizeof(float), hipMemcpyDeviceToHost, arena_.stream));
+    }
+  }
+  // Flint: normed already holds output_norm(hidden) of every row.
+  LaunchVerifyProjection(
+      weights_.output, scratch.decode.normed.data(), logits_buffer, rows,
+      vocab_size, H, arena_.stream,
+      DecodeSingleIntegerPath(weights_.output, vocab_size, H));
+  auto* const d_out_tokens = scratch.decode.prompt_tokens.data();
+  LaunchBatchedGPUArgmax(logits_buffer, d_out_tokens, rows, vocab_size,
+                         scratch.ffn.out, arena_.stream);
+  std::vector<tokenization::TokenId> host_predictions(rows, 0);
+  HIP_CHECK(hipMemcpyAsync(host_predictions.data(), d_out_tokens,
+                           rows * sizeof(tokenization::TokenId),
+                           hipMemcpyDeviceToHost, arena_.stream));
+  if (capture_logits) {
+    h_verification_logits_.resize(rows * vocab_size);
+    HIP_CHECK(hipMemcpyAsync(h_verification_logits_.data(), logits_buffer,
+                             rows * vocab_size * sizeof(float),
+                             hipMemcpyDeviceToHost, arena_.stream));
+  }
+  HIP_CHECK(hipStreamSynchronize(arena_.stream));
+  std::vector<tokenization::TokenId> predictions;
+  predictions.reserve(rows);
+  for (std::size_t r = 0; r < rows; ++r) {
+    predictions.push_back(
+        CheckedSampleToken(host_predictions[r], config.vocab_size));
+  }
+  last_hidden_offset_ = (rows - 1) * H;
   return predictions;
 }
 

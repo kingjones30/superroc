@@ -14,7 +14,7 @@
 #include <string_view>
 #include <thread>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace {
 constexpr int kLaunchFailure = 719;
@@ -24,7 +24,7 @@ std::atomic<void*> probe_stream{nullptr};
 
 std::string Path(std::string_view name) {
   const auto* directory =
-      ::superroc::core::GetEnvCompat("SUPERROC_TEST_DEVICE_LOSS_DIR");
+      ::superroc::core::GetEnv("SUPERROC_TEST_DEVICE_LOSS_DIR");
   return directory ? std::string(directory) + "/" + std::string(name) : "";
 }
 bool Exists(std::string_view name) {

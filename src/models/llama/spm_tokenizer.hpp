@@ -46,6 +46,11 @@ public:
   [[nodiscard]] std::string Decode(std::span<const std::int32_t> tokens) const;
   [[nodiscard]] std::string TokenText(std::int32_t token) const;
 
+  /// SR-03: the text of every token with type kControl or kUnknown that is
+  /// non-empty. Client text overlapping one of these spellings is encoded
+  /// with special parsing off so it cannot become a control token.
+  [[nodiscard]] std::vector<std::string> SpecialSpellings() const;
+
   [[nodiscard]] std::int32_t Bos() const noexcept { return bos_; }
   [[nodiscard]] std::int32_t Eos() const noexcept { return eos_; }
   [[nodiscard]] std::int32_t Pad() const noexcept { return pad_; }

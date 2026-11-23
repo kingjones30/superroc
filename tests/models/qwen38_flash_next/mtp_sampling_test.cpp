@@ -37,18 +37,11 @@ void CheckLengthController() {
   for (unsigned i = 0; i < 12; ++i) {
     controller.Observe(0, controller.Choose(7));
   }
-  Require(controller.Choose(7) == 0,
-          "unprofitable speculation did not back off to AR");
+  Require(controller.Choose(7) == 1,
+          "unprofitable speculation did not fall to one proposal");
   qfn::MtpLengthController backed_off(7);
   Require(backed_off.Restore(controller.State()), "backoff restore failed");
-  for (unsigned i = 0; i < 16; ++i) {
-    Require(controller.Choose(7) == 0 && backed_off.Choose(7) == 0,
-            "AR interval ended early");
-    controller.ObserveArToken();
-    backed_off.ObserveArToken();
-  }
-  Require(controller.Choose(7) == 1 && backed_off.Choose(7) == 1,
-          "AR backoff did not retry a proposal");
+  Require(backed_off.Choose(7) == 1, "restored policy lost the one proposal");
   controller.Reset();
   Require(controller.Choose(7) == initial, "reset retained old acceptance");
   controller.Observe(5, 6);
@@ -96,7 +89,7 @@ void CheckLengthController() {
     early_failure.Observe(0, 7);
     late_failure.Observe(4, 7);
   }
-  Require(early_failure.Choose(7) == 0 && late_failure.Choose(7) > 1,
+  Require(early_failure.Choose(7) == 1 && late_failure.Choose(7) > 1,
           "conditional acceptance by depth was collapsed to one probability");
 }
 

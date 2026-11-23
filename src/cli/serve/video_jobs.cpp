@@ -27,7 +27,6 @@
 
 #include "src/cli/serve/logging.hpp"
 #include "src/core/json.hpp"
-#include "src/core/previous_name_compat.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
 
 namespace superroc::server {
@@ -401,13 +400,8 @@ struct VideoJobService::Impl {
         if (filesystem_error) {
           break;
         }
-        // Compatibility: previous releases wrote the previous
-        // engine-name suffix (built from parts so the old spelling never
-        // appears here); the scanner still removes it.
         if (const std::string partial_name = child.path().filename().string();
-            partial_name.find(".superroc-partial-") != std::string::npos ||
-            partial_name.find(std::string("g") + "ufo-partial-") !=
-                std::string::npos) {
+            partial_name.find(".superroc-partial-") != std::string::npos) {
           std::filesystem::remove_all(child.path(), filesystem_error);
           filesystem_error.clear();
         }
@@ -454,8 +448,7 @@ struct VideoJobService::Impl {
             expires_at > completed_at &&
             expires_at <=
                 static_cast<double>(std::numeric_limits<std::int64_t>::max());
-        if (!::superroc::core::MatchesCurrentOrPrevious(
-                value.member_str("schema"), "superroc.video-job.v1") ||
+        if ((value.member_str("schema")) != ("superroc.video-job.v1") ||
             !IsVideoId(job->snapshot.id) || job->snapshot.id != directory_id ||
             !IsH3Model(job->snapshot.model) ||
             !minimax_h3::ResolveDurationFrames(job->snapshot.seconds) ||

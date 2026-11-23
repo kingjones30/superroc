@@ -1,0 +1,373 @@
+#!/usr/bin/env python3
+"""Route Lemonade's llama.cpp backend to Super Roc where it can run the model.
+
+Lemonade execs <llamacpp.rocm_bin>/llama-server. Installed as that file, this
+shim reads the model GGUF header: Super Roc families are served by
+`superroc serve`, everything else is handed to the stock llama-server with
+the original arguments. See docs/LEMONADE.md.
+
+Environment:
+  SUPERROC_BIN                 superroc binary (default: ../bin/superroc
+                               next to this file, then PATH)
+  SUPERROC_FALLBACK_LLAMA_SERVER  stock llama-server for other models
+  SUPERROC_EXTRA_ARGS          extra superroc serve args (shell-split)
+  SUPERROC_SHIM_DRYRUN=1       print the chosen argv as JSON, do not exec
+"""
+
+import glob
+import json
+import os
+import shlex
+import shutil
+import struct
+import sys
+
+FAMILIES = {
+    "qwen2", "qwen3", "qwen35", "qwen35moe", "qwen4exp",
+    "lfm2", "lfm2moe", "bailingmoe3", "flint", "llama",
+    "muse-glimmer", "deepseek4",
+}
+
+VALUE_FLAGS = {
+    "-m", "--model", "-hf", "--hf-repo", "-c", "--ctx-size",
+    "--device", "-dev", "--port", "--host", "--mmproj", "-mm",
+    "--model-draft", "-md", "--spec-type", "--spec-draft-n-max",
+    "-lv", "--verbosity", "-b", "--batch-size", "-ub", "--ubatch-size",
+    "--parallel", "-np", "-ngl", "--n-gpu-layers", "-fa", "--flash-attn",
+    "--pooling", "-t", "--threads",
+}
+
+BOOL_FLAGS = {
+    "--jinja", "--no-jinja", "--metrics", "--no-mmproj-offload",
+    "--no-webui", "--embeddings", "--embedding", "--reranking",
+    "--rerank", "--cont-batching",
+}
+
+ALIASES = {
+    "-m": "model", "--model": "model",
+    "-hf": "hf", "--hf-repo": "hf",
+    "-c": "ctx", "--ctx-size": "ctx",
+    "--port": "port", "--host": "host",
+    "--mmproj": "mmproj", "-mm": "mmproj",
+    "--model-draft": "draft", "-md": "draft",
+    "--spec-type": "spec_type",
+    "--spec-draft-n-max": "spec_n_max",
+    "--pooling": "pooling",
+}
+
+USAGE = """usage: llama-server [llama-server flags]
+
+Super Roc shim for Lemonade's llama.cpp backend. Models in a Super Roc
+family run on `superroc serve`; all others run on the stock llama-server
+with these same flags. Set SUPERROC_SHIM_DRYRUN=1 to print the chosen
+command as JSON instead of running it. See docs/LEMONADE.md.
+"""
+
+
+class Fallback(Exception):
+    """Run the stock llama-server with the original argv."""
+
+
+def parse_args(args):
+    """Split args into (values, bools). Unknown input raises Fallback."""
+    values = {}
+    bools = set()
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if not arg.startswith("-") or arg == "-":
+            raise Fallback("unexpected argument %r" % arg)
+        name, eq, inline = arg.partition("=")
+        if name in VALUE_FLAGS:
+            if eq:
+                value = inline
+            elif i + 1 < len(args):
+                i += 1
+                value = args[i]
+            else:
+                raise Fallback("missing value for %s" % name)
+            key = ALIASES.get(name)
+            if key:
+                values[key] = value
+        elif name in BOOL_FLAGS:
+            bools.add(name)
+        else:
+            raise Fallback("unknown flag %s" % name)
+        i += 1
+    return values, bools
+
+
+# GGUF header reading (format version 3). Value type ids and scalar sizes:
+_SCALAR_SIZE = {0: 1, 1: 1, 2: 2, 3: 2, 4: 4, 5: 4, 6: 4, 7: 1, 10: 8, 11: 8, 12: 8}
+_TYPE_STRING = 8
+_TYPE_ARRAY = 9
+# Header size caps, checked before the read/allocation they size; a header
+# over any cap is unreadable here, so the model goes to the stock server.
+_MAX_KV_COUNT = 65536
+_MAX_ARRAY_COUNT = 1 << 20
+_MAX_STRING = 1 << 20
+
+
+def _read_exact(fh, count):
+    data = fh.read(count)
+    if len(data) != count:
+        raise ValueError("short read")
+    return data
+
+
+def _read_string(fh):
+    (length,) = struct.unpack("<Q", _read_exact(fh, 8))
+    if length > _MAX_STRING:
+        raise ValueError("string too long")
+    return _read_exact(fh, length).decode("utf-8", "replace")
+
+
+def _skip_value(fh, vtype):
+    if vtype in _SCALAR_SIZE:
+        _read_exact(fh, _SCALAR_SIZE[vtype])
+    elif vtype == _TYPE_STRING:
+        _read_string(fh)
+    elif vtype == _TYPE_ARRAY:
+        (etype,) = struct.unpack("<I", _read_exact(fh, 4))
+        (count,) = struct.unpack("<Q", _read_exact(fh, 8))
+        if count > _MAX_ARRAY_COUNT:
+            raise ValueError("array too large")
+        if etype == _TYPE_STRING:
+            for _ in range(count):
+                _read_string(fh)
+        elif etype in _SCALAR_SIZE:
+            _read_exact(fh, _SCALAR_SIZE[etype] * count)
+        else:
+            raise ValueError("bad array element type")
+    else:
+        raise ValueError("bad value type")
+
+
+def read_architecture(path):
+    """Return general.architecture from a GGUF v3 header, or None."""
+    try:
+        with open(path, "rb") as fh:
+            if _read_exact(fh, 4) != b"GGUF":
+                return None
+            (version,) = struct.unpack("<I", _read_exact(fh, 4))
+            if version != 3:
+                return None
+            _read_exact(fh, 8)  # tensor count
+            (kv_count,) = struct.unpack("<Q", _read_exact(fh, 8))
+            if kv_count > _MAX_KV_COUNT:
+                return None
+            for _ in range(kv_count):
+                key = _read_string(fh)
+                (vtype,) = struct.unpack("<I", _read_exact(fh, 4))
+                if key == "general.architecture":
+                    if vtype != _TYPE_STRING:
+                        return None
+                    return _read_string(fh)
+                _skip_value(fh, vtype)
+    except (OSError, ValueError, struct.error):
+        return None
+    return None
+
+
+def shim_path():
+    return os.path.realpath(__file__)
+
+
+def find_stock_server():
+    """Stock llama-server path, or None. Never this shim itself."""
+    me = shim_path()
+    env = os.environ.get("SUPERROC_FALLBACK_LLAMA_SERVER")
+    if env:
+        return env if os.path.realpath(env) != me else None
+    cache = os.path.join(os.path.expanduser("~"), ".cache", "lemonade",
+                         "bin", "llamacpp")
+    patterns = [
+        os.path.join(cache, "rocm*", "*", "llama-server"),
+        os.path.join(cache, "rocm*", "llama-server"),
+        os.path.join(cache, "vulkan", "llama-server"),
+    ]
+    for pattern in patterns:
+        for cand in sorted(glob.glob(pattern)):
+            if os.path.isfile(cand) and os.path.realpath(cand) != me:
+                return cand
+    on_path = shutil.which("llama-server")
+    if on_path and os.path.realpath(on_path) != me:
+        return on_path
+    return None
+
+
+def find_superroc():
+    """Super Roc binary path, or None."""
+    env = os.environ.get("SUPERROC_BIN")
+    if env:
+        return env
+    sibling = os.path.join(os.path.dirname(shim_path()), "..", "bin", "superroc")
+    sibling = os.path.normpath(sibling)
+    if os.path.isfile(sibling):
+        return sibling
+    return shutil.which("superroc")
+
+
+# Listener/model/auth options are owned by the shim, so extra-args sources
+# (superroc-models.json, SUPERROC_EXTRA_ARGS) may not set them; dropped
+# with a warning. --cache-disk also picks a filesystem path.
+_UNSAFE_VALUE_ARGS = {
+    "--host", "-i", "--port", "-p", "--api-key", "--api-key-file",
+    "--cache-disk", "-m", "--model",
+}
+_UNSAFE_BOOL_ARGS = {"--trace"}
+
+
+def sanitize_extra(args, source):
+    clean = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name, eq, _inline = arg.partition("=")
+        if name in _UNSAFE_BOOL_ARGS or (name in _UNSAFE_VALUE_ARGS and eq):
+            print("super-roc shim: dropped unsafe arg %s from %s"
+                  % (arg, source), file=sys.stderr)
+            i += 1
+        elif name in _UNSAFE_VALUE_ARGS:
+            print("super-roc shim: dropped unsafe arg %s from %s"
+                  % (arg, source), file=sys.stderr)
+            i += 2
+        else:
+            clean.append(arg)
+            i += 1
+    return clean
+
+
+def per_model_args(model_path):
+    here = os.path.dirname(shim_path())
+    try:
+        with open(os.path.join(here, "superroc-models.json")) as fh:
+            table = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    args = table.get(os.path.basename(model_path), [])
+    if not isinstance(args, list):
+        return []
+    return sanitize_extra([str(a) for a in args], "superroc-models.json")
+
+
+def build_superroc_argv(values, binary):
+    model = values["model"]
+    served = os.path.basename(model)
+    if served.lower().endswith(".gguf"):
+        served = served[:-5]
+    argv = [binary, "serve",
+            "-i", values.get("host") or "127.0.0.1",
+            "-p", values.get("port") or "8080",
+            "-j", "1",
+            "llm", "-m", model,
+            "--served-model-name", served, "--accept-any-model-name"]
+    ctx = values.get("ctx")
+    if ctx is not None:
+        try:
+            ctx_n = int(ctx)
+        except ValueError:
+            raise Fallback("bad ctx-size %r" % ctx)
+        if ctx_n > 0:
+            argv += ["-c", ctx]
+    if values.get("mmproj"):
+        argv += ["--mmproj", values["mmproj"]]
+    spec = values.get("spec_type")
+    if spec == "draft-mtp":
+        argv += ["--speculative", "mtp"]
+    elif spec == "draft-dflash":
+        if not values.get("draft"):
+            raise Fallback("draft-dflash without --model-draft")
+        argv += ["--speculative", "dflash2", "--dflash-model", values["draft"]]
+    elif spec is not None:
+        raise Fallback("unsupported --spec-type %s" % spec)
+    if values.get("spec_n_max") is not None:
+        argv += ["-d", values["spec_n_max"]]
+    argv += per_model_args(model)
+    extra = os.environ.get("SUPERROC_EXTRA_ARGS")
+    if extra:
+        argv += sanitize_extra(shlex.split(extra), "SUPERROC_EXTRA_ARGS")
+    return argv
+
+
+def decide(values, bools):
+    """Return (mode, reason); mode is 'superroc' or raises Fallback."""
+    if "hf" in values:
+        raise Fallback("hf repo model")
+    if not values.get("model"):
+        raise Fallback("no -m model")
+    if "--embeddings" in bools or "--embedding" in bools:
+        raise Fallback("embeddings requested")
+    if "--reranking" in bools or "--rerank" in bools:
+        raise Fallback("reranking requested")
+    if "pooling" in values:
+        raise Fallback("pooling requested")
+    arch = read_architecture(values["model"])
+    if arch is None:
+        raise Fallback("cannot read GGUF header")
+    if arch not in FAMILIES:
+        raise Fallback("architecture %s not a Super Roc family" % arch)
+    return arch
+
+
+def exec_stock(argv, reason):
+    try:
+        os.execvp(argv[0], argv)
+    except OSError:
+        pass
+    print("super-roc shim: no stock llama-server for %s" % reason, file=sys.stderr)
+    return 2
+
+
+def exec_superroc(argv):
+    try:
+        os.execvp(argv[0], argv)
+    except OSError:
+        pass
+    print("super-roc shim: cannot run superroc binary %s" % argv[0],
+          file=sys.stderr)
+    return 2
+
+
+def main(argv):
+    args = argv[1:]
+    if args and args[0] == "--version":
+        print("version: 1 (super-roc)")
+        return 0
+    if args and args[0] == "--help":
+        print(USAGE, end="")
+        return 0
+
+    dryrun = os.environ.get("SUPERROC_SHIM_DRYRUN") == "1"
+    try:
+        values, bools = parse_args(args)
+        arch = decide(values, bools)
+        binary = find_superroc()
+        sr_argv = build_superroc_argv(values, binary or "superroc")
+    except Fallback as exc:
+        reason = str(exc)
+        stock = find_stock_server()
+        if dryrun:
+            print(json.dumps({"mode": "fallback", "reason": reason,
+                              "argv": [stock or "llama-server"] + args}))
+            return 0
+        if not stock:
+            print("super-roc shim: no stock llama-server for %s" % reason,
+                  file=sys.stderr)
+            return 2
+        return exec_stock([stock] + args, reason)
+
+    if dryrun:
+        print(json.dumps({"mode": "superroc",
+                          "reason": "architecture %s" % arch,
+                          "argv": sr_argv}))
+        return 0
+    if not binary:
+        print("super-roc shim: no superroc binary found "
+              "(set SUPERROC_BIN)", file=sys.stderr)
+        return 2
+    return exec_superroc(sr_argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

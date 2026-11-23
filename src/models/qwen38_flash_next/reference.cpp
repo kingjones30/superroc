@@ -522,11 +522,13 @@ void ReferenceModel::Moe(const LayerWeights& l, std::span<const float> x,
   }
   std::vector<std::uint32_t> order(c_.num_experts);
   std::iota(order.begin(), order.end(), 0U);
+  const std::uint32_t selected =
+      std::max(c_.num_experts_used, c_.num_experts_file);
   std::partial_sort(
-      order.begin(), order.begin() + c_.num_experts_used, order.end(),
+      order.begin(), order.begin() + selected, order.end(),
       [&](std::uint32_t a, std::uint32_t b) { return logits[a] > logits[b]; });
   float sum = 0.0F;
-  for (std::uint32_t i = 0; i < c_.num_experts_used; ++i) {
+  for (std::uint32_t i = 0; i < selected; ++i) {
     sum += logits[order[i]];
   }
   sum = std::max(sum, 6.103515625e-5F);

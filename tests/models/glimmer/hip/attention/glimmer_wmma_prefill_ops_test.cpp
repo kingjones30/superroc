@@ -1,5 +1,5 @@
 // Oracle test for the Glimmer (32,2,128) instantiations of the masked WMMA
-// prefill attention (LGA): windowless (the 13 full layers) and windowed (the
+// prefill attention: windowless (the 13 full layers) and windowed (the
 // 39 SWA layers).
 //
 // Reference 1: the fp32 LaunchGlimmerPrefillAttention over the same visible
@@ -12,7 +12,7 @@
 // Tolerances (fixed before the run; not tuned to its output):
 //   * WMMA/shared vs fp32 context: rel (max_abs / magnitude) <= 2e-3 -- the
 //     same bar as the 27B/KAT WMMA-vs-reference oracles -- AND per-row
-//     cosine >= 0.9999 AND max_abs <= 2e-2 (the fp16-KV rounding floor LX1
+//     cosine >= 0.9999 AND max_abs <= 2e-2 (the fp16-KV rounding floor
 //     documents for this pattern).
 //   * WMMA/shared vs the FP64 original-input oracle (first and last query
 //     of head zero, plus any row at pos W-1/W/W+1): rel <= 2e-3.
@@ -484,8 +484,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
     std::cout << "  chunk boundaries: byte-identical\n";
   }
 
-  if (!want_lse && key_begin == 0 &&
-      (start_pos >= 8192 || batch_size >= 1024)) {
+  if (!want_lse && key_begin == 0 && (start_pos >= 8192 || batch_size >= 256)) {
     const std::size_t length = start_pos + batch_size;
     const std::array<std::size_t, 2> words{
         length * kv_size / 2,
@@ -535,7 +534,7 @@ void RunCase(std::uint32_t start_pos, std::size_t batch_size,
         const bool untouched = std::all_of(
             first.begin(), first.end(), [](auto byte) { return byte == 0xA5; });
         if (untouched ==
-            (key_heads != 0 && value_heads != 0 && batch_size >= 1024 &&
+            (key_heads != 0 && value_heads != 0 && batch_size >= 256 &&
              key_begin < length && key_begin % 16 == 0))
           std::abort();
         for (std::size_t off : {std::size_t{0}, sizes[i] + 16}) {
@@ -567,7 +566,7 @@ void CheckPack() {
   constexpr std::uint32_t kStart = 0;
   constexpr std::size_t kBatch = 1024;
   constexpr std::uint32_t kCtx = 2048;
-  // PGA: the plane must hold MORE layers than the one being cast, or the
+  // The plane must hold MORE layers than the one being cast, or the
   // K/V half stride (the whole plane) and the cast range (one layer) coincide
   // and a wrong stride still lands in the right slot. Glimmer 30B has dozens
   // of attention layers, so the check runs on a 4-layer plane casting layer 1.
@@ -595,11 +594,11 @@ void CheckPack() {
   auto* v_cache = d_cache + total_kv;
   auto* cache_f16_v = static_cast<std::uint16_t*>(d_cache_f16) + total_kv;
   // Reference: the Glimmer batched write plus, on c20cf22, the token-major
-  // fp16 cast. PGA: main's LaunchGlimmerBatchedWriteKv carries no fp16
-  // dual-write -- lane LX1's never landed, and glimmer_decode.{hpp,hip} are
-  // outside this lane's zone -- so the prefill path issues
-  // LaunchGlimmerCastKvFp16 instead (glimmer_prefill.hip). Same plane, same
-  // remap, so the bytes compared below are the ones the kernel reads.
+  // fp16 cast. Main's LaunchGlimmerBatchedWriteKv carries no fp16
+  // dual-write -- glimmer_decode.{hpp,hip} are not changed here -- so the
+  // prefill path issues LaunchGlimmerCastKvFp16 instead
+  // (glimmer_prefill.hip). Same plane, same remap, so the bytes compared
+  // below are the ones the kernel reads.
   HIP_CHECK(hipMemset(d_cache, 0xA5, total_kv * 2 * sizeof(float)));
   HIP_CHECK(hipMemset(d_cache_f16, 0xA5, total_kv * 2 * sizeof(std::uint16_t)));
   const auto wrote = superroc::hip::LaunchGlimmerBatchedWriteKv(
@@ -863,29 +862,30 @@ void CheckScalePair() {
 }
 
 // The dispatch contract: the WMMA launcher accepts (32,2,128) with window
-// 0 and window > 0 plus (24,4,256), (16,2,256), (32,4,128) and (56,8,128),
-// and rejects anything else, so unknown shapes keep falling back. The
-// windowed instantiation rejects lse_out (no split path with a per-row
+// 0 and window > 0 plus (24,4,256), (16,2,256), (32,2,256), (32,4,128) and
+// (56,8,128), and rejects anything else, so unknown shapes keep falling back.
+// The windowed instantiation rejects lse_out (no split path with a per-row
 // window).
 void CheckDispatch() {
   constexpr std::size_t kBatch = 64;
   constexpr std::uint32_t kCtx = 1024;
-  constexpr std::size_t kMaxAttn27 = 24 * 256;
+  // Widest accepted config: 32 query heads x 256.
+  constexpr std::size_t kMaxAttn = 32 * 256;
   constexpr std::size_t kMaxKv = 4 * 256;
   constexpr std::size_t kMaxTotalKv = 4 * kCtx * 256;
   float *d_q = nullptr, *d_gate = nullptr, *d_k = nullptr, *d_v = nullptr;
   float *d_cache = nullptr, *d_out = nullptr, *d_lse = nullptr;
   void* d_cache_f16 = nullptr;
-  HIP_CHECK(hipMalloc(&d_q, kBatch * kMaxAttn27 * sizeof(float)));
-  HIP_CHECK(hipMalloc(&d_gate, kBatch * kMaxAttn27 * sizeof(float)));
+  HIP_CHECK(hipMalloc(&d_q, kBatch * kMaxAttn * sizeof(float)));
+  HIP_CHECK(hipMalloc(&d_gate, kBatch * kMaxAttn * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_k, kBatch * kMaxKv * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_v, kBatch * kMaxKv * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_cache, 2 * kMaxTotalKv * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_cache_f16, 2 * kMaxTotalKv * sizeof(std::uint16_t)));
-  HIP_CHECK(hipMalloc(&d_out, kBatch * kMaxAttn27 * sizeof(float)));
+  HIP_CHECK(hipMalloc(&d_out, kBatch * kMaxAttn * sizeof(float)));
   HIP_CHECK(hipMalloc(&d_lse, kBatch * 32 * sizeof(float)));
-  HIP_CHECK(hipMemset(d_q, 0, kBatch * kMaxAttn27 * sizeof(float)));
-  HIP_CHECK(hipMemset(d_gate, 0, kBatch * kMaxAttn27 * sizeof(float)));
+  HIP_CHECK(hipMemset(d_q, 0, kBatch * kMaxAttn * sizeof(float)));
+  HIP_CHECK(hipMemset(d_gate, 0, kBatch * kMaxAttn * sizeof(float)));
   HIP_CHECK(hipMemset(d_k, 0, kBatch * kMaxKv * sizeof(float)));
   HIP_CHECK(hipMemset(d_v, 0, kBatch * kMaxKv * sizeof(float)));
   HIP_CHECK(hipMemset(d_cache, 0, 2 * kMaxTotalKv * sizeof(float)));
@@ -897,12 +897,13 @@ void CheckDispatch() {
         static_cast<std::uint16_t*>(d_cache_f16) + kMaxTotalKv, d_out, 0, 0,
         kBatch, kCtx, hq, hkv, hd, nullptr, lse, 0, false, {}, {}, window);
   };
-  if (!wmma(16, 2, 256, 0) || !wmma(24, 4, 256, 0) || !wmma(32, 2, 128, 0) ||
-      !wmma(32, 2, 128, 2048) || !wmma(32, 4, 128, 0) || !wmma(56, 8, 128, 0)) {
+  if (!wmma(16, 2, 256, 0) || !wmma(24, 4, 256, 0) || !wmma(32, 2, 256, 0) ||
+      !wmma(32, 2, 128, 0) || !wmma(32, 2, 128, 2048) || !wmma(32, 4, 128, 0) ||
+      !wmma(56, 8, 128, 0)) {
     std::cerr << "WMMA launcher rejected a supported head config\n";
     std::abort();
   }
-  if (wmma(32, 2, 256, 0) || wmma(16, 2, 128, 0)) {
+  if (wmma(8, 2, 256, 0) || wmma(16, 2, 128, 0)) {
     std::cerr << "WMMA launcher accepted an unsupported head config\n";
     std::abort();
   }

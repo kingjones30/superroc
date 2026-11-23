@@ -1,4 +1,4 @@
-// superroc-quant G4 types 120/121 — "split scale plane" layout (RV20-DESIGN.md §3.1).
+// superroc-quant G4 types 120/121 — "split scale plane" layout.
 //
 // The encode math is IDENTICAL to the ROCmFP4 types (same UE4M3 exhaustive
 // scale search, same codebook, same nibble packing); only the *addressing*

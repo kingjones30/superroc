@@ -1,14 +1,14 @@
-// post_pass_test — SPEC3B item 3 unit test: on every ROC block of a source GGUF,
+// post_pass_test — unit test: on every ROC block of a source GGUF,
 // assert that the stored bytes of the weighted + post-pass encode have
 // mse-weighted error <= the stored bytes of the weighted (fork) encode, and
 // report how many blocks strictly improved.
 //
-// This is the empirical companion to RV29 §4 / the code-sweep being a provable
+// This is the empirical companion to the code-sweep being a provable
 // no-op: with D8 the fork's exhaustive weighted scale search is the global
 // argmin of the mse-weighted objective (per-element-separable nearest codes at
 // the winning scale), so the post-pass (LS refit + code sweep) can never
 // strictly improve and MUST tie. The test asserts the invariant from the ACTUAL
-// STORED BYTES (SPEC3B item 3: "computed FROM THE STORED BYTES"), not from a
+// STORED BYTES, not from a
 // re-derivation, and reports the improved-block count.
 //
 // Usage: post_pass_test <src.gguf> <imatrix.gguf> [recipe]

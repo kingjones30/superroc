@@ -1,4 +1,4 @@
-// LM1 SPEC11 item 2: bit-exact KV equality for the KAT-MTP batched prime pack.
+// Bit-exact KV equality for the KAT-MTP batched prime pack.
 //
 //   LaunchKatMtpWriteKv packs a BATCH of already-normed, already-RoPE'd K/V
 //   rows into the draft head's dense KV cache for the embedded nextn block
@@ -20,7 +20,7 @@
 //
 //   Both caches are pre-filled with a sentinel and compared in full, so a write
 //   outside the intended (kv_h, pos) slots fails too — that is the class of
-//   out-of-range access that faulted the GPU in REPORT9.
+//   out-of-range access that faulted the GPU.
 //
 //   Runs on a live ROCm device; deliberately NOT part of the default CTest
 //   suite on a CPU box (same policy as rocmfp4_gpu_gemv_test).

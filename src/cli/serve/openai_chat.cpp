@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
+#include <deque>
 #include <iomanip>
 #include <limits>
 #include <memory>
@@ -21,8 +23,9 @@
 #include <utility>
 #include <vector>
 
-#include "src/cli/serve/lfm2_tool_parse.hpp"  // LFM2
+#include "src/cli/serve/lfm2_tool_parse.hpp"
 #include "src/cli/serve/logging.hpp"
+#include "src/cli/serve/logprobs_json.hpp"
 #include "src/cli/serve/quote_tracker.hpp"
 #include "src/cli/serve/response_format.hpp"
 #include "src/cli/serve/sampling_request.hpp"
@@ -35,6 +38,18 @@
 #include "src/models/qwen/chat_template.hpp"
 
 namespace superroc::server {
+
+namespace {
+std::atomic<bool> g_accept_any_model_name{false};
+}  // namespace
+
+void SetAcceptAnyModelName(bool accept) {
+  g_accept_any_model_name.store(accept, std::memory_order_relaxed);
+}
+
+bool AcceptAnyModelName() {
+  return g_accept_any_model_name.load(std::memory_order_relaxed);
+}
 
 std::optional<ReasoningEffort> ParseReasoningEffortName(
     std::string_view value) {
@@ -94,9 +109,10 @@ constexpr std::array<std::string_view, 7> kToolMarkers{
     "<tool_calls｜>",
     "<tool_calls>",
 };
-// GLM: ATEM hold-back is Muse-only. Stock models keep the 7 markers above.
+// ATEM hold-back is for Muse Glimmer only. Stock models keep the 7 markers
+// above.
 
-// Jay 2026-10-01: Ling-3.0's chat template shows its tool format with a
+// Ling-3.0's chat template shows its tool format with a
 // zero-width space inside the tags ("<​tool_call>"), and sampled output
 // sometimes copies that or spells the tag with fullwidth bars, with or without
 // the closing '>'
@@ -863,7 +879,7 @@ bool ParseReasoningOptions(const json::Value& body, ReasoningOptions* options,
     }
     options->preserve_thinking = preserve->as_bool();
   }
-  // GLM: pinned Glimmer template reads this string. It is not reasoning_effort.
+  // Pinned Glimmer template reads this string. It is not reasoning_effort.
   if (const json::Value* strength = kwargs->find("reasoning_strength")) {
     if (!strength->is_string() || strength->get_str().empty()) {
       *error =
@@ -958,7 +974,7 @@ std::optional<HttpResponse> ParseRequest(const HttpRequest& request,
   if (output->model.empty()) {
     return Error(400, "Bad Request", "'model' is required", "missing_model");
   }
-  if (output->model != backend.model_id()) {
+  if (!AcceptAnyModelName() && output->model != backend.model_id()) {
     return Error(404, "Not Found",
                  "model '" + output->model + "' is not served by this process",
                  "model_not_found");
@@ -1107,6 +1123,33 @@ std::optional<HttpResponse> ParseRequest(const HttpRequest& request,
                  sampling_error->code.c_str());
   }
   output->sampling = parsed_sampling;
+  output->sampling.logprobs = false;
+  output->sampling.logprobs_top_n = 0;
+  if (const auto* logprobs = body.find("logprobs");
+      logprobs != nullptr && !logprobs->is_null()) {
+    if (!logprobs->is_bool()) {
+      return Error(400, "Bad Request", "'logprobs' must be a boolean",
+                   "invalid_logprobs");
+    }
+    output->sampling.logprobs = logprobs->as_bool();
+  }
+  if (const auto* top = body.find("top_logprobs");
+      top != nullptr && !top->is_null()) {
+    if (!top->is_number() || !std::isfinite(top->as_double()) ||
+        std::floor(top->as_double()) != top->as_double() ||
+        top->as_double() < 0.0 || top->as_double() > 20.0) {
+      return Error(400, "Bad Request",
+                   "'top_logprobs' must be an integer between 0 and 20",
+                   "invalid_top_logprobs");
+    }
+    if (!output->sampling.logprobs) {
+      return Error(400, "Bad Request",
+                   "'top_logprobs' requires 'logprobs' to be true",
+                   "invalid_top_logprobs");
+    }
+    output->sampling.logprobs_top_n =
+        static_cast<std::uint32_t>(top->as_double());
+  }
 
   if (const json::Value* choices = body.find("n");
       choices != nullptr && !choices->is_null() &&
@@ -1121,15 +1164,14 @@ std::optional<HttpResponse> ParseRequest(const HttpRequest& request,
                  "request field 'ignore_eos' is not supported on this endpoint",
                  "unsupported_field");
   }
-  for (const std::string_view unsupported :
-       {"logprobs", "top_logprobs", "modalities", "audio"}) {
+  // `logprobs` and `top_logprobs` are parsed above; a false `logprobs` keeps
+  // today's behaviour exactly.
+  for (const std::string_view unsupported : {"modalities", "audio"}) {
     if (const auto* value = body.find(std::string(unsupported));
         value != nullptr && !value->is_null()) {
-      if ((unsupported == "logprobs" && value->is_bool() &&
-           !value->as_bool()) ||
-          (unsupported == "modalities" && value->is_array() &&
-           value->size() == 1 && value->items().front().is_string() &&
-           value->items().front().str() == "text"))
+      if (unsupported == "modalities" && value->is_array() &&
+          value->size() == 1 && value->items().front().is_string() &&
+          value->items().front().str() == "text")
         continue;
       return Error(
           400, "Bad Request",
@@ -1766,7 +1808,7 @@ void ParseQwenCalls(
           PartialStringArgument(call, name, syntax.unfinished->value);
       }
     } else if (!body.empty() && body.front() != '{') {
-      // Jay 2026-10-01: GLM-style calls, which the Ling-3.0 chat template asks
+      // GLM-style calls, which the Ling-3.0 chat template asks
       // for:
       //   <tool_call>NAME\n<arg_key>K</arg_key>\n<arg_value>V</arg_value>\n...</tool_call>
       // Without this branch Ling's correct calls came back as plain `content`
@@ -1833,7 +1875,7 @@ void ParseQwenCalls(
         }
         body.remove_prefix(close + std::string_view{"</arg_value>"}.size());
       }
-      // Jay 2026-10-24 (Flint): an unconstrained model can write its trained
+      // An unconstrained model can write its trained
       // argument name instead of the schema's (Flint: "command" for a shell
       // tool whose schema says "cmd"; LLM Fight Club then re-prompted 25 turns
       // in a row). When exactly one key is outside the schema and exactly one
@@ -2019,7 +2061,7 @@ void ParseDsmlCalls(
   }
 }
 
-// Muse: defined after ParseGeneration; forward-declared for the flag branch.
+// Defined after ParseGeneration; forward-declared for the flag branch.
 ParsedGeneration ParseMuseGeneration(
     std::string_view raw,
     TextGenerationBackend::InitialOutputState initial_output_state,
@@ -2044,13 +2086,13 @@ ParsedGeneration ParseGeneration(
     ChatRequest::ToolChoice choice, bool enforce_required,
     ToolMarkerSet markers, ToolCloserSet closers, QuoteTracker& quotes,
     bool partial = false, bool muse_channels = false,
-    bool lfm2_pythonic = false) {  // LFM2
+    bool lfm2_pythonic = false) {
   if (muse_channels) {
     return ParseMuseGeneration(raw, initial_output_state, tools, choice,
                                enforce_required, markers, closers, quotes,
                                partial);
   }
-  if (lfm2_pythonic) {  // LFM2
+  if (lfm2_pythonic) {
     return ParseLfm2Generation(raw, initial_output_state, tools, choice,
                                enforce_required, markers, closers, quotes,
                                partial);
@@ -2282,7 +2324,7 @@ void ParseAtemCalls(std::string_view text, std::vector<ParsedToolCall>* calls) {
   }
 }
 
-// GLM: fork channel markers. The generation prompt <|start|>assistant is not
+// Fork channel markers. The generation prompt <|start|>assistant is not
 // part of the generated text. <|eom|> continues the turn; <|eot|> ends it.
 constexpr std::string_view kMuseStart = "<|start|>assistant";
 constexpr std::string_view kMuseMessage = "<|message|>";
@@ -2367,7 +2409,7 @@ std::size_t HeldLiteralPrefix(std::string_view text, std::string_view literal) {
   return 0;
 }
 
-// GLM: to=self -> reasoning_content when reasoning is on, else content.
+// To=self -> reasoning_content when reasoning is on, else content.
 // The final to=user (or bare) message is content. Other recipients are tools.
 ParsedGeneration ParseMuseGeneration(
     std::string_view raw,
@@ -2753,12 +2795,19 @@ json::Value BaseChunk(std::string_view id, long long created,
 
 json::Value ChoiceChunk(std::string_view id, long long created,
                         std::string_view model, json::Value delta,
-                        const char* finish_reason = nullptr) {
+                        const char* finish_reason = nullptr,
+                        std::optional<json::Value> logprobs = std::nullopt) {
   json::Value chunk = BaseChunk(id, created, model);
   json::Value choices = json::Value::array();
   json::Value choice = json::Value::object();
   choice["index"] = 0;
   choice["delta"] = std::move(delta);
+  // OpenAI streams per-choice logprobs as a sibling of `delta`, never inside
+  // it. Present only when the request armed logprobs and this chunk's text
+  // covers at least one token.
+  if (logprobs.has_value()) {
+    choice["logprobs"] = std::move(*logprobs);
+  }
   if (finish_reason == nullptr) {
     choice["finish_reason"] = json::Value();
   } else {
@@ -2768,6 +2817,96 @@ json::Value ChoiceChunk(std::string_view id, long long created,
   chunk["choices"] = std::move(choices);
   return chunk;
 }
+
+/// The filter's pending text with per-piece logprobs reports alongside.
+///
+/// Pieces are tracked by normalized length, which is exactly what lands in
+/// `pending_`, so the queue stays parallel to the text. Front erases and
+/// clears drop the corresponding reports silently (tag consumption, separator
+/// trims, tool diverts); emissions move them out explicitly through
+/// NoteEmitted, so a chunk carries exactly the reports of the tokens its
+/// text covers. A report split across an emission boundary attaches to the
+/// emission that completes its token.
+class MetaString : public std::string {
+public:
+  using std::string::string;
+
+  MetaString& operator=(const std::string& other) {
+    pieces_.clear();
+    last_emitted_.clear();
+    std::string::operator=(other);
+    return *this;
+  }
+  MetaString& operator=(std::string&& other) {
+    pieces_.clear();
+    last_emitted_.clear();
+    std::string::operator=(std::move(other));
+    return *this;
+  }
+  void clear() {
+    pieces_.clear();
+    std::string::clear();
+  }
+  std::string& erase(size_type pos, size_type len) {
+    if (pos == 0) {
+      DropFront(std::min(len, size()));
+    } else {
+      // No caller erases mid-buffer; resync rather than misattribute.
+      pieces_.clear();
+    }
+    return std::string::erase(pos, len);
+  }
+
+  /// Records one pushed piece (normalized length) with its token's report.
+  void NotePiece(std::size_t length,
+                 std::optional<TextGenerationBackend::TokenMeta> meta) {
+    pieces_.push_back({length, std::move(meta)});
+  }
+  /// Copies the reports fully covered by the next `length` emitted bytes to
+  /// the pending emission. Call before the matching erase/clear, which drops
+  /// the queue entries exactly once; this never mutates the queue itself, so
+  /// a report split across an emission boundary stays queued until the
+  /// emission that completes its token.
+  void NoteEmitted(std::size_t length) {
+    std::size_t remaining = length;
+    for (const auto& piece : pieces_) {
+      if (remaining == 0) {
+        break;
+      }
+      if (piece.length > remaining) {
+        break;
+      }
+      remaining -= piece.length;
+      if (piece.meta.has_value()) {
+        last_emitted_.push_back(piece.meta->logprobs);
+      }
+    }
+  }
+  /// Reports moved by the last NoteEmitted, in token order.
+  std::vector<sampling::CapturedTokenLogprobs> TakeEmitted() {
+    return std::exchange(last_emitted_, {});
+  }
+
+private:
+  struct TrackedPiece {
+    std::size_t length{0};
+    std::optional<TextGenerationBackend::TokenMeta> meta;
+  };
+  void DropFront(std::size_t length) {
+    std::size_t remaining = length;
+    while (!pieces_.empty() && remaining > 0) {
+      auto& front = pieces_.front();
+      if (front.length > remaining) {
+        front.length -= remaining;
+        break;
+      }
+      remaining -= front.length;
+      pieces_.pop_front();
+    }
+  }
+  std::deque<TrackedPiece> pieces_;
+  std::vector<sampling::CapturedTokenLogprobs> last_emitted_;
+};
 
 class StreamingTextFilter {
 public:
@@ -2804,7 +2943,8 @@ public:
     }
   }
 
-  bool Push(std::string_view bytes, bool final = false) {
+  bool Push(std::string_view bytes, bool final = false,
+            std::optional<TextGenerationBackend::TokenMeta> meta = {}) {
     const auto piece = tag_normalizer_.Push(decoder_.Push(bytes, final), final);
     raw_.append(piece);
     quotes_.Append(piece);
@@ -2813,6 +2953,7 @@ public:
       return true;
     }
     pending_.append(piece);
+    pending_.NotePiece(piece.size(), std::move(meta));
     if (muse_channels_) {
       return PushMuse(final);
     }
@@ -2873,6 +3014,7 @@ public:
       const std::size_t marker =
           found == std::string::npos ? std::string::npos : found - offset;
       if (marker < end_pos) {
+        pending_.NoteEmitted(marker);
         if (marker > 0 && !Emit(pending_.substr(0, marker), true))
           return false;
         hidden_ = pending_.substr(marker);
@@ -2881,12 +3023,11 @@ public:
         return true;
       }
       if (end_pos != std::string::npos) {
+        pending_.NoteEmitted(end_pos);
         if (end_pos > 0 && !Emit(pending_.substr(0, end_pos), true)) {
           return false;
         }
-        std::string_view remaining = pending_;
-        remaining.remove_prefix(end_pos + kThinkEnd.size());
-        pending_ = std::string(remaining);
+        pending_.erase(0, end_pos + kThinkEnd.size());
         state_ = State::kContent;
         quotes_.Reset(raw_, offset + end_pos + kThinkEnd.size());
         trim_reasoning_separator_ = true;
@@ -2904,6 +3045,7 @@ public:
           }
         }
         const std::size_t ready = pending_.size() - held;
+        pending_.NoteEmitted(ready);
         if (ready > 0 && !Emit(pending_.substr(0, ready), true)) {
           return false;
         }
@@ -2936,6 +3078,7 @@ public:
             recognize_tools_
                 ? ContentBefore(raw_, offset, found, closers_, quotes_, tools_)
                 : std::string_view(pending_).substr(0, marker);
+        pending_.NoteEmitted(marker);
         if (!prose.empty() && !Emit(prose, false)) {
           return false;
         }
@@ -2954,6 +3097,7 @@ public:
                          pending_.size())
               : 0;
       const std::size_t ready = pending_.size() - held;
+      pending_.NoteEmitted(ready);
       if (ready > 0 && !Emit(pending_.substr(0, ready), false)) {
         return false;
       }
@@ -2998,6 +3142,7 @@ public:
                               : std::string_view(pending_);
         const bool is_reasoning =
             state_ == State::kThinking || state_ == State::kMuseReasoning;
+        pending_.NoteEmitted(pending_.size());
         const bool emitted = Emit(text, is_reasoning);
         pending_.clear();
         if (!emitted) {
@@ -3014,6 +3159,10 @@ public:
 
   [[nodiscard]] std::string_view raw() const noexcept { return raw_; }
   [[nodiscard]] bool in_tools() const noexcept { return tool_mode_; }
+  /// Logprobs reports for the last emission, in token order.
+  std::vector<sampling::CapturedTokenLogprobs> take_emitted_logprobs() {
+    return pending_.TakeEmitted();
+  }
 
   // `pending_` always holds a suffix of what the model generated, so the
   // context of a marker inside it is decided against the whole response.
@@ -3039,6 +3188,7 @@ private:
       if (start != std::string::npos) {
         const auto prose =
             ContentBefore(raw_, offset, found, closers_, quotes_, tools_);
+        pending_.NoteEmitted(start);
         if (!prose.empty() && !Emit(prose, false)) {
           return false;
         }
@@ -3057,6 +3207,7 @@ private:
       if (ready) {
         const auto text = ContentBefore(raw_, offset, offset + ready, closers_,
                                         quotes_, tools_);
+        pending_.NoteEmitted(text.size());
         if (!text.empty() && !Emit(text, false)) {
           return false;
         }
@@ -3077,7 +3228,13 @@ private:
         return true;
       }
     }
-    auto text = std::exchange(pending_, {});
+    // The clear below drops the queue, so move this emission's reports out
+    // first; the whole tail is content here. Copy the text instead of
+    // exchanging: the pending emission's reports must survive on `pending_`
+    // until the transport takes them.
+    pending_.NoteEmitted(pending_.size());
+    std::string text = pending_;
+    pending_.clear();
     return text.empty() || Emit(text, false);
   }
   bool PushMuse(bool final) {
@@ -3132,9 +3289,9 @@ private:
       const bool reasoning = state_ == State::kMuseReasoning;
       const auto cut = FindMuseEnd(pending_);
       if (cut.kind != MuseEnd::kNone) {
+        pending_.NoteEmitted(cut.pos);
         if (cut.pos > 0 &&
-            !emit_piece_(std::string_view(pending_).substr(0, cut.pos),
-                         reasoning)) {
+            !Emit(std::string_view(pending_).substr(0, cut.pos), reasoning)) {
           return false;
         }
         const std::size_t marker =
@@ -3150,12 +3307,13 @@ private:
       }
       std::size_t held = std::max(HeldLiteralPrefix(pending_, kMuseEom),
                                   HeldLiteralPrefix(pending_, kMuseEot));
-      // GLM: delay a partial ATEM marker, then emit it. Tool turns are a
+      // Delay a partial ATEM marker, then emit it. Tool turns are a
       // recipient, not this marker appearing inside self/user text.
       held = std::max(held, HeldLiteralPrefix(pending_, kAtemMarker));
       const std::size_t ready = pending_.size() - held;
-      if (ready > 0 && !emit_piece_(std::string_view(pending_).substr(0, ready),
-                                    reasoning)) {
+      pending_.NoteEmitted(ready);
+      if (ready > 0 &&
+          !Emit(std::string_view(pending_).substr(0, ready), reasoning)) {
         return false;
       }
       pending_.erase(0, ready);
@@ -3179,7 +3337,7 @@ private:
   core::Utf8Decoder decoder_;
   ToolTagNormalizer tag_normalizer_;
   std::string raw_;
-  std::string pending_;
+  MetaString pending_;
   std::string hidden_;
   State state_{State::kInitial};
   bool tool_mode_{false};
@@ -3276,7 +3434,7 @@ ParsedGeneration StreamingGeneration(
     TextGenerationBackend::InitialOutputState initial, ToolMarkerSet markers,
     ToolCloserSet closers, QuoteTracker& quotes, bool enforce_required,
     bool partial = false, bool muse_channels = false,
-    bool lfm2_pythonic = false,  // LFM2
+    bool lfm2_pythonic = false,
     std::optional<sampling::JsonConstraint::ToolFormat> format = {}) {
   // Native grammars establish argument framing before the value completes.
   // Recovery from unconstrained/JSON fallback text still requires a full call.
@@ -3290,7 +3448,7 @@ ParsedGeneration StreamingGeneration(
              : ParseGeneration(filter.raw(), initial, chat.tools,
                                chat.tool_choice, enforce_required, markers,
                                closers, quotes, partial, muse_channels,
-                               lfm2_pythonic);  // LFM2
+                               lfm2_pythonic);
 }
 
 // Responses uses semantic SSE events, rather than Chat Completions chunks.
@@ -3566,11 +3724,11 @@ HttpResponse NonStreamingResponse(
   // so the final parse emits the calls.
   static constexpr std::array<std::string_view, 1> kLfm2ToolStart{
       "<|tool_call_start|>"};
-  const bool lfm2 = backend.lfm2_pythonic_tools();  // LFM2
-  const bool lfm2_tools_offered =                   // LFM2
+  const bool lfm2 = backend.lfm2_pythonic_tools();
+  const bool lfm2_tools_offered =
       lfm2 && !request.chat.tools.empty() &&
       request.chat.tool_choice != ChatRequest::ToolChoice::kNone;
-  const ToolMarkerSet markers =  // LFM2
+  const ToolMarkerSet markers =
       lfm2_tools_offered ? ToolMarkerSet(kLfm2ToolStart) : base_markers;
   core::Utf8Decoder decoder;
   const auto decoded = NormalizeToolTags(decoder.Push(result.text, true));
@@ -3589,8 +3747,7 @@ HttpResponse NonStreamingResponse(
                             request.chat.tool_choice,
                             result.finish_reason ==
                                 TextGenerationBackend::FinishReason::kStop,
-                            markers, closers, quotes, false, muse,
-                            lfm2);  // LFM2
+                            markers, closers, quotes, false, muse, lfm2);
 
   json::Value response = json::Value::object();
   response["id"] = RandomId("chatcmpl-");
@@ -3614,6 +3771,12 @@ HttpResponse NonStreamingResponse(
     message["tool_calls"] = ToolCallsJson(generated.tool_calls);
   }
   choice["message"] = std::move(message);
+  // One entry per emitted token in order, including reasoning tokens and
+  // tokens consumed by tool framing. Omitted when off, so an unarmed
+  // request's body is byte-identical to before.
+  if (request.sampling.logprobs) {
+    choice["logprobs"] = ChatContentLogprobsJson(result.token_logprobs);
+  }
   choice["finish_reason"] = FinishReason(result, !generated.tool_calls.empty());
   choices.push_back(std::move(choice));
   response["choices"] = std::move(choices);
@@ -3651,11 +3814,11 @@ HttpResponse StreamingResponse(
   // so the final parse emits the calls.
   static constexpr std::array<std::string_view, 1> kLfm2ToolStart{
       "<|tool_call_start|>"};
-  const bool lfm2 = backend.lfm2_pythonic_tools();  // LFM2
-  const bool lfm2_tools_offered =                   // LFM2
+  const bool lfm2 = backend.lfm2_pythonic_tools();
+  const bool lfm2_tools_offered =
       lfm2 && !request.chat.tools.empty() &&
       request.chat.tool_choice != ChatRequest::ToolChoice::kNone;
-  const ToolMarkerSet markers =  // LFM2
+  const ToolMarkerSet markers =
       lfm2_tools_offered ? ToolMarkerSet(kLfm2ToolStart) : base_markers;
   auto stream_log = std::make_shared<HttpResponse::StreamLog>();
   return {
@@ -3671,8 +3834,7 @@ HttpResponse StreamingResponse(
       .streaming_body =
           [request, generation = std::move(generation), id, created, model,
            initial_output_state, muse = backend.muse_channel_parse(),
-           lfm2 = backend.lfm2_pythonic_tools(),  // LFM2
-           markers, closers, format,
+           lfm2 = backend.lfm2_pythonic_tools(), markers, closers, format,
            stream_log](const HttpResponse::BodyWriter& writer) {
             bool connected = true;
             bool started = false;
@@ -3691,6 +3853,7 @@ HttpResponse StreamingResponse(
               return;
             }
             QuoteTracker quotes;
+            const bool want_logprobs = request.sampling.logprobs;
             StreamingTextFilter filter(
                 initial_output_state,
                 [&](std::string_view text, bool is_reasoning) {
@@ -3703,8 +3866,16 @@ HttpResponse StreamingResponse(
                   } else {
                     delta["content"] = std::string(text);
                   }
+                  std::optional<json::Value> choice_logprobs;
+                  if (want_logprobs) {
+                    auto emitted = filter.take_emitted_logprobs();
+                    if (!emitted.empty()) {
+                      choice_logprobs = ChatContentLogprobsJson(emitted);
+                    }
+                  }
                   connected = writer(
-                      Sse(ChoiceChunk(id, created, model, std::move(delta))));
+                      Sse(ChoiceChunk(id, created, model, std::move(delta),
+                                      nullptr, std::move(choice_logprobs))));
                   return connected;
                 },
                 request.chat.response_format != nullptr,
@@ -3744,17 +3915,29 @@ HttpResponse StreamingResponse(
                   };
             }
 
+            std::optional<TextGenerationBackend::TokenMeta> pending_meta;
+            if (want_logprobs) {
+              generation->SetTokenMetaCallback(
+                  [&](const TextGenerationBackend::TokenMeta& meta) {
+                    pending_meta = meta;
+                    return true;
+                  });
+            }
             try {
               const auto result = generation->Wait(
                   [&](std::string_view piece) {
-                    if (!begin() || !filter.Push(piece))
+                    if (!begin())
+                      return false;
+                    auto meta = std::move(pending_meta);
+                    pending_meta.reset();
+                    if (!filter.Push(piece, false, std::move(meta)))
                       return false;
                     return !filter.in_tools() || markers.size() > 2 ||
                            tools.Update(StreamingGeneration(
                                             filter, request.chat,
                                             initial_output_state, markers,
                                             closers, quotes, false, true, false,
-                                            lfm2, format)  // LFM2
+                                            lfm2, format)
                                             .tool_calls);
                   },
                   on_progress, begin);
@@ -3773,7 +3956,7 @@ HttpResponse StreamingResponse(
                   TextGenerationBackend::FinishReason::kStop;
               const auto generated = StreamingGeneration(
                   filter, request.chat, initial_output_state, markers, closers,
-                  quotes, !interrupted, false, muse, lfm2, format);  // LFM2
+                  quotes, !interrupted, false, muse, lfm2, format);
               if (!tools.Finish(generated.tool_calls, interrupted))
                 return;
               if (!filter.Finish(generated.hide_tool_markup, generated.text,
@@ -3821,9 +4004,7 @@ HttpResponse StreamingResponse(
               stream_log->error_code = "generation_failed";
               json::Value err = json::Value::object();
               json::Value detail = json::Value::object();
-              const char* message = error.what();
-              detail["message"] =
-                  message && *message ? message : "generation failed";
+              detail["message"] = "generation failed";
               detail["type"] = "server_error";
               detail["code"] = "generation_failed";
               err["error"] = std::move(detail);
@@ -3833,6 +4014,11 @@ HttpResponse StreamingResponse(
           },
       .stream_log = std::move(stream_log),
       .defer_stream_headers = !request.chat.return_progress,
+      // An empty delta adds no content, reasoning or tool call, so the token
+      // stream is unchanged; unlike an SSE comment it survives proxies that
+      // forward only data lines during a long prefill.
+      .sse_heartbeat_payload =
+          Sse(ChoiceChunk(id, created, model, json::Value::object())),
   };
 }
 
@@ -4477,18 +4663,18 @@ HttpResponse CreateCompatibilityResponse(
   // so the final parse emits the calls.
   static constexpr std::array<std::string_view, 1> kLfm2ToolStart{
       "<|tool_call_start|>"};
-  const bool lfm2 = backend.lfm2_pythonic_tools();  // LFM2
-  const bool lfm2_tools_offered =                   // LFM2
+  const bool lfm2 = backend.lfm2_pythonic_tools();
+  const bool lfm2_tools_offered =
       lfm2 && !chat_local.tools.empty() &&
       chat_local.tool_choice != ChatRequest::ToolChoice::kNone;
-  const ToolMarkerSet markers =  // LFM2
+  const ToolMarkerSet markers =
       lfm2_tools_offered ? ToolMarkerSet(kLfm2ToolStart) : base_markers;
   auto stream_log = std::make_shared<HttpResponse::StreamLog>();
   auto timing = std::make_shared<std::string>();
   const auto run = [generation, initial, chat_local, markers, closers,
                     structured = chat_local.response_format != nullptr,
                     muse = backend.muse_channel_parse(),
-                    lfm2 = backend.lfm2_pythonic_tools(),  // LFM2
+                    lfm2 = backend.lfm2_pythonic_tools(),
                     model = backend.model_id(), format, stream_log,
                     timing](const HttpResponse::BodyWriter& writer) {
     Output output(model, writer, chat_local);
@@ -4532,20 +4718,20 @@ HttpResponse CreateCompatibilityResponse(
             };
       }
       const auto result =
-          writer ? generation->Wait(
-                       [&](std::string_view piece) {
-                         if (!begin() || !filter.Push(piece))
-                           return false;
-                         return !filter.in_tools() || markers.size() > 2 ||
-                                tools.Update(StreamingGeneration(
-                                                 filter, chat_local, initial,
-                                                 markers, closers, quotes,
-                                                 false, true, false, lfm2,
-                                                 format)  // LFM2
-                                                 .tool_calls);
-                       },
-                       on_progress, begin)
-                 : generation->Wait();
+          writer
+              ? generation->Wait(
+                    [&](std::string_view piece) {
+                      if (!begin() || !filter.Push(piece))
+                        return false;
+                      return !filter.in_tools() || markers.size() > 2 ||
+                             tools.Update(StreamingGeneration(
+                                              filter, chat_local, initial,
+                                              markers, closers, quotes, false,
+                                              true, false, lfm2, format)
+                                              .tool_calls);
+                    },
+                    on_progress, begin)
+              : generation->Wait();
       stream_log->details = GenerationLogDetails(result);
       RecordServerMetrics(result);
       if (!writer) {
@@ -4568,9 +4754,9 @@ HttpResponse CreateCompatibilityResponse(
       }
       const bool interrupted =
           result.finish_reason != TextGenerationBackend::FinishReason::kStop;
-      const auto generated = StreamingGeneration(
-          filter, chat_local, initial, markers, closers, quotes, !interrupted,
-          false, muse, lfm2, format);  // LFM2
+      const auto generated =
+          StreamingGeneration(filter, chat_local, initial, markers, closers,
+                              quotes, !interrupted, false, muse, lfm2, format);
       if (!tools.Finish(generated.tool_calls, interrupted)) {
         generation->Cancel();
         return json::Value();
@@ -4586,15 +4772,12 @@ HttpResponse CreateCompatibilityResponse(
         throw;
       const auto* generation_error =
           dynamic_cast<const TextGenerationError*>(&error);
-      // Retain the cause in logs alongside the client's stable code.
-      if (generation_error == nullptr)
-        Logger::Error("chat", error.what());
+      // Retain the cause in logs; the client gets only fixed text.
+      Logger::Error("chat", error.what());
       stream_log->error_code = generation_error
                                    ? generation_error->stable_code()
                                    : "generation_failed";
-      const char* message = error.what();
-      stream_log->error_event_sent =
-          output.Fail(message && *message ? message : "generation failed");
+      stream_log->error_event_sent = output.Fail("generation failed");
       generation->Cancel();
       return json::Value();
     }
@@ -4641,6 +4824,41 @@ HttpResponse CreateAnthropicMessage(const HttpRequest& request,
                                     bool stream) {
   return CreateCompatibilityResponse<AnthropicOutput>(
       request, backend, chat, max_tokens, sampling, stream);
+}
+
+std::vector<std::string_view> ChatAcceptedFields() {
+  return {"model",
+          "messages",
+          "temperature",
+          "top_k",
+          "top_p",
+          "min_p",
+          "min_keep",
+          "seed",
+          "repeat_penalty",
+          "repeat_last_n",
+          "frequency_penalty",
+          "presence_penalty",
+          "max_tokens",
+          "max_completion_tokens",
+          "stream",
+          "stream_options",
+          "n",
+          "stop",
+          "tools",
+          "tool_choice",
+          "parallel_tool_calls",
+          "response_format",
+          "thinking",
+          "reasoning_effort",
+          "reasoning_budget_tokens",
+          "thinking_budget_tokens",
+          "chat_template_kwargs",
+          "modalities",
+          "cache_prompt",
+          "return_progress",
+          "logprobs",
+          "top_logprobs"};
 }
 
 HttpResponse HandleOpenAiChat(const HttpRequest& request,

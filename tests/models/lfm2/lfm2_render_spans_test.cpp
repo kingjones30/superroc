@@ -1,4 +1,4 @@
-// HTC (RVW C4): client tool text renders as content, so a typed special-token
+// Client tool text renders as content, so a typed special-token
 // spelling in a tool description or a replayed call argument stays text, while
 // the real turn and tool-call markers stay framing. CPU only, no model file.
 #include <iostream>

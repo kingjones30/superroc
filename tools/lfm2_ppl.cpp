@@ -5,7 +5,7 @@
 // The decode path is the LFM2 single-token loop (ForwardToken), so every
 // chunk is Reset and every position is scored teacher-forced.
 // Usage:
-//   lfm2_ppl <model.gguf> <corpus.txt> [n_ctx] [n_chunks] [prefill]  // LFM2
+//   lfm2_ppl <model.gguf> <corpus.txt> [n_ctx] [n_chunks] [prefill]
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -54,7 +54,7 @@ int main(int argc, char** argv) {
     }
     const int n_ctx = argc > 3 ? std::stoi(argv[3]) : 4096;
     const int n_chunks_req = argc > 4 ? std::stoi(argv[4]) : 2;
-    const bool use_prefill = argc > 5 && std::string(argv[5]) == "prefill";  // LFM2
+    const bool use_prefill = argc > 5 && std::string(argv[5]) == "prefill";
     if (n_ctx < 2 || n_chunks_req < 1) {
       throw std::runtime_error("n_ctx and n_chunks must be positive");
     }
@@ -71,9 +71,9 @@ int main(int argc, char** argv) {
     if (owner == nullptr) {
       throw std::runtime_error(error);
     }
-    superroc::hip::QwenExecutionPolicy policy;  // LFM2
-    policy.kv_cache_storage = superroc::hip::Lfm2KvCacheStorage();  // LFM2 (SPEC3)
-    policy.fuse_qk_norm_rope_kv = false;  // LFM2
+    superroc::hip::QwenExecutionPolicy policy;
+    policy.kv_cache_storage = superroc::hip::Lfm2KvCacheStorage();  // LFM2
+    policy.fuse_qk_norm_rope_kv = false;
     auto executor = superroc::hip::QwenGpuExecutor::CreateFromGguf(
         std::shared_ptr<const superroc::core::GgufReader>(std::move(owner)),
         &error, static_cast<std::uint32_t>(n_ctx), policy);
@@ -111,37 +111,37 @@ int main(int argc, char** argv) {
       if (add_bos) {
         ids[0] = tokenizer.GetBosTokenId();
       }
-      if (use_prefill) {  // LFM2
-        executor->Reset();  // LFM2
-        (void)executor->ForwardPromptBatch(ids, 0, false);  // LFM2
-        for (int pos = first; pos <= n_ctx - 2; ++pos) {  // LFM2
-          executor->MaterializeLfm2RowLogits(static_cast<std::size_t>(pos));  // LFM2
-          const double nll = TokenNll(executor->CopyLastLogits(),  // LFM2
-                                      ids[static_cast<std::size_t>(pos + 1)]);  // LFM2
-          sum_nll += nll;  // LFM2
-          sum_nll2 += nll * nll;  // LFM2
-          ++count;  // LFM2
-        }  // LFM2
-      } else {  // LFM2
+      if (use_prefill) {
+        executor->Reset();
+        (void)executor->ForwardPromptBatch(ids, 0, false);
+        for (int pos = first; pos <= n_ctx - 2; ++pos) {
+          executor->MaterializeLfm2RowLogits(static_cast<std::size_t>(pos));
+          const double nll = TokenNll(executor->CopyLastLogits(),
+                                      ids[static_cast<std::size_t>(pos + 1)]);
+          sum_nll += nll;
+          sum_nll2 += nll * nll;
+          ++count;
+        }
+      } else {
         // LFM2: token-loop scoring. CopyLastLogits copies decode.logits, the
         // buffer ExecuteLfm2DecodeStep writes (executor.cpp), so no
         // MaterializeGlimmerRowLogits step is needed.
-        executor->Reset();  // LFM2
-        for (int pos = 0; pos <= n_ctx - 2; ++pos) {  // LFM2
-          const bool score = pos >= first - 1;  // LFM2
-          (void)executor->ForwardToken(ids[static_cast<std::size_t>(pos)],  // LFM2
+        executor->Reset();
+        for (int pos = 0; pos <= n_ctx - 2; ++pos) {
+          const bool score = pos >= first - 1;
+          (void)executor->ForwardToken(ids[static_cast<std::size_t>(pos)],
                                        static_cast<std::uint32_t>(pos),
-                                       score);  // LFM2
-          if (score && pos >= first) {  // LFM2
-            const double nll = TokenNll(  // LFM2
-                executor->CopyLastLogits(),  // LFM2
-                ids[static_cast<std::size_t>(pos + 1)]);  // LFM2
-            sum_nll += nll;  // LFM2
-            sum_nll2 += nll * nll;  // LFM2
-            ++count;  // LFM2
-          }  // LFM2
-        }  // LFM2
-      }  // LFM2
+                                       score);
+          if (score && pos >= first) {
+            const double nll = TokenNll(
+                executor->CopyLastLogits(),
+                ids[static_cast<std::size_t>(pos + 1)]);
+            sum_nll += nll;
+            sum_nll2 += nll * nll;
+            ++count;
+          }
+        }
+      }
       const double mean = sum_nll / static_cast<double>(count);
       std::printf("[%d]%.4f,", chunk + 1, std::exp(mean));
       std::fflush(stdout);

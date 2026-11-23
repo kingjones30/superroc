@@ -12,7 +12,6 @@
 
 #include "src/cli/serve/text_generation_backend.hpp"
 #include "src/cli/serve/text_generation_scheduler.hpp"
-#include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/qwen/dflash_policy.hpp"
 
 namespace superroc::hip {
@@ -55,12 +54,16 @@ struct TextSpeculativeConfig {
   TextSpeculativeBackend backend{TextSpeculativeBackend::kDisabled};
   std::string draft_model_path;
   std::uint32_t max_draft_tokens{7};
+  /// The draft length was not given: the backend may use the default of the
+  /// drafter it loads instead of max_draft_tokens.
+  bool default_draft_tokens{false};
   std::uint32_t min_draft_tokens{1};
   speculative::DFlashDraftPolicy dflash_policy{
       speculative::DFlashDraftPolicy::kAdaptive};
-  /// Guard floor measured on this box: plain-decode tok/s per context
-  /// length, ascending. Empty disables the guard.
-  std::vector<speculative::PlainDecodeRatePoint> plain_decode_rates;
+  bool prompt_lookup{false};
+  /// No speculative option was given. A dense Qwen file that carries its own
+  /// MTP block then drafts with it; any other model stays without a drafter.
+  bool automatic{false};
 };
 
 struct TextDiskCacheConfig {
@@ -157,9 +160,12 @@ public:
   [[nodiscard]] InitialOutputState initial_output_state(
       const ChatRequest& request) const override;
   [[nodiscard]] bool muse_channel_parse() const override;
-  [[nodiscard]] bool lfm2_pythonic_tools() const override;         // LFM2
+  [[nodiscard]] bool lfm2_pythonic_tools() const override;
   [[nodiscard]] bool unconstrained_native_tools() const override;  // Ling3
   [[nodiscard]] std::string speculative_status() const override;
+  /// The draft length the loaded drafter uses when it chose it itself (a
+  /// model file's own MTP block, or no --draft-tokens); zero otherwise.
+  [[nodiscard]] std::uint32_t speculative_draft_limit() const;
   void set_model_id(const std::string& model_id);
   void set_served_artifact(const std::string& model_path,
                            const std::string& build_info);
@@ -197,6 +203,19 @@ public:
       bool ignore_eos = false, std::string_view client_id = "anonymous",
       const std::vector<std::string>& stop_sequences = {},
       bool return_progress = false, bool cache_prompt = true) override;
+
+  /// Runs one short greedy generation through the normal request path, so
+  /// the first real request does not pay the first-use costs (kernel code,
+  /// decode graphs, draft buffers, fresh scratch pages). It is a raw-text
+  /// prompt that reuses nothing, leaves no state behind and is not a request
+  /// in the metrics. Returns the tokens generated; zero when no text model
+  /// that runs through the scheduler is loaded.
+  std::size_t warm_up(std::size_t max_tokens);
+
+  /// Builds the process-wide reasoning caches (word-ban token set and
+  /// closing-message tokens) once, so process start logs the per-word token
+  /// counts before serving. No-op when both options are unset.
+  void WarmReasoningCaches();
 
   Result chat(const std::vector<tokenization::ChatMessage>& messages,
               std::size_t max_tokens, const sampling::SamplingConfig& sampling,

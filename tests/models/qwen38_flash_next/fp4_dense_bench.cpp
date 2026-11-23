@@ -1,7 +1,7 @@
-// LFP item 1: per-shape dense GEMM timing. Q8_0 via DenseF16Gemm (the ceiling),
+// Per-shape dense GEMM timing. Q8_0 via DenseF16Gemm (the ceiling),
 // Q8_0 via QuantizeQ8Tiled+W8A8Gemm, type-101 via
 // superroc_fp4_wmma_quant+gemm_dense. Random weights (timing only). HIP events,
-// 20 reps, median. Run under gpu-run.
+// 20 reps, median. Run on an otherwise idle GPU.
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>
 #include <hipblas/hipblas.h>

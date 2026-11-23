@@ -4,8 +4,6 @@ Native gfx1151 speech synthesis from BF16 safetensors, with an F32 waveform
 decoder. Checkpoint configuration selects the variant; 0.6B, 25Hz and GGUF
 checkpoints are unsupported. Official Python is an offline oracle only.
 
-[Benchmarks](BENCHMARKS.md) · [Quality](QUALITY.md) · [Experiments](EXPERIMENTS.md)
-
 ## Modes
 
 | Checkpoint suffix | HTTP model ID | Conditioning |
@@ -58,7 +56,7 @@ for both talker and predictor, and repetition penalty 1.05. Request controls:
 `top_k: 0` disables that filter. `seed` controls request-local replay;
 `repetition_penalty` applies to the talker's generated codec tokens.
 Greedy generation can fail to reach EOS; bound diagnostic requests with
-`max_new_tokens`. Read the [quality limits](QUALITY.md#known-limitations).
+`max_new_tokens`.
 
 WAV is buffered so its length header is correct. To receive audio as it is
 generated, request `response_format: "pcm"`:

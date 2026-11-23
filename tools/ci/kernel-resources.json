@@ -1,6 +1,5 @@
 {
  "schema": "superroc.kernel-resources.v1",
- "note": "Remapped from the previous baseline by tools/dev/superroc_rename.py (N4: previous engine-name mangled keys mapped with unchanged allowances; 261 allowances). The kernels in this file use scratch by design. Make the file again only after you decide that a new allowance is correct: python3 tools/ci/check-kernel-resources.py result/bin/superroc --write-baseline tools/ci/kernel-resources.json --note TEXT",
  "default_max_scratch": 0,
  "allow": {
   "_ZL18quantize_mmq_nvfp4PKfPKiPvlllllll": {
@@ -434,6 +433,27 @@
   "_ZL9mul_mat_qIL9ggml_type8ELi8ELb1ELb1ELb0EEvPKcPKiS4_S4_PfS5_15HIP_vector_typeIjLj3EEiiiiiS7_S7_iiiS7_S7_iiiS7_S2_lPKfS9_S5_P6__halff": {
    "max_scratch": 24
   },
+  "_ZN15superroc_fp4_ks25superroc_fp4_k_moe_down_mEiPKhmPKiPKfPKaS5_PfiiiiiPii": {
+   "max_scratch": 12
+  },
+  "_ZN15superroc_fp4_ks29superroc_fp4_k_gemv_verify_mtILi2EEEviPKhmPKaPKfPfii": {
+   "max_scratch": 12
+  },
+  "_ZN15superroc_fp4_ks29superroc_fp4_k_gemv_verify_mtILi3EEEviPKhmPKaPKfPfii": {
+   "max_scratch": 12
+  },
+  "_ZN15superroc_fp4_ks29superroc_fp4_k_gemv_verify_mtILi4EEEviPKhmPKaPKfPfii": {
+   "max_scratch": 12
+  },
+  "_ZN15superroc_fp4_ks29superroc_fp4_k_gemv_verify_mtILi5EEEviPKhmPKaPKfPfii": {
+   "max_scratch": 32
+  },
+  "_ZN15superroc_fp4_ks29superroc_fp4_k_gemv_verify_mtILi6EEEviPKhmPKaPKfPfii": {
+   "max_scratch": 12
+  },
+  "_ZN15superroc_fp4_ks29superroc_fp4_k_gemv_verify_mtILi7EEEviPKhmPKaPKfPfii": {
+   "max_scratch": 16
+  },
   "_ZN15superroc_fp4_ks29superroc_fp4_k_gemv_verify_mtILi8EEEviPKhmPKaPKfPfii": {
    "max_scratch": 52,
    "comment": "qwen-ROC decode draft-verify GEMV, batch 2..8; superroc_fp4_gemv_q8.hip"
@@ -442,12 +462,12 @@
    "max_scratch": 8
   },
   "_ZN8superroc3hip21EmbeddingLookupKernelEPKvNS_4core8GgmlTypeEjPfm": {
-   "max_scratch": 28,
-   "comment": "qwen decode single-token embedding lookup (also TTS/MTP); embed.hip"
+   "max_scratch": 32,
+   "comment": "qwen decode single-token embedding lookup (also TTS/MTP); embed.hip; ROCm 7.2.4 measures 32 B (was 28)"
   },
   "_ZN8superroc3hip24EmbeddingLookupPtrKernelEPKvNS_4core8GgmlTypeEPKjPfm": {
-   "max_scratch": 28,
-   "comment": "qwen decode single-token embedding lookup, device token id; embed.hip"
+   "max_scratch": 32,
+   "comment": "qwen decode single-token embedding lookup, device token id; embed.hip; ROCm 7.2.4 measures 32 B (was 28)"
   },
   "_ZN8superroc3hip24Q8KBlockGEMVKernel_2RowsILj4ELNS_4core8GgmlTypeE0EEEvPKvS3_PKfPfmm": {
    "max_scratch": 8
@@ -477,7 +497,7 @@
    "max_scratch": 528,
    "note": "llama DFlash2 drafter top-k 32 (Nanbeige): 32 candidates per thread; runs once per draft step"
   },
-  "_ZN8superroc3hip7kernels35dflash_selector_partial_topk_kernelILj32EEEvPKfPfPjjj": {
+  "_ZN8superroc3hip7kernels35dflash_selector_partial_topk_kernelILj32EEEvPKfPfPjjjjjj": {
    "max_scratch": 272,
    "note": "llama DFlash2 drafter top-k 32 (Nanbeige): 32 candidates per thread; runs once per draft step"
   },
@@ -519,8 +539,8 @@
    "comment": "Ling prefill MLA tile attention, LING3_MLA_TILE=1; ling3_mla_tile.hip"
   },
   "_ZN5ling3L22scan_kernel_decode_fmaEPKfS1_S1_S1_S1_PfS2_iiifllllllll": {
-   "max_scratch": 340,
-   "comment": "Ling KDA decode, LING3_KDA_DECODE_VARIANT=fma only (seat default t32); ling3_kda.hip"
+   "max_scratch": 372,
+   "comment": "Ling KDA decode, LING3_KDA_DECODE_VARIANT=fma only (seat default t32); ling3_kda.hip; ROCm 7.2.4 measures 372 B (was 340)"
   },
   "_ZN5ling3L28scan_kernel_decode_t32_fusedEPKfS1_S1_S1_S1_S1_PfS2_S1_PaS2_iiffllllllllll": {
    "max_scratch": 12,
@@ -791,20 +811,20 @@
    "max_scratch": 80
   },
   "superroc_fp4_k_moe_group_parallel": {
-   "max_scratch": 16,
-   "comment": "ROC MoE expert grouping per prefill chunk; superroc_fp4_moe_group.hip"
+   "max_scratch": 20,
+   "comment": "ROC MoE expert grouping per prefill chunk; superroc_fp4_moe_group.hip; ROCm 7.2.4 measures 20 B (was 16)"
   },
   "superroc_fp4_k_moe_group_serial": {
-   "max_scratch": 16,
-   "comment": "ROC MoE expert grouping oracle (SUPERROC_FP4_MOE_GROUP_SERIAL=1); superroc_fp4_moe_group.hip"
+   "max_scratch": 20,
+   "comment": "ROC MoE expert grouping oracle (SUPERROC_FP4_MOE_GROUP_SERIAL=1); superroc_fp4_moe_group.hip; ROCm 7.2.4 measures 20 B (was 16)"
   },
   "k_moe_group_parallel": {
-   "max_scratch": 16,
-   "comment": "Ling MoE expert grouping per prefill chunk; ling3_moe_group.hip"
+   "max_scratch": 20,
+   "comment": "Ling MoE expert grouping per prefill chunk; ling3_moe_group.hip; ROCm 7.2.4 measures 20 B (was 16)"
   },
   "k_moe_group_serial": {
-   "max_scratch": 16,
-   "comment": "Ling MoE expert grouping oracle; ling3_moe_group.hip"
+   "max_scratch": 20,
+   "comment": "Ling MoE expert grouping oracle; ling3_moe_group.hip; ROCm 7.2.4 measures 20 B (was 16)"
   }
  }
 }

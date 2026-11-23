@@ -1,4 +1,7 @@
 #if defined(ENGINE_ENABLE_HIP)
+#include <cstdio>
+#include <cstdlib>
+
 #include "src/models/qwen/hip/kernels/prefill_quant_gemm.hpp"
 #include "src/core/hip_launch_check.hpp"
 
@@ -397,7 +400,7 @@ __device__ __forceinline__ int32x8_t Wmma_16x16x16_iu8(int32x4_t a, int32x4_t b,
 #endif
 }
 
-// Two-dimensionally blocked W8A8 WMMA GEMM (opt-c163-blocked-w8a8).
+// Two-dimensionally blocked W8A8 WMMA GEMM.
 //
 // Traffic per multiply-accumulate is 34/(32*BN) bytes of weight and
 // 36/(32*BM) bytes of activation. The previous 16-row macro tile therefore
@@ -1444,7 +1447,7 @@ void LaunchKQuantSmallBatchByType(core::GgmlType type, const void* w,
       LaunchKQuantSmallBatchTyped<RowsPerWave, core::GgmlType::kIQ3_S>(
           w, fp32_x, y, batch, m, k, grid, block, stream);
       return;
-    case core::GgmlType::kQ4_0_ROCMFP4:  // lqw:smallbatch-switch
+    case core::GgmlType::kQ4_0_ROCMFP4:
       LaunchKQuantSmallBatchTyped<RowsPerWave, core::GgmlType::kQ4_0_ROCMFP4>(
           w, fp32_x, y, batch, m, k, grid, block, stream);
       return;
@@ -1534,7 +1537,7 @@ void LaunchKQuantWmmaGEMM(core::GgmlType type, const void* w,
       LaunchKQuantWmmaGEMMTyped<core::GgmlType::kIQ3_S>(w, q8_1_x, y, batch, m,
                                                         k, stream);
       return;
-    case core::GgmlType::kQ4_0_ROCMFP4:  // lqw:wmma-switch
+    case core::GgmlType::kQ4_0_ROCMFP4:
       LaunchKQuantWmmaGEMMTyped<core::GgmlType::kQ4_0_ROCMFP4>(
           w, q8_1_x, y, batch, m, k, stream);
       return;
@@ -1543,7 +1546,12 @@ void LaunchKQuantWmmaGEMM(core::GgmlType type, const void* w,
           w, q8_1_x, y, batch, m, k, stream);
       return;
     default:
-      return;
+      // The only caller reaches here for every type QuantizedBlockElements
+      // sizes that this switch has no kernel for; returning without writing
+      // would hand the caller unwritten memory.
+      std::fprintf(stderr, "LaunchKQuantWmmaGEMM: unsupported type %d\n",
+                   static_cast<int>(type));
+      std::abort();
   }
 }
 
@@ -1563,9 +1571,13 @@ void LaunchBatchedQuantGEMMPreQuantized(core::GgmlType type, const void* w,
   // BatchedQuantGEMVKernel, one warp per (row, token), which re-reads the whole
   // weight matrix once per token and is unusable at prefill batch.
   if (type != core::GgmlType::kQ8_0) {
-    if (::superroc::quant::QuantizedBlockElements(type) != 0) {
-      LaunchKQuantWmmaGEMM(type, w, q8_1_x, y, batch, m, k, stream);
+    if (::superroc::quant::QuantizedBlockElements(type) == 0) {
+      std::fprintf(stderr,
+                   "LaunchBatchedQuantGEMMPreQuantized: unsupported type %d\n",
+                   static_cast<int>(type));
+      std::abort();
     }
+    LaunchKQuantWmmaGEMM(type, w, q8_1_x, y, batch, m, k, stream);
     return;
   }
   if (batch <= 8) {
@@ -1620,8 +1632,7 @@ void LaunchBatchedDualQuantGEMMPreQuantized(
   // 128-row blocked macro tile the activation panel is already cheap, and two
   // blocked launches measured faster than a blocked dual (23.0 vs 24.4 ms for
   // the FFN shape at batch 2048) because the dual doubles LDS and halves
-  // occupancy. See opt-c163-blocked-dual in
-  // docs/models/qwen3.8-27b/BENCHMARKS.md.
+  // occupancy.
   LaunchBatchedQuantGEMMPreQuantized(type, w_gate, q8_1_x, y_gate, batch, m, k,
                                      stream);
   LaunchBatchedQuantGEMMPreQuantized(type, w_up, q8_1_x, y_up, batch, m, k,
@@ -1683,7 +1694,9 @@ void LaunchBatchedQuantGEMM(core::GgmlType type, const void* w,
     static thread_local void* s_act_q8_scratch = nullptr;
     static thread_local std::size_t s_act_q8_scratch_bytes = 0;
 
-    const std::size_t req_bytes = Q8ActTiledBytes(batch, k);
+    // The quantize kernels also write the per-token sum sidecar after the tiled
+    // payload, so the scratch has to hold both.
+    const std::size_t req_bytes = QuantizedActivationBytes(batch, k);
     if (s_act_q8_scratch_bytes < req_bytes) {
       if (s_act_q8_scratch != nullptr) {
         (void)hipFree(s_act_q8_scratch);

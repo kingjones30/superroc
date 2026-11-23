@@ -425,8 +425,8 @@ nix develop -c python3 tools/prof/isa_mix.py /tmp/k.s W8A8BlockedWmmaGEMMKernel
 Read the counts with care: the listing covers a whole kernel, so a once-per-block
 store epilogue is counted alongside the K loop that repeats hundreds of times.
 Attributing epilogue instructions to the inner loop led to one rejected
-experiment (`opt-c163-lowoverhead`); confirm a hypothesis with an ablation in the
-microbenchmark before acting on the mix.
+experiment; confirm a hypothesis with an ablation in the microbenchmark before
+acting on the mix.
 
 ### Offline tuning and replay
 

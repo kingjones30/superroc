@@ -17,7 +17,8 @@
 #include "src/cli/serve/component_text_cache.hpp"
 #include "src/cli/serve/continuation_disk_store.hpp"
 #include "src/cli/serve/logging.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/canonical.hpp"
+#include "src/core/env.hpp"
 #include "src/core/json.hpp"
 
 namespace superroc::server {
@@ -32,7 +33,7 @@ std::optional<ChatRequest> ConstrainChatRequest(
   if (tool_format)
     *tool_format = format;
   if (runner.UnconstrainedNativeTools() && !request.response_format) {
-    // Ling3 (Super ROC): Ling-3.0 has no constraint vocabulary. Its GLM-style
+    // Ling3 (Super Roc): Ling-3.0 has no constraint vocabulary. Its GLM-style
     // tool_call blocks (<arg_key>/<arg_value>) render in the model's own
     // template and are parsed after generation, as the Ling-VL build did; a
     // required call is checked by that parse (tool_choice_unsatisfied).
@@ -40,14 +41,13 @@ std::optional<ChatRequest> ConstrainChatRequest(
     return std::nullopt;
   }
   if (runner.Lfm2PythonicTools() && !request.response_format) {
-    // LFM2 (Super ROC): a required call (the render prefills
+    // LFM2 (Super Roc): a required call (the render prefills
     // "<|tool_call_start|>") is constrained to "[", the offered names,
     // declared keys and Python literals. Auto/none stay
     // unconstrained and are parsed after generation.
     // SUPERROC_LFM2_TOOL_GRAMMAR=0 turns the grammar off.
     static const bool lfm2_grammar = [] {
-      const char* env =
-          ::superroc::core::GetEnvCompat("SUPERROC_LFM2_TOOL_GRAMMAR");
+      const char* env = ::superroc::core::GetEnv("SUPERROC_LFM2_TOOL_GRAMMAR");
       return env == nullptr || std::strcmp(env, "0") != 0;
     }();
     if (!lfm2_grammar || request.tools.empty() ||
@@ -70,6 +70,12 @@ std::optional<ChatRequest> ConstrainChatRequest(
   auto constrained = request;
   auto instruction = request.response_format ? request.response_format->prompt()
                                              : std::string();
+  // Byte ranges of `instruction` that come from the client: the schema text
+  // and the response-format description. The rest (tool-call delimiters) is
+  // server framing.
+  std::vector<std::pair<std::size_t, std::size_t>> client_ranges;
+  if (!instruction.empty())
+    client_ranges.emplace_back(0, instruction.size());
   auto grammar = request.response_format;
   if (!runner
            .Lfm2PythonicTools()) {  // LFM2: no Qwen tool grammar; the pythonic
@@ -104,8 +110,14 @@ std::optional<ChatRequest> ConstrainChatRequest(
         instruction += " The JSON response schema applies to the final answer.";
     }
   }  // LFM2: end skip of Qwen tool grammar
-  if (!request.response_format_description.empty())
+  if (!request.response_format_description.empty()) {
+    const std::size_t shift = request.response_format_description.size() + 2;
+    for (auto& range : client_ranges)
+      range.first += shift;
+    client_ranges.insert(client_ranges.begin(),
+                         {0, request.response_format_description.size()});
     instruction.insert(0, request.response_format_description + "\n\n");
+  }
   if (instruction.empty()) {
     // Native constraints follow the model's existing template. In particular
     // they do not change prompt tokens or invalidate continuation checkpoints.
@@ -114,10 +126,15 @@ std::optional<ChatRequest> ConstrainChatRequest(
                   tokenization::ChatRole::kSystem ||
               constrained.messages.front().role ==
                   tokenization::ChatRole::kDeveloper)) {
-    constrained.messages.front().framing_suffix += "\n\n" + instruction;
+    auto& front = constrained.messages.front();
+    const std::size_t base = front.framing_suffix.size() + 2;
+    for (const auto& [offset, size] : client_ranges)
+      front.framing_client_ranges.emplace_back(base + offset, size);
+    front.framing_suffix += "\n\n" + instruction;
   } else {
     tokenization::ChatMessage message{tokenization::ChatRole::kSystem, ""};
     message.framing_suffix = std::move(instruction);
+    message.framing_client_ranges = std::move(client_ranges);
     constrained.messages.insert(constrained.messages.begin(),
                                 std::move(message));
   }
@@ -133,15 +150,29 @@ std::optional<ChatRequest> ConstrainChatRequest(
   return constrained;
 }
 
-std::optional<std::string> LlamaRenderPrompt(const ChatRequest& request) {
+std::optional<std::string> LlamaRenderPrompt(
+    const ChatRequest& request, std::vector<core::TextSpan>* spans) {
   if (!request.tools.empty() &&
       request.tool_choice != ChatRequest::ToolChoice::kNone) {
     return std::nullopt;
   }
   std::string concat;
   for (const auto& message : request.messages) {
+    // SR-03: message.content and the client ranges of framing_suffix are
+    // client text; the rest of the suffix is server framing.
+    const auto begin = concat.size();
     concat += message.content;
+    if (spans != nullptr && !message.content.empty()) {
+      spans->push_back({begin, concat.size() - begin});
+    }
+    const auto suffix_begin = concat.size();
     concat += message.framing_suffix;
+    if (spans != nullptr) {
+      for (const auto& [offset, size] : message.framing_client_ranges) {
+        if (size != 0 && offset + size <= message.framing_suffix.size())
+          spans->push_back({suffix_begin + offset, size});
+      }
+    }
   }
   return concat;
 }
@@ -274,6 +305,16 @@ std::optional<std::size_t> SystemMemTotalBytes() {
 }
 
 }  // namespace
+
+bool SuperrocCanonicalCache() {
+  static const bool on = [] {
+    const bool set = ::superroc::core::CanonicalCacheOn();
+    if (set)
+      Logger::Info("cache", "event=canonical_cache enabled=1");
+    return set;
+  }();
+  return on;
+}
 
 std::size_t HostSnapshotBudgetBytes() {
   return ClampToSize(HostAvailableBytes() / 2);
@@ -805,25 +846,6 @@ std::size_t TextModelRunner::SnapshotPayloadBytes(
   throw std::logic_error("text runner does not support snapshot sizing");
 }
 
-TextDeferredPromptBoundary TextModelRunner::CaptureDeferredPromptBoundary(
-    const TextRunnerState&) const {
-  throw std::logic_error(
-      "text runner does not support deferred prompt snapshots");
-}
-
-std::size_t TextModelRunner::DeferredPromptSnapshotPayloadBytes(
-    const TextRunnerState&, const TextDeferredPromptBoundary&) const {
-  throw std::logic_error(
-      "text runner does not support deferred prompt snapshots");
-}
-
-std::unique_ptr<TextRunnerSnapshot>
-TextModelRunner::SnapshotDeferredPromptBoundary(
-    const TextRunnerState&, const TextDeferredPromptBoundary&) const {
-  throw std::logic_error(
-      "text runner does not support deferred prompt snapshots");
-}
-
 void TextModelRunner::RestoreOrFork(TextRunnerState&,
                                     const TextRunnerSnapshot&) const {
   throw std::logic_error("text runner does not support snapshot restore/fork");
@@ -864,6 +886,25 @@ struct TextRunnerPool::Impl {
        std::optional<TextRunnerDiskCacheOptions> disk_cache_options,
        TextRunnerRamCacheOptions ram_cache_options)
       : validated(ValidateRunner(std::move(model_runner), state_count)) {
+    if (SuperrocCanonicalCache()) {
+      const auto capabilities = validated.runner->Descriptor().capabilities;
+      // The planner, the step-budget rule and shared checkpoints all cut on
+      // multiples of 64 rows.
+      if (capabilities.canonical_min_pass_rows > 64)
+        throw std::logic_error(
+            "canonical_min_pass_rows above 64 is not supported");
+      if (capabilities.canonical_min_pass_rows != 0 &&
+          !validated.runner->UsesComponentCache())
+        throw std::logic_error(
+            "canonical_min_pass_rows needs a component-cache runner");
+      // Without prompt snapshots there is no prompt checkpoint to go back
+      // to: such a runner keeps continuing from its own last state.
+      if (capabilities.prefix_reuse &&
+          !(capabilities.snapshot && capabilities.fork))
+        Logger::Warn("cache",
+                     "event=canonical_cache_not_applied "
+                     "reason=no_prompt_snapshots");
+    }
     if (validated.runner->UsesComponentCache()) {
       const auto resources = validated.runner->ResourceClaim();
       const auto automatic =
@@ -995,6 +1036,16 @@ std::size_t TextModelRunner::PrepareConstraintVocabulary() const {
   return constraint_vocabulary_ ? constraint_vocabulary_->size() : 0;
 }
 
+std::vector<TextRunnerToken> TextModelRunner::TokenizeRawPrompt(
+    std::string_view text) const {
+  auto tokens = Tokenize(text);
+  if (const auto bos = RawPromptBos();
+      bos.has_value() && (tokens.empty() || tokens.front() != *bos)) {
+    tokens.insert(tokens.begin(), *bos);
+  }
+  return tokens;
+}
+
 std::shared_ptr<const sampling::ReasoningBudget>
 TextModelRunner::BuildReasoningBudget(
     std::size_t tokens, std::span<const TextRunnerToken> prompt) const {
@@ -1003,9 +1054,13 @@ TextModelRunner::BuildReasoningBudget(
   auto forced = TokenizeControl(tags.forced_end);
   if (start.size() != 1 || forced.empty())
     return nullptr;
+  // An opt-in closing message emits first, then the forced end, exactly once
+  // per forcing; the forcing counters below run through the longer sequence.
+  const auto& message = ReasoningCloseMessageTokens();
   auto budget = std::make_shared<sampling::ReasoningBudget>();
   budget->tokens = tokens;
-  budget->forced.assign(forced.begin(), forced.end());
+  budget->forced.assign(message.begin(), message.end());
+  budget->forced.insert(budget->forced.end(), forced.begin(), forced.end());
   for (const auto end : tags.ends) {
     const auto token = TokenizeControl(end);
     if (token.size() != 1)
@@ -1044,6 +1099,236 @@ TextModelRunner::BuildReasoningBudget(
   return budget;
 }
 
+// SUPERROC_REASONING_LOOP_GUARD=<min_period>:<max_period>:<repeats>, as in
+// BuildReasoningBudget's example 16:512:3: while still reasoning, the guard
+// fires when the last P*repeats generated reasoning tokens are `repeats`
+// identical copies of one P-token block, for some P in the range, and emits
+// the same forced end the budget would. Unset or empty keeps every request on
+// today's code path. Read once; a malformed value is a startup error.
+std::optional<sampling::ReasoningLoopGuardPeriods>
+SharedReasoningLoopGuardPeriods() {
+  static const std::optional<sampling::ReasoningLoopGuardPeriods> periods =
+      []() -> std::optional<sampling::ReasoningLoopGuardPeriods> {
+    const char* text =
+        ::superroc::core::GetEnv("SUPERROC_REASONING_LOOP_GUARD");
+    if (text == nullptr || *text == '\0')
+      return std::nullopt;
+    sampling::ReasoningLoopGuardPeriods parsed;
+    try {
+      parsed = sampling::ParseReasoningLoopGuardPeriods(text);
+    } catch (const std::exception& error) {
+      throw std::runtime_error(
+          std::string("invalid SUPERROC_REASONING_LOOP_GUARD: ") +
+          error.what());
+    }
+    // A valid setting is worth one line, like SUPERROC_TAIL_CAPTURE.
+    std::fprintf(stderr,
+                 "SUPERROC_REASONING_LOOP_GUARD=%s: reasoning loop guard "
+                 "enabled\n",
+                 text);
+    return parsed;
+  }();
+  return periods;
+}
+
+namespace {
+
+// Set once at server startup when `--reasoning-close-message` is given; the
+// flag wins over the variable. Read on every build: set before serving, so no
+// lock is needed on the request path.
+std::string& ReasoningCloseMessageOverride() {
+  static std::string override;
+  return override;
+}
+
+bool& ReasoningCloseMessageOverridden() {
+  static bool overridden = false;
+  return overridden;
+}
+
+// Leading whitespace (`space`, `tab`, `newline`) and trailing `,.!?:;`
+// removed; the remainder must equal the word exactly (case-sensitive).
+std::string NormalizeReasoningBanToken(std::string text) {
+  std::size_t begin = 0;
+  while (begin < text.size() &&
+         (text[begin] == ' ' || text[begin] == '\t' || text[begin] == '\n'))
+    ++begin;
+  std::size_t end = text.size();
+  while (end > begin && (text[end - 1] == ',' || text[end - 1] == '.' ||
+                         text[end - 1] == '!' || text[end - 1] == '?' ||
+                         text[end - 1] == ':' || text[end - 1] == ';'))
+    --end;
+  return text.substr(begin, end - begin);
+}
+
+}  // namespace
+
+void SetSharedReasoningCloseMessage(std::string text) {
+  ReasoningCloseMessageOverride() = std::move(text);
+  ReasoningCloseMessageOverridden() = true;
+}
+
+std::string SharedReasoningCloseMessageText() {
+  if (ReasoningCloseMessageOverridden())
+    return ReasoningCloseMessageOverride();
+  const char* text =
+      ::superroc::core::GetEnv("SUPERROC_REASONING_CLOSE_MESSAGE");
+  return text != nullptr ? text : "";
+}
+
+std::vector<std::string> SharedReasoningWordBanWords() {
+  static const std::vector<std::string> words = []() {
+    std::vector<std::string> parsed;
+    const char* text = ::superroc::core::GetEnv("SUPERROC_REASONING_BAN");
+    if (text == nullptr || *text == '\0')
+      return parsed;
+    std::string_view remaining(text);
+    while (!remaining.empty()) {
+      const auto comma = remaining.find(',');
+      const std::string_view word = comma == std::string_view::npos
+                                        ? remaining
+                                        : remaining.substr(0, comma);
+      if (!word.empty())
+        parsed.emplace_back(word);
+      if (comma == std::string_view::npos)
+        break;
+      remaining.remove_prefix(comma + 1);
+    }
+    return parsed;
+  }();
+  return words;
+}
+
+std::shared_ptr<const sampling::ReasoningLoopGuard>
+TextModelRunner::BuildReasoningLoopGuard(
+    sampling::ReasoningLoopGuardPeriods periods) const {
+  const auto tags = ReasoningBudgetTags();
+  const auto start = TokenizeControl(tags.start);
+  auto forced = TokenizeControl(tags.forced_end);
+  if (start.size() != 1 || forced.empty())
+    return nullptr;
+  auto guard = std::make_shared<sampling::ReasoningLoopGuard>();
+  guard->min_period = periods.min_period;
+  guard->max_period = periods.max_period;
+  guard->repeats = periods.repeats;
+  // Same closing message as the budget's forcing: message first, forced end
+  // second, so the two forcings compose token for token.
+  const auto& message = ReasoningCloseMessageTokens();
+  guard->forced.assign(message.begin(), message.end());
+  guard->forced.insert(guard->forced.end(), forced.begin(), forced.end());
+  for (const auto end : tags.ends) {
+    const auto token = TokenizeControl(end);
+    if (token.size() != 1)
+      return nullptr;
+    guard->ends.push_back(token.front());
+  }
+  // Same table BuildReasoningBudget builds: as in llama.cpp
+  // common_utf8_is_complete, the last lead byte within the final four bytes
+  // must have all of its continuation bytes.
+  const std::lock_guard lock(constraint_mutex_);
+  if (!partial_utf8_ && VocabularySize() != 0) {
+    auto partial = std::make_shared<std::vector<bool>>(VocabularySize());
+    for (TextRunnerToken token = 0; token < partial->size(); ++token) {
+      const auto text = Decode(std::span(&token, 1));
+      bool complete = text.empty();
+      for (std::size_t i = 1; i <= std::min<std::size_t>(4, text.size()); ++i) {
+        const auto byte = static_cast<unsigned char>(text[text.size() - i]);
+        if ((byte & 0xC0U) != 0x80U) {
+          complete = i >= (byte >= 0xF0U   ? 4U
+                           : byte >= 0xE0U ? 3U
+                           : byte >= 0xC0U ? 2U
+                                           : 1U);
+          break;
+        }
+      }
+      (*partial)[token] = !complete;
+    }
+    partial_utf8_ = std::move(partial);
+  }
+  guard->partial_utf8 = partial_utf8_;
+  return guard;
+}
+
+// Tokenized once per process with the runner's normal tokenizer (not control
+// text, so vendor prose tokenizes as the model reads it). Empty when unset.
+const std::vector<TextRunnerToken>&
+TextModelRunner::ReasoningCloseMessageTokens() const {
+  const std::lock_guard lock(constraint_mutex_);
+  if (!close_message_built_) {
+    close_message_built_ = true;
+    const std::string text = SharedReasoningCloseMessageText();
+    if (!text.empty() && VocabularySize() != 0) {
+      close_message_tokens_ = Tokenize(text);
+      if (close_message_tokens_.empty()) {
+        std::fprintf(stderr,
+                     "SUPERROC_REASONING_CLOSE_MESSAGE: message tokenizes to "
+                     "no tokens; closing without a message\n");
+      } else {
+        std::fprintf(stderr,
+                     "SUPERROC_REASONING_CLOSE_MESSAGE: %zu tokens precede "
+                     "the forced reasoning end\n",
+                     close_message_tokens_.size());
+      }
+    }
+  }
+  return close_message_tokens_;
+}
+
+// At process start (after load, before serving), the ban builds the set of
+// vocabulary tokens whose decoded text, with leading whitespace removed and
+// trailing `,.!?:;` removed, equals one of the words exactly. One log line
+// per word with its token count; a word with no match is logged and skipped,
+// and zero matches overall leaves the ban off.
+std::shared_ptr<const sampling::ReasoningWordBan>
+TextModelRunner::BuildReasoningWordBan() const {
+  const std::lock_guard lock(constraint_mutex_);
+  if (!word_ban_built_) {
+    word_ban_built_ = true;
+    const auto words = SharedReasoningWordBanWords();
+    if (!words.empty() && VocabularySize() != 0) {
+      const auto tags = ReasoningBudgetTags();
+      std::vector<sampling::TokenId> ends;
+      for (const auto end : tags.ends) {
+        const auto token = TokenizeControl(end);
+        if (token.size() != 1) {
+          ends.clear();
+          break;
+        }
+        ends.push_back(token.front());
+      }
+      if (!ends.empty()) {
+        auto ban = std::make_shared<sampling::ReasoningWordBan>();
+        ban->banned.assign(VocabularySize(), false);
+        ban->ends = std::move(ends);
+        std::size_t matched = 0;
+        for (const auto& word : words) {
+          std::size_t count = 0;
+          for (TextRunnerToken token = 0;
+               token < static_cast<TextRunnerToken>(ban->banned.size());
+               ++token) {
+            const auto text = Decode(std::span(&token, 1));
+            if (NormalizeReasoningBanToken(text) == word) {
+              ban->banned[token] = true;
+              ++count;
+            }
+          }
+          std::fprintf(stderr,
+                       "SUPERROC_REASONING_BAN: word '%s' matches %zu tokens\n",
+                       word.c_str(), count);
+          matched += count;
+        }
+        if (matched != 0)
+          word_ban_ = std::move(ban);
+        else
+          std::fprintf(stderr,
+                       "SUPERROC_REASONING_BAN: no word matches any token; "
+                       "the ban is off\n");
+      }
+    }
+  }
+  return word_ban_;
+}
+
 void TextModelRunner::StreamPersistentSnapshot(
     const TextRunnerSnapshot& snapshot, const SnapshotSink& sink) const {
   std::vector<std::uint8_t> payload(PersistentSnapshotPayloadBytes(snapshot));
@@ -1054,18 +1339,6 @@ void TextModelRunner::StreamPersistentSnapshot(
 }
 
 struct TextRunnerPool::Request::Impl {
-  /// Prompt-boundary captures refused while the speculative drafter was
-  /// unprimed (its prime queue drains with the first decoded token). The
-  /// frontier pieces are copied at the boundary; the device capture is
-  /// retried at request end, after the queue has drained.
-  struct DeferredPromptCapture {
-    std::vector<TextRunnerToken> tokens;
-    TextDeferredPromptBoundary boundary;
-    bool reserve_preserve_source{false};
-    SnapshotPurpose reserve_purpose{SnapshotPurpose::kContinuation};
-  };
-  std::vector<DeferredPromptCapture> deferred_prompt_captures;
-
   Impl(std::shared_ptr<TextModelRunner> model_runner,
        std::shared_ptr<ContinuationDiskStore> persistent_store,
        ServingCacheLease state_lease,
@@ -1161,9 +1434,46 @@ struct TextRunnerPool::Request::Impl {
                 std::span<const TextRunnerToken>(prompt).first(position)))
           checkpoints.push_back(position);
       }
+      // Optional late point before a short closing tail (see
+      // SuperrocTailCaptureTokens): same body, different last instruction.
+      if (const std::size_t late = SuperrocTailCaptureTokens();
+          late != 0 && prompt.size() > late) {
+        const std::size_t position = (prompt.size() - late) / 64 * 64;
+        if (position > prefill_offset && position - prefill_offset >= 512 &&
+            position != snapshot_tokens.size() &&
+            position != stable_prefix_position &&
+            std::ranges::find(checkpoints, position) == checkpoints.end() &&
+            !lease.HasSnapshotFor(
+                std::span<const TextRunnerToken>(prompt).first(position))) {
+          checkpoints.push_back(position);
+          std::ranges::sort(checkpoints);
+        }
+      }
     }
-    if (lease.component())
-      checkpoints = lease.PlannedCaptures(cache_prefix_tokens);
+    if (lease.component()) {
+      // Canonical cache on a runner whose state depends on the cut points:
+      // this request is cut and checkpointed only on allowed positions: the
+      // planned ones, step ends (Prefill) and a checkpoint shared with a
+      // waiting request (ShareCheckpoint). The stable boundary, the complete
+      // prompt and the disk tier's shared-prefix boundaries are neither cut
+      // at nor kept. The only capture inside a pass is the planned checkpoint
+      // of the last pass (Prefill, PrefillThroughBoundary).
+      const std::size_t min_pass =
+          SuperrocCanonicalCache() ? capabilities.canonical_min_pass_rows : 0;
+      if (min_pass != 0) {
+        canonical_min_pass = min_pass;
+        // Only a cache filled without the switch (a disk tier from an
+        // earlier run) holds checkpoints on other positions.
+        if (prefill_offset % 64 != 0)
+          Logger::Warn("cache", "event=canonical_frontier_off_grid tokens=" +
+                                    std::to_string(prefill_offset));
+        boundaries.clear();
+        stable_prefix_position = 0;
+        snapshot_tokens.assign(prompt.begin(), prompt.begin() + prefill_offset);
+        prompt_snapshot_attempted = true;
+      }
+      checkpoints = lease.PlannedCaptures(cache_prefix_tokens, min_pass);
+    }
   }
 
   ~Impl() {
@@ -1188,13 +1498,34 @@ struct TextRunnerPool::Request::Impl {
         return;
       FinishSnapshot();
     }
-    if (prompt_snapshot_attempted && prefill_offset == snapshot_tokens.size() &&
+    if (canonical_min_pass == 0 && prompt_snapshot_attempted &&
+        prefill_offset == snapshot_tokens.size() &&
         snapshot_tokens.size() < prompt.size()) {
       AdvancePromptTarget();
     }
   }
 
   void AdvancePromptTarget() noexcept {
+    // With a cut rule there is no prompt target to move (see the
+    // constructor); the planned cuts are captured as boundary snapshots.
+    if (canonical_min_pass != 0)
+      return;
+    // Dual in-pass capture: publish ascending — the
+    // earlier P as history first, then the stable boundary as today. A
+    // refused or failed P publish never blocks the stable boundary.
+    if (pair_snapshot) {
+      try {
+        snapshot_metrics.snapshot_bytes +=
+            lease.PublishSecondSnapshot(pair_tokens, pair_snapshot, false);
+      } catch (...) {
+        lease.SkipSnapshot(SnapshotEventReason::kCaptureFailure, pair_bytes,
+                           pair_position);
+      }
+    }
+    pair_snapshot.reset();
+    pair_tokens.clear();
+    pair_position = 0;
+    pair_bytes = 0;
     // Keep both the branching fallback and the complete prompt. The latter
     // is captured after first-token publication, as for ordinary requests.
     // Admission may refuse it without discarding the fallback.
@@ -1223,107 +1554,6 @@ struct TextRunnerPool::Request::Impl {
       snapshot_tokens = prompt;
     }
     prompt_snapshot_attempted = false;
-  }
-
-  /// Records a prompt-boundary capture refused because the speculative
-  /// drafter is not primed yet. The queue drains with the first decoded
-  /// token, so the capture is retried at request end. Returns false when the
-  /// runner cannot defer; the caller then records the ordinary skip.
-  bool DeferPromptSnapshot(const TextRunnerState& state) noexcept {
-    try {
-      if (!runner->HasPendingSpeculativePrime(state)) {
-        return false;
-      }
-      DeferredPromptCapture deferred;
-      deferred.boundary = runner->CaptureDeferredPromptBoundary(state);
-      deferred.tokens = snapshot_tokens;
-      if (deferred.boundary.position != snapshot_tokens.size() ||
-          !deferred.boundary.frontier.has_value()) {
-        return false;
-      }
-      // Mirror the reserve flags StartPromptSnapshot would have used at this
-      // boundary; the prompt and fallback positions do not change after the
-      // attempt.
-      deferred.reserve_preserve_source =
-          retain_fallback &&
-          (fallback_position == 0 || snapshot_tokens.size() == prompt.size());
-      deferred.reserve_purpose =
-          retain_fallback && snapshot_tokens.size() == prompt.size()
-              ? SnapshotPurpose::kRetry
-              : SnapshotPurpose::kContinuation;
-      deferred_prompt_captures.push_back(std::move(deferred));
-      if (Logger::Enabled(LogLevel::kDebug)) {
-        std::ostringstream line;
-        line << "event=prompt_snapshot_defer tokens=" << snapshot_tokens.size();
-        Logger::Debug("cache", line.str());
-      }
-      return true;
-    } catch (...) {
-      return false;
-    }
-  }
-
-  /// Retries the deferred prompt-boundary captures at request end, after the
-  /// last token is sent: drain the drafter prime queue first, then capture
-  /// the device state truncated to each recorded boundary.
-  void CaptureDeferredSnapshots() noexcept {
-    if (deferred_prompt_captures.empty() || !lease) {
-      return;
-    }
-    TextRunnerState* state = nullptr;
-    try {
-      state = &dynamic_cast<TextRunnerState&>(lease.state());
-    } catch (...) {
-      deferred_prompt_captures.clear();
-      return;
-    }
-    // A request that decoded drained its queue at the first verify step; one
-    // that never decoded still holds it, so drain it here before capturing.
-    runner->DrainSpeculativePrime(*state);
-    for (auto& deferred : deferred_prompt_captures) {
-      CaptureDeferredSnapshot(*state, deferred);
-    }
-    deferred_prompt_captures.clear();
-  }
-
-  void CaptureDeferredSnapshot(TextRunnerState& state,
-                               DeferredPromptCapture& deferred) noexcept {
-    const auto position = deferred.boundary.position;
-    std::size_t bytes = 0;
-    try {
-      bytes =
-          runner->DeferredPromptSnapshotPayloadBytes(state, deferred.boundary);
-      if (FloorRefusesSnapshotBytes(floor_bytes, bytes)) {
-        lease.SkipSnapshot(SnapshotEventReason::kHostFloor, bytes, position);
-        return;
-      }
-      if (!lease.TryReserveSnapshot(
-              bytes, position, deferred.reserve_preserve_source,
-              deferred.reserve_purpose, deferred.tokens)) {
-        // Admission refused and recorded its own event.
-        return;
-      }
-      auto snapshot =
-          runner->SnapshotDeferredPromptBoundary(state, deferred.boundary);
-      if (snapshot == nullptr || snapshot->PayloadBytes() != bytes) {
-        lease.SkipSnapshot(SnapshotEventReason::kReservationMismatch, bytes,
-                           position);
-        return;
-      }
-      snapshot_metrics.snapshot_bytes +=
-          lease.PublishSnapshot(std::move(deferred.tokens), std::move(snapshot),
-                                fallback_position != 0);
-    } catch (const std::exception& e) {
-      try {
-        Logger::Warn("cache", "event=deferred_capture_failed what=" +
-                                  std::string(e.what()) +
-                                  " tokens=" + std::to_string(position));
-      } catch (...) {
-      }
-      lease.SkipSnapshot(SnapshotEventReason::kCaptureFailure, bytes, position);
-    } catch (...) {
-      lease.SkipSnapshot(SnapshotEventReason::kCaptureFailure, bytes, position);
-    }
   }
 
   void StartPromptSnapshot(bool wait) noexcept {
@@ -1384,12 +1614,6 @@ struct TextRunnerPool::Request::Impl {
       snapshot_bytes = lease.component() ? lease.CaptureBytes()
                                          : runner->SnapshotPayloadBytes(*state);
     } catch (...) {
-      // The speculative drafter primes only with the first decoded token;
-      // defer this boundary to request end instead of skipping it, so the
-      // cache keeps the prompt-boundary checkpoint plain decoding produces.
-      if (DeferPromptSnapshot(*state)) {
-        return;
-      }
       lease.SkipSnapshot(SnapshotEventReason::kCaptureFailure, 0,
                          snapshot_tokens.size());
       return;
@@ -1685,6 +1909,7 @@ struct TextRunnerPool::Request::Impl {
   // a request cancelled between steps keeps the frontier it reached.
   CancellationCheck cancelled;
   bool stopped{false};
+  std::function<void()> prompt_logits_hook;
   std::optional<TextDecodeSelection> pending_selection;
   sampling::SamplerState sampler;
   std::shared_ptr<const TextPromptContext> context;
@@ -1702,7 +1927,17 @@ struct TextRunnerPool::Request::Impl {
                    : std::span<const std::uint8_t>{};
   }
   bool prompt_snapshot_attempted{false};
+  // Canonical cache with a cut rule (see the constructor): no prompt target,
+  // and every cut leaves this many rows on both sides. Zero otherwise.
+  std::size_t canonical_min_pass{0};
   std::shared_ptr<const TextRunnerSnapshot> prompt_snapshot;
+  /// Dual in-pass capture: the earlier P snapshot of the
+  /// pair, published first as history; refused or mismatched P captures
+  /// never disturb the stable boundary above.
+  std::shared_ptr<const TextRunnerSnapshot> pair_snapshot;
+  std::size_t pair_bytes{0};
+  std::size_t pair_position{0};
+  std::vector<TextRunnerToken> pair_tokens;
   TextRunnerPool::Request::CommitMetrics snapshot_metrics;
   std::size_t snapshot_bytes{0};
   bool retain_snapshot{false};
@@ -1741,6 +1976,21 @@ TextRunnerPool::Request::PreviewFirstToken() {
   auto sampler = impl_->sampler;
   return impl_->runner->PreviewFirstToken(
       dynamic_cast<TextRunnerState&>(impl_->lease.state()), sampler);
+}
+
+std::optional<TextDecodeSelection>
+TextRunnerPool::Request::PreviewPromptLogits() {
+  if (!impl_ || impl_->decode_ready || !impl_->generated.empty() ||
+      impl_->pending_selection || impl_->stopped)
+    return std::nullopt;
+  auto sampler = impl_->sampler;
+  return impl_->runner->PreviewFirstToken(
+      dynamic_cast<TextRunnerState&>(impl_->lease.state()), sampler);
+}
+
+void TextRunnerPool::Request::SetPromptLogitsHook(std::function<void()> hook) {
+  if (impl_)
+    impl_->prompt_logits_hook = std::move(hook);
 }
 
 TextRunnerPool::Request::~Request() = default;
@@ -1782,6 +2032,23 @@ TextRunnerNgramRows TextRunnerPool::Request::ngram_rows() const {
   const auto& base = impl_->ngram_baseline;
   return {now.rows - base.rows, now.dedup_rows - base.dedup_rows,
           now.cache_hits - base.cache_hits, now.disk_reads - base.disk_reads};
+}
+
+bool TextRunnerPool::Request::loop_guard_fired() const noexcept {
+  return impl_ != nullptr && impl_->sampler.LoopGuardFired();
+}
+
+std::uint32_t TextRunnerPool::Request::loop_guard_period() const noexcept {
+  return impl_ != nullptr ? impl_->sampler.LoopGuardPeriod() : 0;
+}
+
+std::uint32_t TextRunnerPool::Request::loop_guard_repeats() const noexcept {
+  return impl_ != nullptr ? impl_->sampler.LoopGuardRepeats() : 0;
+}
+
+std::size_t TextRunnerPool::Request::loop_guard_reasoning_tokens()
+    const noexcept {
+  return impl_ != nullptr ? impl_->sampler.LoopGuardReasoningTokens() : 0;
 }
 
 bool TextRunnerPool::Request::cache_disk_hit() const noexcept {
@@ -1830,8 +2097,16 @@ std::size_t TextRunnerPool::Request::ShareCheckpoint(
     return 0;
   // The complete prompt is retained only after decoding starts; share the
   // last prefill position instead so peers can start sooner.
-  const auto target = std::min(common_tokens, impl_->prompt.size() - 1);
+  auto target = std::min(common_tokens, impl_->prompt.size() - 1);
   const auto offset = impl_->prefill_offset;
+  if (const std::size_t rows = impl_->canonical_min_pass; rows != 0) {
+    // Only an allowed cut: a multiple of 64 rows with `rows` on both sides.
+    if (impl_->prompt.size() < rows)
+      return 0;
+    target = std::min(target, impl_->prompt.size() - rows) / 64 * 64;
+    if (target < offset + rows)
+      return 0;
+  }
   if (target <= offset)
     return 0;
   // Prefill already publishes the fallback, this turn's stable boundary and
@@ -1903,11 +2178,112 @@ TextPrefillStep TextRunnerPool::Request::Prefill(std::size_t max_input_tokens) {
   while (!impl_->checkpoints.empty() &&
          impl_->checkpoints.front() <= impl_->prefill_offset)
     impl_->checkpoints.erase(impl_->checkpoints.begin());
+  auto& state = dynamic_cast<TextRunnerState&>(impl_->lease.state());
+  // Dual in-pass capture: after `snapshot_position`,
+  // compute P = SuperrocTailPoint(prompt, SUPERROC_TAIL_CAPTURE, offset, S).
+  // A claimed pair removes the P split point before the truncation below so
+  // the pass can reach S; when the stable boundary is then not reserved,
+  // the split point is restored below and today's behaviour is kept.
+  bool pair_in_pass = false;
+  bool pair_erased = false;
+  std::optional<std::size_t> pair_point;
+  const bool pair_eligible =
+      !impl_->disk_store && !impl_->prompt_snapshot_attempted &&
+      impl_->prefill_offset < snapshot_position &&
+      snapshot_position < impl_->prompt.size() && impl_->lease.component() &&
+      impl_->runner->Descriptor().capabilities.in_pass_checkpoint;
+  // The 512-token rule of the tail point counts from the frontier this
+  // request reused, as the plan in the constructor does, not from this
+  // step's offset: a short last step keeps P and S in one pass. A step that
+  // already starts at or past P has no pair; the runner checks the rest of
+  // P's position against the step itself.
+  if (pair_eligible) {
+    pair_point =
+        SuperrocTailPoint(impl_->prompt.size(), SuperrocTailCaptureTokens(),
+                          impl_->lease.cached_tokens(), snapshot_position);
+    if (pair_point && *pair_point <= impl_->prefill_offset)
+      pair_point.reset();
+  }
+  if (pair_point) {
+    std::vector<std::size_t> others = impl_->checkpoints;
+    (void)std::erase(others, *pair_point);
+    const std::size_t budget =
+        others.empty() ? max_input_tokens
+                       : std::min(max_input_tokens,
+                                  others.front() - impl_->prefill_offset);
+    if (impl_->runner->PrefillCheckpointPairBytes(
+            state, impl_->prompt, impl_->prefill_offset, budget, *pair_point,
+            snapshot_position))
+      pair_erased = std::erase(impl_->checkpoints, *pair_point) > 0;
+  }
+  // Canonical restore point: when it is the only planned cut left and this
+  // step covers the rest of the prompt, freeze it inside the pass instead
+  // of ending a pass there. The last 16-79 rows prefill with the rest of the
+  // prompt as one pass. A runner that refuses, or admission that rejects the
+  // reservation, keeps today's split capture at the cut.
+  bool boundary_in_pass = false;
+  std::size_t boundary_position = 0;
+  std::optional<std::size_t> boundary_bytes;
+  std::vector<TextRunnerToken> boundary_tokens;
+  if (impl_->canonical_min_pass != 0 && !impl_->disk_store &&
+      impl_->lease.component() && impl_->boundaries.empty() &&
+      impl_->checkpoints.size() == 1 &&
+      impl_->prefill_offset < impl_->checkpoints.front() &&
+      impl_->checkpoints.front() % 64 == 0 &&
+      impl_->checkpoints.front() - impl_->prefill_offset >=
+          impl_->canonical_min_pass &&
+      impl_->prompt.size() - impl_->checkpoints.front() >=
+          impl_->canonical_min_pass &&
+      max_input_tokens >= impl_->prompt.size() - impl_->prefill_offset) {
+    const std::size_t position = impl_->checkpoints.front();
+    const auto bytes = impl_->runner->PrefillCheckpointBoundaryBytes(
+        state, impl_->prompt, impl_->prefill_offset, max_input_tokens,
+        position);
+    if (bytes) {
+      // The plan's own byte math is authoritative, exactly as a dual
+      // capture's P: the runner's claim only gates support.
+      const std::size_t proposed = impl_->lease.CaptureBytes(position);
+      if (FloorRefusesSnapshotBytes(impl_->floor_bytes, proposed)) {
+        impl_->lease.SkipSnapshot(SnapshotEventReason::kHostFloor, proposed,
+                                  position);
+      } else if (impl_->lease.TryReserveSnapshot(
+                     proposed, position, true, SnapshotPurpose::kHistory,
+                     std::span<const TextRunnerToken>(impl_->prompt)
+                         .first(position))) {
+        boundary_in_pass = true;
+        boundary_position = position;
+        boundary_bytes = proposed;
+        boundary_tokens.assign(impl_->prompt.begin(),
+                               impl_->prompt.begin() + position);
+        impl_->checkpoints.clear();
+      }
+    }
+  }
+  if (const std::size_t rows = impl_->canonical_min_pass; rows != 0) {
+    // A step budget cuts the prompt too. The step ends on the last multiple
+    // of 64 rows the budget reaches that leaves `rows` on both sides; a
+    // budget too small for that is exceeded up to the first such cut, or to
+    // the next planned cut or the prompt end when none lies before it.
+    const std::size_t offset = impl_->prefill_offset;
+    const std::size_t target = impl_->checkpoints.empty()
+                                   ? impl_->prompt.size()
+                                   : impl_->checkpoints.front();
+    if (max_input_tokens < target - offset) {
+      std::size_t cut = (offset + max_input_tokens) / 64 * 64;
+      if (cut < offset + rows)
+        cut = (offset + rows + 63) / 64 * 64;
+      while (cut < target && target - cut < rows && cut >= offset + rows + 64)
+        cut -= 64;
+      if (cut >= target || target - cut < rows)
+        cut = target;
+      max_input_tokens = cut - offset;
+    }
+  }
+  const std::size_t budget_before_checkpoints = max_input_tokens;
   if (!impl_->checkpoints.empty())
     max_input_tokens = std::min(
         max_input_tokens, impl_->checkpoints.front() - impl_->prefill_offset);
 
-  auto& state = dynamic_cast<TextRunnerState&>(impl_->lease.state());
   bool in_pass = false;
   if (!impl_->disk_store && !impl_->prompt_snapshot_attempted &&
       impl_->prefill_offset < snapshot_position &&
@@ -1932,8 +2308,37 @@ TextPrefillStep TextRunnerPool::Request::Prefill(std::size_t max_input_tokens) {
         impl_->snapshot_bytes = *bytes;
         impl_->retain_snapshot = true;
         impl_->prompt_snapshot_attempted = true;
+        if (pair_point) {
+          // Reserve order: S above, then P. A
+          // refused P leaves the stable boundary exactly as today; a
+          // reserved P publishes as history.
+          const std::size_t bytes_first =
+              impl_->lease.CaptureBytes(*pair_point);
+          if (FloorRefusesSnapshotBytes(impl_->floor_bytes, bytes_first)) {
+            impl_->lease.SkipSnapshot(SnapshotEventReason::kHostFloor,
+                                      bytes_first, *pair_point);
+          } else if (impl_->lease.TryReserveSecondSnapshot(
+                         bytes_first, *pair_point, SnapshotPurpose::kHistory,
+                         std::span<const TextRunnerToken>(impl_->prompt)
+                             .first(*pair_point))) {
+            pair_in_pass = true;
+            impl_->pair_bytes = bytes_first;
+            impl_->pair_position = *pair_point;
+            impl_->pair_tokens.assign(impl_->prompt.begin(),
+                                      impl_->prompt.begin() + *pair_point);
+          }
+        }
       }
     }
+  }
+  if (pair_erased && !in_pass) {
+    // The claimed pair never reserved its stable boundary; put the split
+    // point back and keep today's split capture at P.
+    impl_->checkpoints.push_back(*pair_point);
+    std::ranges::sort(impl_->checkpoints);
+    max_input_tokens =
+        std::min(budget_before_checkpoints,
+                 impl_->checkpoints.front() - impl_->prefill_offset);
   }
   if (!in_pass && impl_->prefill_offset < snapshot_position)
     max_input_tokens =
@@ -1955,11 +2360,28 @@ TextPrefillStep TextRunnerPool::Request::Prefill(std::size_t max_input_tokens) {
   const auto model_prompt =
       std::span<const TextRunnerToken>(impl_->prompt).first(frontier);
   std::unique_ptr<TextRunnerSnapshot> captured;
+  std::unique_ptr<TextRunnerSnapshot> captured_pair;
+  std::unique_ptr<TextRunnerSnapshot> captured_boundary;
   const std::function<std::unique_ptr<TextRunnerSnapshot>()> capture =
       in_pass && impl_->lease.component()
           ? std::function<std::unique_ptr<TextRunnerSnapshot>()>(
                 [&] { return impl_->lease.Capture(); })
           : std::function<std::unique_ptr<TextRunnerSnapshot>()>{};
+  const std::function<std::unique_ptr<TextRunnerSnapshot>()> capture_boundary =
+      boundary_in_pass ? std::function<std::unique_ptr<TextRunnerSnapshot>()>(
+                             [&] { return impl_->lease.Capture(); })
+                       : std::function<std::unique_ptr<TextRunnerSnapshot>()>{};
+  const std::function<std::unique_ptr<TextRunnerSnapshot>(std::size_t)>
+      capture_pair =
+          pair_in_pass
+              ? std::function<std::unique_ptr<TextRunnerSnapshot>(std::size_t)>(
+                    [&](std::size_t boundary) {
+                      return boundary == impl_->pair_position
+                                 ? impl_->lease.CaptureSecond()
+                                 : impl_->lease.Capture();
+                    })
+              : std::function<std::unique_ptr<TextRunnerSnapshot>(
+                    std::size_t)>{};
   // A cancellation observed inside a step abandons it half-fed, which loses
   // the whole conversation. Let a step run to completion instead, and honour
   // the cancellation at the next step boundary where Cancel keeps the prefix.
@@ -1992,16 +2414,31 @@ TextPrefillStep TextRunnerPool::Request::Prefill(std::size_t max_input_tokens) {
     lookahead_end = std::min(lookahead_end, snapshot_position);
   struct ClearLookahead {
     TextRunnerState& state;
-    ~ClearLookahead() { state.SetPrefillLookahead({}); }
+    ~ClearLookahead() {
+      state.SetPrefillLookahead({});
+      state.SetPromptLogitsHook(nullptr);
+    }
   } clear_lookahead{state};
+  state.SetPromptLogitsHook(
+      frontier == impl_->prompt.size() ? &impl_->prompt_logits_hook : nullptr);
   state.SetPrefillLookahead(std::span<const TextRunnerToken>(impl_->prompt)
                                 .subspan(frontier, lookahead_end - frontier));
   auto step =
-      in_pass ? impl_->runner->PrefillThrough(
-                    state, model_prompt, impl_->prefill_offset,
-                    max_input_tokens, snapshot_position, &captured, capture)
-              : impl_->runner->Prefill(state, model_prompt,
-                                       impl_->prefill_offset, max_input_tokens);
+      boundary_in_pass
+          ? impl_->runner->PrefillThroughBoundary(
+                state, model_prompt, impl_->prefill_offset, max_input_tokens,
+                boundary_position, &captured_boundary, capture_boundary)
+      : pair_in_pass
+          ? impl_->runner->PrefillThroughPair(
+                state, model_prompt, impl_->prefill_offset, max_input_tokens,
+                impl_->pair_position, snapshot_position, &captured_pair,
+                &captured, capture_pair)
+      : in_pass
+          ? impl_->runner->PrefillThrough(
+                state, model_prompt, impl_->prefill_offset, max_input_tokens,
+                snapshot_position, &captured, capture)
+          : impl_->runner->Prefill(state, model_prompt, impl_->prefill_offset,
+                                   max_input_tokens);
   const std::size_t maximum_consumed = std::min(remaining, max_input_tokens);
   if (step.consumed_tokens == 0 || step.consumed_tokens > maximum_consumed) {
     throw std::runtime_error(
@@ -2019,8 +2456,16 @@ TextPrefillStep TextRunnerPool::Request::Prefill(std::size_t max_input_tokens) {
   impl_->state_reusable = true;
   if (in_pass) {
     impl_->snapshot_metrics.snapshot_ms += step.checkpoint_ms;
+    // A dual capture's S payload shares the chunks P just committed, so it
+    // legitimately lands below its reserved budget;
+    // anything costlier than the reservation is still a mismatch. The
+    // single-capture path keeps today's exact equality.
+    const bool payload_over_budget =
+        captured && captured->PayloadBytes() > impl_->snapshot_bytes;
     if (!captured || impl_->prefill_offset <= snapshot_position ||
-        captured->PayloadBytes() != impl_->snapshot_bytes) {
+        payload_over_budget ||
+        (!pair_in_pass && captured &&
+         captured->PayloadBytes() != impl_->snapshot_bytes)) {
       impl_->lease.SkipSnapshot(SnapshotEventReason::kReservationMismatch,
                                 captured ? captured->PayloadBytes() : 0,
                                 snapshot_position);
@@ -2028,7 +2473,39 @@ TextPrefillStep TextRunnerPool::Request::Prefill(std::size_t max_input_tokens) {
     } else {
       impl_->prompt_snapshot = std::move(captured);
     }
+    if (pair_in_pass &&
+        (!captured_pair || impl_->prefill_offset <= impl_->pair_position ||
+         captured_pair->PayloadBytes() != impl_->pair_bytes)) {
+      // A mismatched P skips only the P snapshot.
+      impl_->lease.SkipSnapshot(
+          SnapshotEventReason::kReservationMismatch,
+          captured_pair ? captured_pair->PayloadBytes() : 0,
+          impl_->pair_position);
+    } else if (pair_in_pass) {
+      impl_->pair_snapshot = std::move(captured_pair);
+    }
     impl_->AdvancePromptTarget();
+  }
+  if (boundary_in_pass) {
+    // The canonical boundary checkpoint publishes like a captured cut;
+    // canonical mode never advances a prompt target, so this is the only
+    // publication of the in-pass view.
+    impl_->snapshot_metrics.snapshot_ms += step.checkpoint_ms;
+    if (!captured_boundary || impl_->prefill_offset <= boundary_position ||
+        captured_boundary->PayloadBytes() != *boundary_bytes) {
+      impl_->lease.SkipSnapshot(
+          SnapshotEventReason::kReservationMismatch,
+          captured_boundary ? captured_boundary->PayloadBytes() : 0,
+          boundary_position);
+    } else {
+      try {
+        impl_->snapshot_metrics.snapshot_bytes += impl_->lease.PublishSnapshot(
+            std::move(boundary_tokens), std::move(captured_boundary), true);
+      } catch (...) {
+        impl_->lease.SkipSnapshot(SnapshotEventReason::kCaptureFailure,
+                                  *boundary_bytes, boundary_position);
+      }
+    }
   }
   if (!reached_frontier && impl_->prefill_offset == snapshot_position)
     impl_->CapturePromptSnapshot(false);
@@ -2159,7 +2636,6 @@ TextRunnerPool::Request::CommitMetrics TextRunnerPool::Request::Commit() {
   }
 
   impl_->CapturePromptSnapshot();
-  impl_->CaptureDeferredSnapshots();
   auto& state = dynamic_cast<TextRunnerState&>(impl_->lease.state());
   state.SetCancellationCheck({});
   if (!impl_->runner->Descriptor().capabilities.prefix_reuse) {
@@ -2182,6 +2658,15 @@ TextRunnerPool::Request::CommitMetrics TextRunnerPool::Request::Commit() {
   }
   checkpoint.resize(position);
   if (capabilities.snapshot && capabilities.fork) {
+    // Canonical cache: the state after this reply came from the decode path,
+    // and a later request must not continue from it. Only the prompt
+    // checkpoints stay published, so the next request restores one and reads
+    // this reply's tokens through the prompt path with its own new tokens.
+    // A message history then holds the same model state whether it was served
+    // turn by turn or read in one request. A runner without snapshots has no
+    // prompt checkpoint to go back to and keeps its frontier (below).
+    if (SuperrocCanonicalCache())
+      checkpoint.clear();
     CommitMetrics metrics = impl_->snapshot_metrics;
     metrics.snapshot_bytes += impl_->lease.Commit(
         std::move(impl_->snapshot_tokens), std::move(impl_->prompt_snapshot),
@@ -2244,6 +2729,14 @@ TextRunnerPool::Request::Cancel() noexcept {
     }
     CommitMetrics metrics = impl_->snapshot_metrics;
     if (capabilities.snapshot && capabilities.fork) {
+      // Canonical cache: tokens generated before the cancellation are decode
+      // path state too (see Commit). A cancelled prompt pass keeps its
+      // completed rows, unless the runner has a cut rule: a later prompt
+      // could reuse a part of them that ends between two allowed cuts, so
+      // only the checkpoints taken on the way stay.
+      if (SuperrocCanonicalCache() &&
+          (impl_->decode_ready || impl_->canonical_min_pass != 0))
+        checkpoint.clear();
       metrics.snapshot_bytes += impl_->lease.Commit(
           std::move(impl_->snapshot_tokens), std::move(impl_->prompt_snapshot),
           std::move(checkpoint));

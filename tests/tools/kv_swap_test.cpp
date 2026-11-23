@@ -1,4 +1,4 @@
-// kv_swap_test — SPEC7 item 2(b): tests for the kv_swap tool.
+// kv_swap_test — tests for the kv_swap tool.
 //
 // kv_swap (tools/superroc-quant/kv_swap.cpp) writes a GGUF whose KV/metadata
 // block comes verbatim from a template file and whose tensor payloads come

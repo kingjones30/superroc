@@ -8,13 +8,14 @@
 #include <cstdlib>
 #include <filesystem>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 
 namespace {
@@ -326,6 +327,145 @@ void TestQ4_0() {
   }
 }
 
+void Expect(bool condition, std::string_view message) {
+  if (!condition) {
+    std::cerr << "Assertion failed: " << message << '\n';
+    std::exit(1);
+  }
+}
+
+void TestFloatToFp16() {
+  using superroc::quant::FloatToFp16;
+  using superroc::quant::Fp16ToFloat;
+  // Every finite half and both infinities survive the round trip.
+  for (std::uint32_t h = 0; h < 0x10000U; ++h) {
+    const bool is_nan = ((h >> 10U) & 0x1FU) == 31U && (h & 0x3FFU) != 0U;
+    if (is_nan) {
+      continue;
+    }
+    const auto half = static_cast<std::uint16_t>(h);
+    if (FloatToFp16(Fp16ToFloat(half)) != half) {
+      std::cerr << "Assertion failed: half round trip of 0x" << std::hex << h
+                << '\n';
+      std::exit(1);
+    }
+  }
+  // Round to nearest, ties to even.
+  Expect(FloatToFp16(1.0F + std::ldexp(1.0F, -11)) == 0x3C00,
+         "half tie rounds down to an even mantissa");
+  Expect(FloatToFp16(1.0F + (3.0F * std::ldexp(1.0F, -11))) == 0x3C02,
+         "half tie rounds up to an even mantissa");
+  Expect(FloatToFp16(1.0F + std::ldexp(1.0F, -11) + std::ldexp(1.0F, -20)) ==
+             0x3C01,
+         "above a tie rounds up");
+  Expect(FloatToFp16(65519.0F) == 0x7BFF, "largest half");
+  Expect(FloatToFp16(65520.0F) == 0x7C00, "overflow becomes infinity");
+  Expect(FloatToFp16(-1.0e9F) == 0xFC00, "negative overflow");
+  Expect(FloatToFp16(std::ldexp(1.0F, -24)) == 0x0001, "smallest subnormal");
+  Expect(FloatToFp16(std::ldexp(1.0F, -25)) == 0x0000,
+         "half of the smallest subnormal ties to zero");
+  Expect(FloatToFp16(std::ldexp(1.5F, -25)) == 0x0001,
+         "above half of the smallest subnormal rounds up");
+  Expect(FloatToFp16(-0.0F) == 0x8000, "negative zero keeps its sign");
+  Expect((FloatToFp16(std::nanf("")) & 0x7C00U) == 0x7C00U &&
+             (FloatToFp16(std::nanf("")) & 0x03FFU) != 0U,
+         "NaN stays NaN");
+}
+
+void TestQuantizeQ4_0() {
+  using superroc::quant::block_q4_0;
+  // Values on a Q4_0 grid whose largest magnitude is the -8 code come back
+  // exactly: the scale is that value over -8.
+  std::array<float, 64> grid{};
+  for (std::size_t index = 0; index < grid.size(); ++index) {
+    const int code = static_cast<int>((index * 7U) % 16U) - 8;  // -8 .. 7
+    grid[index] = 0.25F * static_cast<float>(code);
+  }
+  std::array<block_q4_0, 2> blocks{};
+  superroc::quant::QuantizeQ4_0(grid.data(), blocks.data(), grid.size());
+  std::array<float, 64> back{};
+  superroc::quant::DequantizeQ4_0(blocks.data(), back.data(), back.size());
+  for (std::size_t index = 0; index < grid.size(); ++index) {
+    ExpectNear(back[index], grid[index], "Q4_0 grid round trip", 0.0F);
+  }
+  Expect(blocks[0].d == 0x3400, "Q4_0 scale of the grid block is 0.25");
+
+  // Arbitrary values: every element within half a step, and the element of
+  // largest magnitude kept to half precision. A positive maximum gives a
+  // negative scale, so it also lands on the -8 code.
+  std::array<float, 96> values{};
+  std::uint32_t state = 0x1234567U;
+  for (auto& value : values) {
+    state = (state * 1664525U) + 1013904223U;
+    value = (static_cast<float>(state >> 8U) / 8388608.0F) - 1.0F;  // [-1, 1)
+  }
+  values[40] = 1.75F;  // positive maximum of the second block
+  values[70] = -2.5F;  // negative maximum of the third block
+  std::array<block_q4_0, 3> packed{};
+  superroc::quant::QuantizeQ4_0(values.data(), packed.data(), values.size());
+  std::array<float, 96> restored{};
+  superroc::quant::DequantizeQ4_0(packed.data(), restored.data(),
+                                  restored.size());
+  for (std::size_t block = 0; block < 3; ++block) {
+    float amax = 0.0F;
+    for (std::size_t j = 0; j < 32; ++j) {
+      amax = std::max(amax, std::abs(values[(block * 32) + j]));
+    }
+    const float step = amax / 8.0F;
+    for (std::size_t j = 0; j < 32; ++j) {
+      const std::size_t index = (block * 32) + j;
+      // The code range is [-8, 7] steps of the signed scale, so one end of
+      // the block's range can be clipped by up to one step.
+      const float limit = (step * 1.001F) + 1.0e-6F;
+      if (std::abs(restored[index] - values[index]) > limit) {
+        std::cerr << "Assertion failed: Q4_0 error at " << index
+                  << " actual=" << restored[index]
+                  << " expected=" << values[index] << '\n';
+        std::exit(1);
+      }
+    }
+  }
+  ExpectNear(restored[40], 1.75F, "Q4_0 keeps a positive maximum", 1.0e-3F);
+  ExpectNear(restored[70], -2.5F, "Q4_0 keeps a negative maximum", 1.0e-3F);
+  double squared = 0.0;
+  double reference = 0.0;
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    const double diff = static_cast<double>(restored[index] - values[index]);
+    squared += diff * diff;
+    reference += static_cast<double>(values[index]) * values[index];
+  }
+  Expect(squared < 0.02 * reference, "Q4_0 relative error stays 4-bit sized");
+
+  // A block of zeros has a zero scale and decodes to zeros; values that are
+  // not finite count as zero instead of poisoning the scale.
+  std::array<float, 32> zeros{};
+  block_q4_0 zero_block{};
+  zero_block.d = 0x1234;
+  superroc::quant::QuantizeQ4_0(zeros.data(), &zero_block, zeros.size());
+  Expect(superroc::quant::Fp16ToFloat(zero_block.d) == 0.0F,
+         "Q4_0 zero block has a zero scale");
+  std::array<float, 32> zero_back{};
+  zero_back.fill(1.0F);
+  superroc::quant::DequantizeQ4_0(&zero_block, zero_back.data(),
+                                  zero_back.size());
+  for (const float value : zero_back) {
+    Expect(value == 0.0F, "Q4_0 zero block decodes to zeros");
+  }
+  std::array<float, 32> odd{};
+  odd[3] = std::numeric_limits<float>::infinity();
+  odd[5] = std::nanf("");
+  odd[7] = -4.0F;
+  odd[9] = 1.0F;
+  block_q4_0 odd_block{};
+  superroc::quant::QuantizeQ4_0(odd.data(), &odd_block, odd.size());
+  std::array<float, 32> odd_back{};
+  superroc::quant::DequantizeQ4_0(&odd_block, odd_back.data(), odd_back.size());
+  ExpectNear(odd_back[3], 0.0F, "Q4_0 infinity counts as zero");
+  ExpectNear(odd_back[5], 0.0F, "Q4_0 NaN counts as zero");
+  ExpectNear(odd_back[7], -4.0F, "Q4_0 finite maximum beside non-finite");
+  ExpectNear(odd_back[9], 1.0F, "Q4_0 finite value beside non-finite");
+}
+
 void TestQ5_K() {
   constexpr std::size_t kQ5Elements = 256;
   struct Q5Block {
@@ -523,8 +663,10 @@ int main() {
   TestQ8();
   TestQ8_0();
   TestQ4_0();
+  TestFloatToFp16();
+  TestQuantizeQ4_0();
   TestQ5_K();
-  if (const char* model = ::superroc::core::GetEnvCompat("SUPERROC_MTP_MODEL");
+  if (const char* model = ::superroc::core::GetEnv("SUPERROC_MTP_MODEL");
       model != nullptr && std::string_view(model).size() > 0) {
     TestModelRows(model);
   }

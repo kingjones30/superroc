@@ -1,4 +1,4 @@
-// ling3_mla_fusion_test.cpp — LC1 SPEC4 unit gate for the RV25 MLA decode
+// ling3_mla_fusion_test.cpp — unit gate for the MLA decode
 // fusions against the exact unfused sequence they replace:
 //
 //   M1   mla_pre_fused   = rope(q) + rope(kv) + latent_norm + cache_append
@@ -17,7 +17,7 @@
 //
 // It also asserts the fused path actually RAN (the launch counters), so a
 // LING3_MLA_DECODE_FUSED=0 environment cannot make this gate pass vacuously.
-// Synthetic tensors; no model load. Run inside gpu-run.
+// Synthetic tensors; no model load. Run on an otherwise idle GPU.
 #include <hip/hip_runtime.h>
 
 #include <cmath>
@@ -213,7 +213,7 @@ int main(int argc, char ** argv) {
         const int pos_val = n_pos - 1;
 
         // ---- reference: the UNFUSED sequence, exactly what the block entry
-        // launched before LC1 (four stages + attention without the epilogue),
+        // launched before (four stages + attention without the epilogue),
         // then k_q8_1_quant for the wo activation.
         void * d_q  = DevAlloc(q.size() * 4);
         void * d_kv = DevAlloc(kv.size() * 4);

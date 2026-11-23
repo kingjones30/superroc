@@ -1,5 +1,5 @@
 #pragma once
-// ling3_wmma.hpp — LS3 phase 3: W8A8 int8-WMMA GEMM for the ROCmFP4 prefill.
+// ling3_wmma.hpp — W8A8 int8-WMMA GEMM for the ROCmFP4 prefill.
 //
 // The phase-1/2 tiled kernel (ling3_gemm.hip) dequantises FP4 weights to float
 // in LDS and does scalar float FMA: ~5-6 % of the box's fp32 peak, while the
@@ -11,7 +11,7 @@
 // This file is the Ling instantiation of that design, built from superroc's
 // WKQuantA8BlockedWmmaGEMMKernel skeleton (src/models/qwen/hip/kernels/
 // prefill_quant_gemm.hpp) and the fork's FP4->int8 decode
-// (ggml/rocmfp4/rocmfp4_hip_codebook.cuh). It is a NEW file in the LS3 zone:
+// (ggml/rocmfp4/rocmfp4_hip_codebook.cuh). It is a NEW file:
 // no qwen file, no other lane's file is touched.
 //
 // Layouts
@@ -34,7 +34,7 @@
 // int32 sum and one k-ascending float += per 32-block per output element.
 // No atomics anywhere; same binary twice -> bit-identical output.
 //
-// Bounds discipline (this lane faults no GPUs):
+// Bounds discipline (these kernels fault no GPUs):
 //   * weight reads: the fetch clamps row to n-1 and k-block to num_kb-1 and
 //     zeroes the block scale by a multiply (superroc opt-c179: bit-identical to
 //     zero-filling, and it keeps every load inside the row's blocks).

@@ -110,6 +110,9 @@ public:
   [[nodiscard]] std::size_t GetPackedWeightBytes() const noexcept {
     return packed_weight_bytes_;
   }
+  [[nodiscard]] const QwenGpuModel& GetTargetModel() const noexcept {
+    return *target_model_;
+  }
 
 private:
   QwenDFlashGpuModel(std::shared_ptr<const core::GgufReader> dflash_reader,
@@ -141,11 +144,25 @@ public:
 
   void Reset() noexcept;
 
+  /// Trims the draft unembed and the DSpark markov scan to the head rows
+  /// [0, H) plus the special-token tail [T, V) of the drafter vocab. An empty
+  /// trim (draft_rows_ == 0) keeps the full head. Called once by the backend
+  /// once the executor exists.
+  void ConfigureDraftVocab(const std::vector<std::uint32_t>& special_ids);
+
   /// Ingests target multi-layer hidden states and injects K/V into the draft
   /// cache.
   bool InjectTargetContext(std::span<const float> target_features,
                            std::uint32_t position, std::uint32_t num_tokens,
                            const DFlashTrace& trace = {});
+
+  /// Advances the committed context over [position, position + num_tokens)
+  /// without injecting those rows. The drafter's attention only reads the last
+  /// history_capacity_ rows, so callers with a known final prompt length may
+  /// skip the leading rows that can never enter that window. The skipped ring
+  /// slots are zeroed so a mid-prompt snapshot restored into a shorter
+  /// continuation attends defined values instead of stale memory.
+  bool SkipTargetContext(std::uint32_t position, std::uint32_t num_tokens);
 
   /// Projects committed features together and writes each private cache at
   /// its original absolute positions. Reuses the coordinator's scalar scratch.
@@ -168,18 +185,12 @@ public:
   ForwardBlockBatch(std::span<const QwenDFlashBlockRequest> requests);
 
   [[nodiscard]] std::unique_ptr<QwenDFlashGpuSnapshot> SaveSnapshot() const;
-  /// Exact payload bytes of SaveSnapshotAt().
-  [[nodiscard]] std::size_t SnapshotPayloadBytesAt(
-      std::uint32_t valid_context) const;
-  /// Snapshot truncated to an earlier injected-context length. The ring
-  /// holds rows in absolute slot order only while the context fits the
-  /// history, so a wrapped cache refuses instead of truncating.
-  [[nodiscard]] std::unique_ptr<QwenDFlashGpuSnapshot> SaveSnapshotAt(
-      std::uint32_t valid_context) const;
   void RestoreSnapshot(const QwenDFlashGpuSnapshot& snapshot);
   void RestorePersistentSnapshot(std::span<const std::uint8_t> payload);
   [[nodiscard]] std::size_t StateBytes() const noexcept;
   [[nodiscard]] std::size_t SnapshotPayloadBytes() const noexcept;
+  [[nodiscard]] std::size_t SnapshotPayloadBytesAt(
+      std::uint32_t position) const noexcept;
   [[nodiscard]] QwenGpuMemoryUsage GetMemoryUsage() const noexcept;
   [[nodiscard]] static QwenGpuMemoryUsage EstimateMemoryUsage(
       const QwenDFlashGpuModel& model, std::uint32_t max_context,
@@ -193,6 +204,11 @@ public:
   }
   [[nodiscard]] std::uint32_t GetInjectedContextLength() const noexcept {
     return injected_context_len_;
+  }
+  /// Rows of drafter history the attention window can still read. The ring
+  /// keeps the last history_capacity_ committed rows.
+  [[nodiscard]] std::uint32_t GetHistoryCapacity() const noexcept {
+    return history_capacity_;
   }
   [[nodiscard]] const QwenDFlashGpuModel& GetModel() const noexcept {
     return *model_;
@@ -216,11 +232,8 @@ private:
                     std::size_t output_size, std::size_t input_size);
   void RunInjectGemm(const models::QwenTensorRef& weight, const float* input,
                      float* output, std::size_t num_tokens,
-                     std::size_t output_size, std::size_t input_size);
-  void RunInjectGemmWide(const models::QwenTensorRef& weight,
-                         const float* input, float* output,
-                         std::size_t num_tokens, std::size_t output_size,
-                         std::size_t input_size);
+                     std::size_t output_size, std::size_t input_size,
+                     bool allow_batched = false);
 
   std::shared_ptr<const QwenDFlashGpuModel> model_;
   std::uint32_t max_context_{4096};
@@ -253,6 +266,13 @@ private:
   float* d_ffn_up_{nullptr};
   float* d_ffn_down_{nullptr};
   float* d_logits_{nullptr};
+  // Trimmed draft vocabulary: rows [0, draft_head_rows_) plus
+  // [draft_tail_start_, vocab_size). Zero means the full head.
+  std::uint32_t draft_head_rows_{0};
+  std::uint32_t draft_tail_start_{0};
+  std::uint32_t draft_rows_{0};
+  std::size_t draft_row_bytes_{0};
+  float* d_logits_tail_{nullptr};
   float* d_selector_hidden_{nullptr};
   std::uint32_t* d_selector_candidate_ids_{nullptr};
   float* d_selector_candidate_probabilities_{nullptr};
@@ -260,7 +280,6 @@ private:
   float* d_confidences_{nullptr};
   std::uint32_t* d_out_token_{nullptr};
   hip_bfloat16* d_bf16_input_{nullptr};
-  hip_bfloat16* d_inject_bf16_{nullptr};
   std::size_t scratch_bytes_{0};
   void* d_batch_scratch_{nullptr};
   std::size_t batch_scratch_bytes_{0};
@@ -271,6 +290,8 @@ struct QwenDFlashGpuDraftConfig {
   std::uint32_t max_draft_tokens{7};
   speculative::DFlashDraftPolicy policy{
       speculative::DFlashDraftPolicy::kAdaptive};
+  // The target verifies more rows without reading more weights (FP4).
+  bool flat_verify{false};
 };
 
 /// Adapts the GPU DFlash executor to the repository's IDraftBackend speculative
@@ -308,6 +329,17 @@ public:
       const speculative::DraftTargetContext& context,
       std::uint32_t position) override;
 
+  /// Drafter history rows the attention window can still read.
+  [[nodiscard]] std::uint32_t TargetHistoryCapacity() const noexcept override {
+    return executor_->GetHistoryCapacity();
+  }
+
+  /// Advances the committed draft context over [position, position +
+  /// num_tokens) without injecting those rows (see
+  /// QwenDFlashGpuExecutor::SkipTargetContext).
+  [[nodiscard]] bool SkipTargetContext(std::uint32_t position,
+                                       std::uint32_t num_tokens);
+
   void UpdateTargetHidden(std::span<const float> hidden) override;
 
   [[nodiscard]] speculative::DraftProposal Propose(
@@ -327,12 +359,10 @@ public:
                       tokenization::TokenId correction_token) override;
 
   [[nodiscard]] std::size_t SnapshotPayloadBytes() const override;
+  [[nodiscard]] std::optional<std::size_t> SnapshotPayloadBytesAt(
+      std::uint32_t position) const override;
   [[nodiscard]] std::unique_ptr<speculative::IDraftBackendSnapshot> Snapshot()
       const override;
-  [[nodiscard]] std::size_t SnapshotPayloadBytesAtPosition(
-      std::uint32_t position) const override;
-  [[nodiscard]] std::unique_ptr<speculative::IDraftBackendSnapshot>
-  SnapshotAtPosition(std::uint32_t position) const override;
   void RestoreSnapshot(
       const speculative::IDraftBackendSnapshot& snapshot) override;
   void RestorePersistentSnapshot(

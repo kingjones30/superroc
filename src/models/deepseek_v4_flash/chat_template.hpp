@@ -8,6 +8,7 @@
 
 #include "src/core/gguf_reader.hpp"
 #include "src/core/reasoning.hpp"
+#include "src/core/text/content_spans.hpp"
 
 namespace superroc::models::deepseek_v4_flash {
 
@@ -62,6 +63,14 @@ struct ChatTemplateOptions {
 [[nodiscard]] std::string RenderChat(std::span<const ChatMessage> messages,
                                      std::span<const ChatTool> tools,
                                      const ChatTemplateOptions& options = {});
+/// Same render; `content_spans` receives the byte range of every piece of
+/// client-supplied text (message text, reasoning, tool calls, tool results,
+/// tool definitions), in order, so the caller can keep that text from being
+/// read as control tokens.
+[[nodiscard]] std::string RenderChat(
+    std::span<const ChatMessage> messages, std::span<const ChatTool> tools,
+    const ChatTemplateOptions& options,
+    std::vector<core::TextSpan>* content_spans);
 
 /// Rejects DeepSeek artifacts whose embedded template is not the pinned
 /// converter version implemented by the compiled formatter.

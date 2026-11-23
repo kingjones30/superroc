@@ -230,22 +230,9 @@ def make_bundle(entries):
 
 
 def key(mangled: str) -> str:
-    """Canonical name for one kernel entry (ROCm appends a version suffix).
-
-    Canonicalization also maps previous engine-name namespace segments (the
-    old prefix is length-prefixed in Itanium mangling, so the mapping adds
-    the prefix length difference) so previous baselines keep matching.
-    """
+    """Canonical name for one kernel entry (ROCm appends a version suffix)."""
     name = re.sub(r"\d+ROCPRIM_\d+_NS", "ROCPRIM_NS", mangled)
-    # Previous engine-name segments, assembled from parts so the old
-    # spelling never appears here.
-    previous = "g" + "ufo"
-    name = re.sub(
-        r"(\d+)" + previous,
-        lambda match: str(int(match.group(1)) + 4) + "superroc",
-        name,
-    )
-    return re.sub(r"(?<![A-Za-z0-9_])" + previous + "_", "superroc_", name)
+    return name
 
 
 def binary_kernels(path: str, bundler: str | None) -> dict[str, dict]:

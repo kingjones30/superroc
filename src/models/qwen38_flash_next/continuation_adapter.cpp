@@ -111,7 +111,7 @@ public:
     return !restoring && !failed && (guarding || session->IsValid());
   }
   void BeforeExecution() override {
-    if (!IsValid() || pending || checkpoint)
+    if (!IsValid() || pending || Checkpoint())
       throw std::logic_error("Flash-Next slot is not ready for execution");
   }
   void BeforeWrite(bool draft, std::uint32_t first, std::uint32_t end,
@@ -120,7 +120,7 @@ public:
     // Model execution temporarily disables its public validity flag. The
     // adapter's restore/failure status and outstanding transfers still gate
     // every native write, including graph replay and speculative rollback.
-    if (restoring || failed || pending || checkpoint)
+    if (restoring || failed || pending || Checkpoint())
       throw std::logic_error("Flash-Next slot is not ready for mutation");
     CaptureDuringGuard readable(*this);
     for (const auto& component : adapter.layout_.Components()) {
@@ -136,7 +136,7 @@ public:
   void BeforeReset() override {
     if (invalidating)
       return;
-    if (restoring || pending || checkpoint)
+    if (restoring || pending || Checkpoint())
       throw std::logic_error("cannot reset a busy Flash-Next slot");
     GuardAll();
   }
@@ -172,8 +172,16 @@ public:
   ContinuationAdapter& adapter;
   cache::MutationGuard& guard;
   std::unique_ptr<Session> session;
-  const rocm::PrefillCheckpoint* checkpoint{};
+  // Dual in-pass captures: the frozen view exposed to
+  // captures; at most one entry is live at a time and `active` names it.
+  // A null active view keeps today's live session frontier.
+  std::array<const rocm::PrefillCheckpoint*, 2> checkpoints{};
+  std::size_t active{0};
+  [[nodiscard]] const rocm::PrefillCheckpoint* Checkpoint() const noexcept {
+    return checkpoints[active];
+  }
   rocm::Session& CaptureState() const {
+    const rocm::PrefillCheckpoint* checkpoint = Checkpoint();
     return checkpoint ? *checkpoint->state : *session->session_;
   }
   struct CaptureDuringGuard {
@@ -260,10 +268,15 @@ void ContinuationAdapter::PrefillThrough(cache::Slot& slot,
   const auto consume = [&](const rocm::PrefillCheckpoint& checkpoint) {
     struct BoundaryScope {
       State& state;
+      std::size_t index;
       bool guarding;
-      BoundaryScope(State& state, const rocm::PrefillCheckpoint& checkpoint)
-          : state(state), guarding(std::exchange(state.guarding, true)) {
-        state.checkpoint = &checkpoint;
+      BoundaryScope(State& state, const rocm::PrefillCheckpoint& checkpoint,
+                    std::size_t index)
+          : state(state),
+            index(index),
+            guarding(std::exchange(state.guarding, true)) {
+        state.checkpoints[index] = &checkpoint;
+        state.active = index;
       }
       ~BoundaryScope() {
         // The checkpoint arena may be reused by the next native pass. Even a
@@ -273,15 +286,104 @@ void ContinuationAdapter::PrefillThrough(cache::Slot& slot,
           for (const auto& job : state.jobs)
             (void)job->Wait();
         }
-        state.checkpoint = nullptr;
+        state.checkpoints[index] = nullptr;
         state.guarding = guarding;
       }
-    } scope(state, checkpoint);
+    } scope(state, checkpoint, 0);
     capture();
     if (state.pending)
       throw std::logic_error("in-pass capture returned with pending transfers");
   };
   if (!state.session->SyncThroughComponents(prompt, boundary, consume, &error))
+    throw std::runtime_error("component in-pass prefill failed: " + error);
+}
+
+void ContinuationAdapter::PrefillThroughPair(
+    cache::Slot& slot, std::span<const std::int32_t> prompt,
+    std::uint32_t boundary_first, std::uint32_t boundary,
+    const std::function<void(std::uint32_t)>& capture) {
+  auto& state = As(slot);
+  state.BeforeExecution();
+  if (!capture)
+    throw std::invalid_argument("missing component checkpoint consumer");
+  std::string error;
+  // Dual in-pass capture: the consumer runs once per
+  // frozen view in ascending boundary order, each in its own BoundaryScope
+  // that drains that view's transfers before the arena can be reused.
+  const auto consume = [&](const rocm::PrefillCheckpoint& checkpoint,
+                           std::uint32_t at) {
+    struct BoundaryScope {
+      State& state;
+      std::size_t index;
+      bool guarding;
+      BoundaryScope(State& state, const rocm::PrefillCheckpoint& checkpoint,
+                    std::size_t index)
+          : state(state),
+            index(index),
+            guarding(std::exchange(state.guarding, true)) {
+        state.checkpoints[index] = &checkpoint;
+        state.active = index;
+      }
+      ~BoundaryScope() {
+        {
+          const std::lock_guard lock(state.jobs_mutex);
+          for (const auto& job : state.jobs)
+            (void)job->Wait();
+        }
+        state.checkpoints[index] = nullptr;
+        state.guarding = guarding;
+      }
+    } scope(state, checkpoint, at == boundary_first ? 0U : 1U);
+    capture(at);
+    if (state.pending)
+      throw std::logic_error("in-pass capture returned with pending transfers");
+  };
+  if (!state.session->SyncThroughComponentsPair(prompt, boundary_first,
+                                                boundary, consume, &error))
+    throw std::runtime_error("component dual in-pass prefill failed: " + error);
+}
+
+void ContinuationAdapter::PrefillThroughBoundary(
+    cache::Slot& slot, std::span<const std::int32_t> prompt,
+    std::uint32_t boundary, const std::function<void(std::uint32_t)>& capture) {
+  auto& state = As(slot);
+  state.BeforeExecution();
+  if (!capture)
+    throw std::invalid_argument("missing component checkpoint consumer");
+  std::string error;
+  // Single in-pass capture: the consumer runs once for the frozen view in
+  // its own BoundaryScope that drains its transfers before the arena can
+  // be reused.
+  const auto consume = [&](const rocm::PrefillCheckpoint& checkpoint,
+                           std::uint32_t at) {
+    struct BoundaryScope {
+      State& state;
+      std::size_t index;
+      bool guarding;
+      BoundaryScope(State& state, const rocm::PrefillCheckpoint& checkpoint,
+                    std::size_t index)
+          : state(state),
+            index(index),
+            guarding(std::exchange(state.guarding, true)) {
+        state.checkpoints[index] = &checkpoint;
+        state.active = index;
+      }
+      ~BoundaryScope() {
+        {
+          const std::lock_guard lock(state.jobs_mutex);
+          for (const auto& job : state.jobs)
+            (void)job->Wait();
+        }
+        state.checkpoints[index] = nullptr;
+        state.guarding = guarding;
+      }
+    } scope(state, checkpoint, 0U);
+    capture(at);
+    if (state.pending)
+      throw std::logic_error("in-pass capture returned with pending transfers");
+  };
+  if (!state.session->SyncThroughComponentsBoundary(prompt, boundary, consume,
+                                                    &error))
     throw std::runtime_error("component in-pass prefill failed: " + error);
 }
 cache::Capabilities ContinuationAdapter::GetCapabilities() const {
@@ -331,7 +433,7 @@ std::vector<cache::ComponentPosition>
 ContinuationAdapter::PrefillCheckpointPositions(const cache::Slot& slot,
                                                 Rows boundary) const {
   const auto& state = As(slot);
-  if (!state.IsValid() || state.pending || state.checkpoint)
+  if (!state.IsValid() || state.pending || state.Checkpoint())
     throw std::logic_error(
         "Flash-Next slot is not ready for checkpoint planning");
   if (boundary <= state.session->Position() || boundary > context_ ||
@@ -471,8 +573,9 @@ ContinuationAdapter::Region ContinuationAdapter::PrivateRegion(
   const auto bytes = component.descriptor.state_bytes;
   switch (component.part) {
     case ContinuationPart::kLogits:
-      add(state.checkpoint ? const_cast<float*>(state.checkpoint->logits.data())
-                           : session.logits_.data(),
+      add(state.Checkpoint()
+              ? const_cast<float*>(state.Checkpoint()->logits.data())
+              : session.logits_.data(),
           bytes, true);
       break;
     case ContinuationPart::kMetadata:
@@ -493,10 +596,11 @@ ContinuationAdapter::Region ContinuationAdapter::PrivateRegion(
       break;
     case ContinuationPart::kKeptHidden:
       add(native.mtp_.target_hidden,
-          loading ? bytes
-                  : std::size_t{state.checkpoint ? state.checkpoint->hidden_rows
-                                                 : session.KeptHiddenRows()} *
-                        model_->config().HcDim() * sizeof(float));
+          loading
+              ? bytes
+              : std::size_t{state.Checkpoint() ? state.Checkpoint()->hidden_rows
+                                               : session.KeptHiddenRows()} *
+                    model_->config().HcDim() * sizeof(float));
       break;
     case ContinuationPart::kRawKeys:
     case ContinuationPart::kDraftRawKeys: {
@@ -560,8 +664,8 @@ cache::Completion ContinuationAdapter::CapturePrivatePiece(
     metadata.blocks = native.blocks_;
     metadata.draft_blocks = native.mtp_.blocks;
     metadata.hidden_base =
-        state.checkpoint ? native.position_ - state.checkpoint->hidden_rows
-                         : session.hidden_base_;
+        state.Checkpoint() ? native.position_ - state.Checkpoint()->hidden_rows
+                           : session.hidden_base_;
     metadata.residual_valid = native.mtp_.residual_valid;
     metadata.ngram = native.ngram_;
     metadata.policy = session.draft_length_.State();
@@ -844,7 +948,7 @@ bool ContinuationAdapter::Invalidate(cache::Slot& slot) noexcept {
   State* resetting = nullptr;
   try {
     auto& state = As(slot);
-    if (state.pending || state.checkpoint)
+    if (state.pending || state.Checkpoint())
       return false;
     resetting = &state;
     state.BeforeRelease();

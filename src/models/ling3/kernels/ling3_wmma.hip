@@ -1,4 +1,4 @@
-// ling3_wmma.hip — LS3 phase 3: W8A8 int8-WMMA GEMM for the ROCmFP4 prefill.
+// ling3_wmma.hip — W8A8 int8-WMMA GEMM for the ROCmFP4 prefill.
 // See ling3_wmma.hpp for the design and the contracts.
 //
 // Structure follows superroc's WKQuantA8BlockedWmmaGEMMKernel
@@ -11,8 +11,8 @@
 //     16-element scales are exactly the kernel's per-half-scale machinery;
 //     for the FAST type the second half reuses e[0].
 //   * weights decoded FP4 -> int8 in registers by the fork's Codebook10 perm
-//     (rocmfp4_get_low_int_from_codebook_16, rocmfp4_hip_codebook.cuh; LS1
-//     verified the perm's selector order exhaustively on this box); nothing
+//     (rocmfp4_get_low_int_from_codebook_16, rocmfp4_hip_codebook.cuh; the
+//     perm's selector order was verified exhaustively on this box); nothing
 //     is repacked at load — the GGUF stays packed for the decode path.
 //   * activations pre-quantised to the 576-byte tiled Q8_1 layout by
 //     ling3_wmma_quant (superroc's QuantizeActivationToQ8_1Kernel, no sidecar:
@@ -145,8 +145,8 @@ __global__ __launch_bounds__(256) void k_q8_quant(
 // NOTE (measured, see the unit gate): this file compiles with -ffast-math,
 // and on gfx11 that lowers `max_abs / 127.0f` to a reciprocal multiply --
 // the same compiled form as superroc's own QuantizeActivationToQ8_1Kernel and
-// LS1's shipped ling3_gemv_q8 quantizer (same flags), 1 ulp from the exact
-// division. The quantise arithmetic is otherwise LS1's recipe verbatim
+// The shipped ling3_gemv_q8 quantizer (same flags), 1 ulp from the exact
+// division. The quantise arithmetic is otherwise the same recipe verbatim
 // (max|x| per 32, d = max/127, q = roundf(x/d)). Deterministic: same binary,
 // same bytes.
 
@@ -181,7 +181,7 @@ __global__ __launch_bounds__(WM * WN * WaveSize, 1) void k_wmma_grp(
     // ---- which (group, token-tile) this block is ----
     int expert, off, cnt, z, act_tile0;
     if (grp_zp != nullptr) {
-        // LG1 Change 1: swap so the inner-loop grid dim carries the row tile.
+        // swap so the inner-loop grid dim carries the row tile.
         // binary search the 16-token-tile prefix for this block's group;
         // grp_zp[g] <= blockIdx.y < grp_zp[g+1]
         int lo = 0;
@@ -202,7 +202,7 @@ __global__ __launch_bounds__(WM * WN * WaveSize, 1) void k_wmma_grp(
         cnt = grp_cnt[g];
         act_tile0 = grp_zp[g] + z * kTokTiles;
     } else {
-        // LG1 Change 1: dense (LING3_WMMA_GEMM_DENSE) launch transposed; z uses blockIdx.y.
+        // dense (LING3_WMMA_GEMM_DENSE) launch transposed; z uses blockIdx.y.
         z = (int) blockIdx.y;
         expert = 0;
         off = 0;
@@ -225,7 +225,7 @@ __global__ __launch_bounds__(WM * WN * WaveSize, 1) void k_wmma_grp(
     const int wave_row = wave_id / WN;
     const int wave_tok = wave_id % WN;
 
-    // LG1 Change 1: row tiles are now the inner-loop grid dim.
+    // row tiles are now the inner-loop grid dim.
     const size_t r_block = (size_t) blockIdx.x * (size_t) BM;
 
     float acc[kWaveRowTiles][kWaveTokTiles][kAcc];
@@ -517,22 +517,22 @@ extern "C" int ling3_wmma_quant(const float * x, const int * x_rows, const int *
     return ls3w_chk("quant");
 }
 
-// LS3 PHASE8 (RV2 Change 2): raise BK for the grouped MoE expert GEMM,
+// Raise BK for the grouped MoE expert GEMM,
 // behind LING3_MOE_V2 (0 = int27 BK=2, the default; 1 = BK=8; 4 = BK=4).
 // Fewer K-stage turnarounds (fetch + commit + two __syncthreads per stage:
 // 40 -> 20 stages at K=2560 with BK=4, -> 10 with BK=8) and kPartialFetch
 // goes false (BM*BK is a multiple of 256), so no thread runs the dead-lane
 // fp4_sub16 decode. The inner kb loop stays ascending over the same kb
-// sequence. Stacks on LG1 Change 1 (the transposed grid). MEASURED on
-// MAX-1 (REPORT8): BK=8 REGRESSES (+52 ms/chunk vs BK=2 -- VGPR 108 -> 208
+// sequence. Stacks on the transposed grid. Measured on a
+// Strix Halo machine: BK=8 REGRESSES (+52 ms/chunk vs BK=2 -- VGPR 108 -> 208
 // and LDS 6,656 -> 25,088 B cost more occupancy than the barriers save);
 // BK=4 wins (-27..-32 ms/chunk vs BK=2, -26..-28 % on the moe section vs
 // int27). NOT bit-identical to BK=2: -ffast-math reassociates the float
 // accumulator chain differently across the wider unrolled loop; the unit
 // gate (wmma_test --dump) shows all cases PASS at err/rms ~1e-6 vs the
-// exact fork-semantics oracle, and the wave-2 numerics gates decide.
+// exact fork-semantics oracle, and the numerics gates decide.
 static int MoeV2(void) {
-    // 0 = BK=2 (int27), 1 = BK=8, 4 = BK=4 (RV2's named fallback).
+    // 0 = BK=2 (int27), 1 = BK=8, 4 = BK=4.
     static const int v = [] {
         const char * e = std::getenv("LING3_MOE_V2");
         if (e == nullptr || e[0] == 0 || e[0] == 48) return 0;
@@ -561,7 +561,7 @@ extern "C" int ling3_wmma_gemm_grp(int qtype, const void * W, size_t expert_stri
     if (rb == 0) {
         return LING3_ERR_TYPE;
     }
-    // LG1 Change 1: transpose grid so consecutive blocks share one expert y-slice.
+    // transpose grid so consecutive blocks share one expert y-slice.
     // BM = 64: grid.x covers n rows; grid.y is exactly the per-group tiles.
     const int row_tiles = (n + 63) / 64;
     const dim3 grid((unsigned) row_tiles, (unsigned) total_tiles);
@@ -602,7 +602,7 @@ extern "C" int ling3_wmma_gemm_dense(int qtype, const void * W, const void * q8_
     }
     const int tok_tiles = (m + 63) / 64;   // BN = 64
     const int row_tiles = (n + 127) / 128; // BM = 128
-    // LG1 Change 1: transpose dim3 so the inner-loop grid dim carries the row tile.
+    // transpose dim3 so the inner-loop grid dim carries the row tile.
     const dim3 grid((unsigned) row_tiles, (unsigned) tok_tiles);
     ls3w::k_wmma_grp<128, 64, 2, 4, 1, 64><<<grid, 256>>>(
         qtype == LING3_Q4_0_ROCMFP4_FAST ? 1 : 0, (const uint8_t *) W, rb,

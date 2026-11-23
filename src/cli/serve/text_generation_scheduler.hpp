@@ -80,7 +80,16 @@ public:
     std::size_t cache_prefix_tokens{0};
     bool stop_at_eos{true};
     std::vector<std::string> stop_sequences;
+    /// Set when the output starts inside a reasoning span: the markers that
+    /// end it. Stop sequences are then matched in the answer only (see
+    /// StopSequenceFilter).
+    std::vector<std::string> stop_reasoning_ends;
     bool return_progress{false};
+    /// A warm-up, not a client request: it is left out of the request metrics
+    /// and its state is dropped when it finishes. Nothing would restore a
+    /// warm-up's checkpoint, and keeping it would make the first prompt after
+    /// it move that checkpoint aside before it can start.
+    bool warmup{false};
   };
 
   class Request {
@@ -106,6 +115,11 @@ public:
                 const ProgressCallback& on_progress = {},
                 const StartCallback& on_start = {});
     void Cancel() noexcept;
+    /// Delivers one TokenMeta per published piece carrying logprobs, just
+    /// before that piece, when the transport consumes per-token logprobs.
+    /// Must be set before Wait; unset delivers no metas.
+    void SetTokenMetaCallback(
+        TextGenerationBackend::TokenMetaCallback callback);
 
   private:
     friend class TextGenerationScheduler;

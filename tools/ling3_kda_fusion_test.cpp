@@ -1,4 +1,4 @@
-// LKF: bit-identity of the decode fusion (K1 + K2 + Q2-KDA) against the unfused
+// Bit-identity of the decode fusion (K1 + K2 + Q2-KDA) against the unfused
 // sequence. Every compared buffer is memcmp'd. 0 differing bytes is the gate.
 //
 // The Q8 oracle below is k_q8_1_quant from ling3_gemv_q8.hip, copied so this

@@ -117,7 +117,7 @@ __launch_bounds__(256) __global__ void BatchedDeltaNetPrepAlphaBetaKernel(
 namespace {
 
 // __shfl_xor lowers to ds_bpermute_b32, which takes the LDS path. For xor masks
-// inside a 16-lane DPP row the same exchange is an ALU-path DPP modifier
+// inside a DPP row of 16 lanes the same exchange is an ALU-path DPP modifier
 // (ROW_XMASK, gfx10 and later).
 template<int kMask>
 __device__ __forceinline__ float XorAddDpp(float x) {
@@ -314,6 +314,18 @@ __launch_bounds__(256) __global__ void BatchedDeltaNetRowSplitKernel(
   }
 }
 
+// The conv history a pass cut at `rows` would leave, for a checkpoint inside the
+// pass. Launched before the pass writes its own history over `conv_in`.
+__launch_bounds__(256) __global__ void SsmConvHistoryKernel(
+    const float* __restrict__ qkv_in, const float* __restrict__ conv_in,
+    float* __restrict__ conv_state, std::size_t rows, std::size_t qkv_size) {
+  const std::size_t i =
+      (static_cast<std::size_t>(blockIdx.x) * blockDim.x) + threadIdx.x;
+  if (i < qkv_size) {
+    detail::StoreSSMConvHistory(qkv_in, conv_in, conv_state, i, rows, qkv_size);
+  }
+}
+
 // Rows of the state covered by one 256-thread block for a given register tile.
 template<int kKeysPerLane, int kRowsPerLane>
 constexpr unsigned int RowSplitRowsPerBlock() {
@@ -383,7 +395,8 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
     float* alpha_beta, std::uint32_t layer_idx, std::size_t batch_size,
     std::size_t qkv_size, std::uint32_t num_key_heads, std::uint32_t num_heads,
     std::uint32_t key_dim, std::uint32_t val_dim, hipStream_t stream,
-    QwenRecurrentStateStorage state_storage, void* fp16_out) {
+    QwenRecurrentStateStorage state_storage, void* fp16_out,
+    SsmPassCheckpoint checkpoint) {
   if (!IsDeltaNetRowSplitSupported(key_dim, val_dim)) {
     throw std::invalid_argument(
         "row-split Qwen recurrent state requires 128x128 matrices");
@@ -407,6 +420,14 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
       conv_out, kq_scales, qkv_size, num_key_heads);
   SUPERROC_CHECK_LAUNCH("BatchedDeltaNetPrepKqKernel");
 
+  if (checkpoint.rows != 0) {
+    SsmConvHistoryKernel<<<static_cast<unsigned int>((qkv_size + 255) / 256),
+                           256, 0, stream>>>(
+        qkv_in, conv_layer_in, checkpoint.conv + conv_layer_offset,
+        checkpoint.rows, qkv_size);
+    SUPERROC_CHECK_LAUNCH("SsmConvHistoryKernel");
+  }
+
   const std::size_t ab_count = batch_size * num_heads;
   const std::size_t prep_count = std::max(ab_count, qkv_size);
   BatchedDeltaNetPrepAlphaBetaKernel<<<
@@ -426,13 +447,39 @@ void LaunchBatchedSSMConvRecurrenceRowSplit(
                           bool kDiverge>() {
     const dim3 grid(val_dim / RowSplitRowsPerBlock<32, kRowsPerLane>(),
                     num_heads);
+    const int first_rows =
+        checkpoint.rows != 0 ? static_cast<int>(checkpoint.rows) : batch_i;
     BatchedDeltaNetRowSplitKernel<StateT, 32, kRowsPerLane, kPrefetch, kDiverge>
         <<<grid, 256, 0, stream>>>(
             conv_out, kq_scales, alpha_beta,
             static_cast<StateT*>(state.recurrent_out), out_buf, layer_idx,
-            batch_i, qkv_i, inner_i, kh_i, h_i,
+            first_rows, qkv_i, inner_i, kh_i, h_i,
             static_cast<const StateT*>(state.recurrent_in));
     SUPERROC_CHECK_LAUNCH("BatchedDeltaNetRowSplitKernel<StateT, 32, kRowsPerLane, kPrefetch, kDiverge>");
+    if (checkpoint.rows != 0) {
+      // Every per-row buffer advances by its own stride, so the rest of the
+      // pass is the same kernel on the same state from the checkpoint row on.
+      const std::size_t layer_elements = static_cast<std::size_t>(num_heads) *
+                                         kRowSplitDim * kRowSplitDim;
+      const std::size_t rows = checkpoint.rows;
+      const std::size_t layer_offset = layer_idx * layer_elements;
+      if (hipMemcpyAsync(
+              static_cast<StateT*>(checkpoint.recurrent) + layer_offset,
+              static_cast<StateT*>(state.recurrent_out) + layer_offset,
+              layer_elements * sizeof(StateT), hipMemcpyDeviceToDevice,
+              stream) != hipSuccess) {
+        throw std::runtime_error("recurrent state checkpoint copy failed");
+      }
+      BatchedDeltaNetRowSplitKernel<StateT, 32, kRowsPerLane, kPrefetch, false>
+          <<<grid, 256, 0, stream>>>(
+              conv_out + (rows * qkv_size),
+              kq_scales + (rows * num_key_heads * 3),
+              alpha_beta + (rows * num_heads * 2),
+              static_cast<StateT*>(state.recurrent_out),
+              out_buf + (rows * inner_size), layer_idx,
+              batch_i - first_rows, qkv_i, inner_i, kh_i, h_i, nullptr);
+      SUPERROC_CHECK_LAUNCH("BatchedDeltaNetRowSplitKernel tail");
+    }
   };
   const auto launch_diverge =
       [&]<typename StateT, int kRowsPerLane, bool kPrefetch>() {

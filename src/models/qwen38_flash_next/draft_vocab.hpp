@@ -28,6 +28,38 @@ inline constexpr std::uint32_t kMtpDraftVocab = 98304;
 /// tokens above kMtpDraftVocab in first-use order.
 inline constexpr std::uint32_t kMtpDraftExtraRows = 1024;
 
+/// Where the head every draft read projects through comes from. A sidecar
+/// that carries its own `output.weight` lets the draft score that copy; the
+/// trunk's head then only serves reply text, verify and prefill logits.
+enum class DraftHeadSource : std::uint8_t { kTrunk, kMtp };
+
+struct DraftHeadPlan {
+  DraftHeadSource source{DraftHeadSource::kTrunk};
+  std::uint64_t rows{0};  ///< Vocabulary rows.
+  std::uint64_t cols{0};  ///< Hidden size.
+  /// False when a sidecar head was bound but does not match the trunk head.
+  bool valid{true};
+};
+
+/// Chooses the head drafts read. `mtp_present` says the sidecar bound its own
+/// `output.weight`. That head must have the trunk head's exact shape (rows =
+/// vocabulary, cols = hidden): drafts only ever propose, and a mismatched
+/// copy would score rows the target does not know. Without one, drafts read
+/// the trunk head exactly as before.
+[[nodiscard]] constexpr DraftHeadPlan PlanDraftHead(
+    bool mtp_present, std::uint64_t trunk_rows, std::uint64_t trunk_cols,
+    std::uint64_t mtp_rows, std::uint64_t mtp_cols) noexcept {
+  DraftHeadPlan plan;
+  plan.rows = trunk_rows;
+  plan.cols = trunk_cols;
+  if (!mtp_present) {
+    return plan;
+  }
+  plan.source = DraftHeadSource::kMtp;
+  plan.valid = mtp_rows == trunk_rows && mtp_cols == trunk_cols;
+  return plan;
+}
+
 /// Committed tokens the head choice looks back over.
 inline constexpr std::size_t kMtpDraftVocabWindow = 32;
 
@@ -36,7 +68,9 @@ inline constexpr std::size_t kMtpDraftVocabWindow = 32;
 /// session count, with penalties and constraints: verification corrects
 /// their proposals against the full target distribution, and the choice
 /// reads only the request's own tokens, so seeded output does not depend on
-/// overlapping requests. Greedy penalties/constraints keep the full head.
+/// overlapping requests. Greedy constraints keep the full head; greedy
+/// penalties may use the small head (the caller passes plain_greedy for them:
+/// the target applies the same penalties to every draft it verifies).
 /// Other greedy requests use the small head on one session or in a jointly
 /// planned batch; unplanned multi-session greedy requests keep the full head.
 [[nodiscard]] constexpr bool MtpDraftSubsetAllowed(

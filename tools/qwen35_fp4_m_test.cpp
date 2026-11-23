@@ -1,5 +1,5 @@
-// lqw:spec6. Batched ROCmFP4 GEMV vs m separate m=1 calls, bitwise, on real
-// 27B layers. gpu-run only.
+// Batched ROCmFP4 GEMV vs m separate m=1 calls, bitwise, on real
+// 27B layers. Needs an otherwise idle GPU.
 #include <hip/hip_runtime.h>
 
 #include <bit>
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
       {"blk.0.attn_qkv.weight", 0},
       {"blk.17.ffn_gate.weight", 0},
       {"output.weight", 0},
-      // lqw:spec7. Odd-n tail pair of the two-row verify kernel.
+      // Odd-n tail pair of the two-row verify kernel.
       {"blk.0.ffn_down.weight", 1},
   };
 
@@ -186,7 +186,7 @@ int main(int argc, char** argv) {
         all = false;
         break;
       }
-      // lqw:spec7. Row count, not tensor bytes: the odd-n case reads fewer.
+      // Row count, not tensor bytes: the odd-n case reads fewer.
       const double gb =
           static_cast<double>(row) * static_cast<double>(n) / 1.0e9;
       std::printf(

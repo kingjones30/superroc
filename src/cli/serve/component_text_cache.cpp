@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <numeric>
@@ -17,6 +19,7 @@
 #include "src/cli/serve/logging.hpp"
 #include "src/cli/serve/text_model_runner.hpp"
 #include "src/core/crypto/sha256.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::server {
 namespace {
@@ -616,16 +619,24 @@ struct ComponentTextCache::Lease::Impl {
   std::unique_ptr<TextRunnerState> state;
   cache::InputIdentity input;
   std::vector<cache::Token> prompt;
-  std::size_t cached{}, restored{}, stable{}, capture_boundary{};
+  std::size_t cached{}, restored{}, stable{};
   double restore_time{};
-  bool disk_hit{}, active{true}, preserve_source{};
+  bool disk_hit{}, active{true};
   cache::CheckpointId source{};
   std::array<cache::CheckpointId, cache::RetentionPolicy::kRecordLimit>
       edit_boundaries{};
   std::size_t edit_boundary_count{};
   cache::ResourceCharge edit_metadata;
-  SnapshotPurpose purpose{SnapshotPurpose::kContinuation};
-  std::vector<cache::Token> capture_tokens;
+  /// Dual in-pass capture slots: slot 0 is today's
+  /// stable boundary reservation, slot 1 the earlier P reservation; a slot
+  /// without a reservation stays at its defaults and never captures.
+  struct CapturePlan {
+    std::size_t boundary{};
+    SnapshotPurpose purpose{SnapshotPurpose::kContinuation};
+    bool preserve{false};
+    std::vector<cache::Token> tokens;
+  };
+  std::array<CapturePlan, 2> captures;
   ContinuationLookup lookup_result;
   ComponentCacheMetrics metrics;
   Impl(ComponentTextCache::Impl* cache, ComponentTextCache::Impl::Entry* entry,
@@ -644,16 +655,16 @@ struct ComponentTextCache::Lease::Impl {
                                    sizeof(edit_boundaries))
                           .Convert()) {}
   cache::RetentionRequest Retain(
-      std::span<const cache::Token> tokens,
+      const CapturePlan& plan, std::span<const cache::Token> tokens,
       std::optional<std::size_t> new_payload_bytes = {}) const {
     return {
         .tokens = tokens,
         .compatibility = cache->identity,
         .input = At(input, std::min(tokens.size(), prompt.size())),
-        .purpose = Purpose(purpose),
+        .purpose = Purpose(plan.purpose),
         .stable = std::min(stable, tokens.size()),
         .source = source,
-        .preserve_source = preserve_source,
+        .preserve_source = plan.preserve,
         .new_payload_bytes =
             new_payload_bytes
                 ? *new_payload_bytes
@@ -664,11 +675,13 @@ struct ComponentTextCache::Lease::Impl {
         .reused = cached != 0,
         .reused_tokens = cached};
   }
-  std::unique_ptr<TextRunnerSnapshot> CaptureDurable();
+  std::unique_ptr<TextRunnerSnapshot> CaptureDurable(const CapturePlan& plan);
 };
 
 std::unique_ptr<TextRunnerSnapshot>
-ComponentTextCache::Lease::Impl::CaptureDurable() {
+ComponentTextCache::Lease::Impl::CaptureDurable(const CapturePlan& plan) {
+  const auto& capture_tokens = plan.tokens;
+  const auto purpose = plan.purpose;
   if (!cache->queue || !cache->resources->copy_observed_rows ||
       purpose == SnapshotPurpose::kHistory)
     throw cache::ResourceExhausted();
@@ -1268,16 +1281,38 @@ bool ComponentTextCache::Lease::HasSnapshotFor(
 bool ComponentTextCache::Lease::TryReserveSnapshot(
     std::size_t bytes, std::size_t boundary, bool preserve,
     SnapshotPurpose purpose, std::span<const ContinuationToken> tokens) {
+  auto& plan = impl_->captures[0];
   if (!boundary || boundary > impl_->prompt.size() ||
       (bytes > impl_->cache->ledger.Limits().ram_bytes &&
        (!impl_->cache->queue || purpose == SnapshotPurpose::kHistory)))
     return false;
-  impl_->capture_boundary = boundary;
+  plan.boundary = boundary;
   if (tokens.empty())
     tokens = std::span<const cache::Token>(impl_->prompt).first(boundary);
-  impl_->capture_tokens.assign(tokens.begin(), tokens.end());
-  impl_->preserve_source = preserve;
-  impl_->purpose = purpose;
+  plan.tokens.assign(tokens.begin(), tokens.end());
+  plan.preserve = preserve;
+  plan.purpose = purpose;
+  return true;
+}
+
+bool ComponentTextCache::Lease::TryReserveSecondSnapshot(
+    std::size_t bytes, std::size_t boundary, SnapshotPurpose purpose,
+    std::span<const ContinuationToken> tokens) {
+  // Dual in-pass capture: the earlier P reservation
+  // is independent; refusing it leaves the stable slot-0 reservation alone.
+  auto& plan = impl_->captures[1];
+  if (!boundary || boundary > impl_->prompt.size() ||
+      (bytes > impl_->cache->ledger.Limits().ram_bytes &&
+       (!impl_->cache->queue || purpose == SnapshotPurpose::kHistory)) ||
+      (impl_->captures[0].boundary != 0 &&
+       boundary >= impl_->captures[0].boundary))
+    return false;
+  if (tokens.empty())
+    tokens = std::span<const cache::Token>(impl_->prompt).first(boundary);
+  plan.boundary = boundary;
+  plan.tokens.assign(tokens.begin(), tokens.end());
+  plan.preserve = false;
+  plan.purpose = purpose;
   return true;
 }
 void ComponentTextCache::Lease::SkipSnapshot(SnapshotEventReason reason,
@@ -1308,14 +1343,24 @@ std::size_t ComponentTextCache::Lease::CaptureBytes(
           impl_->slot.Execution(), boundary));
 }
 std::unique_ptr<TextRunnerSnapshot> ComponentTextCache::Lease::Capture() {
+  return CaptureAt(0);
+}
+
+std::unique_ptr<TextRunnerSnapshot> ComponentTextCache::Lease::CaptureSecond() {
+  return CaptureAt(1);
+}
+
+std::unique_ptr<TextRunnerSnapshot> ComponentTextCache::Lease::CaptureAt(
+    int slot) {
   auto& request = *impl_;
   auto& cache = *request.cache;
+  const auto& plan = request.captures[slot];
   auto positions =
       cache.resources->adapter->Positions(request.slot.Execution());
   const auto bytes = request.entry->history->NewPayloadBytes(positions);
-  const auto retain = request.Retain(request.capture_tokens, bytes);
+  const auto retain = request.Retain(plan, plan.tokens, bytes);
   if (bytes > cache.ledger.Limits().ram_bytes)
-    return request.CaptureDurable();
+    return request.CaptureDurable(plan);
   const auto reclaim = [&] {
     const std::lock_guard lock(cache.mutex);
     return cache.retention.Reclaim(retain);
@@ -1332,11 +1377,10 @@ std::unique_ptr<TextRunnerSnapshot> ComponentTextCache::Lease::Capture() {
       std::vector<std::span<const std::byte>> borrowed;
       std::size_t next_buffer = 0;
       checkpoint = request.entry->history->Capture(
-          {request.capture_tokens,
-           request.input.Through(request.capture_tokens.size()), positions,
-           request.purpose == SnapshotPurpose::kHistory
+          {plan.tokens, request.input.Through(plan.tokens.size()), positions,
+           plan.purpose == SnapshotPurpose::kHistory
                ? cache::CheckpointPurpose::kGrid
-           : request.purpose == SnapshotPurpose::kBranchPoint
+           : plan.purpose == SnapshotPurpose::kBranchPoint
                ? cache::CheckpointPurpose::kLearned
                : cache::CheckpointPurpose::kPrompt,
            0},
@@ -1446,15 +1490,15 @@ std::unique_ptr<TextRunnerSnapshot> ComponentTextCache::Lease::Capture() {
       break;
     } catch (const cache::ResourceExhausted&) {
       if (!reclaim()) {
-        if (cache.queue && request.purpose != SnapshotPurpose::kHistory)
-          if (auto durable = request.CaptureDurable())
+        if (cache.queue && plan.purpose != SnapshotPurpose::kHistory)
+          if (auto durable = request.CaptureDurable(plan))
             return durable;
         // RAM refused the copy; the disk fallback, when there is one, already
         // holds a checkpoint within its step of this boundary.
         Logger::Info("cache",
                      "schema=component-cache-v1 event=capture_refused "
                      "reason=byte_capacity tokens=" +
-                         std::to_string(request.capture_tokens.size()));
+                         std::to_string(plan.tokens.size()));
         throw;
       }
     } catch (const std::exception& error) {
@@ -1479,6 +1523,18 @@ std::unique_ptr<TextRunnerSnapshot> ComponentTextCache::Lease::Capture() {
 std::size_t ComponentTextCache::Lease::PublishSnapshot(
     std::vector<ContinuationToken> tokens,
     std::shared_ptr<const ContinuationSnapshot> snapshot, bool preserve) {
+  return PublishAt(0, std::move(tokens), std::move(snapshot), preserve);
+}
+
+std::size_t ComponentTextCache::Lease::PublishSecondSnapshot(
+    std::vector<ContinuationToken> tokens,
+    std::shared_ptr<const ContinuationSnapshot> snapshot, bool preserve) {
+  return PublishAt(1, std::move(tokens), std::move(snapshot), preserve);
+}
+
+std::size_t ComponentTextCache::Lease::PublishAt(
+    int slot, std::vector<ContinuationToken> tokens,
+    std::shared_ptr<const ContinuationSnapshot> snapshot, bool preserve) {
   const auto* component =
       dynamic_cast<const ComponentSnapshot*>(snapshot.get());
   if (component && component->durable) {
@@ -1492,7 +1548,7 @@ std::size_t ComponentTextCache::Lease::PublishSnapshot(
   }
   if (!component || !component->checkpoint)
     return 0;
-  auto retain = impl_->Retain(tokens);
+  auto retain = impl_->Retain(impl_->captures[slot], tokens);
   retain.preserve_source = preserve;
   bool admitted;
   {
@@ -1564,8 +1620,49 @@ void ComponentTextCache::Lease::Invalidate() noexcept {
   impl_->active = false;
 }
 
+// SUPERROC_TAIL_CAPTURE=<tokens>: also checkpoint this many tokens before the
+// prompt end (rounded down to 64), when at least 512 new tokens precede it.
+// Read once; 0 or unset keeps the default capture plan.
+std::size_t SuperrocTailCaptureTokens() {
+  static const std::size_t value = [] {
+    const char* v = ::superroc::core::GetEnv("SUPERROC_TAIL_CAPTURE");
+    if (v == nullptr || *v == '\0')
+      return std::size_t{0};
+    char* end = nullptr;
+    const unsigned long long n = std::strtoull(v, &end, 10);
+    if (end == v || *end != '\0' || n > 8192)
+      return std::size_t{0};
+    if (n != 0)
+      std::fprintf(
+          stderr,
+          "SUPERROC_TAIL_CAPTURE=%llu: late prompt checkpoint enabled\n", n);
+    return static_cast<std::size_t>(n);
+  }();
+  return value;
+}
+
+// Definitions: P = (prompt_end - T) / 64 * 64 is a valid
+// earlier in-pass boundary only when it is at least 512 tokens past the reused
+// frontier, strictly below the stable target S with a >=64 gap, and S is
+// strictly inside the prompt. Rounding down keeps P on a 64-row boundary.
+std::optional<std::size_t> SuperrocTailPoint(std::size_t prompt_tokens,
+                                             std::size_t tail_tokens,
+                                             std::size_t reused,
+                                             std::size_t stable) {
+  // T <= 192 keeps prompt_end - P at
+  // T + 63 <= 255 rows, inside the widened kPairTailRows = 256 tail.
+  if (tail_tokens == 0 || tail_tokens > 192 || prompt_tokens <= tail_tokens)
+    return std::nullopt;
+  const std::size_t point = (prompt_tokens - tail_tokens) / 64 * 64;
+  if (point % 64 != 0 || point <= reused || point - reused < 512)
+    return std::nullopt;
+  if (stable <= point || stable - point < 64 || stable >= prompt_tokens)
+    return std::nullopt;
+  return point;
+}
+
 std::vector<std::size_t> ComponentTextCache::Lease::PlannedCaptures(
-    std::size_t stable) const {
+    std::size_t stable, std::size_t canonical_min_pass) const {
   const auto& adapter = *impl_->cache->resources->adapter;
   std::size_t private_bytes = 0;
   for (const auto& d : adapter.Components())
@@ -1580,8 +1677,9 @@ std::vector<std::size_t> ComponentTextCache::Lease::PlannedCaptures(
        true,
        false,
        {},
-       cache::GridLimit(impl_->cache->ledger.Limits().ram_bytes,
-                        private_bytes)});
+       cache::GridLimit(impl_->cache->ledger.Limits().ram_bytes, private_bytes),
+       SuperrocTailCaptureTokens(),
+       canonical_min_pass});
   std::vector<std::size_t> boundaries;
   for (const auto& capture : plan)
     if (!capture.required &&
@@ -1591,8 +1689,8 @@ std::vector<std::size_t> ComponentTextCache::Lease::PlannedCaptures(
   return boundaries;
 }
 std::vector<std::size_t> ServingCacheLease::PlannedCaptures(
-    std::size_t stable) const {
-  return component_->PlannedCaptures(stable);
+    std::size_t stable, std::size_t canonical_min_pass) const {
+  return component_->PlannedCaptures(stable, canonical_min_pass);
 }
 
 ComponentCacheMetrics ComponentTextCache::Lease::Metrics() const {
@@ -1670,5 +1768,19 @@ std::size_t ServingCacheLease::CaptureBytes(std::size_t boundary) const {
 }
 std::unique_ptr<TextRunnerSnapshot> ServingCacheLease::Capture() {
   return component_->Capture();
+}
+bool ServingCacheLease::TryReserveSecondSnapshot(
+    std::size_t bytes, std::size_t boundary, SnapshotPurpose purpose,
+    std::span<const ContinuationToken> tokens) {
+  return component_->TryReserveSecondSnapshot(bytes, boundary, purpose, tokens);
+}
+std::unique_ptr<TextRunnerSnapshot> ServingCacheLease::CaptureSecond() {
+  return component_->CaptureSecond();
+}
+std::size_t ServingCacheLease::PublishSecondSnapshot(
+    std::vector<ContinuationToken> tokens,
+    std::shared_ptr<const ContinuationSnapshot> snapshot, bool preserve) {
+  return component_->PublishSecondSnapshot(std::move(tokens),
+                                           std::move(snapshot), preserve);
 }
 }  // namespace superroc::server

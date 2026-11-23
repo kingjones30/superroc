@@ -34,7 +34,7 @@ bool IsMatrixType(core::GgmlType type) noexcept {
          type == core::GgmlType::kQ4_K || type == core::GgmlType::kQ6_K ||
          type == core::GgmlType::kQ4_0 || type == core::GgmlType::kQ8_0 ||
          type == core::GgmlType::kIQ4_NL || type == core::GgmlType::kIQ4_XS ||
-         // MTPFP4: an MTP block quantized with King's ROCmFP4 formats
+         // An MTP block quantized with superroc's ROCmFP4 formats
          // (OxCoder's own block is type 101). The GPU draft packs these to BF16
          // on load.
          type == core::GgmlType::kQ4_0_ROCMFP4 ||
@@ -92,8 +92,8 @@ std::optional<QwenMtpWeights> QwenMtpWeights::LoadFromGguf(
   // The MTP (nextn) block is the file's LAST block: blk.64 in the Qwen3.8-27B
   // sidecar (block_count 65), blk.72 in Agnes-3.0-Flash's, blk.32 in
   // OxCoder-9B. It was hard-coded to 64, which refused every other dense qwen35
-  // drafter with "Missing Qwen MTP tensor: blk.64.nextn.enorm.weight" (lane
-  // PMX, 2026-10-14). 64 stays the fallback when the file has no block_count.
+  // drafter with "Missing Qwen MTP tensor: blk.64.nextn.enorm.weight". 64 stays
+  // the fallback when the file has no block_count.
   const std::string arch_name(
       reader.GetMetadataString("general.architecture").value_or("qwen35"));
   const auto block_count = reader.GetMetadataUint32(arch_name + ".block_count");
@@ -136,12 +136,27 @@ std::optional<QwenMtpWeights> QwenMtpWeights::LoadFromGguf(
   layer.ffn_up = TensorRef(reader, blk + "ffn_up.weight");
   layer.ffn_down = TensorRef(reader, blk + "ffn_down.weight");
 
+  // A sidecar that carries its own token_embd or output is packed as
+  // vocab x hidden by the GPU draft even when the caller can borrow the
+  // target's, so a tensor that is present must have that size.
+  const auto sized = [&](const models::QwenTensorRef& tensor,
+                         std::string_view name) {
+    if (tensor.empty() || tensor.num_elements == vocab * hidden) {
+      return true;
+    }
+    if (error_msg != nullptr) {
+      *error_msg = "Qwen MTP tensor shape mismatch for " + std::string(name);
+    }
+    return false;
+  };
   const bool valid =
-      (!require_tied_embeddings ||
-       (Validate(weights.token_embedding, vocab * hidden, "token_embd.weight",
-                 true, error_msg) &&
-        Validate(weights.output, vocab * hidden, "output.weight", true,
-                 error_msg))) &&
+      (require_tied_embeddings
+           ? (Validate(weights.token_embedding, vocab * hidden,
+                       "token_embd.weight", true, error_msg) &&
+              Validate(weights.output, vocab * hidden, "output.weight", true,
+                       error_msg))
+           : (sized(weights.token_embedding, "token_embd.weight") &&
+              sized(weights.output, "output.weight"))) &&
       Validate(weights.embedding_norm, hidden, blk + "nextn.enorm.weight",
                false, error_msg) &&
       Validate(weights.hidden_norm, hidden, blk + "nextn.hnorm.weight", false,

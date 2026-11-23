@@ -22,7 +22,7 @@
 #include "src/models/minimax_h3/dit.hpp"
 #include "src/models/minimax_h3/dit_ops.hip.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace {
 
@@ -1101,8 +1101,8 @@ int CheckReal() {
     std::cout << "SKIP: integrated gfx1151 is unavailable\n";
     return 77;
   }
-  const char* root_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* golden_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_DIT_GOLDEN");
+  const char* root_value = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
+  const char* golden_value = ::superroc::core::GetEnv("SUPERROC_H3_DIT_GOLDEN");
   if (root_value == nullptr || *root_value == '\0' || golden_value == nullptr ||
       *golden_value == '\0') {
     std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or SUPERROC_H3_DIT_GOLDEN unset\n";
@@ -1233,7 +1233,7 @@ int ProfileBlock(std::size_t rows, bool row_parallel) {
     std::cout << "SKIP: integrated gfx1151 is unavailable\n";
     return 77;
   }
-  const char* root_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* root_value = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
   if (root_value == nullptr || *root_value == '\0') {
     std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT unset\n";
     return 77;
@@ -1302,7 +1302,7 @@ int ProfileBlock(std::size_t rows, bool row_parallel) {
   const auto bytes = std::span<const unsigned char>(
       reinterpret_cast<const unsigned char*>(output.data()),
       output.size() * sizeof(output.front()));
-  if (const char* output_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_DIT_PROFILE_OUTPUT");
+  if (const char* output_path = ::superroc::core::GetEnv("SUPERROC_H3_DIT_PROFILE_OUTPUT");
       output_path != nullptr && *output_path != '\0') {
     std::ofstream output_file(output_path, std::ios::binary);
     output_file.write(

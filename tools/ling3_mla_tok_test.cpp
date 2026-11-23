@@ -1,8 +1,8 @@
-// ling3_mla_tok_test.cpp — LS3 phase 2: unit gate for mla_attn_tok (the
+// ling3_mla_tok_test.cpp — unit gate for mla_attn_tok (the
 // warp-pair tiled rewrite) against mla_attn (the serial kernel that passed
 // every phase-1 and p2d gate), on synthetic tensors at the model's real
 // shapes (32 heads, dk 192, dv 128, latent 512, kv_a 576). No model load:
-// seconds on the GPU. Run inside gpu-run with no arguments.
+// seconds on the GPU. Run on an otherwise idle GPU with no arguments.
 //
 // Both kernels run over the SAME roped / latent-normed / cache-appended
 // inputs, so any diff beyond fp-reorder noise is a bug in the tiled kernel.

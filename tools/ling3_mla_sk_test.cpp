@@ -1,9 +1,9 @@
-// ling3_mla_sk_test.cpp — LS3 PHASE4 unit gate for the split-K decode
+// ling3_mla_sk_test.cpp — unit gate for the split-K decode
 // attention (mla_attn_splitk) against the serial mla_attn, which every
 // earlier gate already tied to the CPU reference. Synthetic tensors at the
 // model's real shapes; n_pos sweeps across slice boundaries (1024, 1025,
 // 3000, 8192). Also proves run-to-run determinism (two runs byte-identical)
-// and that the serial path is untouched. Run inside gpu-run.
+// and that the serial path is untouched. Run on an otherwise idle GPU.
 #include <hip/hip_runtime.h>
 
 #include <cmath>
@@ -46,7 +46,7 @@ void *DevAlloc(size_t bytes) {
 int main(int argc, char** argv) {
     std::setbuf(stdout, nullptr);
     const bool only_p7 = argc > 1 && std::strcmp(argv[1], "p7") == 0;
-    // SPEC6: `bits` byte-compares the transposed and original weight layouts;
+    // `bits` byte-compares the transposed and original weight layouts;
     // `bench` / `bench0` / `bench1` time mla_attn_splitk (both / original /
     // transposed) at decode depths.
     const bool mode_bits = argc > 1 && std::strcmp(argv[1], "bits") == 0;
@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
     const int max_pos = 30000;   // PHASE5: n_pos sweep extended to 30K
     const int slice = ling3::kMlaSplitkSlice;   // 1024
     const size_t ks_max = ling3::mla_splitk_slices(max_pos, slice);
-    // PHASE7: partials sized for the FIXED slot cap; short slices make
+    // Partials sized for the FIXED slot cap; short slices make
     // k_slices up to kMlaSplitkMaxSlices, far beyond ceil(max_pos/1024).
     const size_t slots = (size_t) ling3::kMlaSplitkMaxSlices;
 
@@ -88,7 +88,7 @@ int main(int argc, char** argv) {
     HIPCK(hipMemcpy(d_kv, kv.data(), kv.size() * 4, hipMemcpyHostToDevice));
     HIPCK(hipMemcpy(d_gate, gate.data(), gate.size() * 4, hipMemcpyHostToDevice));
 
-    // SPEC6: row-transposed copies -- wk_bT[h][i][r] == wk_b[h][r][i] -- the
+    // Row-transposed copies -- wk_bT[h][i][r] == wk_b[h][r][i] -- the
     // decode prep / de-absorb read these so a wave's threads hit consecutive
     // addresses. Built here exactly as the loader builds them.
     std::vector<float> wkT(wk.size()), wvT(wv.size());
@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
         return g_fail == 0 ? 0 : 1;
     }
     if (argc > 1 && std::strcmp(argv[1], "mrow") == 0) {
-        // PHASE7 item 4: mla_attn_splitk_m vs m single-row calls, <= 1e-6
+        // mla_attn_splitk_m vs m single-row calls, <= 1e-6
         // rel, run-twice determinism. Every buffer is sized for m_max rows
         // and the extents are printed before the first launch (the
         // 2026-10-03T04:43Z GCVM permission fault was an out-of-range
@@ -387,7 +387,7 @@ int main(int argc, char** argv) {
                     mabs[0], mabs[1], mabs[2], between, det[0] ? "y" : "N",
                     det[1] ? "y" : "N", det[2] ? "y" : "N");
         if (!ok) ++g_fail;
-        // PHASE7 (in-loop): short slice lengths of the rf kernel at this
+        // Short slice lengths of the rf kernel at this
         // n_pos, on the same buffers as the passing calls above (o1 = the
         // case\x27s serial reference).
         if (n_pos == 6500) {

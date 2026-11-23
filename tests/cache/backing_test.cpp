@@ -825,7 +825,9 @@ void AcquireAllocationFailure() {
   first.reset();
   assert(pool.TryAcquire());
 }
-void CheckBasePages(std::span<std::byte> data) {
+// The backing's page layout follows whether it holds a long-term pin: pinned,
+// ordinary pages that are opted out of huge pages; unpinned, huge pages.
+void CheckBackingPages(std::span<std::byte> data, bool pinned) {
   constexpr std::size_t huge = 2ULL << 20;
   assert(data.size() >= 2 * huge);
   std::vector<unsigned char> resident(data.size() / 4096);
@@ -841,6 +843,16 @@ void CheckBasePages(std::span<std::byte> data) {
   const auto collapse =
       madvise(reinterpret_cast<void*>(aligned), huge, MADV_COLLAPSE);
   const auto error = errno;
+  if (!pinned) {
+    // Without a long-term pin the backing is built from huge pages, which
+    // memory compaction leaves in place: a whole unit accepts the collapse.
+    if (collapse != 0)
+      std::fprintf(stderr, "cache backing collapse returned %d, errno %d\n",
+                   collapse, error);
+    assert(collapse == 0);
+    return;
+  }
+  // Pinned, it is ordinary pages that refuse the collapse.
   if (collapse != -1 || error != EINVAL)
     std::fprintf(stderr, "cache backing collapse returned %d, errno %d\n",
                  collapse, error);
@@ -854,7 +866,7 @@ void BasePageBacking() {
     auto block = pool.TryAcquire(Category::kPrivateState);
     assert(block);
     auto memory = block->Bytes();
-    CheckBasePages(memory);
+    CheckBackingPages(memory, pool.LongTermPinnedBytes() != 0);
     void* device = nullptr;
     assert(hipHostGetDevicePointer(&device, memory.data(), 0) == hipSuccess);
     assert(hipMemset(device, 0x5a, memory.size()) == hipSuccess);
@@ -930,7 +942,7 @@ void LongTermPagePins() {
     // CAP_IPC_LOCK can bypass the soft limit; either result remains usable.
     auto block = pool.TryAcquire(Category::kPrivateState);
     assert(block);
-    CheckBasePages(block->Bytes());
+    CheckBackingPages(block->Bytes(), pool.LongTermPinnedBytes() != 0);
     assert(hipHostGetDevicePointer(&device, block->Bytes().data(), 0) ==
            hipSuccess);
     assert(hipMemset(device, 0x38, bytes) == hipSuccess);
@@ -1000,7 +1012,7 @@ void LargeBacking() {
     auto backing = pool.TryAcquire(Category::kPrivateState, bytes);
     assert(backing && backing->Bytes().size() == bytes);
     auto memory = backing->Bytes();
-    CheckBasePages(memory);
+    CheckBackingPages(memory, pool.LongTermPinnedBytes() != 0);
     void* device = nullptr;
     assert(hipMalloc(&device, bytes) == hipSuccess);
     assert(hipMemset(device, 0x5b, bytes) == hipSuccess);

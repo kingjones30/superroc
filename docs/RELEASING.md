@@ -1,6 +1,6 @@
 # Releasing
 
-SuperROC uses squash merges and Conventional Commit pull request titles to keep
+Super Roc uses squash merges and Conventional Commit pull request titles to keep
 `main` machine-readable. A pull request may contain arbitrary work-in-progress
 commits; its title becomes the single commit retained on `main`.
 
@@ -49,7 +49,7 @@ documented command-line interface, HTTP API and public Nix flake outputs. A
 change is breaking when an existing documented use must be changed to keep
 working.
 
-Before `1.0.0`, SuperROC uses this policy:
+Before `1.0.0`, Super Roc uses this policy:
 
 - `fix` and `perf` changes increment the patch version.
 - `feat` changes increment the minor version.
@@ -58,8 +58,8 @@ Before `1.0.0`, SuperROC uses this policy:
 
 After `1.0.0`, breaking changes increment the major version. A release uses the
 largest required increment among all changes since the previous release.
-Ordinary pull requests do not bump the version; release automation owns version
-and changelog updates.
+Ordinary pull requests do not bump the version; the release commit updates the
+version and the changelog.
 
 Git tags use `vX.Y.Z`. A released version is immutable. Development builds keep
 their exact Git revision so diagnostics can identify the source independently
@@ -67,31 +67,26 @@ of the release version.
 
 ## Release flow
 
-`version.txt` is the canonical release version. A daily GitHub workflow reads
-the Conventional Commit history after the latest release and opens or updates
-one release pull request. That pull request updates `version.txt`,
-`CHANGELOG.md` and the release manifest. It receives the same CI as any other
-change, plus the complete Devlab functional suite on Strix Halo (other pull
-requests run its smaller PR tier). The workflow waits up to 160 minutes for the
-pull request title, the repository checks and `devlab/functional`. If any of
-them fails, errors or is still pending, it leaves the pull request open without
-publishing a release and comments on it to notify the maintainers.
+`version.txt` is the canonical release version. A release is cut by a
+maintainer:
 
-After the checks pass, the workflow squash-merges the release pull request and
-immediately creates the immutable tag and GitHub Release. A manually dispatched
-run follows the same process and is available for recovery. Do not edit the
-version, changelog or release manifest in an ordinary feature or fix pull
-request.
+1. Run the GPU suite on Strix Halo (`cmake --preset gpu-test`, then
+   `ctest -L gpu`) and the CPU suite (`cmake --preset cpu-test`, then
+   `ctest -L cpu`) on the commit to release, plus `tools/ci/check-format.py`,
+   `tools/ci/check-docs.py` and `tools/ci/check-dependencies.py`.
+2. Update `version.txt` and move the `[Unreleased]` section of `CHANGELOG.md`
+   under the new version and date in the same commit.
+3. Tag that commit `vX.Y.Z` and publish a GitHub Release with the changelog
+   section as its notes.
 
-Nix keeps release identity and source identity separate. The default package is
-a development build and reports `Super ROC development (<revision>)`.
-Official artifacts build the `release` package from a `vX.Y.Z` tag and report
-`Super ROC X.Y.Z (<revision>)`. Both package outputs retain the exact flake
-revision; only the explicitly selected release output reads the semantic version
-from `version.txt`.
+GitHub Actions runs the CPU contracts and repository checks on every push and
+pull request and once a day on `main`. GPU tests need Strix Halo hardware and
+run on the maintainers' machines before a release.
 
-After Release Please creates a GitHub Release, the same workflow sends its exact
-`vX.Y.Z` tag to the Toolboxes repository. Toolboxes builds the release package
-from that tag and publishes OCI images tagged `X.Y.Z`, `X.Y` and `latest`.
-Rolling Toolboxes images remain separate: they follow SuperROC `main` and use `edge`
-and `sha-<revision>` tags.
+Release identity and source identity stay separate. A development build reports
+`Super Roc development (<revision>)`; a build configured with
+`-DSUPERROC_RELEASE_VERSION=X.Y.Z` from a `vX.Y.Z` tag reports
+`Super Roc X.Y.Z (<revision>)`.
+
+A container image for the Lemonade backend is published per release as
+`ghcr.io/kingjones30/superroc-lemonade:X.Y.Z`.

@@ -4,8 +4,6 @@ Dense text/image model on gfx1151. Production target GGUFs are **UD-Q4_K_XL**
 (16.35 GiB weights) and **UD-Q8_K_XL** (29.30 GiB); request state and an optional
 draft/projector need additional memory. BF16 targets are reference-only.
 
-[Benchmarks](BENCHMARKS.md) · [Quality](QUALITY.md) · [Experiments](EXPERIMENTS.md)
-
 ## Load and run
 
 ```sh
@@ -31,8 +29,7 @@ have matching precision. Use the Q4_K_M DFlash2 draft with either target.
 | DFlash2 | `--speculative dflash2 --dflash-model PATH` | Adaptive default; `--draft-tokens` caps proposals, `--draft-policy fixed` is a comparison mode. |
 
 Greedy speculation must match AR. Sampled modes preserve the target policy,
-but AR and speculation need not share the same-seed sequence. See the
-[quality contract](QUALITY.md). Thinking/template controls and HTTP
+but AR and speculation need not share the same-seed sequence. Thinking/template controls and HTTP
 sampling defaults are described in [the server guide](../../SERVER.md#reasoning-controls).
 
 ## Images
@@ -70,4 +67,4 @@ Official dynamic resizing allows 64–16384 merged image tokens.
 Image numbering is off by default; `--add-vision-id` or
 `chat_template_kwargs: {"add_vision_id": true}` adds `Picture N:` prefixes.
 Cache identity includes processed pixels, placement, preprocessing version and
-projector contents. See [vision checks and limits](QUALITY.md#vision).
+projector contents.

@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::hip {
 
@@ -26,10 +26,10 @@ enum class QwenRecurrentStateStorage : std::uint8_t {
                                                      : sizeof(float);
 }
 
-// LFM2 (SPEC3): token-major fp16 KV (the production plane) unless
+// LFM2: token-major fp16 KV (the production plane) unless
 // SUPERROC_LFM2_KV=fp32 selects the fp32 head-major reference cache.
 [[nodiscard]] inline QwenKvCacheStorage Lfm2KvCacheStorage() noexcept {
-  const char* env = ::superroc::core::GetEnvCompat("SUPERROC_LFM2_KV");
+  const char* env = ::superroc::core::GetEnv("SUPERROC_LFM2_KV");
   return env != nullptr && std::strcmp(env, "fp32") == 0
              ? QwenKvCacheStorage::kFp32
              : QwenKvCacheStorage::kFp16;
@@ -47,7 +47,7 @@ struct QwenExecutionPolicy {
   QwenKvCacheStorage kv_cache_storage{QwenKvCacheStorage::kFp16};
   QwenRecurrentStateStorage recurrent_state_storage{
       QwenRecurrentStateStorage::kFp32};
-  // LGA: extra token-major fp16 KV plane beside the fp32 cache (Glimmer).
+  // Extra token-major fp16 KV plane beside the fp32 cache (Glimmer).
   // Deliberately absent from Fingerprint(); Ling's default stays false.
   bool glimmer_fp16_kv{false};
 

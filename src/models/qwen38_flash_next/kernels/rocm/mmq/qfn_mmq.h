@@ -63,7 +63,12 @@ int qfn_mmq_q8_0_dense_vec_preq(const void* W_q8_0, const void* W_gate,
                                 const void* X_q8, float* out_f32, int M, int N,
                                 int K, hipStream_t stream);
 
-// LFX: dense Q6_K GEMV over pre-quantized Q8_1 activations (the ROC LM
+// The 320x10240 HC down projection over FP4 FAST weights (17-byte blocks),
+// 1-8 rows of pre-quantized Q8_1 activations. Only N output rows are written.
+int qfn_mmq_fp4_hc_down_vec_preq(const void* W_fp4_fast, const void* X_q8,
+                                 float* out_f32, int N, hipStream_t stream);
+
+// Dense Q6_K GEMV over pre-quantized Q8_1 activations (the ROC LM
 // head on narrow batches). K is a multiple of 256, 1 <= N <= 32.
 // Only N output rows are written.
 int qfn_mmq_q6_K_dense_vec_preq(const void* W_q6_K, const void* X_q8,

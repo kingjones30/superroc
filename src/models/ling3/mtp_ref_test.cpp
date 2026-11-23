@@ -1,17 +1,17 @@
-// LS4 phase 1: drive the Ling-3.0 MTP draft head on the CPU oracle and
+// Drive the Ling-3.0 MTP draft head on the CPU oracle and
 // MEASURE draft acceptance.
 //
 // The point is not that the oracle agrees with itself -- it is the only
 // implementation running. The check that matters is that the MTP head, wired
 // exactly as the fork wires it (speculative.cpp:1759-1930), reproduces the
 // fork's black-box behaviour: a draft token that the main model then produces
-// most of the time (Jay MEASURED 82-84 % on code, 73-75 % on prose today). A
+// most of the time (measured 82-84 % on code, 73-75 % on prose). A
 // wrong norm, a transposed concat, or a residual added after the attention
 // norm instead of before it all show up here as a collapsed acceptance rate.
 //
 // Run it nice and single-threaded, and never while a bench is on the GPU:
 //   nice -n 19 env OMP_NUM_THREADS=8 ./build-ls4/mtp_ref_test <model.gguf> \
-//       --prompt-file ~/ls/long-prompt.txt --tokens 40
+//       --prompt-file <file> --tokens 40
 //
 // Everything printed is measured on the run you are looking at; there are no
 // canned expectations anywhere in this file.

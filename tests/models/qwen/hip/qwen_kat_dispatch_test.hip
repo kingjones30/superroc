@@ -1,11 +1,11 @@
-// KDG SPEC1 step 4: KAT device-dispatch bit-identity gate.
+// KAT device-dispatch bit-identity gate.
 // On the real embedded MTP block (blk.40: the Q8_0 experts the production
 // step executes), runs the OLD host-loop dispatch (static reference below,
-// the algorithm LaunchKatMtpMoeFfn used before SPEC1 step 2) and the NEW
+// the algorithm LaunchKatMtpMoeFfn used before) and the NEW
 // device-dispatch path (LaunchKatMtpMoeFfn) on 8 random hidden vectors and
 // asserts bit-identical outputs (memcmp).
 //
-// NOTE on the fixture: SPEC1 names blk.0, but blk.0's experts are FP4
+// NOTE on the fixture: the spec names blk.0, but blk.0's experts are FP4
 // (type 101), which the Q8 GEMV this step runs refuses ("KAT-MTP: expert
 // matrix must be Q8_0 or Q8_K"). blk.40 is the one real KAT layer slice
 // this step executes, so the test binds it.
@@ -27,6 +27,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -38,6 +39,12 @@ void Expect(bool ok, const std::string& msg) {
     std::cerr << "FAIL " << msg << "\n";
     std::exit(1);
   }
+}
+
+// exists() throws or says yes for a fixture the user cannot read; open it instead.
+bool FixtureReadable(const std::string& p) {
+  std::ifstream f(p, std::ios::binary);
+  return f.good();
 }
 
 #define HIP_REQUIRE(expr)                                                      \
@@ -122,7 +129,7 @@ void RefScaleAdd(const float* x, const float* scale, float* out, int n) {
   HIP_REQUIRE(hipGetLastError());
 }
 
-// OLD host-loop path (pre-SPEC1-step-2 algorithm): route on device, read
+// OLD host-loop path: route on device, read
 // ids/weights back, loop slots on the host. Uses the same public GEMM
 // (LaunchBatchedQuantGEMMFp32, batch 1) the old GemvQ8 called.
 void ReferenceMoe(const superroc::models::QwenLayerWeights& layer,
@@ -201,7 +208,7 @@ int main() {
           ? path_env
           : "/path/to/models/swap/kat-coder/"
             "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf";
-  if (!std::filesystem::exists(path)) {
+  if (!FixtureReadable(path)) {
     std::cout << "SKIP: KAT GGUF not found: " << path << " (set KAT_GGUF)\n";
     return 77;
   }

@@ -270,7 +270,6 @@ void LaunchFusedSSMInputProjections(
     float* qkv_out, float* gate_out, float* alpha_out, float* beta_out,
     std::size_t hidden_size, std::size_t qkv_size, std::size_t inner_size,
     std::size_t time_step_rank, hipStream_t stream) {
-  // lqw:ssm
   if (IsRocmFp4(qkv_type) && IsRocmFp4(gate_type) && IsRocmFp4(alpha_type) &&
       IsRocmFp4(beta_type) && RocmFp4ShapeOk(qkv_size, hidden_size) &&
       RocmFp4ShapeOk(inner_size, hidden_size) &&

@@ -31,8 +31,8 @@ constexpr std::size_t kPad = LING3_TAIL_PAD;
 
 // ---------------------------------------------------------------------------
 // Device helpers. Mirrors rocm_backend.cpp's, deliberately: hipMemset is
-// absent from LK's Mac type-check stub, and a big device memset is a launch
-// we do not need.
+// absent from the host-only type-check stub, and a big device memset is a
+// launch we do not need.
 // ---------------------------------------------------------------------------
 void* DevAlloc(std::size_t bytes) {
   if (bytes == 0) {
@@ -183,7 +183,7 @@ struct State {
   bool windowed{false};
   int base_pos{0};
   bool base_set{false};
-  /// SPEC7 item 2: the ATTENTION window, in cache rows. > 0 => the head reads
+  /// The ATTENTION window, in cache rows. > 0 => the head reads
   /// only the last `attn_win` rows of its cache (LING3_MTP_WINDOW=W); 0 => the
   /// whole cache. Independent of `windowed`, which is about how rows are
   /// ADDRESSED, not how many are read.
@@ -213,7 +213,7 @@ struct State {
         hipFree(p);
     }
     allocs.clear();
-    // SPEC7 item 2: the score scratch is grown on demand (the window is fixed
+    // The score scratch is grown on demand (the window is fixed
     // before the first call, so in practice it is one alloc), so it is NOT in
     // `allocs` -- that would double-free a buffer replaced on grow.
     if (attn_scores != nullptr) {
@@ -473,7 +473,7 @@ State* NewState(std::uint32_t max_ctx) {
   }
   st->tok_in = static_cast<int*>(DevAlloc(sizeof(int)));
   // int[2]: [argmax, float-bits of p_top1]. One 8-byte readback gets both
-  // (SPEC6 item 3) -- the draft loop pays one sync per token already.
+  // -- the draft loop pays one sync per token already.
   st->tok_out = static_cast<int*>(DevAlloc(2 * sizeof(int)));
   st->pos_d = static_cast<int*>(DevAlloc(sizeof(int)));
   if (st->tok_in == nullptr || st->tok_out == nullptr || st->pos_d == nullptr) {
@@ -495,7 +495,7 @@ void ResetState(State* st) noexcept {
   st->base_set = false;
 }
 
-/// LS4 phase 2: window the cache to positions the head actually writes.
+/// Window the cache to positions the head actually writes.
 void SetWindowed(State* st, bool windowed) noexcept {
   if (st == nullptr)
     return;
@@ -504,7 +504,7 @@ void SetWindowed(State* st, bool windowed) noexcept {
   st->base_set = false;
 }
 
-/// SPEC7 item 2: LING3_MTP_WINDOW=W. rows <= 0 attends over the whole cache.
+/// LING3_MTP_WINDOW=W. rows <= 0 attends over the whole cache.
 void SetAttnWindow(State* st, int rows) noexcept {
   if (st == nullptr)
     return;
@@ -537,15 +537,15 @@ bool PrimeNext(State* st, std::int32_t x_next, std::span<const float> h_prev,
                std::uint32_t pos, std::span<float> h_out,
                std::string* error_msg) {
   // top1_p = nullptr: the row-by-row priming fallback and the probe path never
-  // ask for a confidence, so the exponent pass is skipped (SPEC6 item 3).
+  // ask for a confidence, so the exponent pass is skipped.
   return HeadBlock(st, x_next, h_prev, pos, nullptr, h_out, error_msg, nullptr);
 }
 
 // ---------------------------------------------------------------------------
-// LM1: batched priming (DECISIONS 00:30; RV5 change 1 + SPEC5, 2026-10-03).
+// Batched priming.
 //
-// WHY THIS IS NOT THE SMALL-M KERNELS. SPEC5 item 2 said to strip every
-// LS1_MAX_M-capped call into rows of <= 4. That cannot work on this artifact:
+// WHY THIS IS NOT THE SMALL-M KERNELS. Every LS1_MAX_M-capped call
+// was split into rows of <= 4. That cannot work on this artifact:
 // the ENTIRE MTP head (blk.42) is Q8_0 (13 Q8_0 tensors -- eh_proj, attn_q,
 // attn_kv_a_mqa, attn_gate, attn_output, the three exps stacks and the three
 // shexp matrices) while the trunk is ROCmFP4. All four of those kernels reject
@@ -572,10 +572,11 @@ bool PrimeNext(State* st, std::int32_t x_next, std::span<const float> h_prev,
 // weight matrices per row) and with it the router readbacks.
 //
 // KERNELS. The head is Q8_0. The first cut used per-row ling3_gemv (the exact
-// call HeadBlock makes, bit-identical cache rows) and cost 8.5-20 % of prefill;
-// the second called LX's ling3_gemm and cost 5x MORE than that (see the call
-// site). Both re-read every weight row once per PROMPT TOKEN. The projections
-// now go through ling3_gemm_fast, LS3's tiled batched kernel: one block covers
+// call HeadBlock makes, bit-identical cache rows) and cost 8.5-20 % of
+// prefill; the second called the reference ling3_gemm and cost 5x MORE than
+// that (see the call site). Both re-read every weight row once per PROMPT
+// TOKEN. The projections now go through ling3_gemm_fast, the tiled batched
+// kernel: one block covers
 // 64 weight rows x 64 tokens x 64 k, and each weight element is dequantized
 // into LDS once and reused by every token in the tile, so each weight is read
 // from global ONCE PER CHUNK. mla_rope / mla_latent_norm / mla_cache_append
@@ -654,7 +655,7 @@ bool PrimeScratchReady(int m) {
   g_pr.tok_in = i32(M);
   g_pr.pos_d = i32(M);
   // Host-side audit of the carve-out itself: every buffer must end inside the
-  // allocation. LF1's lf_audit is the model -- indices are checked on the host
+  // allocation. lf_audit is the model -- indices are checked on the host
   // BEFORE a launch, not discovered as a GPU page fault after it.
   if (base > end) {
     (void)hipFree(g_pr.pool);
@@ -662,7 +663,7 @@ bool PrimeScratchReady(int m) {
     g_pr.rows = 0;
     return false;
   }
-  // LM1 M1, same reason as the trunk image pool: start the pool clean so
+  // Same reason as the trunk image pool: start the pool clean so
   // nothing uninitialised can reach a live buffer.
   (void)hipMemset(g_pr.pool, 0, bytes);
   g_pr.pool_bytes = bytes;
@@ -689,12 +690,12 @@ bool PrimeBatch(State* st, const std::int32_t* tokens, const float* h_prev,
     if (error_msg != nullptr) {
       *error_msg = std::string("mtp: PrimeBatch ") + what;
     }
-    // SPEC5: any failure leaves the head EXACTLY as un-primed -- no
+    // Any failure leaves the head EXACTLY as un-primed -- no
     // half-filled window. Clearing base_set makes the next DraftNext re-base at
     // its own position and write cache row 0, so the rows this call did write
     // are overwritten before they can ever be attended over. Keeping base_set
     // would leave DraftNext attending from 0 over a cache that was never filled
-    // (RV5: the zero-prompt dilution).
+    //.
     if (st != nullptr) {
       st->base_set = false;
       st->base_pos = 0;
@@ -727,7 +728,7 @@ bool PrimeBatch(State* st, const std::int32_t* tokens, const float* h_prev,
   hipStream_t stream = nullptr;
 
   // The window base this chunk will use, computed but NOT committed. It is
-  // written to `st` only after the cache rows land (RV5 fix 3).
+  // written to `st` only after the cache rows land.
   const int base =
       (st->windowed && !st->base_set) ? static_cast<int>(pos0) : st->base_pos;
   if (st->windowed && static_cast<int>(pos0) < base) {
@@ -799,10 +800,9 @@ bool PrimeBatch(State* st, const std::int32_t* tokens, const float* h_prev,
                         static_cast<std::int64_t>(twoH), stream);
 
   // Steps 3-5: eh_proj, then the attention norm. ONE batched GEMM per
-  // projection over the whole chunk instead of one ling3_gemv per row (SPEC6
-  // item 2).
+  // projection over the whole chunk instead of one ling3_gemv per row.
   //
-  // WHICH kernel matters more than batching. LX's ling3_gemm (ling3_moe.hip
+  // WHICH kernel matters more than batching. ling3_gemm (ling3_moe.hip
   // k_gemm) is one thread per (row, token), each running a serial
   // ling3_dot_row, so it re-reads every weight row once per token AND loses
   // k_gemv_wide's 64-way tree: prefill fell from 408.7 to 78.2 tok/s at 1.6K
@@ -815,12 +815,12 @@ bool PrimeBatch(State* st, const std::int32_t* tokens, const float* h_prev,
   // property item 2 asks for. Q8_0 is not an FP4 type, so it takes the
   // ling3_elem decode into the same LDS tile (ling3_gemm.hip:258).
   //
-  // Bit-identity with row-by-row PrimeNext is NOT required (Jay DECISIONS
-  // 12:38): the head's cache only affects acceptance, and the trunk verify
+  // Bit-identity with row-by-row PrimeNext is NOT required: the head's cache
+  // only affects acceptance, and the trunk verify
   // decides every emitted token, so text ON == OFF holds by construction. The
   // tile accumulates k-ascending, one += per element, in ling3_dot_row's
   // statement order (ling3_gemm.hip:14-16), so the rows are near but not bit
-  // identical to the per-row path -- REPORT6 reports acceptance before/after.
+  // identical to the per-row path -- acceptance was measured before and after.
   //
   // Both entry points launch on the NULL stream (ling3_gemm.hpp:23-24), and
   // every stream in this file is nullptr, so ordering with the ops below is
@@ -896,7 +896,7 @@ bool PrimeBatch(State* st, const std::int32_t* tokens, const float* h_prev,
 
   // Every launch above is queued on the null stream in order and there is
   // nothing left to fail, so committing the window base here is the same as
-  // committing it after the rows land. RV5 fix 3 wants it set only once the
+  // committing it after the rows land. It must be set only once the
   // chunk's MLA rows are written -- that is now.
   if (st->windowed && !st->base_set) {
     st->base_pos = base;
@@ -953,7 +953,7 @@ static bool HeadBlock(State* st, std::int32_t x_next,
     return false;
   }
   const int n_pos_abs = row + 1;
-  // SPEC7 item 2: the attention window. `n_pos_abs` cache rows exist from the
+  // The attention window. `n_pos_abs` cache rows exist from the
   // window base to `pos`; with LING3_MTP_WINDOW=W the head reads only the last
   // W of them. mla_block indexes rows from cache.kv and takes the row count as
   // an argument, so an offset base plus a clamped count is exactly a sliding
@@ -1027,7 +1027,7 @@ static bool HeadBlock(State* st, std::int32_t x_next,
   mw.kv_a_norm = g.kv_a_norm;
 
   ::ling3::MlaCache cache;
-  // SPEC7 item 2: the base slides with the attention window. Rows are laid out
+  // The base slides with the attention window. Rows are laid out
   // [kv_a] apart from st->mla_cache, so a row offset is a pointer offset.
   cache.kv = st->mla_cache + static_cast<std::size_t>(attn_start) *
                                  static_cast<std::size_t>(kv_a);
@@ -1083,7 +1083,7 @@ static bool HeadBlock(State* st, std::int32_t x_next,
   // Raw MLA output lands in st->k (o_dim = 4096 floats), then attn_output
   // projects it into st->attn_out. Do NOT project into a hidden-sized buffer.
   // `st->pos_d` carries the TRUE position (RoPE); `n_pos` is the window row
-  // count (SPEC7 item 2: at most attn_win rows, from attn_start on). mla_block
+  // count. mla_block
   // indexes the cache from cache.kv and takes RoPE from pos[].
   ::ling3::mla_block(ms, msc, mw, cache, in, st->pos_d, n_pos,
                      ::ling3::make_view(st->k, ms.o_dim(), 1), st->attn_scores,
@@ -1132,7 +1132,7 @@ static bool HeadBlock(State* st, std::int32_t x_next,
   if (want_token) {
     ling3_gemv(g.output_type, g.output, st->h_out, st->logits, g.hidden,
                g.vocab);
-    // SPEC6 item 3 (RV14 3.2): argmax and its top-1 softmax probability in one
+    // Argmax and its top-1 softmax probability in one
     // launch, one readback. p = 1 / sum_i exp(x_i - x_max), exact to fp32.
     if (top1_p != nullptr) {
       ::ling3::ops_argmax_prob(st->logits, g.vocab, 1, st->tok_out,
@@ -1395,7 +1395,7 @@ public:
   SpecPolicy policy;
   std::uint32_t max_ctx{0};
 
-  // LM1 SPEC4 item 1: `kda_saved` is now the pool for the per-row trunk-state
+  // `kda_saved` is now the pool for the per-row trunk-state
   // IMAGES the verify fills (rocm::MultiRowKeep), not a single before-shot. A
   // rejected draft installs the image for the row it kept and never replays a
   // Step. One image per row of the block, rows 0..m-2.
@@ -1414,7 +1414,7 @@ public:
 
   hipEvent_t ev_a{nullptr}, ev_b{nullptr};
 
-  // LM1 SPEC3: the cost guard. `plain_ms` is the rolling cost of one plain Step
+  // The cost guard. `plain_ms` is the rolling cost of one plain Step
   // at the current depth, sampled from the k <= 0 branch below; `spec_pt` is
   // what the speculative path costs per EMITTED token. Drafting stops for the
   // rest of the session the first time a speculative step costs more per token
@@ -1430,23 +1430,23 @@ public:
   int spec_n{0};
   bool cost_stop{false};
 
-  // LM1 SPEC4 item 1: the cost table. `acc_*` are the steps where every draft
+  // The cost table. `acc_*` are the steps where every draft
   // was accepted (no state install), `rej_*` the ones that were not.
   // Accumulated process-wide because the ~Session reporter never fires --
   // sessions are pooled, so g_total stays zero no matter how much speculation
-  // ran (LS4 REPORT3 §6.4; still true).
+  // ran.
   double acc_ms{0.0};
   long acc_n{0};
   double rej_ms{0.0};
   long rej_n{0};
   double rej_tok{0.0};
 
-  // SPEC6 item 3: the cost guard's sliding window, a ring of whole STEPS. The
+  // The cost guard's sliding window, a ring of whole STEPS. The
   // old guard accumulated over every speculative step since the session began
   // and could only ever turn drafting OFF, so a request that started unlucky
   // ran all 64 tokens plain. This window is bounded and reversible; when it has
   // stopped drafting it re-opens one speculative sample every RetryInterval()
-  // plain steps (SPEC7 item 3: depth-scaled) so the window can learn the run
+  // plain steps so the window can learn the run
   // improved. The shallow default that interval replaces was 8.
   static constexpr int kCostWin = 8;
   double cost_win_ms[kCostWin]{};
@@ -1467,7 +1467,7 @@ double MsBetween(hipEvent_t a, hipEvent_t b) {
   return static_cast<double>(ms);
 }
 
-/// LM1 SPEC4 item 1: install row `row`'s image of the trunk state. This is the
+/// Install row `row`'s image of the trunk state. This is the
 /// whole of the "rewind" now -- no Step is replayed. The MLA latent cache is
 /// deliberately NOT restored: it is position-indexed, the verify appended rows
 /// [pos0, pos0+m) and the next Step at `pos0+row+1` appends that row before it
@@ -1480,10 +1480,10 @@ bool KeepInstall(rocm::State* trunk, const SpecState* spec, int row) {
     return false;
   }
   const std::size_t r = static_cast<std::size_t>(row);
-  // LM1 00:05: async on the null stream. The image writes were issued on the
+  // Async on the null stream. The image writes were issued on the
   // null stream too, so this orders after them, and it no longer blocks the
   // host on a GPU drain per copy. KeepInstall is followed by an explicit D2H of
-  // the hidden (B1), which is what actually synchronises. LV1 R6: KDA slices
+  // the hidden (B1), which is what actually synchronises. KDA slices
   // only, the same bytes KeepImageLayer wrote. The 7 MLA slices are zeros on
   // both sides of the copy.
   const char* conv_row =
@@ -1496,7 +1496,7 @@ bool KeepInstall(rocm::State* trunk, const SpecState* spec, int row) {
 }
 
 void RecordAcceptance(SpecState* spec, int accepted, int drafted) {
-  // SPEC6 item 3 (RV14 3): report-only tally. The one-strike shrink/grow that
+  // Report-only tally. The one-strike shrink/grow that
   // lived here is DELETED, not repaired -- its window mixed units (win_len grew
   // by `drafted` tokens but the trim subtracted 1) and at n_max 1 the first
   // rejection set draft_len to 0, which made the grow-back branch unreachable,
@@ -1549,8 +1549,8 @@ bool EnvOff(const char* name) {
 
 }  // namespace
 
-// Default LING3_MTP_MAX_POS, from the measured breakeven (REPORT3 has the
-// table), rounded down. The breakeven is content-dependent and the gate is
+// Default LING3_MTP_MAX_POS, from the measured breakeven (table below),
+// rounded down. The breakeven is content-dependent and the gate is
 // "drafting must never cost speed", so this is the WORST case, not the average:
 //   code   wins at 1.6K (+2.1 %) and 3K (+6.2 %), loses at 6.5K (-2.3 %)
 //   prose  loses at 1.6K (-1.5 %) and 3K (-2.6 %) -- one rejected draft is 2.4x
@@ -1558,7 +1558,7 @@ bool EnvOff(const char* name) {
 //          plain step at that depth, and at 96 tokens that alone is -1.5 %
 // So the breakeven for "never costs" is below the 1.6K point: 1024. The bench's
 // 41/58-token prompts sit far under it and keep the full drafting win. Raise
-// the knob if the seat's turns are code and short; LS3's split-K MLA moves it.
+// the knob if the turns are code and short; the split-K MLA moves it.
 // 0 disables the cap.
 constexpr std::uint32_t kDefaultMaxPos = 1024;
 
@@ -1574,7 +1574,7 @@ bool MaxPosAllows(std::uint32_t pos) {
 }
 
 // ---------------------------------------------------------------------------
-// SPEC8: drafting that never locks out.
+// Drafting that never locks out.
 //
 // (a) structural, in depth_rule.hpp. A full-accept block is the best case at
 // this depth. Cold blocks (more than 20% above the cheapest full-accept in the
@@ -1591,7 +1591,7 @@ bool MaxPosAllows(std::uint32_t pos) {
 // ResetSpecState still clears the ring, so the next request starts allowed.
 // A clear loss re-opens inside the request only under 16K. Under 8K the
 // interval stays 8; 8K-16K stays 32. Buckets at 27.7K and 56K do not
-// re-open inside the request (REPORT6's leak).
+// re-open inside the request.
 //
 // LING3_MTP_DEPTH unset selects this rule. LING3_MTP_DEPTH=0 turns it off.
 // ---------------------------------------------------------------------------
@@ -1613,7 +1613,7 @@ const bool g_depth_rule = [] {
   return e == nullptr || e[0] == '\0' || std::string(e) != "0";
 }();
 
-/// SPEC7 interval. Under 8K this is 8. Buckets 4 and 5 do not use it while
+/// interval. Under 8K this is 8. Buckets 4 and 5 do not use it while
 /// the depth rule is on (the 27.7K/56K leak). Shallow buckets do.
 constexpr double kCostStopBand = 1.12;
 int RetryInterval(int depth_bucket) {
@@ -1737,7 +1737,7 @@ SpecState* NewSpecState(std::uint32_t max_ctx, const SpecPolicy& policy_in,
   // run reports three samples, which says nothing.
   SpecPolicy policy = policy_in;
   policy.n_max = EnvInt("LING3_MTP_NMAX", policy.n_max);
-  // SPEC6 item 3: the p_min confidence gate (RV14 3.3). Clamped to [0,1]; 0
+  // The p_min confidence gate. Clamped to [0,1]; 0
   // disables the gate (every candidate is kept, i.e. fixed n_max).
   {
     const char* e = std::getenv("LING3_MTP_PMIN");
@@ -1748,7 +1748,7 @@ SpecState* NewSpecState(std::uint32_t max_ctx, const SpecPolicy& policy_in,
       v = 1.0;
     policy.p_min = v;
   }
-  // LING3_MTP_ADAPTIVE is now a NO-OP (SPEC6 item 3): the shrink/grow branches
+  // LING3_MTP_ADAPTIVE is now a NO-OP: the shrink/grow branches
   // it used to disable are deleted. The knob is read and ignored so existing
   // seat env keeps working.
   (void)EnvOff("LING3_MTP_ADAPTIVE");
@@ -1768,9 +1768,9 @@ SpecState* NewSpecState(std::uint32_t max_ctx, const SpecPolicy& policy_in,
   s->draft_len = policy.n_max;
   s->head = NewState(max_ctx);
   if (s->head != nullptr) {
-    // SPEC7 item 2 redefines LING3_MTP_WINDOW as a ROW COUNT (it used to be a
+    // LING3_MTP_WINDOW is a ROW COUNT (it used to be a
     // boolean for the cache REBASE). > 0 is the sliding attention window the
-    // head reads; 0 / unset is the whole cache, which is the pre-SPEC7
+    // head reads; 0 / unset is the whole cache, which is the default
     // behaviour and what an unset seat env gets. A negative value keeps the old
     // diagnostic: absolute cache positions, no rebase.
     const int win_rows = EnvInt("LING3_MTP_WINDOW", 0);
@@ -1836,7 +1836,7 @@ void ResetSpecState(SpecState* spec) noexcept {
   spec->spec_tok_sum = 0.0;
   spec->spec_n = 0;
   spec->cost_stop = false;
-  // RV18 F2: the sliding window and the re-probe phase are per-sequence too.
+  // The sliding window and the re-probe phase are per-sequence too.
   // Without this a later request inherits the previous one's ring and the guard
   // decides on its first drafting step from stale entries.
   spec->cost_win_n = 0;
@@ -1902,7 +1902,7 @@ void PrintMeasured(const SpecStats& s, const char* tag) {
                  100.0 * static_cast<double>(s.accept_at_len[k]) /
                      static_cast<double>(s.drafted_at_len[k]));
   }
-  // SPEC6 item 3: the p_min gate's k-distribution. k0 steps are the ones the
+  // The p_min gate's k-distribution. k0 steps are the ones the
   // gate shortened to zero drafts (they ran the plain path); gate_skips is
   // the number of discarded candidates, so a step that stopped at k=1 after
   // one confident draft contributes k1_steps 1 and gate_skips 1.
@@ -1914,7 +1914,7 @@ void PrintMeasured(const SpecStats& s, const char* tag) {
 void InstallSpecReporter() {
   std::atexit([] {
     CloseOpenBucket();
-    // LM1 SPEC4 item 1: the cost table. g_total is never fed (see above), so
+    // The cost table. g_total is never fed (see above), so
     // this reads the process-wide tally SpecStep writes. Output:
     //   plain   = one Step, from the k <= 0 branch
     //   acc/rej = one speculative step, by whether the block fully accepted
@@ -1925,7 +1925,7 @@ void InstallSpecReporter() {
                  g_cost_plain_ms, g_cost_plain_n, g_cost_acc_ms, g_cost_acc_n,
                  g_cost_rej_ms, g_cost_rej_n, g_cost_rej_tok);
     PrintMeasured(g_total, "");
-    // SPEC7 item 3: the measured cost model per n_pos bucket, in full.
+    // The measured cost model per n_pos bucket, in full.
     // best_pt is the full-accept block's cost per emitted token (the structural
     // case (a) tests); spec_pt is the mix that actually ran (case (b)).
     for (int b = 0; b < kDepthBuckets; ++b) {
@@ -1948,10 +1948,10 @@ void InstallSpecReporter() {
 
 void ReportSpecSession(const SpecStats& s, int final_draft_len, int req,
                        int prompt_tokens) {
-  // SPEC8: close the bucket before the row, so verdict is what the
+  // Close the bucket before the row, so verdict is what the
   // NEXT request will see and req_* still holds this request.
   CloseOpenBucket();
-  // SPEC6 item 4: LM1_COST and the drafts counters PER LENGTH, one row per
+  // LM1_COST and the drafts counters PER LENGTH, one row per
   // request. `req` counts prompts in arrival order and `prompt_tokens` is the
   // length of the prompt that produced the row, so the six curve points sort
   // themselves. The process-wide LM1_COST / MTP_SPEC_MEASURED at exit is
@@ -1963,7 +1963,7 @@ void ReportSpecSession(const SpecStats& s, int final_draft_len, int req,
                req, prompt_tokens, s.plain_ms_sum, s.no_draft_steps,
                s.acc_ms_sum, s.acc_n_sum, s.rej_ms_sum, s.rej_n_sum,
                s.rej_tok_sum);
-  // SPEC7 item 3: the depth model this request sat in, as it stands AFTER the
+  // The depth model this request sat in, as it stands AFTER the
   // request (the buckets are process-wide, so the row is cumulative -- that is
   // the point: the next prompt at a new depth sees what the earlier ones paid).
   {
@@ -2026,31 +2026,31 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   const std::size_t V = static_cast<std::size_t>(g.vocab);
   const std::size_t H = static_cast<std::size_t>(g.hidden);
 
-  // LM1 SPEC3: past LING3_MTP_MAX_POS this becomes 0, which is the plain-Step
+  // Past LING3_MTP_MAX_POS this becomes 0, which is the plain-Step
   // branch right below -- byte-identical by construction, and the only thing
   // the cap does. Checked on the trunk position BEFORE the step, so `cap` is
   // the position at which drafting stops.
   int k = spec->draft_len;  // 0 => ordinary single-token decode
-  // SPEC7 item 3: the depth bucket this step is priced in. Captured ONCE here,
+  // The depth bucket this step is priced in. Captured ONCE here,
   // before any Step advances the trunk, so the plain baseline and the block
   // that follows it land in the same bucket (it is what MaxPosAllows checked).
   const int depth_bucket = DepthBucket(static_cast<int>(trunk->pos));
   if (k > 0 && !MaxPosAllows(static_cast<std::uint32_t>(trunk->pos))) {
     k = 0;
   }
-  // SPEC7 item 3: the depth rule. Drafting runs only where the measured cost
+  // The depth rule. Drafting runs only where the measured cost
   // model says a block pays at this depth; LING3_MTP_MAX_POS is the blunt
   // override and LING3_MTP_DEPTH=0 turns the model off.
   if (k > 0 && !DepthAllows(static_cast<int>(trunk->pos))) {
     k = 0;
   }
-  // LM1 SPEC3 cost guard: no baseline yet -> take one plain step to get one
+  // Cost guard: no baseline yet -> take one plain step to get one
   // (it is what sets h_prev anyway), and a step that lost per emitted token ->
   // plain Step for the rest of the session.
   if (k > 0 && (spec->cost_stop || spec->plain_n == 0)) {
     k = 0;
   }
-  // SPEC6 item 3: the sliding window the cost guard decides on, and the
+  // The sliding window the cost guard decides on, and the
   // reversible decision itself, in one place so every step that took the
   // DRAFTING path is priced the same way. That includes a k0 step, which paid
   // the draft head's forward and THEN a plain Step for a single emitted token
@@ -2068,12 +2068,12 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   // yet full, means there is nothing to judge.
   double plain_step_ms = 0.0;
   const auto record_cost = [&](double ms, double tok, bool full_accept) {
-    // SPEC7 item 3: the same sample goes into the depth model. `ms` is a whole
+    // The same sample goes into the depth model. `ms` is a whole
     // block (or a k0 probe: draft forward + the plain step it fell back to).
     // `full_accept` selects the acc_* bucket DepthAllows decides on -- the best
     // case this depth can produce.
     if (g_depth_rule) {
-      // SPEC8: every block is recorded. Cold ones fall out of the warm band
+      // Every block is recorded. Cold ones fall out of the warm band
       // once a cheaper full-accept arrives; a constant skip cannot see a
       // whole cold first reply (the "Say OK." then prose case).
       depth::RecordBlock(g_depth[depth_bucket], ms, tok, full_accept);
@@ -2091,10 +2091,10 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
       }
       if (w_tok > 0.0) {
         const double pt = w_ms / w_tok;
-        // SPEC8: inside the band is noise around a paying reply, not a stop.
+        // Inside the band is noise around a paying reply, not a stop.
         spec->cost_stop = g_depth_rule ? (pt > spec->plain_ms * kCostStopBand)
                                        : (pt > spec->plain_ms);
-        // The first drafting request under 8K is the cold seat open. G1's
+        // The first drafting request under 8K is the cold seat open. The
         // heat-pump froze at 1.12x and finished under the off decode
         // (41.49 vs 44.14); warm, the same prompt drafted 67/77 at 46.54.
         // Do not freeze that first short-context request. At 8K and deeper
@@ -2109,7 +2109,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
 
   // The plain single-token path. Reached when drafting is off up front (cost
   // guard, position cap, no baseline yet) AND when the p_min gate shortens a
-  // chain to zero drafts (SPEC6 item 3) -- same code either way, so a
+  // chain to zero drafts -- same code either way, so a
   // gate-skipped step is byte-identical to drafting being off.
   const auto run_plain_step = [&]() -> bool {
     hipEventRecord(spec->ev_a);
@@ -2130,7 +2130,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
       ++g_cost_plain_n;
       if (stats != nullptr)
         stats->plain_ms_sum += step_ms;
-      // SPEC7 item 3: the depth model's plain baseline. Every path that runs a
+      // The depth model's plain baseline. Every path that runs a
       // plain Step lands here -- including a k0 probe's fallback, which is a
       // real plain step at this depth and a valid sample of what drafting is
       // priced against.
@@ -2151,14 +2151,14 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
       ++stats->no_draft_steps;
       stats->verify_ms += step_ms;
     }
-    // SPEC6 item 3: while the guard has drafting stopped, every re-probe
+    // While the guard has drafting stopped, every re-probe
     // interval re-opens it for ONE speculative sample. Without this the
     // window can never observe that the run improved, and "can re-enable"
-    // would be a claim rather than a mechanism. SPEC7 item 3 scales that
-    // interval with DEPTH (RetryInterval): shallow it stays at the 8 steps
-    // SPEC6 measured; at 27.7K/56K each re-probe was re-opening a block that
-    // cannot pay and running until the ring refilled (REPORT6 §5's leak).
-    // Jay 13:21: keep SPEC7's in-request re-probe at shallow depth so a
+    // would be a claim rather than a mechanism. The interval scales
+    // with DEPTH (RetryInterval): shallow it stays at the 8 steps
+    // Measured; at 27.7K/56K each re-probe was re-opening a block that
+    // cannot pay and running until the ring refilled (the leak above).
+    // Keep the in-request re-probe at shallow depth so a
     // reply that opens in prose can still draft the code block. Under 8K
     // the interval is 8; bucket 3 (8K-16K) stays 32. The leak was the
     // re-open at 27.7K and 56K (buckets 4 and 5): those wait for the next
@@ -2193,7 +2193,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   // snapshot AND putting the position back here -- not one token further on.
   const int pos0 = trunk->pos;
 
-  // LM1 SPEC4 item 1: allocate the per-row trunk-state images the verify fills.
+  // Allocate the per-row trunk-state images the verify fills.
   // There is no before-shot any more -- a rejected draft installs the image for
   // the row it kept, so nothing is replayed and nothing is restored twice.
   if (spec->kda_conv_bytes == 0) {
@@ -2216,7 +2216,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
       (void)hipFree(spec->kda_saved);
     spec->kda_saved = DevAlloc(need);
     spec->keep_cap = spec->kda_saved != nullptr ? need : 0;
-    // LM1 M1 (01:22): zero the pool ONCE here. KeepImageLayer images only the
+    // Zero the pool ONCE here. KeepImageLayer images only the
     // KDA layers' slices -- the MLA layers never touch theirs (zeroed at
     // NewState and left alone) -- so without this those slices are
     // uninitialised pool bytes and KeepInstall copies them straight back into
@@ -2256,7 +2256,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
       *error_msg = "mtp: no hidden state to draft from";
     return false;
   }
-  // SPEC6 item 3: the k-distribution counters live in SpecStats (the reporter
+  // The k-distribution counters live in SpecStats (the reporter
   // reads that), but `stats` is nullable and the k0 path returns early, so they
   // are accumulated locally and flushed at both exits.
   int gate_skips = 0;
@@ -2273,7 +2273,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   std::vector<float> h_prev(h_prev_in.begin(), h_prev_in.begin() + H);
   std::vector<float> h_next(H);
   hipEventRecord(spec->ev_a);
-  // SPEC6 item 3 (RV14 3.3): the p_min confidence gate. `k` is the MAX width;
+  // The p_min confidence gate. `k` is the MAX width;
   // `k_this` is how many drafts survive the gate this step (0, 1 or 2). A
   // candidate under p_min is DISCARDED and the chain stops, exactly like the
   // fork (fork/speculative.cpp:1867-1871) -- it never reaches the verify batch.
@@ -2306,7 +2306,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
     // The draft head already advanced its own cache for this position -- the
     // same approximation a rejected draft leaves behind, and harmless because
     // the cache only affects future acceptance while the trunk verify owns
-    // every emitted token (RV14 3 invariant).
+    // every emitted token.
     ++k0;
     flush_k();
     const bool ok = run_plain_step();
@@ -2315,7 +2315,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
     if (ok && plain_step_ms > 0.0) {
       record_cost(draft_ms + plain_step_ms, 1.0, /*full_accept=*/false);
     }
-    // RV18 F3: price the probe. run_plain_step has already booked the Step into
+    // Price the probe. run_plain_step has already booked the Step into
     // plain_ms_sum / no_draft_steps, so only the draft forward goes on the rej
     // tally, at 1.0 emitted token -- adding the whole block would count the
     // plain half twice.
@@ -2388,7 +2388,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   }
 
   double rollback_ms = 0.0;
-  // SPEC6 item 3 / RV18 F1: keyed on k_this, the width actually verified, not
+  // Keyed on k_this, the width actually verified, not
   // on k the max width. `rows` holds 1 + k_this real rows (StepMultiDispatch
   // was told n_this), so the last row is index k_this; row k is unwritten
   // whenever the gate shortened the chain and would install stale trunk state.
@@ -2398,7 +2398,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
     std::copy_n(rows.data() + static_cast<std::size_t>(k_this) * V, V,
                 next_logits->begin());
   } else {
-    // LM1 SPEC4 item 1: NO REPLAY. The verify imaged the trunk state after row
+    // NO REPLAY. The verify imaged the trunk state after row
     // `accepted`, and row `accepted`'s logits are already in `rows` -- the
     // corrected token's distribution never needed recomputing. Install the
     // image, move the position to just past the tokens we are keeping, and
@@ -2416,11 +2416,10 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
     std::copy_n(rows.data() + static_cast<std::size_t>(accepted) * V, V,
                 next_logits->begin());
     if (h_prev_out != nullptr) {
-      // LM1 B1 (01:22): `keep.hidden` lives inside `spec->kda_saved`, a
+      // `keep.hidden` lives inside `spec->kda_saved`, a
       // hipMalloc'd DEVICE buffer. `assign(hk, hk + H)` reads it on the host --
-      // it does not fault on gfx1151 (Jay's 01:31 probe: the APU host-maps
-      // hipMalloc memory) but it is unsynchronised with the image writes and
-      // faults on any non-APU GPU. Explicit ordered D2H, same as int27's
+      // it does not fault on gfx1151 but it is unsynchronised with the image
+      // writes and faults on any non-APU GPU. Explicit ordered D2H, same as
       // ReadHidden after the replay.
       const float* hk = spec->keep.hidden + static_cast<std::size_t>(accepted) *
                                                 spec->keep_hidden_span;
@@ -2435,7 +2434,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   }
   if (stop_at >= 0 && stop_at + 1 < static_cast<int>(out->size())) {
     const int keep = stop_at + 1;
-    // LM1 SPEC4 item 1: same, no replay -- row `keep-1`'s image and its already
+    // Same, no replay -- row `keep-1`'s image and its already
     // computed logits are exactly what a stop-token rewind needs.
     hipEventRecord(spec->ev_a);
     if (!KeepInstall(trunk, spec, keep - 1)) {
@@ -2451,7 +2450,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
     std::copy_n(rows.data() + static_cast<std::size_t>(keep - 1) * V, V,
                 next_logits->begin());
     if (h_prev_out != nullptr) {
-      // LM1 B1: same -- device memory, explicit ordered D2H (see above).
+      // Same -- device memory, explicit ordered D2H (see above).
       const float* hk = spec->keep.hidden + static_cast<std::size_t>(keep - 1) *
                                                 spec->keep_hidden_span;
       h_prev_out->resize(H);
@@ -2467,7 +2466,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   if (next_logits->size() < V)
     next_logits->resize(V);
 
-  // LM1 SPEC3: cost guard. `pt` is what this step cost per token it EMITTED,
+  // Cost guard. `pt` is what this step cost per token it EMITTED,
   // against what a plain step at the same depth has been costing. The first
   // step that loses turns drafting off for the session, so the worst case is
   // one wasted step rather than the two the acceptance policy needs to notice.
@@ -2484,12 +2483,12 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
     spec->spec_ms_sum += draft_ms + verify_ms + rollback_ms;
     spec->spec_tok_sum += emitted;
     ++spec->spec_n;
-    // SPEC6 item 3: this step into the sliding window, then the guard (both in
+    // This step into the sliding window, then the guard (both in
     // record_cost, which the k0 path shares so every drafting-path step is
     // priced the same way).
     record_cost(draft_ms + verify_ms + rollback_ms, emitted,
                 /*full_accept=*/accepted == k_this);
-    // LM1 SPEC4 item 1: the cost table, by whether the block was fully
+    // The cost table, by whether the block was fully
     // accepted.
     if (accepted == k_this) {
       spec->acc_ms += draft_ms + verify_ms + rollback_ms;
@@ -2542,7 +2541,7 @@ bool SpecStep(void* trunk_ptr, SpecState* spec, std::int32_t base,
   RecordAcceptance(spec, accepted, k_this);
   if (stats != nullptr) {
     ++stats->steps;
-    // SPEC6 item 3: the k-distribution the p_min gate produced. k0_steps are
+    // The k-distribution the p_min gate produced. k0_steps are
     // counted where the gate fell through to the plain path.
     if (k_this == 1)
       ++k1;

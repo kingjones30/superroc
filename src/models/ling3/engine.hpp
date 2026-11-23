@@ -23,7 +23,7 @@ namespace vision {
 struct PreparedPrompt;
 }
 
-/// LS3 batched-prefill knobs (read once per process):
+/// Batched-prefill knobs (read once per process):
 ///   LING3_PREFILL_BATCH=0  disables batching (token-at-a-time, the old path)
 ///   LING3_PREFILL_CHUNK=N  tokens per ForwardBatch call, clamped to [1, 512]
 bool PrefillBatchEnabled();
@@ -70,7 +70,7 @@ public:
   /// Runs one token at the current position and leaves its logits behind.
   [[nodiscard]] bool Evaluate(std::int32_t token,
                               std::string* error_msg = nullptr);
-  /// LS4's MTP probe: while `Sync` is replaying a prompt the positions are
+  /// MTP probe: while `Sync` is replaying a prompt the positions are
   /// prompt positions, not decode steps, so the probe must not score a draft
   /// made there. `Evaluate` reads this; only `Sync` sets it.
   [[nodiscard]] bool in_prefill() const noexcept { return in_prefill_; }
@@ -92,13 +92,13 @@ public:
   }
   [[nodiscard]] std::size_t AllocatedBytes() const noexcept;
 
-  /// How many tokens one Prefill call may consume. LS3 2026-10-01: batched
+  /// How many tokens one Prefill call may consume. Batched
   /// prefill runs chunks of up to this many tokens in one pass per layer
   /// (ForwardBatch); the effective chunk is min(this, LING3_PREFILL_CHUNK).
   /// LING3_PREFILL_BATCH=0 caps prefill back to token-at-a-time.
   static constexpr std::uint32_t kPrefillChunk = 512;
 
-  /// LS4 (LING3_MTP=1): one speculative decode step.
+  /// One speculative decode step.
   ///
   /// `base` is the token about to be fed -- the model's own argmax from the
   /// previous step. This drafts up to n_max tokens with the MTP head, verifies
@@ -120,7 +120,7 @@ public:
                                          std::vector<std::int32_t>* consumed,
                                          std::string* error_msg = nullptr);
 
-  /// LS4: the process-wide counters and the per-session draft length, for the
+  /// The process-wide counters and the per-session draft length, for the
   /// runner's end-of-request report.
   [[nodiscard]] const mtp::SpecStats& SpecStats() const noexcept {
     return spec_stats_;
@@ -128,7 +128,7 @@ public:
   [[nodiscard]] int SpecDraftLength() const noexcept;
   [[nodiscard]] mtp::SpecPolicy SpecPolicy() const { return spec_policy_; }
 
-  /// LS3: prefill `tokens` in one batched pass (ForwardBatch on the ROCm
+  /// Prefill `tokens` in one batched pass (ForwardBatch on the ROCm
   /// backend; the CPU reference deliberately loops single-token steps because
   /// it is the oracle). Leaves the logits of the LAST token in logits_.
   [[nodiscard]] bool EvaluateBatch(std::span<const std::int32_t> tokens,
@@ -147,7 +147,7 @@ private:
 
   [[nodiscard]] bool CheckCancel(std::string* error_msg) const;
 
-  /// SPEC6 item 4: report the request that just finished and zero the tally.
+  /// Report the request that just finished and zero the tally.
   /// Called at every new prompt (EvaluateBatch), at Reset, and from the
   /// destructor for the last one -- each guarded by spec_stats_.steps, so a
   /// path that fires twice reports once.
@@ -161,18 +161,18 @@ private:
   std::function<bool()> cancel_;
   bool in_prefill_{false};
   bool vision_guard_{false};
-  /// LS4: this session's speculative state -- the head's latent cache, the
+  /// This session's speculative state -- the head's latent cache, the
   /// KDA snapshot and the adaptive-policy window. Owned by the session and
   /// destroyed with it. Raw rather than a smart pointer because SpecState is
   /// only forward-declared in this header.
   mtp::SpecState* spec_{nullptr};
   mtp::SpecPolicy spec_policy_{};
   mtp::SpecStats spec_stats_{};
-  /// SPEC6 item 4: label for FlushSpecReport's row -- which request this is,
+  /// Label for FlushSpecReport's row -- which request this is,
   /// and how long the prompt that produced the stats was.
   int spec_report_req_{0};
   int spec_report_prompt_tokens_{0};
-  /// LS4: the post-final-norm hidden of the most recent forward, and whether it
+  /// The post-final-norm hidden of the most recent forward, and whether it
   /// is real. Fed to the MTP head as `h_prev`; the batched path writes its own
   /// scratch, so `rocm::ReadHidden` cannot supply it.
   std::vector<float> pending_h_;
@@ -229,15 +229,15 @@ public:
   /// logits. This is the seam the ROCm path and the CPU reference share.
   [[nodiscard]] bool Step(std::int32_t token, void* state,
                           std::span<float> logits, std::string* error_msg);
-  /// LS3: batched prefill seam. On the ROCm backend this is one
+  /// Batched prefill seam. On the ROCm backend this is one
   /// ForwardBatch pass (out_logits sized vocab for the last position, or
   /// n * vocab for every position); the CPU reference loops Step because it
   /// is the oracle. Advances the backend state by n positions.
-  /// LS4: `hidden_out`, when non-empty, receives the post-final-norm hidden of
+  /// `hidden_out`, when non-empty, receives the post-final-norm hidden of
   /// every row of the batch -- [n][hidden]. The batched path normalises into
   /// its own scratch, so this is the only way a caller can see the hidden state
   /// a batched forward produced.
-  /// LS4 phase 3: `hidden_rows_out`, when its size is a whole number of
+  /// `hidden_rows_out`, when its size is a whole number of
   /// [hidden] rows and no more than n, receives the LAST that many rows'
   /// post-`output_norm` hidden. The prefill path already normalised every row;
   /// this is how the MTP head gets primed over the prompt from them.
@@ -246,7 +246,7 @@ public:
                                std::span<float> hidden_out,
                                std::span<float> hidden_rows_out,
                                std::string* error_msg);
-  /// LS3: true when this load should feed Prefill in batches (ROCm with the
+  /// True when this load should feed Prefill in batches (ROCm with the
   /// routed experts resident; the streamed-expert load has no batched path).
   [[nodiscard]] bool PrefersBatchPrefill() const noexcept;
   /// Allocates the backend state for one sequence.
@@ -254,7 +254,7 @@ public:
   void DestroyState(void* state) const noexcept;
   void ResetState(void* state) const;
 
-  /// LS4 (MTP draft head): the opaque backend blob behind `session`, so the
+  /// The opaque backend blob behind `session`, so the
   /// probe in `mtp_gpu.hpp` can pair `mtp::DraftNext` with the trunk's own
   /// step. The blob is owned by the Session and is not to be freed here.
   /// Returns nullptr for a null session or a mismatched model.

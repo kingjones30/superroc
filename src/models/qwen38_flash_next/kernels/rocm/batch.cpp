@@ -122,6 +122,7 @@ void Executor::UseScratch(const Scratch& scratch) const {
   half_src_ = nullptr;
   xn_half_ = false;
   moe_pending_ = false;
+  moe_fuse_pending_ = false;
 }
 
 bool Executor::AllocateBatch(std::string* error) const {
@@ -469,7 +470,9 @@ bool Executor::MtpHeads(std::span<const MtpHeadItem> items,
   // anyway, so all rows go through it once (main's cost) and each small-head
   // row gathers its table rows from its own full logits.
   const auto& prefix_head = model_->draft_output();
-  const auto& full_head = model_->output();
+  // Both are draft reads: the full proposals and the table rows gathered out
+  // of them come from the same head the single-session path uses.
+  const auto& full_head = model_->draft_head();
   const std::size_t vocab = full_head.rows;
   const std::size_t prefix = prefix_head.rows;
   const std::size_t kSmall = prefix + kMtpDraftExtraRows;
@@ -632,11 +635,11 @@ bool Executor::DenseBatch(const DeviceTensor& w, const float* x, float* out,
                           std::uint32_t rows, std::string* error) const {
   if (rows <= kDecodeRows)
     return Dense(w, x, out, rows, error);
-  // LFX1B (RV53 F1): a Q6_K head kept on device (see device_model.cpp) and
+  // A Q6_K head kept on device (see device_model.cpp) and
   // the ROCmFP4 projections (types 100/101) have no GEMM here -- the
   // fallback below hands their bytes to EmbeddingType/SmallGemm, which
   // rejects both. (The Q6_K head is the lfx1a regression; the FP4 ones were
-  // already broken for rows > 8 on main, which is why RV53 check 1 --
+  // already broken for rows > 8 on main, which is why check 1 --
   // "rows = 9..64 completes" -- cannot pass without this too.) Run them in
   // <= 8-row pieces through Dense, the way the Q8_0 branch below chunks:
   // each piece takes the same GEMV the single-session decode path uses, so
@@ -724,6 +727,17 @@ bool Executor::GatedDenseBatch(const DeviceTensor& up, const DeviceTensor& gate,
 
 bool Executor::MoeBatch(const DeviceLayer& l, const float* x, float* out,
                         std::uint32_t rows, std::string* error) const {
+  // CombineBatch, not Combine, consumes this route's block output, so
+  // MoeExperts must not leave its epilogue for a combine here.
+  struct NoMoeFuse {
+    const Executor* self;
+    bool previous;
+    explicit NoMoeFuse(const Executor* e)
+        : self(e), previous(e->moe_fuse_allowed_) {
+      e->moe_fuse_allowed_ = false;
+    }
+    ~NoMoeFuse() { self->moe_fuse_allowed_ = previous; }
+  } no_moe_fuse(this);
   if (rows <= kDecodeRows)
     return Moe(l, x, out, rows, error);
   const auto& c = config();
@@ -731,7 +745,7 @@ bool Executor::MoeBatch(const DeviceLayer& l, const float* x, float* out,
   if (!DenseBatch(l.router, x, base.router, rows, error))
     return false;
   RouterTopK(base.router, c.num_experts + 1, base.ids, base.weights, rows,
-             c.num_experts, c.num_experts_used, stream_);
+             c.num_experts, c.num_experts_used, c.num_experts_file, stream_);
   if (!GatedDenseBatch(l.shexp_up, l.shexp_gate, x, base.shexp_up, rows,
                        error) ||
       !DenseBatch(l.shexp_down, base.shexp_up, base.shexp_out, rows, error))

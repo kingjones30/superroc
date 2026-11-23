@@ -1,9 +1,9 @@
 // kda_layer_test — verify the KDA *layer* (not just the scan) against an
-// independent transcription of the fork's graph. Runs on the Mac; no model.
+// independent transcription of the fork's graph. Runs on any host; no model.
 //
 // The thing under test is the conv-state handling. The fork gives Q, K and V
 // three separate histories inside conv_states_all, each read at offset
-// `(kv_head * n_embd_r_total + qkv * conv_state_size)`. LG keeps one history
+// `(kv_head * n_embd_r_total + qkv * conv_state_size)`. The engine keeps one history
 // and snapshots it once per layer, advancing it once after all three
 // projections. This checks the two are equivalent, end to end, over several
 // tokens -- which is the property that was actually broken.
@@ -99,7 +99,7 @@ Weights MakeWeights(std::size_t H, std::size_t heads, std::size_t hd,
 struct State {
   // fork: three conv histories, one per projection
   std::vector<float> conv[3];
-  // LG: one, snapshotted per layer
+  // One, snapshotted per layer
   std::vector<float> conv_shared;
   std::vector<float> scan;  // [heads][hd][hd]
 };
@@ -132,7 +132,7 @@ void ForkConv(std::vector<float>* hist, const std::vector<float>& proj_in,
 }
 
 // ---------------------------------------------------------------------------
-// LG: three independent histories in one buffer. Projection qkv reads its own
+// Three independent histories in one buffer. Projection qkv reads its own
 // slice and advances only that slice -- which is what the fork's
 // `+ qkv * conv_state_size` offsets mean, and the earlier single-history and
 // snapshot-once variants were both wrong (verified by this test).
@@ -194,7 +194,7 @@ int main() {
     const std::size_t inner = heads * hd;
     const float eps = 1e-6F;
 
-    // Both keep three histories; LG keeps them in one buffer.
+    // Both keep three histories; the engine keeps them in one buffer.
     std::vector<float> fork_conv[3];
     for (int q = 0; q < 3; ++q) fork_conv[q].assign((kc - 1) * inner, 0.0F);
     std::vector<float> lg_conv(3 * (kc - 1) * inner, 0.0F);
@@ -221,7 +221,7 @@ int main() {
       ForkConv(&fork_conv[1], pk, w.cwk, kc, inner, &fk);
       ForkConv(&fork_conv[2], pv, w.cwv, kc, inner, &fv);
 
-      // --- LG: each projection reads and writes its own slice ---
+      // --- Each projection reads and writes its own slice ---
       std::vector<float> lq, lk, lv;
       LgConv(&lg_conv, 0, pq, w.cwq, kc, inner, &lq);
       LgConv(&lg_conv, 1, pk, w.cwk, kc, inner, &lk);

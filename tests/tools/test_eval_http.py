@@ -20,7 +20,7 @@ import unittest
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--superroc", "--" + "g" + "ufo", type=Path, required=True)
+    parser.add_argument("--superroc", type=Path, required=True)
 
     parser.add_argument("--data", type=Path, required=True)
     return parser.parse_args()

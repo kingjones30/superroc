@@ -1,9 +1,22 @@
 #if defined(ENGINE_ENABLE_HIP)
+#include "src/models/qwen/hip/kernels/fp4_decode.hpp"
+#include <cstdlib>
 #include <stdexcept>
 
 #include "src/models/qwen/hip/kernels/prefill_quant_gemm.hpp"
 #include "src/models/qwen/hip/ops/prefill_fp16.hpp"
 #include "src/core/hip_launch_check.hpp"
+
+// These kernels exchange data between waves through LDS only. Global inputs are read-only and
+// output stores follow the final exchange, so a barrier needs no global read cache invalidate,
+// which would also drop the L0 lines of every other group on the compute unit.
+__device__ __forceinline__ __attribute__((convergent)) void LfnLdsBarrier() {
+  asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
+  __builtin_amdgcn_s_barrier();
+  asm volatile("" ::: "memory");
+}
+#define __syncthreads LfnLdsBarrier
+
 namespace superroc::hip {
 namespace {
 __device__ __forceinline__ __half
@@ -32,6 +45,32 @@ __device__ __forceinline__ v16bf LoadSwizzled(const short* p) {
   bits.q[0] = reinterpret_cast<const uint4*>(p)[shift];
   bits.q[1] = reinterpret_cast<const uint4*>(p)[shift ^ 1];
   return bits.f;
+}
+// WMMA reads A only in lanes whose half equals the row's parity (mask 0xAAAA5555), so the other
+// lanes need not load it. Exec is restored before anything else runs.
+__device__ __forceinline__ v16bf LoadSwizzledA(const short* p) {
+#if defined(__gfx1151__)
+  union {
+    v16bf f;
+    uint4 q[2];
+  } bits;
+  const unsigned row = threadIdx.x & 15, shift = (row ^ (row >> 2)) & 1;
+  const std::uint32_t a0 = static_cast<std::uint32_t>(
+      reinterpret_cast<std::uintptr_t>(reinterpret_cast<const uint4*>(p) + shift));
+  const std::uint32_t a1 = static_cast<std::uint32_t>(
+      reinterpret_cast<std::uintptr_t>(reinterpret_cast<const uint4*>(p) + (shift ^ 1)));
+  asm volatile(
+      "s_mov_b32 exec_lo, 0xAAAA5555\n"
+      "ds_load_b128 %0, %2\n"
+      "ds_load_b128 %1, %3\n"
+      "s_mov_b32 exec_lo, -1\n"
+      "s_waitcnt lgkmcnt(0)\n"
+      : "=&v"(bits.q[0]), "=&v"(bits.q[1])
+      : "v"(a0), "v"(a1));
+  return bits.f;
+#else
+  return LoadSwizzled(p);
+#endif
 }
 __device__ __forceinline__ void StoreSwizzled(short* p, uint4 lo, uint4 hi,
                                               unsigned row) {
@@ -122,52 +161,15 @@ __device__ __forceinline__ HalfWeights LoadIqHalf(const void* row,
   return DecodeIqRaw(LoadIqRaw<Type>(row, sub));
 }
 
-// SQ1 SPEC2 round 2: branchless ROCm-FP4 nibble decode. Same perm-LUT shape as
-// Iq4NlLookup4 (quant_ops.hpp): the low 3 bits index entries 0..7/8..15,
-// bit 3 selects the half. Oracle: RocmFp4Code (quant_ops.hpp) —
-// nibble -> code is [0,1,2,3,4,6,8,10,0,-1,-2,-3,-4,-6,-8,-10],
-// verified entry by entry (mag3<=4 ? mag3 : 2*mag3-4, sign on bit 3).
-__device__ inline std::uint32_t RocmFp4Lookup4(std::uint32_t nibbles) noexcept {
-  constexpr std::uint32_t kTable0 = 0x03020100U;  // codes 0,1,2,3
-  constexpr std::uint32_t kTable1 = 0x0A080604U;  // codes 4,6,8,10
-  constexpr std::uint32_t kTable2 = 0xFDFEFF00U;  // codes 0,-1,-2,-3
-  constexpr std::uint32_t kTable3 = 0xF6F8FAFCU;  // codes -4,-6,-8,-10
-  const std::uint32_t low_index = nibbles & 0x07070707U;
-  const std::uint32_t lower =
-      __builtin_amdgcn_perm(kTable1, kTable0, low_index);
-  const std::uint32_t upper =
-      __builtin_amdgcn_perm(kTable3, kTable2, low_index);
-  const std::uint32_t select = ((nibbles & 0x08080808U) >> 3U) * 0xFFU;
-  return (lower & ~select) | (upper & select);
-}
-
-// SQ1 SPEC2 round 3: branchless Ue4m3 scale. Oracle: RocmFp4Ue4m3Half
-// (quant_ops.hpp) — e > 0x7e -> 0, exp == 0 -> man/1024, else the
-// (exp+119)<<23|man<<20 bits; the two branches diverge across a wave
-// (every thread fetches a different sub16), so select instead. Bit-exact:
-// same expressions, same order, exp+119 cannot overflow (exp <= 15).
-__device__ inline float RocmFp4Ue4m3Select(std::uint8_t e) noexcept {
-  const int exp = (e >> 3) & 0xF;
-  const int man = e & 0x7;
-  std::uint32_t normal_u =
-      (static_cast<std::uint32_t>(exp + 119) << 23) |
-      (static_cast<std::uint32_t>(man) << 20);
-  float normal;
-  __builtin_memcpy(&normal, &normal_u, 4);
-  const float sub = static_cast<float>(man) * (1.0F / 1024.0F);
-  const float v = (exp == 0) ? sub : normal;
-  return (e > 0x7e) ? 0.0F : v;
-}
-
-// SQ1 SPEC2 round 2: vectorized FP4 sub16 fetch for the F16 kernel. Four dword
+// Vectorized FP4 sub16 fetch for the F16 kernel. Four dword
 // loads (LoadQuantWords16 goes through memcpy: safe on the 17-byte FAST
 // stride) + perm-LUT codes + the shared Ue4m3 scale. Bit-identical to the
 // generic DecodeQuantSub16 path: same codes, same scale, same
 // fmul(scale, code) - 0.0 order (FP4 offset is 0).
-// SQ1 SPEC2 round 3: FAST goes back to byte loads (bench4: round-2 dword loads
+// FAST goes back to byte loads (bench4: round-2 dword loads
 // on the odd 17-byte stride scale 1.43-1.45x T3072->T4096 on d6144/d1024
 // vs 1.33x for the round-1 scalar pattern and every other row).
-// SQ1 SPEC2 round 4: type 100 joins byte loads (bench5: 100/dwords misses the
+// Type 100 joins byte loads (bench5: 100/dwords misses the
 // m=1024 cell at T3072/T4096, 1.111-1.128, while 101/bytes passes the same
 // cells at 1.037-1.101 — on few-CTA grids the 16 parallel byte loads hide
 // latency better than 4 dword transactions). One load pattern for both
@@ -207,6 +209,58 @@ __device__ __forceinline__ HalfWeights LoadFp4Half(const void* row,
       out.f[4 * i + b] = static_cast<_Float16>(
           __fsub_rn(__fmul_rn(scale, static_cast<float>(code)), 0.0F));
     }
+  }
+  return {out.u[0], out.u[1]};
+}
+
+// FP4 weights held raw from the fetch to the LDS commit: the wave runs its matrix work while the
+// loads are outstanding. One 16-byte load and one scale byte; the decode uses packed halves and is
+// bit-identical to LoadFp4Half (every product is exact in F16, and -0.0 is the bias of a - 0.0).
+struct RawFp4Weights {
+  std::uint32_t packed[4];
+  std::uint32_t scale;
+};
+
+template<superroc::core::GgmlType Type>
+__device__ __forceinline__ RawFp4Weights LoadFp4Raw(const void* row,
+                                                    unsigned sub) {
+  constexpr bool fast = Type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST;
+  constexpr std::size_t block_bytes = fast ? 17 : 18;
+  const auto* blk =
+      static_cast<const std::uint8_t*>(row) + (sub / 2) * block_bytes;
+  RawFp4Weights raw;
+  __builtin_memcpy(raw.packed, blk, 16);
+  raw.scale = blk[fast ? 16 : 16 + (sub & 1)];
+  return raw;
+}
+
+__device__ __forceinline__ HalfWeights DecodeFp4Raw(const RawFp4Weights& raw,
+                                                    unsigned shift) {
+  constexpr std::uint32_t kHalfMagic = 0x64646464U;  // 1024.0 high bytes
+  const __half scale = __float2half_rn(
+      RocmFp4Ue4m3Select(static_cast<std::uint8_t>(raw.scale)));
+  const __half2 scale2 = __halves2half2(scale, scale);
+  const __half2 magic2 = __halves2half2(__float2half_rn(-1152.0F),
+                                        __float2half_rn(-1152.0F));
+  const __half2 bias2 =
+      __halves2half2(__float2half_rn(-0.0F), __float2half_rn(-0.0F));
+  union {
+    __half2 h[8];
+    uint4 u[2];
+  } out;
+#pragma unroll
+  for (int i = 0; i < 4; ++i) {
+    // Signed codes carried as q + 128 over 1024: the halves are 1152 + code.
+    const std::uint32_t codes =
+        RocmFp4Lookup4((raw.packed[i] >> shift) & 0x0F0F0F0FU) ^ 0x80808080U;
+    const std::uint32_t p0 =
+        __builtin_amdgcn_perm(codes, kHalfMagic, 0x01050004U);
+    const std::uint32_t p1 =
+        __builtin_amdgcn_perm(codes, kHalfMagic, 0x03070206U);
+    out.h[2 * i] = __hfma2(__hadd2(__builtin_bit_cast(__half2, p0), magic2),
+                           scale2, bias2);
+    out.h[2 * i + 1] = __hfma2(__hadd2(__builtin_bit_cast(__half2, p1), magic2),
+                               scale2, bias2);
   }
   return {out.u[0], out.u[1]};
 }
@@ -347,6 +401,9 @@ __launch_bounds__(WM * WN * 32) __global__
                                Type == superroc::core::GgmlType::kQ8_0)
                                   ? 2
                                   : 0;
+  constexpr bool Fp4Raw = !Mixed &&
+                          (Type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ||
+                           Type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST);
   constexpr int kThreads = WM * WN * WaveSize;
   constexpr int RS = BM / 16;
   constexpr int TS = BN / 16;
@@ -423,6 +480,7 @@ __launch_bounds__(WM * WN * 32) __global__
   RawIqWeights raw_iq[PFA];
   struct NoRaw {};
   std::conditional_t<DecodeStage == 2, RawWeights<Type>, NoRaw> raw[PFA];
+  std::conditional_t<Fp4Raw, RawFp4Weights, NoRaw> raw_fp4[PFA];
   std::conditional_t<Mixed && UpRaw, RawWeights<UpType>, NoRaw> raw_up[PFA];
   const auto fetch_iq = [&](int p, int kk) {
     if ((kk & 12) == 0)
@@ -496,11 +554,15 @@ __launch_bounds__(WM * WN * 32) __global__
         } else if constexpr (Type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ||
                              Type ==
                              superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST) {
-          // SQ1 SPEC2 round 2: vectorized FP4 fetch (LoadFp4Half); the generic
+          // Vectorized FP4 fetch (LoadFp4Half); the generic
           // DecodeQuantSub16 path below stays for the remaining formats.
-          const auto packed = LoadFp4Half<Type>(w_row[p], unsigned(kk));
-          ra[p][0] = packed.low;
-          ra[p][1] = packed.high;
+          if constexpr (Fp4Raw) {
+            raw_fp4[p] = LoadFp4Raw<Type>(w_row[p], unsigned(kk));
+          } else {
+            const auto packed = LoadFp4Half<Type>(w_row[p], unsigned(kk));
+            ra[p][0] = packed.low;
+            ra[p][1] = packed.high;
+          }
         }
         else {
           superroc::hip::QuantSub16 q;
@@ -519,6 +581,8 @@ __launch_bounds__(WM * WN * 32) __global__
       } else {
         if constexpr (CacheIqHeader)
           raw_iq[p] = {};
+        if constexpr (Fp4Raw)
+          raw_fp4[p] = {};
         ra[p][0] = make_uint4(0, 0, 0, 0);
         ra[p][1] = make_uint4(0, 0, 0, 0);
         if (Mixed && (idx / BK) % 32 >= 16)
@@ -585,6 +649,10 @@ __launch_bounds__(WM * WN * 32) __global__
                              Type == superroc::core::GgmlType::kIQ4_XS) {
           const auto packed = DecodeIqRaw(raw_iq[p]);
           StoreSwizzled(dst, packed.low, packed.high, row);
+        } else if constexpr (Fp4Raw) {
+          const auto packed =
+              DecodeFp4Raw(raw_fp4[p], (static_cast<unsigned>(ks) & 1U) << 2U);
+          StoreSwizzled(dst, packed.low, packed.high, row);
         } else
           StoreSwizzled(dst, ra[p][0], ra[p][1], row);
       }
@@ -600,13 +668,19 @@ __launch_bounds__(WM * WN * 32) __global__
     }
   };
   fetch(0);
+  // A wave with all its token tiles past the batch has nothing to store: a
+  // short chunk's last tile runs its stages without that matrix work.
+  const bool matrix_live = Complete || t_block + wt * WTS * 16 < batch;
   for (int ks0 = 0; ks0 < ksteps; ks0 += BK) {
     commit();
     __syncthreads();
     if (ks0 + BK < ksteps)
       fetch(ks0 + BK);
+    // Keeps the next stage's loads ahead of the matrix work.
+    if constexpr (Fp4Raw)
+      __builtin_amdgcn_sched_barrier(0);
 #pragma unroll
-    for (int ks = 0; ks < BK; ++ks) {
+    for (int ks = 0; ks < BK && matrix_live; ++ks) {
       v16bf a[WRS];
 #pragma unroll
       for (int i = 0; i < WRS; ++i) {
@@ -614,8 +688,12 @@ __launch_bounds__(WM * WN * 32) __global__
       }
 #pragma unroll
       for (int j = 0; j < WTS; ++j) {
-        const v16bf b =
-            LoadSwizzled(&s_b[ks][(wt * WTS) + j][sl ^ (ks & 3)][0]);
+        const short* const b_src = &s_b[ks][(wt * WTS) + j][sl ^ (ks & 3)][0];
+        v16bf b;
+        if constexpr (Fp4Raw)
+          b = LoadSwizzledA(b_src);
+        else
+          b = LoadSwizzled(b_src);
 #pragma unroll
         for (int i = 0; i < WRS; ++i) {
           if constexpr (Type == superroc::core::GgmlType::kIQ3_S)
@@ -623,6 +701,10 @@ __launch_bounds__(WM * WN * 32) __global__
           else
             acc[i][j] = WmmaHalf(b, a[i], acc[i][j]);
         }
+        // The next operands load while this matrix work runs, so the waves of
+        // a workgroup do not queue on the LDS at the same moment.
+        if constexpr (Fp4Raw)
+          __builtin_amdgcn_sched_barrier(0);
       }
     }
     if constexpr (BM == 256 && BN == 256 &&
@@ -826,7 +908,7 @@ void DirectGemm(superroc::core::GgmlType type, const void* w, const void* x,
                 float* y, std::size_t batch, std::size_t m, std::size_t k,
                 const float* gate, hipStream_t stream) {
   const auto launch = [&]<superroc::core::GgmlType Type>() {
-    // SQ1 SPEC2 round 2: FP4 takes the large KV tile like Q4/Q5/Q6/Q8_0 (bench3:
+    // FP4 takes the large KV tile like Q4/Q5/Q6/Q8_0 (bench3:
     // the m=1024 cell misses even for IQ4_XS on the small tile, 1.13-1.27x).
     constexpr bool LargeKvTile = Type == superroc::core::GgmlType::kQ4_K ||
                                  Type == superroc::core::GgmlType::kQ5_K ||
@@ -845,7 +927,7 @@ void DirectGemm(superroc::core::GgmlType type, const void* w, const void* x,
         (LargeKvTile && m >= 1024 && batch >= 1024)) {
       // Only Q4/Q5 benefit from removing the tail checks on complete tiles.
       // Other formats retain the general kernel's better register schedule.
-      // SQ1 SPEC2 round 2: FP4 joins the Complete specialization (same full-tile
+      // FP4 joins the Complete specialization (same full-tile
       // guarantee; FP4-only constexpr, other formats unaffected).
       if constexpr (Type == superroc::core::GgmlType::kQ4_K ||
                     Type == superroc::core::GgmlType::kQ5_K ||
@@ -897,7 +979,7 @@ void DirectGemm(superroc::core::GgmlType type, const void* w, const void* x,
     case GgmlType::kIQ3_S:
       launch.template operator()<GgmlType::kIQ3_S>();
       break;
-    // SQ1: FP4 on the stock F16 route. Round 1 ran the generic
+    // FP4 on the stock F16 route. Round 1 ran the generic
     // DecodeQuantSub16 path and missed the bar (bench3: 1.12-1.29x mix);
     // round 2 vectorizes the FP4 fetch (LoadFp4Half: dword loads + perm-LUT
     // codes, bit-identical to DecodeQuantSub16) and qualifies FP4 for the
@@ -1011,6 +1093,12 @@ bool TryLaunchBatchedDualQuantGEMMSwiGLUFp16(
       return true;
     case GgmlType::kIQ4_XS:
       launch.template operator()<GgmlType::kIQ4_XS>();
+      return true;
+    case GgmlType::kQ4_0_ROCMFP4:
+      launch.template operator()<GgmlType::kQ4_0_ROCMFP4>();
+      return true;
+    case GgmlType::kQ4_0_ROCMFP4_FAST:
+      launch.template operator()<GgmlType::kQ4_0_ROCMFP4_FAST>();
       return true;
     default:
       return false;

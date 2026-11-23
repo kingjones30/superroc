@@ -4,7 +4,7 @@
 // The encode rule: exhaustive UE4M3 half-scale MSE search over candidate scale
 // bytes, then nearest-level codebook on a 10-capped E2M1-derived grid.
 //
-// SPEC3 / RV28 stage 1 adds an imatrix-weighted path (the fork's own weighted
+// Stage 1 adds an imatrix-weighted path (the fork's own weighted
 // convention, adopted verbatim) and a joint scale+code post-pass that improves
 // the weighted output deterministically. With no --imatrix and the post-pass
 // off, output is byte-identical to the fork (v0.2 baseline).
@@ -145,7 +145,7 @@ inline float BlockMseForScale(const float* x, int n, int e, float best_err) noex
 }
 
 // ---------------------------------------------------------------------------
-// SPEC3 / RV28 §1+§2 — imatrix-weighted scale search fused with a joint
+// Imatrix-weighted scale search fused with a joint
 // scale+code post-pass, for types 100/101. The weighted path adopts the
 // ROCmFPX fork's own convention (rocmfp4.c prepare_mse_weights +
 // rocmfp4_choose_scale_ue4m3_exhaustive_weighted) VERBATIM so that, with the
@@ -233,10 +233,10 @@ inline void PrepareMseWeights(const float* __restrict x, int n,
 
 // Weighted scale choice for one half-block/block (fork rocmfp4_choose_scale_ue4m3,
 // weighted arm). quant_weights may be null -> plain fork path.
-// SPEC3B (D8): the mse weights for a block are needed BOTH for the fork-verbatim
+// The mse weights for a block are needed BOTH for the fork-verbatim
 // scale search AND for the post-pass objective. Expose them through an out-param
 // so the post-pass optimises the SAME prepared weights the scale search used
-// (RV29 D8: it previously got raw qw, so strict-improvement was measured on the
+// (it previously got raw qw, so strict-improvement was measured on the
 // wrong objective). Two overloads: the parity path keeps the fork's signature
 // (returns byte only); the post-pass path additionally fills `mse_weights_out`
 // (must have room for n floats) and reports whether a weight was ever positive.
@@ -278,7 +278,7 @@ inline void PrepareMseWeights(const float* __restrict x, int n,
 
 // Joint post-pass on one n=16 half-block (type 100) or n=32 block (type 101).
 //
-// SPEC3B fixes (RV29 D7/D8):
+// Fixes:
 //  - D8: `w` MUST be the already-prepared mse weights (qw*sqrt(sigma2+x^2)) that
 //        the weighted scale search used — NOT the raw qw. Strict improvement is
 //        judged on the same weighted objective the fork optimises.
@@ -286,7 +286,7 @@ inline void PrepareMseWeights(const float* __restrict x, int n,
 //        `e` (the caller then stores it into the block), so the block is never
 //        left as a mix of a new scale's codes under another scale's byte.
 //
-// RV28 §2.1, initialised from the fork choice (monotone non-worse by
+// Initialised from the fork choice (monotone non-worse by
 // construction): (2-3) LS-refit the scale given the incumbent codes, snap to
 // UE4M3 and rescan the 5 neighbouring bytes with fresh nearest codes, iterate a
 // second time; (4) a single L_i +/- 1 coordinate code sweep at the settled scale
@@ -303,7 +303,7 @@ inline void PostPassRefine(const float* x, const float* w, int n, std::uint8_t& 
   const float best_err = BlockErrForScaleAndCodes(x, w, n, e);
   if (!(best_err == best_err) || best_err > 3.0e37f) return;  // non-finite: keep fork
 
-  // ---- RV28 §2.1 steps 2-3: LS scale refit, cap 2 rounds ----
+  // ---- LS scale refit, cap 2 rounds ----
   std::uint8_t best_e = e;
   float best_inc = best_err;
   std::uint8_t cur_e = e;
@@ -330,13 +330,13 @@ inline void PostPassRefine(const float* x, const float* w, int n, std::uint8_t& 
     cur_e = best_e;
   }
 
-  // ---- RV28 §2.1 step 4: one L_i +/- 1 code sweep at the settled scale ----
+  // ---- One L_i +/- 1 code sweep at the settled scale ----
   // At fixed scale the weighted objective is separable in i: element i's best
   // code minimises w_i*(x_i - s*L_i)^2 independently, and for w_i >= 0 that
   // argmin is exactly the nearest codebook level, BestIndexScaled(x_i, 1/s).
   // So the coordinate sweep is a genuine no-op once we have nearest codes — it is
   // implemented (rather than omitted) so the never-fires property can be measured
-  // empirically, per RV29 §4. We re-derive the element-wise optimal codes at the
+  // empirically. We re-derive the element-wise optimal codes at the
   // settled scale and verify they equal the stored ones; any strict improvement
   // would be committed, but by construction none exists.
   {
@@ -405,7 +405,7 @@ inline void QuantizeRowRocmFp4Ex(const float* x, block_rocmfp4* y, std::int64_t 
   for (std::int64_t ib = 0; ib < nb; ++ib) {
     const float* xb = x + ib * kQkRocmFp4;
     const float* qw = quant_weights + ib * kQkRocmFp4;
-    // SPEC3B (D8): get the prepared mse weights out of the scale search so the
+    // Get the prepared mse weights out of the scale search so the
     // post-pass optimises the SAME weighted objective the fork does. Prepared
     // even when post_pass is off (cheap, one-shot); unused then.
     float ms0[16], ms1[16];
@@ -462,7 +462,7 @@ inline void QuantizeRowRocmFp4FastEx(const float* x, block_rocmfp4_fast* y, std:
   for (std::int64_t ib = 0; ib < nb; ++ib) {
     const float* xb = x + ib * kQkRocmFp4;
     const float* qw = quant_weights + ib * kQkRocmFp4;
-    // SPEC3B (D8): prepared mse weights for the post-pass (same objective as
+    // Prepared mse weights for the post-pass (same objective as
     // the scale search); unused when post_pass is off.
     float ms[32];
     bool any;

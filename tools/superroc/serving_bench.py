@@ -23,7 +23,6 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
@@ -31,20 +30,10 @@ from typing import Any, Callable, Iterable
 
 BENCHMARK_SCHEMA = "superroc.serving-benchmark.v1"
 ENDPOINT_PROFILES = ("superroc", "openai")
-# Previous profile spelling, built from parts so the old spelling
-# never appears here; previous invocations keep working.
-_PREVIOUS_ENDPOINT_PROFILE = "g" + "ufo"
 
 
 def _canonical_endpoint_profile(value):
-    """Map the previous profile spelling to the new one."""
-    if value == _PREVIOUS_ENDPOINT_PROFILE:
-        warnings.warn(
-            "endpoint profile uses the previous engine name; "
-            "treating it as 'superroc' (rename it to silence "
-            "this)",
-            DeprecationWarning, stacklevel=2)
-        return "superroc"
+    """Validate the endpoint profile spelling."""
     if value not in ENDPOINT_PROFILES:
         raise ValueError(
             "endpoint profile must be one of %s, got %r"
@@ -461,10 +450,7 @@ def run_request(
     prompt_tokens = usage.get("prompt_tokens")
     completion_tokens = usage.get("completion_tokens")
     details = usage.get("prompt_tokens_details", {})
-    # The engine-metrics block uses the current name; previous server
-    # releases used the previous name (built from parts so its spelling
-    # never appears here).
-    metrics = usage.get("superroc", usage.get("g" + "ufo"))
+    metrics = usage.get("superroc")
     if endpoint_profile == "openai" and not isinstance(metrics, dict):
         metrics = None
     if (
@@ -1666,11 +1652,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("./result/bin/superroc"),
         help="Release superroc binary used for automatic fingerprinting",
     )
-# Compatibility with the previous binary-path flag spelling (hidden alias).
-    parser.add_argument("--" + "g" + "ufo", dest="superroc",
-                        type=Path, default=argparse.SUPPRESS,
-                        help=argparse.SUPPRESS)
-
     parser.add_argument("--output", type=Path, help="Write the JSON artifact")
     parser.add_argument("--json", action="store_true", help="Print JSON")
     return parser

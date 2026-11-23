@@ -1,4 +1,4 @@
-// SPEC8 depth rule. Header-only so a host test can run the state machine
+// Depth rule. Header-only so a host test can run the state machine
 // without HIP. mtp_gpu.cpp is the only production caller.
 //
 // Two decisions, and they are not the same kind of fact:

@@ -1,32 +1,244 @@
+#include <cstring>
+#include <unordered_map>
 #if defined(ENGINE_ENABLE_HIP)
+#include <hip/hip_fp16.h>
+
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/canonical.hpp"
+#include "src/core/env.hpp"
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
-#include "src/core/rocm_fp4/fp4_f16_prefill.hpp"  // SQ1: ported FP4->F16 GEMMs
+#include "src/core/rocm_fp4/fp4_f16_prefill.hpp"       // ported FP4->F16 GEMMs
 #include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // KAT:
 #include "src/core/rocm_fp4/superroc_fp4_quant.hpp"    // KAT:
 #include "src/models/qwen/gemm_route.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
+#include "src/models/qwen/hip/detail/int4_plan.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/ops.hpp"
 #include "src/models/qwen/hip/ops/prefill_fp16.hpp"
+#include "src/models/qwen/hip/ops/prefill_int4.hpp"
 #include "src/models/qwen/moe/qwen_moe_ffn.hpp"      // KAT:
 #include "src/models/qwen/moe/qwen_moe_prefill.hpp"  // KAT:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"    // KAT:
 #include "src/models/qwen/qwen_fp4_f16_gate.hpp"
 
 namespace superroc::hip {
-// SQ1: the promoted FP4->F16 prefill launchers (Flash-Next namespace kept
+// the promoted FP4->F16 prefill launchers (Flash-Next namespace kept
 // for kernel symbol stability; see fp4_f16_prefill.hpp).
 namespace fp4w = ::superroc::models::qwen38_flash_next::rocm;
 namespace {
+// FFN gate and up, attn_qkv and attn_gate through the 4-bit matrix unit.
+// SUPERROC_INT4_WEIGHTS names a route weights file made for this model file and
+// turns the route on. SUPERROC_INT4_TENSORS narrows it to a comma-separated
+// list of tensor names (detail::Int4TensorName).
+struct Int4Matrix {
+  std::uint8_t* w = nullptr;
+  float* scale = nullptr;
+};
+struct Int4Input {
+  std::uint32_t* order = nullptr;
+  float* inverse = nullptr;
+  float base = 1.F;
+  std::size_t k_out = 0;
+  Int4Shifts shifts{};
+};
+struct Int4Scratch {
+  std::uint8_t* x4 = nullptr;
+  float* xs = nullptr;
+  std::size_t x4_bytes = 0, xs_rows = 0;
+};
+struct Int4Route {
+  bool on = false;
+  float clip_w = 3.F, clip_x = 3.F;
+  std::size_t fine_columns = 64;
+  std::uint32_t layers = 0, cols = 0;
+  std::vector<float> sigma;
+  std::FILE* weights_file = nullptr;
+  std::vector<std::uint64_t> weights_offset;
+  std::uint64_t file_bytes = 0;
+  std::uint32_t tensors = 0xFFFFFFFFU;  // one bit per Int4Tensor
+  std::vector<Int4Input> inputs;        // kInt4Sets * layers
+  std::unordered_map<const void*, Int4Matrix> matrices;
+  // The packed input of the chunk in flight, one per stream: two sessions
+  // prefill on their own streams, and a pack queued on one must not write
+  // under a GEMM that the other still has queued.
+  std::unordered_map<hipStream_t, Int4Scratch> scratch;
+  bool announced = false;
+
+  // Whether this tensor of this layer runs here. SUPERROC_INT4_TENSORS narrows
+  // the list, and a weights file leaves out what it does not hold.
+  [[nodiscard]] bool Has(detail::Int4Tensor which, std::uint32_t layer) const {
+    return on && layer < layers && (tensors >> which & 1U) != 0U &&
+           (weights_file == nullptr ||
+            weights_offset[std::size_t{layer} * detail::kInt4TensorKinds +
+                           which] != 0);
+  }
+  const Int4Input& Input(std::uint32_t set, std::uint32_t layer) {
+    Int4Input& in = inputs[std::size_t{set} * layers + layer];
+    if (in.order == nullptr) {
+      if (!announced) {
+        announced = true;
+        std::fprintf(stderr,
+                     "prefill int4: on, %u layers, %u columns, %zu fine\n",
+                     layers, cols, fine_columns);
+      }
+      const detail::Int4Plan plan = detail::MakeInt4Plan(
+          sigma.data() + (std::size_t{set} * layers + layer) * cols, cols,
+          fine_columns);
+      // `order` marks the input as built, so it is set last: a failed
+      // allocation or copy must not leave a half-built input behind.
+      std::uint32_t* order = nullptr;
+      float* inverse = nullptr;
+      HIP_CHECK(hipMalloc(&order, plan.order.size() * sizeof(std::uint32_t)));
+      HIP_CHECK(hipMalloc(&inverse, plan.inverse.size() * sizeof(float)));
+      HIP_CHECK(hipMemcpy(order, plan.order.data(),
+                          plan.order.size() * sizeof(std::uint32_t),
+                          hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(inverse, plan.inverse.data(),
+                          plan.inverse.size() * sizeof(float),
+                          hipMemcpyHostToDevice));
+      in.inverse = inverse;
+      in.base = plan.base;
+      in.k_out = plan.k_out;
+      in.shifts = plan.shifts;
+      in.order = order;
+    }
+    return in;
+  }
+  const Int4Matrix& Matrix(const models::QwenTensorRef& t, const Int4Input& in,
+                           std::size_t m, hipStream_t stream,
+                           std::uint32_t layer, detail::Int4Tensor which) {
+    Int4Matrix& a = matrices[t.data];
+    if (a.w == nullptr) {
+      const std::uint64_t offset =
+          weights_file != nullptr
+              ? weights_offset[std::size_t{layer} * detail::kInt4TensorKinds +
+                               which]
+              : 0;
+      if (offset == 0)
+        throw std::logic_error(
+            "prefill int4: the route weights file has no entry for this "
+            "tensor");
+      // Read before anything is allocated: a short file must leave no entry
+      // behind that a later prefill would take for loaded weights.
+      const std::size_t weight_bytes = m * (in.k_out / 2),
+                        scale_bytes = m * sizeof(float);
+      if (detail::Int4TensorExtent(weights_offset, file_bytes, offset) !=
+          weight_bytes + scale_bytes) {
+        throw std::runtime_error(
+            "SUPERROC_INT4_WEIGHTS does not fit this model: a tensor in the "
+            "file has another size (the file was made for another model "
+            "file)");
+      }
+      std::vector<std::uint8_t> host(weight_bytes + scale_bytes);
+      if (fseeko(weights_file, static_cast<off_t>(offset), SEEK_SET) != 0 ||
+          std::fread(host.data(), 1, host.size(), weights_file) != host.size())
+        throw std::runtime_error("SUPERROC_INT4_WEIGHTS is short");
+      std::uint8_t* w = nullptr;
+      float* scale = nullptr;
+      HIP_CHECK(hipMalloc(&w, weight_bytes));
+      HIP_CHECK(hipMalloc(&scale, scale_bytes));
+      HIP_CHECK(hipMemcpy(w, host.data(), weight_bytes, hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(scale, host.data() + weight_bytes, scale_bytes,
+                          hipMemcpyHostToDevice));
+      a.scale = scale;
+      a.w = w;
+    }
+    return a;
+  }
+  const Int4Scratch& Pack(const void* x, const Int4Input& in, std::size_t batch,
+                          hipStream_t stream) {
+    Int4Scratch& s = scratch[stream];
+    const std::size_t bytes = batch * (in.k_out / 2);
+    if (s.x4_bytes < bytes || s.xs_rows < batch) {
+      HIP_CHECK(hipStreamSynchronize(stream));
+      const std::size_t x4_bytes =
+          std::max(bytes, batch * ((std::size_t{cols} + 1024) / 2));
+      std::uint8_t* x4 = nullptr;
+      float* xs = nullptr;
+      HIP_CHECK(hipMalloc(&x4, x4_bytes));
+      HIP_CHECK(hipMalloc(&xs, batch * sizeof(float)));
+      if (s.x4 != nullptr) {
+        (void)hipFree(s.x4);
+        (void)hipFree(s.xs);
+      }
+      s = Int4Scratch{x4, xs, x4_bytes, batch};
+    }
+    LaunchInt4PackHalf(x, s.x4, s.xs, in.order, in.inverse, in.base, batch,
+                       cols, in.k_out, clip_x, stream);
+    return s;
+  }
+};
+Int4Route& Int4() {
+  static Int4Route route = [] {
+    Int4Route r;
+    if (const char* list = ::superroc::core::GetEnv("SUPERROC_INT4_TENSORS");
+        list != nullptr && list[0] != '\0') {
+      const std::string names = std::string(",") + list + ",";
+      r.tensors = 0;
+      for (std::uint32_t which = 0; which < detail::kInt4TensorKinds; ++which) {
+        if (names.find(std::string(",") + detail::Int4TensorName(which) +
+                       ",") != std::string::npos)
+          r.tensors |= 1U << which;
+      }
+    }
+    const char* weights = ::superroc::core::GetEnv("SUPERROC_INT4_WEIGHTS");
+    if (weights != nullptr && weights[0] != '\0' &&
+        ::superroc::core::CanonicalCacheOn()) {
+      // The 4-bit route takes passes of 512 rows and more and rounds
+      // differently from the F16 route below that, so a canonical server
+      // does not use it.
+      std::fprintf(stderr,
+                   "SUPERROC_INT4_WEIGHTS is not used with "
+                   "SUPERROC_CANONICAL_CACHE=1\n");
+      weights = nullptr;
+    }
+    if (weights != nullptr && weights[0] != '\0') {
+      r.weights_file = std::fopen(weights, "rb");
+      // A refused file is closed again: the route is retried on the next
+      // prefill, and must not leave one open file behind each time.
+      const auto refuse = [&r](const char* what) {
+        if (r.weights_file != nullptr)
+          std::fclose(r.weights_file);
+        r.weights_file = nullptr;
+        throw std::runtime_error(what);
+      };
+      detail::Int4RouteTables tables;
+      if (const char* wrong =
+              detail::ReadInt4RouteTables(r.weights_file, tables)) {
+        refuse(wrong);
+      }
+      // An offsets column of another kind table would read at the wrong
+      // stride; the dense Qwen reader only reads the qwen table.
+      if (tables.head.reserved != 0) {
+        refuse(
+            "SUPERROC_INT4_WEIGHTS is not a dense Qwen route weights "
+            "file");
+      }
+      r.layers = tables.head.layers;
+      r.cols = tables.head.columns;
+      r.fine_columns = tables.head.fine_columns;
+      r.clip_w = tables.head.clip;
+      r.weights_offset = std::move(tables.weights_offset);
+      r.sigma = std::move(tables.sigma);
+      r.file_bytes = tables.file_bytes;
+      r.inputs.resize(std::size_t{detail::kInt4Sets} * r.layers);
+      r.on = true;
+      return r;
+    }
+    return r;
+  }();
+  return route;
+}
 
 // KAT: default ON only when the grouped path can run the shape
 // (n_expert <= 256 and n_used <= 8). Otherwise, and when KAT_MOE_GROUP=0,
@@ -177,27 +389,27 @@ bool KatMoeGrouped(int n_expert, int n_used) {
   return on && n_expert > 0 && n_expert <= 256 && n_used > 0 && n_used <= 8;
 }
 
-// SQ1: ROC FP4 (100/101) prefill on the promoted F16 WMMA kernels.
+// ROC FP4 (100/101) prefill on the promoted F16 WMMA kernels.
 bool IsQwenFp4(core::GgmlType type) {
   return type == core::GgmlType::kQ4_0_ROCMFP4 ||
          type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
 }
 
-// FRZA SPEC2: SUPERROC_QWEN_FP4_F16_PREFILL is tri-state now. Unset/1 = the
+// SUPERROC_QWEN_FP4_F16_PREFILL is tri-state now. Unset/1 = the
 // fail-closed gate, 0 = today's kill switch (unchanged), 2 = force the tag
 // engine's F16 route for every FP4 file (one controlled experiment later).
 int QwenFp4F16PrefillMode() {
   static const int mode = models::qwen::ParseQwenFp4F16PrefillMode(
-      ::superroc::core::GetEnvCompat("SUPERROC_QWEN_FP4_F16_PREFILL"));
+      ::superroc::core::GetEnv("SUPERROC_QWEN_FP4_F16_PREFILL"));
   return mode;
 }
 
-// SQ1: SUPERROC_QWEN_FP4_PORTED (default off) routes FP4 tensors through the
-// SPEC1 ported kernels instead of the stock F16 kernel. The ported path is
-// kept for A/B only; the shippable FP4 route is the F16 kernel (SPEC2 §2).
+// SUPERROC_QWEN_FP4_PORTED (default off) routes FP4 tensors through the
+// Ported kernels instead of the stock F16 kernel. The ported path is
+// kept for A/B only; the shippable FP4 route is the F16 kernel.
 bool QwenFp4PortedOn() {
   static const bool on = [] {
-    const char* e = ::superroc::core::GetEnvCompat("SUPERROC_QWEN_FP4_PORTED");
+    const char* e = ::superroc::core::GetEnv("SUPERROC_QWEN_FP4_PORTED");
     return e != nullptr && e[0] != '0';
   }();
   return on;
@@ -208,16 +420,23 @@ bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
   const auto& config = weights.config;
   // Large Qwen27B low-bit prefill is qualified independently from the Q8
   // target and from the small-batch decode/verification kernels.
-  if (batch < 1024)
+  // Below this the W8A8 route's 64 or 128 token tile is cheaper. From here the
+  // F16 route's 256 token tile reads the weights half as often: 800 new tokens
+  // prefill 48 % faster, with the same quality.
+  // Canonical cache: the two routes round differently, so every pass takes
+  // the F16 route whatever its size. A prompt's state then does not depend on
+  // where earlier requests cut it.
+  constexpr std::size_t kF16PrefillMinRows = 128;
+  if (batch < kF16PrefillMinRows && !::superroc::core::CanonicalCacheOn())
     return false;
   const auto supported = [](const models::QwenTensorRef& tensor) {
-    // lqw:fp16-prefill. Types 100/101 stay off the fp16 prefill path.
+    // Types 100/101 stay off the fp16 prefill path.
     return (tensor.type == core::GgmlType::kQ8_0 ||
             detail::IsNativeWmmaQuant(tensor.type)) &&
            tensor.type != core::GgmlType::kQ4_0_ROCMFP4 &&
            tensor.type != core::GgmlType::kQ4_0_ROCMFP4_FAST;
   };
-  // SQ1: the checked tensor set is unchanged (FFN always; mixer per layer
+  // the checked tensor set is unchanged (FFN always; mixer per layer
   // kind). Files with no FP4 tensor keep today's logic verbatim below, so
   // stock files are bit-identical with the switch on or off. MoE layers
   // keep the grouped expert path (KAT is already 4.9x the fork there).
@@ -225,7 +444,7 @@ bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
     if (layer.is_moe)
       return false;
   }
-  // FRZA SPEC2: the route gate is pure (host-tested in
+  // The route gate is pure (host-tested in
   // tests/models/qwen/fp4_f16_gate_test.cpp) and shared with the test.
   const int fp4_mode = QwenFp4F16PrefillMode();
   std::vector<models::qwen::QwenFp4F16LayerTypes> fp4_mix;
@@ -274,7 +493,7 @@ bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
     return low_bit_ffn;
   }
   if (fp4_gate.route == models::qwen::QwenFp4F16Route::kLegacy) {
-    // FRZA SPEC2: fail-closed refusal (gated mode only). Returning false
+    // Fail-closed refusal (gated mode only). Returning false
     // takes exactly the pre-f85008b dispatch below (half_prefill=false).
     // One line per process, on the first refusing chunk.
     static std::atomic<bool> frza_refusal_logged{false};
@@ -288,12 +507,12 @@ bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
     }
     return false;
   }
-  // SQ1 capability for files with FP4 tensors: every checked tensor keeps a
+  // Capability for files with FP4 tensors: every checked tensor keeps a
   // supported route (FP4 -> the F16 launchers, or the ported kernels when
   // SUPERROC_QWEN_FP4_PORTED=1; the rest -> the F16 launchers), every K is
   // non-zero and a multiple of 32 (the ported kernels' contract; any batch
   // and m), and K % 256 == 0 holds wherever a tensor needs DirectGemm's
-  // contract (SQ1: all 27B/MiMo K dims qualify, so FP4 always takes F16).
+  // contract (all 27B/MiMo K dims qualify, so FP4 always takes F16).
   const std::size_t kdims[] = {config.hidden_size, config.intermediate_size,
                                config.AttentionSize(), config.ssm_inner_size};
   for (std::size_t k : kdims) {
@@ -337,7 +556,62 @@ bool UseQwen27bFp16Prefill(const models::QwenModelWeights& weights,
   }
   return true;
 }
+
+// LFM2: SUPERROC_LFM2_VERIFY_BATCH=0 keeps the per-token verification loop;
+// unset and every other value takes the batched rows.
+bool Lfm2VerifyBatchOn() {
+  static const bool on = [] {
+    const char* e = ::superroc::core::GetEnv("SUPERROC_LFM2_VERIFY_BATCH");
+    return !(e != nullptr && e[0] == '0');
+  }();
+  return on;
+}
 }  // namespace
+
+void QwenGpuExecutor::PrepareInt4Route() {
+  Int4Route& int4 = Int4();
+  if (!int4.on || !UseQwen27bFp16Prefill(weights_, 512))
+    return;
+  const auto& config = weights_.config;
+  for (std::uint32_t l = 0; l < config.num_layers && l < int4.layers; ++l) {
+    const auto& layer = weights_.layers[l];
+    if (int4.cols != config.hidden_size)
+      continue;
+    if (int4.Has(detail::kInt4FfnGate, l) && int4.Has(detail::kInt4FfnUp, l) &&
+        IsQwenFp4(layer.ffn_gate.type) && IsQwenFp4(layer.ffn_up.type)) {
+      const Int4Input& in = int4.Input(0, l);
+      (void)int4.Matrix(layer.ffn_gate, in, config.intermediate_size,
+                        arena_.stream, l, detail::kInt4FfnGate);
+      (void)int4.Matrix(layer.ffn_up, in, config.intermediate_size,
+                        arena_.stream, l, detail::kInt4FfnUp);
+    }
+    const Int4Input& attn = int4.Input(1, l);
+    if (layer.is_full_attention) {
+      if (int4.Has(detail::kInt4AttnQ, l) && IsQwenFp4(layer.attn_q.type))
+        (void)int4.Matrix(layer.attn_q, attn, 2 * config.AttentionSize(),
+                          arena_.stream, l, detail::kInt4AttnQ);
+    } else {
+      if (int4.Has(detail::kInt4AttnQkv, l) && IsQwenFp4(layer.attn_qkv.type))
+        (void)int4.Matrix(layer.attn_qkv, attn, config.SsmQkvSize(),
+                          arena_.stream, l, detail::kInt4AttnQkv);
+      if (int4.Has(detail::kInt4AttnGate, l) && IsQwenFp4(layer.attn_gate.type))
+        (void)int4.Matrix(layer.attn_gate, attn, config.ssm_inner_size,
+                          arena_.stream, l, detail::kInt4AttnGate);
+    }
+  }
+  HIP_CHECK(hipStreamSynchronize(arena_.stream));
+}
+
+bool QwenGpuExecutor::CanCheckpointPromptInPass() const noexcept {
+  const auto& config = weights_.config;
+  return !config.attention_only && !config.lfm2 && !config.flint &&
+         !config.llama && vision_input_.layout().images.empty() &&
+         detail::ShouldUseSsmRowSplitRecurrence(
+             IsDeltaNetRowSplitSupported(config.ssm_state_size,
+                                         config.SsmValueSize()),
+             arena_.d_ssm_kq_scales != nullptr &&
+                 arena_.d_ssm_alpha_beta != nullptr);
+}
 
 tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
     std::span<const tokenization::TokenId> prompt_tokens,
@@ -367,7 +641,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
   if (config.attention_only) {
     return ForwardGlimmerPromptChunk(prompt_tokens, start_pos, compute_logits);
   }
-  if (config.lfm2) {  // LFM2
+  if (config.lfm2) {
     return ForwardLfm2PromptChunk(prompt_tokens, start_pos, compute_logits);
   }
   if (config.flint) {
@@ -410,9 +684,9 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                                const void* q8_act = nullptr) {
     if (half_prefill) {
       if (IsQwenFp4(w.type) && QwenFp4PortedOn()) {
-        // SQ1: ROC FP4 prefill on the promoted F16 WMMA kernels. bf16_input
+        // ROC FP4 prefill on the promoted F16 WMMA kernels. bf16_input
         // holds F16 here (LaunchBatchedRMSNormFp16 / the F16 mixer outputs).
-        // SQ1: ported only when SUPERROC_QWEN_FP4_PORTED=1; otherwise FP4 falls
+        // ported only when SUPERROC_QWEN_FP4_PORTED=1; otherwise FP4 falls
         // into the stock F16 launcher below (DirectGemm FP4 cases).
         const bool fast = w.type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
         if (!fp4w::Fp4DenseF16Gemm(
@@ -491,6 +765,16 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
   };
 
   KatPrefillProf kat_prof(arena_.stream);  // KAT:
+  // A prompt checkpoint inside this chunk: the recurrence leaves its state at
+  // that row, and the head below reads that row's logits.
+  const std::uint32_t checkpoint_rows =
+      prompt_checkpoint_position_ > start_pos &&
+              prompt_checkpoint_position_ < start_pos + batch_size
+          ? prompt_checkpoint_position_ - start_pos
+          : 0U;
+  const SsmPassCheckpoint pass_checkpoint{
+      checkpoint_rows, static_cast<float*>(d_prompt_checkpoint_conv_.get()),
+      d_prompt_checkpoint_recurrent_.get()};
   // 3. Layer stack
   // 3. Layer stack. One recurrent pass per chunk.
   const auto recurrent_state = arena_.BeginRecurrentWrite();
@@ -564,9 +848,23 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                                      arena_.d_scratch_q8_act, batch_size,
                                      hidden_size, arena_.stream);
       }
-      gemm_weight(layer.attn_q, arena_.d_scratch_bf16, arena_.d_normed,
-                  arena_.d_ssm_qkv, q_projection_size, hidden_size,
-                  arena_.d_scratch_q8_act);
+      Int4Route& int4_q = Int4();
+      if (half_prefill && batch_size >= 512 && int4_q.cols == hidden_size &&
+          int4_q.Has(detail::kInt4AttnQ, l) && IsQwenFp4(layer.attn_q.type)) {
+        const Int4Input& in = int4_q.Input(1, l);
+        const Int4Matrix& a =
+            int4_q.Matrix(layer.attn_q, in, q_projection_size, arena_.stream, l,
+                          detail::kInt4AttnQ);
+        const Int4Scratch& packed =
+            int4_q.Pack(arena_.d_scratch_bf16, in, batch_size, arena_.stream);
+        LaunchInt4GemmStore(a.w, packed.x4, a.scale, packed.xs, in.shifts,
+                            arena_.d_ssm_qkv, batch_size, q_projection_size,
+                            in.k_out, arena_.stream);
+      } else {
+        gemm_weight(layer.attn_q, arena_.d_scratch_bf16, arena_.d_normed,
+                    arena_.d_ssm_qkv, q_projection_size, hidden_size,
+                    arena_.d_scratch_q8_act);
+      }
       gemm_weight(layer.attn_k, arena_.d_scratch_bf16, arena_.d_normed,
                   arena_.d_k, kv_size, hidden_size, arena_.d_scratch_q8_act);
       gemm_weight(layer.attn_v, arena_.d_scratch_bf16, arena_.d_normed,
@@ -713,9 +1011,9 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
       }
       if (half_prefill) {
         if (IsQwenFp4(layer.attn_output.type) && QwenFp4PortedOn()) {
-          // SQ1: ported GEMM into the attention-output buffer, then the
+          // ported GEMM into the attention-output buffer, then the
           // residual add the non-half path does (d_attn_out is dead in
-          // half mode otherwise). SQ1: F16 path takes the fused Residual
+          // half mode otherwise). F16 path takes the fused Residual
           // epilogue in the else arm (DirectGemm FP4 cases).
           gemm_weight(layer.attn_output, arena_.d_scratch_bf16, nullptr,
                       arena_.d_attn_out, hidden_size, attention_size);
@@ -739,12 +1037,46 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                                      arena_.d_scratch_q8_act, batch_size,
                                      hidden_size, arena_.stream);
       }
-      gemm_weight(layer.attn_qkv, arena_.d_scratch_bf16, arena_.d_normed,
-                  arena_.d_ssm_qkv, ssm_qkv_size, hidden_size,
-                  arena_.d_scratch_q8_act);
-      gemm_weight(layer.attn_gate, arena_.d_scratch_bf16, arena_.d_normed,
-                  arena_.d_ssm_gate, ssm_inner_size, hidden_size,
-                  arena_.d_scratch_q8_act);
+      Int4Route& int4_attn = Int4();
+      const bool int4_attn_batch =
+          half_prefill && batch_size >= 512 && int4_attn.cols == hidden_size;
+      const bool int4_qkv = int4_attn_batch &&
+                            int4_attn.Has(detail::kInt4AttnQkv, l) &&
+                            IsQwenFp4(layer.attn_qkv.type);
+      const bool int4_gate = int4_attn_batch &&
+                             int4_attn.Has(detail::kInt4AttnGate, l) &&
+                             IsQwenFp4(layer.attn_gate.type);
+      const Int4Scratch* attn_packed = nullptr;
+      if (int4_qkv || int4_gate)
+        attn_packed =
+            &int4_attn.Pack(arena_.d_scratch_bf16, int4_attn.Input(1, l),
+                            batch_size, arena_.stream);
+      if (int4_qkv) {
+        const Int4Input& in = int4_attn.Input(1, l);
+        const Int4Matrix& a =
+            int4_attn.Matrix(layer.attn_qkv, in, ssm_qkv_size, arena_.stream, l,
+                             detail::kInt4AttnQkv);
+        LaunchInt4GemmStore(a.w, attn_packed->x4, a.scale, attn_packed->xs,
+                            in.shifts, arena_.d_ssm_qkv, batch_size,
+                            ssm_qkv_size, in.k_out, arena_.stream);
+      } else {
+        gemm_weight(layer.attn_qkv, arena_.d_scratch_bf16, arena_.d_normed,
+                    arena_.d_ssm_qkv, ssm_qkv_size, hidden_size,
+                    arena_.d_scratch_q8_act);
+      }
+      if (int4_gate) {
+        const Int4Input& in = int4_attn.Input(1, l);
+        const Int4Matrix& a =
+            int4_attn.Matrix(layer.attn_gate, in, ssm_inner_size, arena_.stream,
+                             l, detail::kInt4AttnGate);
+        LaunchInt4GemmStore(a.w, attn_packed->x4, a.scale, attn_packed->xs,
+                            in.shifts, arena_.d_ssm_gate, batch_size,
+                            ssm_inner_size, in.k_out, arena_.stream);
+      } else {
+        gemm_weight(layer.attn_gate, arena_.d_scratch_bf16, arena_.d_normed,
+                    arena_.d_ssm_gate, ssm_inner_size, hidden_size,
+                    arena_.d_scratch_q8_act);
+      }
       gemm_weight(layer.ssm_alpha, arena_.d_scratch_bf16, arena_.d_normed,
                   arena_.d_alpha_buf, time_step_rank, hidden_size,
                   arena_.d_scratch_q8_act);
@@ -782,8 +1114,12 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
             config.ssm_group_count, config.ssm_time_step_rank,
             config.ssm_state_size, config.SsmValueSize(), arena_.stream,
             arena_.GetRecurrentStateStorage(),
-            half_prefill ? arena_.d_scratch_bf16 : nullptr);
+            half_prefill ? arena_.d_scratch_bf16 : nullptr, pass_checkpoint);
       } else {
+        if (checkpoint_rows != 0) {
+          throw std::logic_error(
+              "prompt checkpoint needs the row-split recurrence");
+        }
         LaunchBatchedSSMConvRecurrence(
             arena_.d_ssm_qkv, static_cast<const float*>(layer.ssm_conv1d.data),
             recurrent_state, arena_.d_conv_out, arena_.d_alpha_buf,
@@ -816,9 +1152,9 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
       }
       if (half_prefill) {
         if (IsQwenFp4(layer.ssm_out.type) && QwenFp4PortedOn()) {
-          // SQ1: ported GEMM into the attention-output buffer, then the
+          // ported GEMM into the attention-output buffer, then the
           // residual add the non-half path does (d_attn_out is dead in
-          // half mode otherwise). SQ1: F16 path takes the fused Residual
+          // half mode otherwise). F16 path takes the fused Residual
           // epilogue in the else arm (DirectGemm FP4 cases).
           gemm_weight(layer.ssm_out, arena_.d_scratch_bf16, nullptr,
                       arena_.d_attn_out, hidden_size, ssm_inner_size);
@@ -864,7 +1200,8 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
               arena_.d_normed,
               static_cast<const float*>(layer.ffn_gate_inp.data), moe_hidden,
               moe_expert, moe_tokens, moe_used, arena_.d_moe_logits,
-              arena_.d_moe_ids, arena_.d_moe_weights, arena_.stream) != 0) {
+              arena_.d_moe_ids, arena_.d_moe_weights, arena_.stream,
+              static_cast<int>(config.ExpertsInFile())) != 0) {
         throw std::runtime_error("qwen35moe prefill route launch failed");
       }
       kat_prof.route_ms += kat_prof.Take();
@@ -926,7 +1263,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
           }
           kat_prof.shared_ms += kat_prof.Take();
         }
-        // SQ10 SPEC3 (S3-2): stream-ordered per-set check. The bare aggregate
+        // Stream-ordered per-set check. The bare aggregate
         // read could precede these kernels and miss a bad-router-id error
         // (the R6 stale class); it also cleared every other session's word.
         // A refusal fails loudly, as on the decode sites.
@@ -977,6 +1314,20 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
                              hidden_size, eps, arena_.stream);
       }
 
+      const Int4Input* int4_ffn = nullptr;
+      const Int4Matrix* int4_gate = nullptr;
+      const Int4Matrix* int4_up = nullptr;
+      Int4Route& int4 = Int4();
+      if (half_prefill && batch_size >= 512 && int4.cols == hidden_size &&
+          int4.Has(detail::kInt4FfnGate, l) &&
+          int4.Has(detail::kInt4FfnUp, l) && IsQwenFp4(layer.ffn_gate.type) &&
+          IsQwenFp4(layer.ffn_up.type)) {
+        int4_ffn = &int4.Input(0, l);
+        int4_gate = &int4.Matrix(layer.ffn_gate, *int4_ffn, intermediate_size,
+                                 arena_.stream, l, detail::kInt4FfnGate);
+        int4_up = &int4.Matrix(layer.ffn_up, *int4_ffn, intermediate_size,
+                               arena_.stream, l, detail::kInt4FfnUp);
+      }
       // Which buffer holds the Q8_1 form of the SwiGLU output ffn_down
       // consumes. The fused epilogue below moves it out of the shared
       // activation scratch.
@@ -1004,18 +1355,26 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
             IsFusedSwiGluGemmEpilogueSupported(
                 layer.ffn_gate.type, batch_size, intermediate_size,
                 batch_size * intermediate_size * sizeof(float));
-        if (half_prefill) {
+        if (int4_ffn != nullptr) {
+          const Int4Scratch& packed = int4.Pack(
+              arena_.d_scratch_bf16, *int4_ffn, batch_size, arena_.stream);
+          LaunchInt4GemmPair(int4_gate->w, int4_up->w, packed.x4,
+                             int4_gate->scale, int4_up->scale, packed.xs,
+                             int4_ffn->shifts, arena_.d_ffn_up, batch_size,
+                             intermediate_size, int4_ffn->k_out, arena_.stream);
+          ffn_down_input = arena_.d_ffn_up;
+        } else if (half_prefill) {
           if ((IsQwenFp4(layer.ffn_gate.type) ||
                IsQwenFp4(layer.ffn_up.type)) &&
               QwenFp4PortedOn()) {
-            // SQ1: the dual-FP16 path cannot consume FP4 weights: run both
+            // the dual-FP16 path cannot consume FP4 weights: run both
             // projections through the ported kernels (F32 out), then SwiGLU
             // (F32) and narrow to F16. d_scratch_bf16's norm input is dead
             // past the two GEMMs (same reuse the non-half path does), and
             // d_ffn_up's F32 content is dead past SwiGLU, so the F16 result
             // lands where the paired path puts it. (A fused SwiGLU-to-F16
-            // would save the F32 round trip; follow-up, not this lane.)
-            // SQ1: ported only when SUPERROC_QWEN_FP4_PORTED=1; otherwise the
+            // would save the F32 round trip; follow-up, not this change.)
+            // ported only when SUPERROC_QWEN_FP4_PORTED=1; otherwise the
             // else arm runs (dual declines FP4, singles + SwiGLU epilogue).
             gemm_weight(layer.ffn_gate, arena_.d_scratch_bf16, nullptr,
                         arena_.d_ffn_gate, intermediate_size, hidden_size);
@@ -1092,9 +1451,9 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
 
       if (half_prefill) {
         if (IsQwenFp4(layer.ffn_down.type) && QwenFp4PortedOn()) {
-          // SQ1: ported GEMM into the FFN-output buffer, then the residual
+          // ported GEMM into the FFN-output buffer, then the residual
           // add the non-half path does (d_ffn_out is dead in half mode
-          // otherwise). SQ1: F16 path takes the fused Residual epilogue in
+          // otherwise). F16 path takes the fused Residual epilogue in
           // the else arm (DirectGemm FP4 cases).
           gemm_weight(layer.ffn_down, ffn_down_input, nullptr, arena_.d_ffn_out,
                       hidden_size, intermediate_size);
@@ -1151,6 +1510,31 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
   }
   kat_prof.Arm();  // KAT:
 
+  if (checkpoint_rows != 0) {
+    // Runs ahead of the final token's head, whose logits stay readable below.
+    LaunchRMSNorm(
+        scratch.decode.hidden.data() + ((checkpoint_rows - 1) * hidden_size),
+        static_cast<const float*>(weights_.output_norm.data),
+        scratch.decode.normed.data(), hidden_size, eps, arena_.stream);
+    LaunchGEMV(weights_.output.data, weights_.output.type,
+               scratch.decode.normed.data(), scratch.decode.logits.data(),
+               vocab_size, hidden_size, arena_.stream);
+    LaunchGPUArgmax(scratch.decode.logits.data(),
+                    scratch.decode.sampled_token.data(), vocab_size,
+                    arena_.stream);
+    h_prompt_checkpoint_logits_.resize(vocab_size);
+    std::uint32_t checkpoint_token = 0;
+    HIP_CHECK(hipMemcpyAsync(
+        h_prompt_checkpoint_logits_.data(), scratch.decode.logits.data(),
+        vocab_size * sizeof(float), hipMemcpyDeviceToHost, arena_.stream));
+    HIP_CHECK(hipMemcpyAsync(
+        &checkpoint_token, scratch.decode.sampled_token.data(),
+        sizeof(std::uint32_t), hipMemcpyDeviceToHost, arena_.stream));
+    HIP_CHECK(hipStreamSynchronize(arena_.stream));
+    prompt_checkpoint_frontier_ =
+        CheckedSampleToken(checkpoint_token, config.vocab_size);
+  }
+
   // 4. Output Norm for final token
   const float* final_hidden =
       scratch.decode.hidden.data() + ((batch_size - 1) * hidden_size);
@@ -1182,20 +1566,29 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
 std::vector<tokenization::TokenId> QwenGpuExecutor::ForwardVerificationChunk(
     std::span<const tokenization::TokenId> candidate_tokens,
     std::uint32_t start_pos, bool capture_logits) {
-  // NBFAST T1: llama verifies through its own prefill path (adjacent-pair
+  // llama verifies through its own prefill path (adjacent-pair
   // RoPE, fp32 KV); the decode-equivalent stack below is Qwen-shaped.
   if (weights_.config.llama) {
     return ForwardLlamaVerificationChunk(candidate_tokens, start_pos,
                                          capture_logits);
   }
-  if (!weights_.config.lfm2) {
+  if (!weights_.config.lfm2 && !weights_.config.flint) {
     return ForwardDecodeEquivalentVerificationChunk(candidate_tokens, start_pos,
                                                     capture_logits);
   }
-  // LFM2: the batched verifier kernels assume the Qwen DeltaNet layer
-  // stack. Verify with the exact single-token decode arithmetic instead;
+  // LFM2 and Flint: the batched verifier kernels assume the Qwen DeltaNet
+  // layer stack. Verify with the exact single-token decode arithmetic instead;
   // acceptance still decides which of these rows stay committed, and the
   // conv-state rollback in SaveState/RestoreState undoes the rest.
+  lfm2_rows_verified_ = false;
+  if (candidate_tokens.size() >= 2 && candidate_tokens.size() <= 8 &&
+      Lfm2VerifyBatchOn()) {
+    return weights_.config.flint
+               ? ForwardFlintVerificationRows(candidate_tokens, start_pos,
+                                              capture_logits)
+               : ForwardLfm2VerificationRows(candidate_tokens, start_pos,
+                                             capture_logits);
+  }
   CheckReset();
   h_verification_hidden_.clear();
   h_verification_logits_.clear();
@@ -1235,9 +1628,23 @@ void QwenGpuExecutor::CommitVerificationChunk(
     std::span<const tokenization::TokenId> committed_tokens,
     std::uint32_t start_pos) {
   if (committed_tokens.empty()) {
+    lfm2_rows_verified_ = false;
     return;
   }
-  // NBFAST T1: llama has no recurrent state to rebuild, and its verification
+  // llama and Flint have no recurrent state to rebuild, and their
+  // verification forward already wrote the committed rows' KV at their final
+  // positions (the same state a fully-accepted chunk keeps). Rejected rows sit
+  // beyond the committed position and are overwritten by the next forward,
+  // which writes KV before reading it. Re-forwarding the committed prefix
+  // through single-token decode would cost one full weight pass per token and
+  // erase the speculation gain, so commit is bookkeeping only here.
+  if (weights_.config.llama || weights_.config.flint) {
+    replaying_ssm_state_ = false;
+    arena_.DisableSsmReplayCapture();
+    HIP_CHECK(hipStreamSynchronize(arena_.stream));
+    return;
+  }
+  // llama has no recurrent state to rebuild, and its verification
   // forward already wrote the committed rows' KV at their final positions
   // (the same state a fully-accepted chunk keeps). Rejected rows sit beyond
   // the committed position and are overwritten by the next forward, which
@@ -1261,7 +1668,25 @@ void QwenGpuExecutor::CommitVerificationChunk(
       ReplaySsmState(start_pos, static_cast<std::uint32_t>(replayed));
   }
   replaying_ssm_state_ = false;
-  // SQ10 SPEC3 (S3-1): the commit replays below queue on arena_.stream with
+  // LFM2: the verified rows already wrote the KV entries of every position
+  // (append-only, see QwenGpuArena::SaveState), so accepting a prefix only
+  // has to restore the short-conv state saved after its last row -- the
+  // accepted rows never run again.
+  if (weights_.config.lfm2 && lfm2_rows_verified_) {
+    lfm2_rows_verified_ = false;
+    arena_.DisableSsmReplayCapture();
+    const auto io = arena_.BeginRecurrentWrite();
+    const std::size_t total_conv =
+        static_cast<std::size_t>(weights_.config.SsmLayerCount()) *
+        weights_.config.SsmQkvSize() * weights_.config.ssm_conv_kernel;
+    HIP_CHECK(hipMemcpyAsync(
+        io.conv_out,
+        d_lfm2_row_conv_ + (committed_tokens.size() - 1) * total_conv,
+        total_conv * sizeof(float), hipMemcpyDeviceToDevice, arena_.stream));
+    HIP_CHECK(hipStreamSynchronize(arena_.stream));
+    return;
+  }
+  // The commit replays below queue on arena_.stream with
   // no drain of their own (ForwardToken(false) only drains on MoE, via the
   // status check), and AcceptFeedback's drafter launches on the aliased set
   // next. Drain once here so the session -> drafter edge holds on every

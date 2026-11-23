@@ -1,4 +1,4 @@
-// Super ROC M2 R1: the model-family registry table.
+// The model-family registry table.
 #include "src/core/model_family.hpp"
 
 #include <cstdlib>
@@ -107,7 +107,7 @@ int main() {
   Check(llama != nullptr &&
             llama->vision_refusal == "llama does not support vision",
         "llama vision text");
-  // NBFAST T1: llama gained DFlash2 drafting; like LFM2, the blanket
+  // llama gained DFlash2 drafting; like LFM2, the blanket
   // refusal stays empty and the serve loader refuses other backends.
   Check(llama != nullptr && llama->speculative_refusal.empty(),
         "llama speculative text");

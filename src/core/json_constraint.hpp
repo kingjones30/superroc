@@ -68,7 +68,7 @@ public:
       std::shared_ptr<const JsonConstraint> answer, std::vector<Tool> tools,
       bool required, bool parallel = false,
       ToolFormat format = ToolFormat::kJson);
-  // LFM2 (Super ROC): a required LFM2.5 pythonic call. The grammar starts
+  // LFM2 (Super Roc): a required LFM2.5 pythonic call. The grammar starts
   // after the rendered prefill "<|tool_call_start|>" with the "[" itself (the
   // LFM2 vocabulary merges "[" with the name, e.g. "[get", so the model must
   // emit it) and ends with "]<|tool_call_end|>". Names

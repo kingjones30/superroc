@@ -133,7 +133,7 @@ SUPERROC_FP4_HD inline int superroc_fp4_route_core(
 
   size_t rb = (size_t)k * sizeof(float);
   for (int e = 0; e < n_expert; ++e) {
-    // Jay 2026-10-01: logits_ready = 1 means a parallel kernel already wrote
+    // logits_ready = 1 means a parallel kernel already wrote
     // logits[0, n_expert) (k_route_logits); the single-thread dot over 512 x
     // 2560 was ~0.4 s per call on the GPU, 40 calls per token.
     if (!logits_ready) {

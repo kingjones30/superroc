@@ -85,8 +85,7 @@ def main() -> None:
         if not reference:
             models.append((args.dspark_model, "SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL"))
         for value, name in models:
-            legacy = "G" + "UFO_" + name[len("SUPERROC_"):]
-            value = value or environment.get(name) or environment.get(legacy)
+            value = value or environment.get(name)
             if not value or not Path(value).is_file():
                 parser.error(f"model checks require an existing artifact: {name}")
             environment[name] = str(Path(value).absolute())

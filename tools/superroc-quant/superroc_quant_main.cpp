@@ -1,12 +1,12 @@
-// superroc-quant v0.9 — superroc's own GGUF quantizer (product track, RV20 stages 0+1,
-// LQP SPEC1: exact/anchored tensor rules, --protect, fork head flags, census,
-// --manifest; LQP SPEC2: persistent pool + chunk tasks across tensors,
+// superroc-quant v0.9 — superroc's own GGUF quantizer (product track, stages 0+1,
+// Exact/anchored tensor rules, --protect, fork head flags, census,
+// --manifest; persistent pool + chunk tasks across tensors,
 // streaming header-first writer, side-stream hashing (SHA-NI where the CPU
-// has it), instant --dry-run; LQP SPEC3: failure-proof output (partial file
+// has it), instant --dry-run; failure-proof output (partial file
 // + fsync + rename, exit 2 on every handled failure, no hangs), exact F32
 // widenings, lossy float overrides rejected, census MXFP4-family sizes).
 //
-// v0.9 (LQP SPEC4; RV-LQP3 F1/F2/F3/F4/F6/F7): one publish sequence for the
+// v0.9: one publish sequence for the
 // model AND its manifest (model partial -> fsync; manifest partial -> fsync;
 // rename model; rename manifest; fsync the directories), one writer per
 // output (a flock-held <out>.gq-lock claim; unique <out>.partial.<pid>), a
@@ -14,7 +14,7 @@
 // (SUPERROC_QUANT_TEST_HOOKS), an RAII joiner for the hash threads, and the
 // corrected pool.hpp comment.
 //
-// v0.9.1 (LQP SPEC5): the per-output <out>.gq-lock claim file is REMOVED when
+// v0.9.1: the per-output <out>.gq-lock claim file is REMOVED when
 // the run ends -- after success and after every handled failure -- so a build
 // of seven variants leaves no stray lock beside the output, and a failed run
 // leaves nothing at all. OutputClaim::Acquire proves the fd it locked is still
@@ -25,7 +25,7 @@
 //
 // Makes the same GGUF files the fork's llama-quantize makes for the seven ROC
 // recipes (ftypes 100..106), byte for byte (except the added `superroc.quant.*` KV
-// keys). See SPEC.md / RV20-DESIGN.md.
+// keys). See the quantizer design docs.
 //
 // Usage:
 //   superroc-quant [options] in.gguf out.gguf <RECIPE> [nthreads]
@@ -88,7 +88,7 @@
 #include "sha256.hpp"
 #include "toml.hpp"
 #include "vendored_quantize.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace gqt = superroc::quant_tool;
 using gqt::Type;
@@ -181,9 +181,9 @@ static ImatrixMap LoadImatrix(const std::string& path, std::string* sha_out) {
         for (std::uint64_t i = 0; i < ne0; ++i) e[j * ne0 + i] = 1.0f;
       }
     }
-    // SPEC3B hardening (fork llama-quant.cpp:1326-1333): the fork throws on any
+    // Hardening (fork llama-quant.cpp:1326-1333): the fork throws on any
     // non-finite per-column value after load. Mirror it so a bad imatrix file is
-    // rejected identically instead of silently weighting differently (RV29 D1).
+    // rejected identically instead of silently weighting differently.
     for (float v : e) {
       if (!std::isfinite(v))
         throw std::runtime_error("imatrix contains non-finite value for " + name);
@@ -205,7 +205,7 @@ static void EncodeRow(Type t, const float* x, std::uint8_t* out, std::int64_t k,
     case (Type)2: ::quantize_row_q4_0_ref(x, (::block_q4_0*)out, k); break;
     case (Type)7: ::quantize_row_q5_1_ref(x, (::block_q5_1*)out, k); break;
     case (Type)8: ::quantize_row_q8_0_ref(x, (::block_q8_0*)out, k); break;
-    // SPEC4 (weighted k-quants): when a per-row qw is present, the fork's
+    // When a per-row qw is present, the fork's
     // quantize_qX_K dispatches to the STRUCTURALLY DIFFERENT _impl rowwise
     // algorithm (make_qkx3_quants + make_qp_quants with prepared
     // qw·sqrt(σ²+x²) weights). With qw==nullptr the unweighted _ref is used,
@@ -275,18 +275,18 @@ static void DequantizeRowsToF32(const std::uint8_t* raw, Type src,
 
 static const char* kToolVersion = "superroc-quant 0.9.1";
 
-// ---- v0.9 (SPEC4): publish + one-writer helpers -------------------------
+// ---- v0.9: publish + one-writer helpers -------------------------
 
 // A test-only hook. When SUPERROC_QUANT_TEST_HOOKS is defined (ONLY the separate
 // `superroc-quant-testhooks` target defines it -- the shipped `superroc-quant` target
 // never does), a chunk task can be made to throw in the middle of the encode
 // by setting SUPERROC_QUANT_TEST_FAIL_CHUNK=1, exercising the real
-// worker-throw -> writer-wake -> unlink -> exit-2 path (RV-LQP3 F5). In the
+// worker-throw -> writer-wake -> unlink -> exit-2 path. In the
 // shipped tool the macro expands to nothing and the code does not exist.
 #ifdef SUPERROC_QUANT_TEST_HOOKS
 #define SUPERROC_QUANT_CHUNK_HOOK()                                              \
   do {                                                                      \
-    const char* gq_hook = ::superroc::core::GetEnvCompat("SUPERROC_QUANT_TEST_FAIL_CHUNK");        \
+    const char* gq_hook = ::superroc::core::GetEnv("SUPERROC_QUANT_TEST_FAIL_CHUNK");        \
     if (gq_hook && *gq_hook && *gq_hook != '0')                              \
       throw std::runtime_error("test hook: injected mid-encode chunk fail"); \
   } while (0)
@@ -317,7 +317,7 @@ static void FsyncPath(const std::string& path, const char* what) {
 }
 
 // fsync a directory once (after a rename) -- throws on failure. Durability of
-// the rename itself (RV-LQP3 F3).
+// the rename itself.
 static void FsyncDirOnce(const std::string& dir) {
   int dfd = ::open(dir.c_str(), O_RDONLY | O_DIRECTORY);
   if (dfd < 0)
@@ -332,8 +332,8 @@ static void FsyncDirOnce(const std::string& dir) {
   ::close(dfd);
 }
 
-// RAII holder for the per-output write claim (RV-LQP3 F2; lock removal LQP
-// SPEC5). The claim is a flock(LOCK_EX) on `<out>.gq-lock`, held for the whole
+// RAII holder for the per-output write claim (lock removal included).
+// The claim is a flock(LOCK_EX) on `<out>.gq-lock`, held for the whole
 // run: exactly one writer per output. v0.9.1 also REMOVES the lock file at
 // every exit so a run leaves no leftovers, without reopening the race F2
 // closed. Two ideas make that safe:
@@ -453,7 +453,7 @@ struct OutputClaim {
   }
 };
 
-// RAII joiner for the input-hash threads (RV-LQP3 F6): the destructor joins
+// RAII joiner for the input-hash threads: the destructor joins
 // whatever a failure path left, so no early return can leave a joinable
 // thread behind (std::terminate). It never rethrows -- reporting is the
 // explicit Join()'s job, so the destructor is safe during unwinding.
@@ -478,7 +478,7 @@ class HashThreadJoiner {
 };
 
 
-// `superroc-quant census <file.gguf> [--json]`: header census (SPEC1 item 4).
+// `superroc-quant census <file.gguf> [--json]`: header census.
 int CensusMain(const std::vector<std::string>& args) {
   std::string file;
   bool json = false;
@@ -519,7 +519,7 @@ int CensusMain(const std::vector<std::string>& args) {
 }
 
 int main(int argc, char** argv) {
-  // v0.8 (F1): a file-size limit (RLIMIT_FSIZE, the gpu-run 8 GiB cap) must
+  // v0.8: an 8 GiB file-size limit (RLIMIT_FSIZE) must
   // arrive as a failed write -- handled, exit 2 -- instead of killing the
   // process with SIGXFSZ before any cleanup runs.
   std::signal(SIGXFSZ, SIG_IGN);
@@ -530,9 +530,9 @@ int main(int argc, char** argv) {
   bool g4_format2 = false;  // G4 files carry superroc.quant.format_version = 2
   std::vector<std::pair<std::string, Type>> overrides;
   std::string in, out, recipe_name, recipe_file;
-  std::string imatrix_file;  // SPEC3: fork imatrix GGUF (weighted ROC encode)
-  std::string prune_layers;  // SPEC5: comma/space list of block layers to drop
-  // v0.5 (LQP SPEC1): --protect files, the fork head flags, trace, manifest.
+  std::string imatrix_file;  // Fork imatrix GGUF (weighted ROC encode)
+  std::string prune_layers;  // Comma/space list of block layers to drop
+  // v0.5: --protect files, the fork head flags, trace, manifest.
   std::vector<std::string> protect_files;
   bool protect_allow_unmatched = false;
   bool has_output_type = false, has_token_type = false;
@@ -540,7 +540,7 @@ int main(int argc, char** argv) {
   bool tensor_type_trace = false;
   bool show_time = false;
   std::string manifest_file;
-  // SPEC3 §2 joint scale+code post-pass. Default OFF: on MiMo-9B the post-pass
+  // Joint scale+code post-pass. Default OFF: on MiMo-9B the post-pass
   // lowers per-block weighted MSE by construction but DEGRADES held-out PPL
   // (7.71 -> 8.60), while the imatrix weighting alone beats the fork. The flag
   // remains for the user who wants the weighted-MSE-optimal variant.
@@ -709,7 +709,7 @@ int main(int argc, char** argv) {
   // ---- load ----
   gqt::GgufFile f = gqt::LoadGgufStreaming(in);
 
-  // SPEC3: an explicit --imatrix enables the fork-verbatim weighted ROC encode
+  // An explicit --imatrix enables the fork-verbatim weighted ROC encode
   // (types 100/101); the joint post-pass (§2) refines it unless disabled.
   ImatrixMap imatrix;
   std::string imatrix_sha;
@@ -720,7 +720,7 @@ int main(int argc, char** argv) {
     std::cerr << "imatrix.sha256=" << imatrix_sha << " post_pass=" << (post_pass ? 1 : 0) << "\n";
   }
 
-  // SPEC5: parse --prune-layers (comma and/or space separated integers).
+  // Parse --prune-layers (comma and/or space separated integers).
   std::vector<int> prune_list;
   if (!prune_layers.empty()) {
     std::stringstream ss(prune_layers);
@@ -774,7 +774,7 @@ int main(int argc, char** argv) {
     // The fork's prune rewrites block_count and leaves nextn_predict_layers.
     // On Qwen3.5 that leftover 1 makes the loader treat blk.<n_layer-1> as an
     // MTP block and require blk.<n_layer-1>.nextn.eh_proj, which was pruned
-    // with the old last layer. King's served file omits the key (default 0).
+    // with the old last layer. The served file omits the key (default 0).
     // Drop it only when the prune removed every nextn tensor.
     bool any_nextn = false;
     for (const auto& t : f.tensors) {
@@ -797,7 +797,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // SPEC5: when the input was split, the merged single output must drop the
+  // When the input was split, the merged single output must drop the
   // split.* KVs (the fork's llama-quantize calls gguf_remove_key on them). On a
   // single file they are absent; harmless no-op otherwise.
   {
@@ -856,13 +856,13 @@ int main(int argc, char** argv) {
   for (auto& [pat, ov] : overrides) rules.push_back(gqt::ParseRule(pat, ov, "cli"));
   std::vector<std::uint64_t> rule_matches(rules.size(), 0);
 
-  // Fork head flags (SPEC1 item 3): --output-tensor-type applies to OUTPUT
+  // Fork head flags: --output-tensor-type applies to OUTPUT
   // (exact `output.weight`, plus the fork's NextN mirror
   // `nextn.shared_head_head`), --token-embedding-type to TOKEN_EMBD (exact
   // `token_embd.weight` / `per_layer_token_embd.weight`, plus
   // `nextn.embed_tokens`) — the same categories recipe.hpp ports from the
   // fork. On a tied model (no output.weight) --output-tensor-type is a no-op
-  // with a warning (SPEC1; the fork instead routes it to token_embd through
+  // with a warning (the fork instead routes it to token_embd through
   // its ladder — see docs/superroc-quant.md).
   if (has_output_type && tied) {
     std::cerr << "warning: --output-tensor-type is a no-op on this model "
@@ -875,7 +875,7 @@ int main(int argc, char** argv) {
   std::vector<std::string> via(f.tensors.size());  // --tensor-type-trace text
 
   // Explicit --tensor-type overrides may target tensors that are otherwise
-  // gated off (e.g. the router ffn_gate_inp.weight -> Q8_0, RV20 §3.4). Track
+  // gated off. Track
   // which tensors were overridden so they bypass the quantization gate.
   std::vector<bool> tf_overridden(f.tensors.size(), false);
   for (size_t i = 0; i < f.tensors.size(); ++i) {
@@ -1017,7 +1017,7 @@ int main(int argc, char** argv) {
     p.ne1 = t.dims.size() > 1 ? t.dims[1] : 1;
     p.ne2 = t.dims.size() > 2 ? t.dims[2] : 1;
     p.rowb = gqt::RowSize(dt, ne0);
-    // SPEC3: look up this tensor's imatrix row(s). The fork requires the
+    // Look up this tensor's imatrix row(s). The fork requires the
     // imatrix entry length to be ne[0]*ne[2]; expert i03 (over ne[2]) uses the
     // weight vector e[i03*ne0 ..] applied to the ne[1] rows of that expert.
     if (!imatrix.empty()) {
@@ -1026,7 +1026,7 @@ int main(int argc, char** argv) {
         if (it->second.size() == (size_t)(ne0 * p.ne2)) {
           p.irow = it->second.data();
         } else {
-          // SPEC3B hardening (fork llama-quant.cpp:1605-1615): a size-mismatched
+          // Hardening (fork llama-quant.cpp:1605-1615): a size-mismatched
           // imatrix entry is a serious error — most of the model would silently
           // quantize unweighted. The fork throws, except token_embd which always
           // triggers the mismatch and is deliberately ignored (stays unweighted).
@@ -1082,11 +1082,11 @@ int main(int argc, char** argv) {
     e.v.str = recipe_name; extra.push_back(e); }
   { gqt::ExtraKv e; e.key = "superroc.quant.format_version"; e.v.type = gqt::ValType::kUint32;
     // G4 files (split-scale-plane types 120/121) are format v2; classical ROC
-    // recipes keep v1. Per SPEC2 item 3.
+    // recipes keep v1.
     std::uint32_t x = g4_format2 ? 2u : 1u;
     e.v.scalar_bytes.assign((std::uint8_t*)&x, (std::uint8_t*)&x + 4);
     extra.push_back(e); }
-  // SPEC3: imatrix provenance (exact bytes) + encoder settings, so any weighted
+  // Imatrix provenance (exact bytes) + encoder settings, so any weighted
   // output is reproducible. Only written when --imatrix was given.
   if (!imatrix_sha.empty()) {
     { gqt::ExtraKv e; e.key = "superroc.quant.imatrix.sha256"; e.v.type = gqt::ValType::kString;
@@ -1178,7 +1178,7 @@ int main(int argc, char** argv) {
   HashedFile outh;
   outh.path = out;
 
-  // The receipt JSON (SPEC1 item 5). Built once per run, before any publish,
+  // The receipt JSON. Built once per run, before any publish,
   // so the manifest is durable before either final name appears.
   auto BuildManifestJson = [&]() -> std::string {
     const double wall_s =
@@ -1292,7 +1292,7 @@ int main(int argc, char** argv) {
     // identical to a real run's (same pre-pass, same printf).
     print_table();
     std::cerr << "dry-run: nothing written\n";
-    // v0.9 (SPEC4 item 1, F4): a dry-run manifest is published atomically too
+    // v0.9: a dry-run manifest is published atomically too
     // (partial -> fsync -> rename -> dir fsync), and a failure is `error:`+2.
     if (!manifest_file.empty()) {
       try {
@@ -1334,11 +1334,11 @@ int main(int argc, char** argv) {
     // every chunk writes a disjoint range -- bytes are identical for any
     // scheduling (threads 1/8/32 provably identical, as v0.2 was).
     //
-    // v0.9 (SPEC4 item 2, F2): one writer per output. Claim the output first
+    // v0.9: one writer per output. Claim the output first
     // with a flock-held `<out>.gq-lock`; a live claim is a refusal. The model
     // goes to a per-run unique `<out>.partial.<pid>` and the manifest (when
     // asked) to `<manifest>.partial.<pid>`; leftovers of dead runs and the old
-    // fixed-name `<out>.partial` are removed by the claim. v0.9.1 (SPEC5): the
+    // fixed-name `<out>.partial` are removed by the claim. v0.9.1: the
     // claim file itself is removed when this scope ends -- after success and
     // after every handled failure (the `return 2`s below) -- by ~OutputClaim.
     OutputClaim claim;
@@ -1478,7 +1478,7 @@ int main(int argc, char** argv) {
     });
 
     // Writer: this thread. Waits for each tensor in index order, writes it,
-    // frees its buffers (the SPEC5 bound), and moves on.
+    // frees its buffers, and moves on.
     bool write_ok = true;
     std::string write_err;
     for (size_t i = 0; i < f.tensors.size(); ++i) {
@@ -1555,7 +1555,7 @@ int main(int argc, char** argv) {
       throw std::runtime_error(msg);
     }
     writer.Close();
-    // v0.9 (SPEC4 item 1): join the input-hash threads BEFORE anything is
+    // v0.9: join the input-hash threads BEFORE anything is
     // published, so a hash failure aborts while only the partials exist.
     hashes.Join();
 
@@ -1599,7 +1599,7 @@ int main(int argc, char** argv) {
         throw std::runtime_error("cannot rename " + manifest_partial + " to " +
                                  manifest_file + ": " + std::strerror(errno));
     }
-    // Durability of the renames themselves (RV-LQP3 F3): fsync each containing
+    // Durability of the renames themselves: fsync each containing
     // directory once.
     FsyncDirOnce(DirName(out));
     if (!manifest_file.empty() && DirName(manifest_file) != DirName(out))
@@ -1640,7 +1640,7 @@ int main(int argc, char** argv) {
       }
     }
     if (pipe_failed) {
-      // v0.9 (SPEC4 item 1): remove our partials. If the model was already
+      // v0.9: remove our partials. If the model was already
       // renamed, it is COMPLETE at <out> and only the manifest is missing.
       if (model_published) {
         std::remove(manifest_partial.c_str());

@@ -56,8 +56,7 @@ either load the runtime directly or connect to a running server. `video`
 executes the direct MiniMax H3 route used by the asynchronous video worker.
 `transcribe` executes the native Qwen3-ASR-1.7B route used by the synchronous
 audio transcription endpoint.
-Their detailed contracts are defined in [Command-Line Interface](CLI.md) and
-[MiniMax H3 upstream contract](models/minimax-h3/QUALITY.md).
+Their detailed contracts are defined in [Command-Line Interface](CLI.md).
 
 ### HIP execution
 
@@ -162,7 +161,6 @@ probabilistic proposals with exact p/q acceptance and residual correction.
 That route preserves the target distribution with its own seeded trace.
 Request decoding leaves EOS and later speculative tokens out of the reusable
 checkpoint. Fixed-length benchmarks may continue through EOS.
-See the [DS4 benchmark and quality contract](models/deepseek-v4-flash/BENCHMARKS.md).
 
 LFM2 / LFM2-MoE targets accept DSpark drafting through the same route:
 `--speculative dflash2 --dflash-model <lfm2.5-DSpark.gguf> -d 7`.
@@ -176,13 +174,32 @@ as on the Qwen chassis. A DSpark session's state ABI and disk-cache
 identity name the drafter, so its checkpoints never restore into a
 plain session (or the reverse).
 
+After a text model loads, the server runs one short greedy generation through
+the normal request path before it starts listening (`event=warmup` in the
+log). The first real request then does not pay the first-use costs: kernel
+code, decode graphs, draft buffers and fresh scratch pages. The warm-up is a
+raw-text prompt, so a chat request shares none of it and starts like any new
+conversation; its state is dropped when it finishes, and it does not appear in
+the request metrics. `--no-warmup` skips it.
+
+A dense Qwen file that carries its own MTP block (the `nextn` block of
+Qwen3.8-27B GGUFs) needs no `--mtp-model`: `--speculative mtp` binds the
+block from the model file, and when no speculative option is given at all
+the server drafts with it (the load line then reads `speculative=mtp-auto`).
+`--speculative off` serves the model without a drafter. The block's matrices
+are re-encoded as Q4_0 for the draft and the draft uses the model's own
+token embedding and output head, so the drafter adds about 1.2 GiB at a
+40,960-token context. Without `--draft-tokens` it drafts up to 4 tokens per
+step, and a draft stops at the first token the head gives less than
+`SUPERROC_MTP_PMIN` (default 0.40 on a dense block, 0 turns the gate off);
+greedy output is the same with or without the drafter.
+
 Qwen3.8-Flash-Next uses the same scheduler, with independent recurrent, KV,
 indexer, sampling and MTP state per session. Prefix snapshots retain complete
 state; `--cache-disk` adds restart-safe reuse. MTP draft length adapts within the
 configured ceiling. Sampled MTP proposals use p/q acceptance and residual
 correction; greedy verification follows target argmax. Draft and verification
-work can batch across ready requests. See the
-[Flash-Next benchmark and quality contract](models/qwen3.8-flash-next/BENCHMARKS.md).
+work can batch across ready requests.
 
 Each model chooses its prefill chunk. `--prefill-chunk` limits prompt work
 between active decode rounds without changing a lone request's kernel policy.
@@ -258,8 +275,9 @@ A loaded Qwen vision sidecar is prepared while the model loads, before the RAM
 cache is sized and before readiness: SuperROC hashes the complete sidecar for image
 cache identities and uploads the encoder weights, so neither happens in the
 first image request and admission's free device memory already excludes them.
-The weights stay resident even if no image arrives, including a sidecar
-auto-discovered as `mmproj-BF16.gguf` in the model's directory or its parent.
+The weights stay resident even if no image arrives. Qwen3.8-27B also finds a
+sidecar named `mmproj-BF16.gguf` in the model's directory or its parent on its
+own; every other model takes its sidecar from `--mmproj` only.
 The startup line `event=vision_prepared` reports `resident_bytes`,
 `identity_ms` and `upload_ms`. Startup fails if the upload does not fit. Image
 encoding scratch is still allocated per image.
@@ -318,6 +336,40 @@ restart, sampled output may vary when a disk restore re-prefills a gap; greedy
 and zero-prefill restores still require equality. The report separates successful
 validation (`status`) from observed assistant-message equality (`exact`) and its
 requirement (`exact_required`). The SDK conversation suite checks cache bypass.
+
+### Host memory the driver tracks
+
+On an integrated Radeon the GPU driver tracks every page of process memory
+that the runtime registered with it. When the kernel moves or unmaps such a
+page (memory compaction, swap, a free), the driver stops all GPU queues of the
+process until the range is mapped again. Nothing fails, but a load or a first
+request pauses with no GPU kernel running: on a Radeon 8060S with the page
+cache full, up to 0.9 s per load and up to 0.5 s on a first request.
+
+The server keeps that memory out of the kernel's reach in three ways:
+
+- It starts the runtime with `HSA_USERPTR_FOR_PAGED_MEM=0`, so the runtime's
+  own host buffers come from the driver instead of from anonymous memory.
+- It starts the runtime with `GPU_PINNED_MIN_XFER_SIZE=1048576` (MiB), so a
+  copy from ordinary memory goes through the runtime's staging buffer instead
+  of registering the source in 32 MiB windows.
+- While a model loads and until the warm-up is done it pins what the runtime
+  registers by itself, such as the loaded GPU code
+  (`event=runtime_memory_pinned` in the log). The prompt-cache backing is
+  held the same way where it is allocated.
+
+A value of either variable that is already in the environment is kept, which
+is also how to get the runtime's defaults back (`HSA_USERPTR_FOR_PAGED_MEM=1`,
+`GPU_PINNED_MIN_XFER_SIZE=128`). Pins need io_uring and a locked-memory limit
+that covers them (`ulimit -l`, `LimitMEMLOCK`). Where a pin is refused (a
+container without io_uring, a small limit) the memory is gathered into huge
+pages, which compaction does not move, and locked against swap where the
+limit allows. The log line gives the bytes in each state: `pinned_bytes`,
+`huge_bytes`, `unlocked_bytes` (huge pages whose lock was refused, so swap can
+still take them) and `refused_bytes` (neither pinned nor in huge pages); the
+server warns only when `refused_bytes` is not zero. With driver host buffers
+the weight upload reads through the page cache, dropping each chunk after
+use, because direct I/O cannot read into driver memory.
 
 ### Hardware compute queues
 
@@ -596,7 +648,7 @@ no per-server streaming flag or extra model is required.
 The MiniMax H3 subset follows the asynchronous OpenAI-style video resource
 shape and is versioned independently as `superroc.video-api.v1`. Its supported
 fields, frozen presets, queue behavior, and deliberate conditioning
-omissions are documented in the [H3 upstream contract](models/minimax-h3/QUALITY.md).
+omissions follow the upstream model's video API.
 Create requests accept both `application/json` and OpenAI-client-compatible
 `multipart/form-data`; duplicate form fields, malformed boundaries, unsupported
 media types, and reference-image parts fail explicitly.
@@ -749,6 +801,13 @@ capacity remains the hard limit. Chat Completions, Responses, Messages and
 contract. `GET /v1/models` reports that configured limit as `context_length` on
 the loaded text model.
 
+Raw Completions accepts `logprobs` (0 to 5, the number of alternatives per
+token): the response carries `tokens`, `token_logprobs`, `top_logprobs` and
+`text_offset` for the generated tokens, and a stream sends each token's entry
+with the text it belongs to. A token that is not valid UTF-8 on its own is
+written as `bytes:\xNN...`. With a stop sequence the lists end where the
+returned text ends.
+
 `ignore_eos` measures decode past the model's stop tokens, which speculative
 backends do not accelerate: verification ends its accepted run at every EOS it
 emits, so each crossing clips the draft window. Expect decode near the
@@ -771,10 +830,26 @@ ordinary continuation.
 - `temperature`
 - `top_p`
 - `seed`
-- `stop`: null, one string, or an array of up to four strings
+- `stop`: null, one string, or an array of up to 16 strings (OpenAI documents
+  four). When the reply opens with reasoning (thinking on), a stop string is
+  matched in the answer only: a match inside the reasoning would end the reply
+  before it has any content. A stop string that contains the reasoning end tag
+  (`</think>`) is matched everywhere. The same holds for `stop_sequences` on
+  Messages; raw `/v1/completions` text has no reasoning span.
 - `stream`
 - `stream_options.include_usage`
 - `return_progress` (see [Prompt progress](#prompt-progress))
+- `logprobs` (boolean) and `top_logprobs` (0 to 20): the log probability of each
+  generated token and of the most likely alternatives. `logprobs.content` lists
+  every generated token in order, reasoning tokens included, so with thinking
+  on it is longer than `message.content`. A stream carries each token's entry
+  in `choices[].logprobs`, beside the `delta` whose text it belongs to; the
+  tokens of a tool call are listed in the non-streamed response only. With a
+  stop sequence the list ends where the returned text ends: a token the stop
+  sequence swallowed is not reported. A token that is not valid UTF-8 on its
+  own (part of a multi-byte character) is written as U+FFFD in `token`; `bytes`
+  holds its exact bytes. A request that does not ask for log probabilities does
+  no extra work
 - `tools` and `tool_choice` when supported. Function tools accept the nested
   Chat Completions shape and the flat Responses-style `{type,name,parameters}`
   shape. Missing or null `parameters` become `{}`. `parametersJsonSchema` is
@@ -880,8 +955,7 @@ labelled executed model state. Stops must be nonempty, at most 4 KiB each and
 Nullable Chat Completions defaults retain server settings, including sampling
 and token limits. `logprobs: false`, empty `logit_bias`,
 `response_format: {"type":"text"}` and `modalities: ["text"]` are accepted.
-Actual log probabilities, token biases and audio output remain unsupported
-and return explicit errors.
+Token biases and audio output remain unsupported and return explicit errors.
 
 ### Structured output
 
@@ -974,10 +1048,9 @@ Return an OpenAI-style error object:
 ```json
 {
   "error": {
-    "message": "Unsupported field: logprobs",
+    "message": "request field 'audio' is not implemented",
     "type": "invalid_request_error",
-    "param": "logprobs",
-    "code": "unsupported_parameter"
+    "code": "unsupported_field"
   }
 }
 ```
@@ -1038,8 +1111,19 @@ Request bodies, prompts, generated text and credentials are not logged.
 Tool definitions and generated tool calls are treated as data. `superroc`
 never executes tools, shell commands, URLs, or generated code.
 
-The HTTP transport currently uses a wildcard CORS origin and the same listener
-and API key for inference and metrics.
+No CORS headers are sent unless `--cors-origin ORIGIN` is given; then
+responses allow that one origin (or any origin with `--cors-origin '*'`).
+Inference and metrics share the same listener and API key.
+
+Internal failures reach the client as fixed messages ("internal server
+error", "generation failed"); the cause is written to the server log only.
+
+The prompt cache is shared by every client of one server and model. A
+client that sends a prompt whose start matches an earlier prompt sees it in
+`cached_tokens` (and in a faster first token), so it can tell that another
+client sent that start before. The cache never returns another client's
+text. If clients must not learn about each other's prompts, give each of
+them its own server.
 
 `superroc eval` and `tools/serving/superroc-serving-bench.py` send `OPENAI_API_KEY`
 as the bearer credential when it is set.
@@ -1139,6 +1223,13 @@ commit, so long prefills and queue waits keep sending bytes. Explicit
 `return_progress: true` sends headers immediately and adds live prefill
 progress.
 
+The heartbeat is sent after 15 seconds without output. On Chat Completions it
+is a chunk with an empty `delta`, and on Completions a chunk with empty `text`;
+other streams use an SSE comment (`: ping`). An empty chunk is not a token: a
+client that times the first token should wait for the first chunk that carries
+content, or read `timings.prompt_ms` from the final chunk, which is the time
+the prompt took.
+
 `/metrics` exposes `superroc_device_lost_total`, incremented once per confirmed
 context loss, including idle detection. It stays unchanged for recoverable
 errors and pending probes. The counter resets when the process restarts; the
@@ -1209,14 +1300,25 @@ and `default_generation_settings.params` the sampling a request without
 sampling fields gets, with `n_predict` and `max_tokens` -1 when no default
 limit is set. `modalities.vision` is true only when a vision encoder
 loaded. Fields the server cannot report are omitted rather than sent as zero.
+`recipe` is the applied [recipe](recipes.md): the variables, files and flags
+it set and the variables it named that this build does not read (an empty
+object without `--recipe`). `environment` reports the GPU architecture, the
+ROCm version, the kernel and whether the KFD compute-wave save/restore sizes
+check out. `support` lists the request fields the Chat Completions and
+Completions endpoints accept. `canonical_cache` is true when the server runs
+with `SUPERROC_CANONICAL_CACHE=1`; the request log then carries
+`canonical=1`. It reports the switch, not whether the loaded model family is
+covered ([the cache guide](KV-CACHE.md#the-same-reply-for-the-same-history)
+lists those).
 
 Streaming terminal chunks always include llama.cpp-compatible `timings`, even
 without `stream_options.include_usage`. `prompt_n` counts newly processed
 tokens; `cache_n` counts reused tokens. llama-swap uses these fields on every
 turn. SuperROC-specific details stay in `usage.superroc`.
 
-TODO: retained-cache KV metrics, a validated administrative reload/drain
-interface, and in-process recovery after device reset or suspend/resume.
+Not implemented: retained-cache KV metrics, a validated administrative
+reload/drain interface, and in-process recovery after a device reset or
+suspend/resume.
 
 ## Troubleshooting logs
 
@@ -1309,7 +1411,7 @@ Each request to `/v1/chat/completions`, `/v1/completions`, `/v1/responses`,
   tool-call parsing.
 - `response`: `status`, `outcome`, whether the reply was a `stream`, and the
   `body` the client received. For a stream this is the event stream as
-  written, `: ping` keepalives included, so a difference between streaming and
+  written, keepalives included, so a difference between streaming and
   non-streaming parsing shows up in the trace.
 
 A request that fails before generation, for example with invalid JSON, has

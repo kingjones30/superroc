@@ -1,9 +1,9 @@
-// ling3_mla_w2_test.cpp — LW1: unit gate for mla_w2_attn (the two-pass WMMA
+// ling3_mla_w2_test.cpp — unit gate for mla_w2_attn (the two-pass WMMA
 // rewrite) against BOTH references — the serial mla_attn (the kernel that
 // passed every phase-1 gate) and mla_attn_tok (today's batched-prefill
 // kernel, f32 vector ALUs) — on synthetic tensors at the model's real shapes
 // (32 heads, dk 192, dv 128, latent 512, kv_a 576). No model load: seconds on
-// the GPU. Run inside gpu-run with no arguments.
+// the GPU. Run on an otherwise idle GPU with no arguments.
 //
 // All three paths run over the SAME roped / latent-normed / cache-appended
 // inputs, so any diff beyond fp-reorder + f16-input noise is a bug in the w2
@@ -13,9 +13,9 @@
 // 64-tile geometry (57, 507), plus n_pos odd.
 //
 // Metrics printed per case: max_abs, the GATE metric max_rel = |d|/ref_scale
-// (the house convention LS1/LS3 use — a per-element rel is noise-dominated at
+// (the house convention — a per-element rel is noise-dominated at
 // near-zero refs, reported separately as `elem`), and the p50/p99 of the
-// per-element relative error. PASS bar (SPEC item 4): max_rel <= 2e-3 vs
+// per-element relative error. PASS bar: max_rel <= 2e-3 vs
 // mla_attn (and the model gates decide the rest).
 #include <algorithm>
 #include <cmath>
@@ -51,8 +51,8 @@ struct Buf {
 
 struct Stats {
     double max_abs = 0.0;
-    double max_rel = 0.0;          // GATE metric: |d| / ref_scale (house convention,
-                                   // LS1/LS3 style — a per-element rel with a floor is
+    double max_rel = 0.0;          // GATE metric: |d| / ref_scale (house convention:
+                                   // a per-element rel with a floor is
                                    // noise-dominated at near-zero refs)
     double max_rel_elem = 0.0;     // diagnostic: |d| / max(|ref|, 1e-6)
     double p50 = 0.0, p99 = 0.0;   // of |d| / max(|ref|, 1e-6)

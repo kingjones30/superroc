@@ -51,14 +51,6 @@ void Require(const FlintLaunchStatus& status) {
   }
 }
 
-bool FlintSplitKEnabled() {
-  static const bool enabled = [] {
-    const char* env = std::getenv("FLINT_SPLITK");
-    return env == nullptr || std::strcmp(env, "0") != 0;
-  }();
-  return enabled;
-}
-
 }  // namespace
 
 void ExecuteFlintDecodeStep(QwenGpuArena& arena,

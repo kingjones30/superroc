@@ -367,6 +367,69 @@ void CheckInPass(const std::shared_ptr<qfn::Model>& model, bool mtp,
   }
   std::cout << (mtp ? "MTP" : "AR") << ",in_pass,PASS\n";
 }
+// Dual in-pass capture: one pass freezing the
+// earlier 64-aligned P in the widened tail plus S in the text tail; each
+// view's positions frontiers match its admission prediction, P survives
+// execution continuing to S, and S restores as a working boundary.
+void CheckInPassPair(const std::shared_ptr<qfn::Model>& model, bool mtp,
+                     std::span<const std::int32_t> prompt) {
+  superroc::hip::TransferPool streams(2);
+  qfn::ContinuationAdapter adapter(
+      model,
+      mtp ? superroc::core::SessionMode::kSpeculative
+          : superroc::core::SessionMode::kAutoregressive,
+      16384, {'p', 'a', 'i', 'r'});
+  Guard source_guard, reference_guard;
+  auto source = adapter.CreateSlot(source_guard);
+  auto reference = adapter.CreateSlot(reference_guard);
+  auto& a = adapter.GetSession(*source);
+  auto& b = adapter.GetSession(*reference);
+  std::string error;
+  const std::uint32_t p = 8064, s = 8203;
+  Require(s - p >= 64 && p % 64 == 0 && s + 5 <= prompt.size(),
+          "pair geometry does not match the design definitions");
+  const auto predicted_p = adapter.PrefillCheckpointPositions(*source, p);
+  const auto predicted_s = adapter.PrefillCheckpointPositions(*source, s);
+  Checkpoint frozen_p, frozen_s;
+  std::vector<std::uint32_t> order;
+  adapter.PrefillThroughPair(
+      *source, prompt.first(s + 5), p, s, [&](std::uint32_t boundary) {
+        Require(adapter.Positions(*source) ==
+                    (boundary == p ? predicted_p : predicted_s),
+                "pair in-pass positions differ from admission prediction");
+        order.push_back(boundary);
+        if (boundary == p)
+          frozen_p = Capture(adapter, *source, streams);
+        else
+          frozen_s = Capture(adapter, *source, streams);
+      });
+  Require(order == std::vector<std::uint32_t>({p, s}) &&
+              !frozen_p.bytes.empty() && !frozen_s.bytes.empty(),
+          "pair consumers ran out of order");
+  Require(a.Position() == s + 5,
+          "dual in-pass capture changed the completed live frontier");
+  // View P survived the pass's continuation to S: its frozen bytes equal a
+  // native boundary capture at P.
+  std::unique_ptr<qfn::SessionSnapshot> native_p, native_s;
+  Require(b.SyncThrough(prompt.first(p + 5), p, &native_p, &error), error);
+  Require(b.RestoreSnapshot(*native_p, &error), error);
+  const auto independent_p = Capture(adapter, *reference, streams);
+  Require(frozen_p.positions == independent_p.positions &&
+              frozen_p.bytes == independent_p.bytes,
+          "pair earlier view differs from a native capture at P");
+  Require(b.SyncThrough(prompt.first(s + 5), s, &native_s, &error), error);
+  Require(b.RestoreSnapshot(*native_s, &error), error);
+  const auto independent_s = Capture(adapter, *reference, streams);
+  Require(frozen_s.positions == independent_s.positions &&
+              frozen_s.bytes == independent_s.bytes,
+          "pair stable view differs from a native capture at S");
+  Load(adapter, *source, frozen_s, streams);
+  Require(adapter.Validate(*source, frozen_s.positions),
+          "component pair restore rejected");
+  Require(Decode(a, 24, mtp) == Decode(b, 24, mtp),
+          "pair boundary restore sampled continuation differs");
+  std::cout << (mtp ? "MTP" : "AR") << ",in_pass_pair,PASS\n";
+}
 void CheckTransferAndGuardLifetime(const std::shared_ptr<qfn::Model>& model,
                                    bool mtp,
                                    std::span<const std::int32_t> prompt) {
@@ -969,6 +1032,8 @@ int main(int argc, char** argv) {
     if (!image_only) {
       CheckInPass(model, false, prompt);
       CheckInPass(model, true, prompt);
+      CheckInPassPair(model, false, prompt);
+      CheckInPassPair(model, true, prompt);
     }
     if (in_pass_only)
       return 0;

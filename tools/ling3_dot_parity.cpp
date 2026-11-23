@@ -1,4 +1,4 @@
-// ling3-dot-parity — is LG's ROCmFP4 matvec the SAME ARITHMETIC as ggml's?
+// ling3-dot-parity — is the engine's ROCmFP4 matvec the SAME ARITHMETIC as ggml's?
 //
 // ggml's CPU mul_mat does not decode a ROCmFP4 row and multiply in float. It
 // quantizes the ACTIVATION to Q8_0 and runs an integer dot
@@ -6,7 +6,7 @@
 // different computation, and over 42 blocks of a recurrent model the difference
 // grows until argmax flips -- which is exactly what gate (a) measured.
 //
-// This compares LG's `cpu::DotRow` against the fork's own kernel, dlopen'd
+// This compares the engine's `cpu::DotRow` against the fork's own kernel, dlopen'd
 // from libggml-base.so, with `memcmp` per float. Any mismatch here is a real
 // mismatch in the arithmetic, not a tolerance question.
 //
@@ -158,7 +158,7 @@ int main(int argc, char** argv) {
     (use_fast ? fast : dual)(static_cast<int>(k), &theirs, 0, W.data(), 0,
                              y.data(), 0, 1);
 
-    // LG's DotRow on the same packed row.
+    // The engine's DotRow on the same packed row.
     superroc::models::ling3::TensorRef tr;
     tr.data = W.data();
     tr.type = use_fast ? superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST

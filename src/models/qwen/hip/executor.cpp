@@ -8,7 +8,7 @@
 
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/core/hip/hip_utils.hpp"
-#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R3): detach.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // detach.
 #include "src/models/llama/spm_tokenizer.hpp"
 
 namespace superroc::hip {
@@ -67,7 +67,7 @@ QwenGpuExecutor::QwenGpuExecutor(std::shared_ptr<const QwenGpuModel> model,
       arena_(weights_.config, max_context, policy_),
       graph_key_(BuildGraphCaptureKey(weights_, policy_, max_context)),
       h_logits_(weights_.config.vocab_size, 0.0F) {
-  // SQ19: attach this stream to a slot set at load (growing the table when
+  // Attach this stream to a slot set at load (growing the table when
   // the process never configured a count) and warm any new set's buffers
   // now: a first hipMalloc inside a captured decode step poisons the capture,
   // and an unattached stream would decline to a different arithmetic than
@@ -76,11 +76,12 @@ QwenGpuExecutor::QwenGpuExecutor(std::shared_ptr<const QwenGpuModel> model,
   AllocateGpuSamplingWorkspace(&sampling_workspace_, weights_.config.vocab_size,
                                max_context);
   detail::EmitQwenExecutionPolicy(policy_.Fingerprint());
+  PrepareInt4Route();
 }
 
 QwenGpuExecutor::~QwenGpuExecutor() {
   (void)hipStreamSynchronize(arena_.stream);
-  // SQ10 SPEC2 (R3): release this session's slot set (and any helper alias
+  // Release this session's slot set (and any helper alias
   // pointing at it) before the arena destroys the stream.
   (void)superroc_fp4_slot_stream_detach(arena_.stream);
   for (const auto event : prefill_events_) {
@@ -89,6 +90,9 @@ QwenGpuExecutor::~QwenGpuExecutor() {
   }
   if (d_verification_logits_ != nullptr) {
     (void)hipFree(d_verification_logits_);
+  }
+  if (d_lfm2_row_conv_ != nullptr) {
+    (void)hipFree(d_lfm2_row_conv_);
   }
   FreeGpuSamplingWorkspace(&sampling_workspace_);
 }
@@ -162,6 +166,34 @@ std::unique_ptr<QwenGpuSnapshot> QwenGpuExecutor::SaveSnapshot(
   auto snapshot = arena_.SaveSnapshot(valid_context);
   snapshot->vision_layout_ = vision_input_.layout().Prefix(valid_context);
   return snapshot;
+}
+
+void QwenGpuExecutor::ArmPromptCheckpoint(std::uint32_t position) {
+  CheckReset();
+  const auto& config = weights_.config;
+  if (!d_prompt_checkpoint_conv_) {
+    const std::size_t layers =
+        config.num_layers - config.FullAttentionLayerCount();
+    void* conv = nullptr;
+    void* recurrent = nullptr;
+    HIP_CHECK(hipMalloc(&conv, layers * config.SsmQkvSize() *
+                                   config.ssm_conv_kernel * sizeof(float)));
+    d_prompt_checkpoint_conv_.reset(conv);
+    HIP_CHECK(hipMalloc(
+        &recurrent,
+        layers * config.ssm_time_step_rank * config.ssm_state_size *
+            config.SsmValueSize() *
+            QwenRecurrentStateElementBytes(policy_.recurrent_state_storage)));
+    d_prompt_checkpoint_recurrent_.reset(recurrent);
+  }
+  prompt_checkpoint_position_ = position;
+}
+
+std::unique_ptr<QwenGpuSnapshot> QwenGpuExecutor::SavePromptCheckpoint() {
+  CheckReset();
+  return arena_.SaveSnapshot(prompt_checkpoint_position_,
+                             d_prompt_checkpoint_conv_.get(),
+                             d_prompt_checkpoint_recurrent_.get());
 }
 
 void QwenGpuExecutor::ConfigureVision(
@@ -304,7 +336,12 @@ tokenization::TokenId QwenGpuExecutor::SampleLastLogits(
   HIP_CHECK(hipMemcpyAsync(&token, d_out_token, sizeof(token),
                            hipMemcpyDeviceToHost, arena_.stream));
   HIP_CHECK(hipStreamSynchronize(arena_.stream));
-  return CheckedSampleToken(token, weights_.config.vocab_size);
+  token = CheckedSampleToken(token, weights_.config.vocab_size);
+  // A banned device draw is redrawn host-side with the ban masked (rejection
+  // sampling: exact). One lookup on the raw draw; unbanned steps stop here.
+  if (sampler.IsBanned(token))
+    return sampler.Sample(CopyLastLogits());
+  return token;
 }
 
 tokenization::TokenId QwenGpuExecutor::SampleCachedLogits(
@@ -361,7 +398,11 @@ tokenization::TokenId QwenGpuExecutor::SampleVerificationLogits(
   HIP_CHECK(hipMemcpyAsync(&token, d_out_token, sizeof(token),
                            hipMemcpyDeviceToHost, arena_.stream));
   HIP_CHECK(hipStreamSynchronize(arena_.stream));
-  return CheckedSampleToken(token, weights_.config.vocab_size);
+  token = CheckedSampleToken(token, weights_.config.vocab_size);
+  // Same divert as the last-logits path, from this verification row.
+  if (sampler.IsBanned(token))
+    return sampler.Sample(CopyVerificationLogits(row));
+  return token;
 }
 
 QwenSampledVerificationResult QwenGpuExecutor::VerifySampledToken(
@@ -381,7 +422,11 @@ QwenSampledVerificationResult QwenGpuExecutor::VerifySampledToken(
         "Qwen sampled verification proposal is malformed");
   }
 
-  if (sampler.NeedsConstraintMask()) {
+  // A banned draft takes the host branch: the masked distribution rejects it
+  // (probability zero) and draws the residual masked. An accepted device
+  // token is the pre-checked draft, so only a rejected residual needs a
+  // post-check below.
+  if (sampler.NeedsConstraintMask() || sampler.IsBanned(draft_token)) {
     const auto target = sampler.Distribution(CopyVerificationLogits(row));
     if (sampler.Uniform() * draft_token_probability <
         target.probability(draft_token)) {
@@ -428,6 +473,13 @@ QwenSampledVerificationResult QwenGpuExecutor::VerifySampledToken(
     // a single synchronization, then restores the exact host RNG state here.
     sampler.SetRngState(residual_rng_checkpoint);
     sampler.Accept(draft_token);
+  } else if (sampler.IsBanned(result.token)) {
+    // The device drew its residual ban-blind; redraw masked host-side.
+    // Nothing was accepted, so the host draw starts clean.
+    const auto target = sampler.Distribution(CopyVerificationLogits(row));
+    result.token = target.SampleResidual(draft_candidate_ids,
+                                         draft_candidate_probabilities,
+                                         sampler.mutable_rng_state());
   }
   return result;
 }
@@ -448,17 +500,6 @@ std::span<const float> QwenGpuExecutor::CopyVerificationLogits(
 
 void QwenGpuExecutor::SetPromptHiddenCapture(
     bool enabled, std::span<const std::uint32_t> target_layer_ids) {
-  // Re-arming the same capture between prompt chunks must not drop the
-  // accumulated target features: speculative priming reads them later.
-  const auto& current_layers = arena_.GetTargetLayerCapture();
-  const bool unchanged =
-      capture_prompt_hidden_ == enabled &&
-      current_layers.size() == target_layer_ids.size() &&
-      std::equal(current_layers.begin(), current_layers.end(),
-                 target_layer_ids.begin());
-  if (unchanged) {
-    return;
-  }
   capture_prompt_hidden_ = enabled;
   h_prompt_hidden_.clear();
   h_verification_hidden_.clear();
@@ -536,8 +577,13 @@ std::vector<tokenization::TokenId> QwenGpuExecutor::GenerateFromPrefix(
 
   std::size_t cur_pos = prompt_tokens.size();
   sampling::SamplerState sampler(options.sampling, prompt_tokens);
-  if (!options.sampling.can_use_unmodified_argmax()) {
+  if (!options.sampling.can_use_unmodified_argmax() ||
+      sampler.ForcedToken().has_value()) {
     next_token = SampleLastLogits(sampler);
+  } else if (sampler.IsBanned(next_token)) {
+    // The device argmax is banned: select host-side from this row instead of
+    // resampling on device, which would draw the banned token again.
+    next_token = sampler.Sample(CopyLastLogits());
   }
 
   // 2. Auto-regressive decode generation loop
@@ -564,8 +610,13 @@ std::vector<tokenization::TokenId> QwenGpuExecutor::GenerateFromPrefix(
     }
 
     next_token = ForwardToken(next_token, static_cast<std::uint32_t>(cur_pos));
-    if (!options.sampling.can_use_unmodified_argmax()) {
+    if (!options.sampling.can_use_unmodified_argmax() ||
+        sampler.ForcedToken().has_value()) {
       next_token = SampleLastLogits(sampler);
+    } else if (sampler.IsBanned(next_token)) {
+      // Same divert as the first token: a banned device argmax falls back to
+      // a masked host selection from this row.
+      next_token = sampler.Sample(CopyLastLogits());
     }
     ++cur_pos;
   }

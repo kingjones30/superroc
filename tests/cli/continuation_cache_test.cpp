@@ -1717,7 +1717,7 @@ void TestAcquireShrinkKeepsRequestOwnCopy() {
 }
 
 void TestAcquireShrinkProtectsBoundaryRestoreSource() {
-  // SPEC3C fix 2: the Acquire shrink ranks with the lookup's own predicate —
+  // The Acquire shrink ranks with the lookup's own predicate —
   // the entry's identity must match the input identity at the entry's
   // length, and pass the stable-prefix rule. A checkpoint saved before an
   // image keeps that boundary's identity, so the request that restores

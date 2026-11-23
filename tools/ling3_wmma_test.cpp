@@ -1,5 +1,5 @@
-// ling3_wmma_test.cpp — LS3 phase 3's unit gate for kernels/ling3_wmma.hip.
-// Run inside gpu-run BEFORE the first full-model run (the brief's rule after
+// ling3_wmma_test.cpp — unit gate for kernels/ling3_wmma.hip.
+// Run on an otherwise idle GPU BEFORE the first full-model run (the rule after
 // H1's GPU reset): every kernel here is small-shape, synthetic-tensor, and
 // checked against CPU transcriptions of the SAME algorithms.
 //
@@ -40,7 +40,7 @@
 namespace {
 
 int g_fail = 0;
-std::FILE * g_dump = nullptr;  // LS3 PHASE8: raw ydev bytes per case (A/B bit gate)
+std::FILE * g_dump = nullptr;  // raw ydev bytes per case (A/B bit gate)
 
 unsigned g_state = 20261001u;
 unsigned Rnd() {
@@ -125,7 +125,7 @@ double ForkDot(int qtype, const uint8_t *wrow, const float *xtok, int k) {
     return acc;
 }
 
-// RMS-normalised error report (LS1's lesson: not per-row relative).
+// RMS-normalised error report (not per-row relative).
 void Report(const char *tag, const char *sub, const std::vector<float> &ref,
             const std::vector<float> &dev, double tol_rms) {
     double maxabs = 0, rms = 0;
@@ -179,7 +179,7 @@ void TestQuant(int qtype, int n_rows, int k) {
         // The kernel file compiles with -ffast-math, which lowers the block
         // scale's `max/127` to a reciprocal multiply on gfx11 (measured: the
         // GPU byte equals max*(1/127) exactly) -- the same compiled form as
-        // superroc's quantizer and LS1's shipped ling3_gemv_q8 under the same
+        // superroc's quantizer and the shipped ling3_gemv_q8 under the same
         // flags. The gate therefore pins every byte against the UNION of
         // the two exact CPU lowerings; anything outside that union is an
         // indexing/layout bug, which is what the gate exists to catch.
@@ -333,7 +333,7 @@ void RunGrouped(int qtype, int k, int n, int n_expert, int n_tokens,
         std::printf("%s %-4s FAIL rc=%d\n", tag, TypeName(qtype), rc);
         ++g_fail;
     } else {
-        if (g_dump != nullptr) {  // LS3 PHASE8: raw bytes for the BK A/B gate
+        if (g_dump != nullptr) {  // raw bytes for the BK A/B gate
             std::fprintf(g_dump, "CASE %s %s k=%d n=%d slots=%d\n", tag,
                          TypeName(qtype), k, n, slots);
             std::fwrite(ydev.data(), sizeof(float), ydev.size(), g_dump);
@@ -419,7 +419,8 @@ void TestDense(int qtype, int k, int n, int m) {
 }
 
 // --------------------------------------------------------------------------
-// 6. real weight rows from a raw file (extracted from the GGUF on the box)
+// 6. real weight rows from a raw file (extracted from the GGUF on the
+//    test machine)
 // --------------------------------------------------------------------------
 void TestRealRows(const char *path, int k) {
     FILE *f = std::fopen(path, "rb");

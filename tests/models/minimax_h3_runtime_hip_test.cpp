@@ -4,7 +4,7 @@
 #include <iostream>
 #include <string>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/models/minimax_h3/runtime.hpp"
 
 namespace {
@@ -17,10 +17,9 @@ double Seconds(const std::chrono::steady_clock::time_point& start) {
 }  // namespace
 
 int main() {
-  const char* model_root =
-      ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
+  const char* model_root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
   const char* manifest =
-      ::superroc::core::GetEnvCompat("SUPERROC_H3_SOURCE_MANIFEST");
+      ::superroc::core::GetEnv("SUPERROC_H3_SOURCE_MANIFEST");
   if (model_root == nullptr || manifest == nullptr) {
     std::cerr << "SKIP: set SUPERROC_H3_MODEL_ROOT and "
                  "SUPERROC_H3_SOURCE_MANIFEST\n";

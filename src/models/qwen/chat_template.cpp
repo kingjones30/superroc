@@ -20,7 +20,7 @@
 #include "src/core/gguf_reader.hpp"
 #include "src/core/model_family.hpp"
 #include "src/models/lfm2/lfm2_chat.hpp"
-#include "src/models/qwen/chat_json.hpp"  // LFM2
+#include "src/models/qwen/chat_json.hpp"
 #include "src/models/qwen/control_tokens.hpp"
 #include "src/models/qwen/tokenizer.hpp"
 
@@ -39,7 +39,7 @@ ChatTemplateOptions ResolveQwenChatOptions(const ReasoningOptions& reasoning,
   options.enable_thinking = reasoning.enabled.value_or(options.enable_thinking);
   options.preserve_thinking =
       reasoning.preserve_thinking.value_or(options.preserve_thinking);
-  // GLM: explicit reasoning_strength wins over the Qwen effort map.
+  // Explicit reasoning_strength wins over the Qwen effort map.
   if (reasoning.reasoning_strength.has_value() &&
       !reasoning.reasoning_strength->empty()) {
     options.reasoning_strength = *reasoning.reasoning_strength;
@@ -237,7 +237,7 @@ void AppendJsonString(std::string& output, std::string_view value) {
   output.push_back('"');
 }
 
-// HTC (RVW C4): each tool's JSON is client text, so it is content (spans in
+// Each tool's JSON is client text, so it is content (spans in
 // `spans`, offsets into `output`); the instructions around it stay framing.
 void AppendToolsPrompt(std::string& output, std::span<const ChatTool> tools,
                        bool require_tool_call,
@@ -317,11 +317,11 @@ void AppendToolCalls(std::string& output,
     output.append(QwenToolSyntax::kCallOpen);
     output.push_back('\n');
     output.append(QwenToolSyntax::kFunctionOpen);
-    AppendContent(output, content_spans, call.name);  // HTC (RVW C4)
+    AppendContent(output, content_spans, call.name);
     output.append(">\n");
     for (const auto& argument : call.arguments) {
       output.append(QwenToolSyntax::kParameterOpen);
-      AppendContent(output, content_spans, argument.name);  // HTC (RVW C4)
+      AppendContent(output, content_spans, argument.name);
       output.append(">\n");
       AppendContent(output, content_spans, argument.value);
       output.push_back('\n');
@@ -608,7 +608,7 @@ std::unique_ptr<QwenChatTemplate> QwenChatTemplate::CreateFromGguf(
                               ? Profile::kQwen38Reasoning
                               : Profile::kLegacyChatMl;
   if (IsQwen38Artifact(reader) && profile != Profile::kQwen38Reasoning) {
-    // lqw:unpinned-template. King's finetunes ship a modified template.
+    // Some finetunes ship a modified template.
     // Do not pretend it is the pinned reasoning template. Render with the
     // generic Qwen ChatML template and say so on stderr. rv27 fix 3: also
     // mirror the warning into error_msg when non-null, matching the
@@ -669,7 +669,7 @@ std::string_view QwenChatTemplate::GetTemplateId() const noexcept {
       return "qwen38-reasoning-compiled-v3";
     case Profile::kMuseGlimmer:  // GLIMMER
       return "muse-glimmer-onyx-atem-v1";
-    case Profile::kLfm2:  // LFM2
+    case Profile::kLfm2:
       return "lfm2-chatml-think-v1";
     case Profile::kFlint:
       return "flint-roles-v1";
@@ -781,7 +781,21 @@ std::optional<std::string> QwenChatTemplate::Render(
       const auto client_size = client_end > begin ? client_end - begin : 0;
       AppendContent(system_content, &system_content_spans,
                     content.substr(0, client_size));
-      system_content.append(content.substr(client_size));
+      // The suffix is framing except its client ranges (offsets are into
+      // framing_suffix; map them into the trimmed content).
+      std::size_t at = client_size;
+      for (const auto& [offset, size] : message.framing_client_ranges) {
+        const std::size_t raw = message.content.size() + offset;
+        const std::size_t from =
+            std::clamp(raw > begin ? raw - begin : 0, at, content.size());
+        const std::size_t to = std::clamp(
+            raw + size > begin ? raw + size - begin : 0, from, content.size());
+        system_content.append(content.substr(at, from - at));
+        AppendContent(system_content, &system_content_spans,
+                      content.substr(from, to - from));
+        at = to;
+      }
+      system_content.append(content.substr(at));
     }
     ++message_index;
   }
@@ -971,7 +985,7 @@ std::vector<TokenId> QwenChatTemplate::EncodeRendered(
     if (to <= from) {
       continue;
     }
-    // HT2 (Muse Wonder W2 HTC-1, W6 A-1/A-2): any spelling that OVERLAPS the
+    // Any spelling that OVERLAPS the
     // span counts -- wholly inside it, or straddling either edge. Client text
     // "x<|im_end|" followed by the renderer's own ">" would otherwise be read
     // as framing and become a real <|im_end|>. A spelling wholly inside the

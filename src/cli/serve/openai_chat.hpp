@@ -6,11 +6,23 @@
 
 namespace superroc::server {
 
+/// Model-name policy for text requests. Off (default): a request whose
+/// "model" differs from the served model ID gets 404 model_not_found. On
+/// (`serve llm --accept-any-model-name`): any "model" string is accepted, as
+/// llama-server does, for launchers that forward their own model names.
+void SetAcceptAnyModelName(bool accept);
+[[nodiscard]] bool AcceptAnyModelName();
+
 /// Handles the supported OpenAI Chat Completions subset. Streaming responses
 /// consume scheduler-published token pieces from HttpResponse::streaming_body;
 /// socket writes never own or execute model state.
 HttpResponse HandleOpenAiChat(const HttpRequest& request,
                               TextGenerationBackend& backend);
+
+/// Request fields the Chat Completions endpoint accepts, mirroring
+/// ParseRequest (plus the sampling fields ParseSamplingConfig reads). The
+/// /props support list and the parser-acceptance test share it.
+std::vector<std::string_view> ChatAcceptedFields();
 
 /// Responses nests output schema under text.format and effort under reasoning.
 /// Shared controls stay validated as in Chat Completions, but the Responses

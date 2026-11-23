@@ -5,7 +5,7 @@
 // 2026-10-03 00:55 permits the router's accumulation order to change, because superroc's order
 // was arbitrary to begin with and the block-2 near-tie moving is a numerics change like any
 // other. So this reports what actually matters: max_abs and max_rel of the logits against the
-// kernel shipped today, and -- the number Jay will care about most -- HOW MANY TOP-8 PICKS
+// kernel shipped today, and -- the number that matters most -- HOW MANY TOP-8 PICKS
 // DIFFER per 512 tokens, because that is what can move a text.
 //
 // Runs at the smallest shape first, per the lane's rule after the 2026-10-02 fault.

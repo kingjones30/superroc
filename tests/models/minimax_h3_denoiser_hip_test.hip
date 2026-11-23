@@ -19,7 +19,7 @@
 #include "src/models/minimax_h3/dit.hpp"
 #include "src/models/minimax_h3/runtime.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace {
 
@@ -125,8 +125,8 @@ void CheckF32Boundary(std::string_view name, std::span<const float> got,
 }
 
 int CheckReal() {
-  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* conditioning_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_LAYER50_CONDITIONING");
+  const char* root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
+  const char* conditioning_path = ::superroc::core::GetEnv("SUPERROC_H3_LAYER50_CONDITIONING");
   if (root == nullptr || conditioning_path == nullptr) {
     std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or "
                  "SUPERROC_H3_LAYER50_CONDITIONING unset\n";
@@ -234,8 +234,8 @@ int CheckReal() {
 }
 
 int CheckOracle() {
-  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* golden_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_DENOISER_GOLDEN");
+  const char* root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
+  const char* golden_value = ::superroc::core::GetEnv("SUPERROC_H3_DENOISER_GOLDEN");
   if (root == nullptr || golden_value == nullptr) {
     std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or SUPERROC_H3_DENOISER_GOLDEN unset\n";
     return 77;
@@ -341,8 +341,8 @@ int CheckOracle() {
 }
 
 int CheckProductionShapeOracle(bool row_parallel) {
-  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* golden_value = ::superroc::core::GetEnvCompat("SUPERROC_H3_DENOISER_GOLDEN_512");
+  const char* root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
+  const char* golden_value = ::superroc::core::GetEnv("SUPERROC_H3_DENOISER_GOLDEN_512");
   if (root == nullptr || golden_value == nullptr) {
     std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or "
                  "SUPERROC_H3_DENOISER_GOLDEN_512 unset\n";
@@ -450,8 +450,8 @@ int CheckProductionShapeOracle(bool row_parallel) {
 }
 
 int CheckReuseSmoke() {
-  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* conditioning_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_LAYER50_CONDITIONING");
+  const char* root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
+  const char* conditioning_path = ::superroc::core::GetEnv("SUPERROC_H3_LAYER50_CONDITIONING");
   if (root == nullptr || conditioning_path == nullptr) {
     std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or "
                  "SUPERROC_H3_LAYER50_CONDITIONING unset\n";
@@ -552,8 +552,8 @@ int CheckReuseSmoke() {
 }
 
 int ProfileFullResolutionForward() {
-  const char* root = ::superroc::core::GetEnvCompat("SUPERROC_H3_MODEL_ROOT");
-  const char* conditioning_path = ::superroc::core::GetEnvCompat("SUPERROC_H3_LAYER50_CONDITIONING");
+  const char* root = ::superroc::core::GetEnv("SUPERROC_H3_MODEL_ROOT");
+  const char* conditioning_path = ::superroc::core::GetEnv("SUPERROC_H3_LAYER50_CONDITIONING");
   if (root == nullptr || conditioning_path == nullptr) {
     std::cout << "SKIP: SUPERROC_H3_MODEL_ROOT or "
                  "SUPERROC_H3_LAYER50_CONDITIONING unset\n";

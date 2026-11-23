@@ -329,7 +329,7 @@ __global__ void k_route(
     }
 }
 
-// LR2 SPEC2 2026-10-03 (v2): selection-based replacement for k_route, bit-identical at
+// Selection-based replacement for k_route, bit-identical at
 // EVERY shape k_route accepts -- in particular n_group_used = 4 of 8 groups, which is what
 // the Ling-3.0-flash GGUF carries (expert_group_used_count = 4, config.cpp:189-190). v1 of
 // this kernel refused n_group_used != 2, wrote no ids/weights in the model, and moved the
@@ -347,10 +347,10 @@ __global__ void k_route(
 //   * Everything else is k_route's code VERBATIM: the group bitonic (h1_argsort_desc_par
 //     over gscore, so on tied gscores the kept set gorder[0..n_group_used-1] is exactly
 //     k_route's network tie order, for any n_group_used), the keep/mask loop, the final
-//     512-wide bitonic, and the weight normalisation. v1's hand-rolled group arg-max is
-//     gone: it hardcoded a 2-group keep set AND its smaller-index tie rule is not the
-//     bitonic network's tie order (see the ITEM-2b record below in ling3_route's comment
-//     and this lane's REPORT.md "What I tried that did not work").
+//     512-wide bitonic, and the weight normalisation. v1's hand-rolled group
+//     arg-max is gone: it hardcoded a 2-group keep set AND its smaller-index
+//     tie rule is not the bitonic network's tie order (see the ITEM-2b record
+//     below in ling3_route's comment, and what did not work).
 //
 // Contract notes (inputs where k_route itself is not well-defined): npg < 2 refuses with
 // LING3_ERR_ARG because k_route reads stale scratch there (order[1] of a 1-wide sort);
@@ -504,7 +504,7 @@ __global__ void k_route_fast(
     }
 
     // Phase 5 (k_route verbatim): the final full bitonic. Its network tie order is part
-    // of the ids contract and cannot be replaced by any arg-max (REPORT.md, ITEM 2b).
+    // of the ids contract and cannot be replaced by any arg-max (see ITEM 2b).
     (void) h1_argsort_desc_par(sel, order, ba, n_expert, nt);
     __syncthreads();
 
@@ -527,8 +527,8 @@ __global__ void k_route_fast(
     }
 }
 
-// Jay 2026-10-01: router logits in parallel -- one block per expert, 64 threads stride over k, shared-memory reduce.
-// LS1 PHASE7 item 2a: build24's kernel, kept VERBATIM as `k_route_logits_ref` so
+// Router logits in parallel -- one block per expert, 64 threads stride over k, shared-memory reduce.
+// The earlier kernel, kept VERBATIM as `k_route_logits_ref` so
 // tools/ling3_route_test.cpp can run it against the new one on the device and require
 // bit-identical logits. Do not "improve" it; the new one is k_route_logits, below.
 __global__ void k_route_logits_ref(const float * x, const float * gate, int k, float * logits) {
@@ -575,14 +575,14 @@ extern "C" int ling3_gemv(int qtype, const void * W, const float * x, float * y,
     if (!W || !x || !y || rb == 0 || n <= 0) {
         return LING3_ERR_ARG;
     }
-    // LS1 2026-10-01: ROCmFP4 (100/101) goes through the integer path. Every weight
+    // ROCmFP4 (100/101) goes through the integer path. Every weight
     // matrix Ling-3.0-flash decodes is one of those two; the float kernels below stay
     // for F32 / Q8_0 / Q6_K, which only the norms and the router's F32 gate use.
     if (qtype == LING3_Q4_0_ROCMFP4 || qtype == LING3_Q4_0_ROCMFP4_FAST) {
         return ling3_gemv_fp4(qtype, W, x, y, k, n, stream);
     }
-    // LVL SPEC1: the VL artifact's LM head is Q6_K, and the float path below cost
-    // 15.4 ms per token on it (41 % of the decode step on halo). Its own warp-per-row
+    // The VL artifact's LM head is Q6_K, and the float path below cost
+    // 15.4 ms per token on it (41 % of the decode step on one machine). Its own warp-per-row
     // matvec takes that tensor; every other non-FP4 type keeps the path it had.
     if (qtype == LING3_Q6_K && (k % 256) == 0) {
         return ling3_gemv_q6k(qtype, W, x, y, k, n, stream);
@@ -630,7 +630,7 @@ extern "C" int ling3_vec_add(const float * a, const float * b, float * y, int n,
     return ling3_chk("add");
 }
 
-// build24's entry point, unchanged, kept as the reference for the route test.
+// The earlier entry point, unchanged, kept as the route test's reference.
 extern "C" int ling3_route_ref(
         const float * x, const float * gate, const float * bias,
         int k, int n_expert, int n_used, int n_groups, int n_group_used,
@@ -641,7 +641,7 @@ extern "C" int ling3_route_ref(
     if (!x || !gate || !ids || !weights || nf < 0 || ni < 0) {
         return LING3_ERR_ARG;
     }
-    // Jay 2026-10-01: scratch allocated once (sizes depend only on n_expert / n_groups, fixed per model) instead of three
+    // Scratch allocated once (sizes depend only on n_expert / n_groups, fixed per model) instead of three
     // hipMalloc + three hipFree per call (40 calls per token).
     static float * sf = nullptr;
     static int * si = nullptr;
@@ -658,7 +658,7 @@ extern "C" int ling3_route_ref(
         if (rc == LING3_OK) rc = ling3_hip(hipMalloc(&rc_d, sizeof(int)), "route malloc rc");
         if (rc != LING3_OK) return rc;
         nf_cap = nf; ni_cap = ni;
-        // LS1 phase 4a: hand the status word to the once-per-token device check. This read
+        // Hand the status word to the once-per-token device check. This read
         // used to be one blocking D2H per MoE layer -- 40 GPU drains per token, the last of
         // them -- and the value it returned was discarded by the only caller anyway.
         ling3_moe_dev_register_route_rc(rc_d);
@@ -693,7 +693,7 @@ extern "C" int ling3_expert_ffn(
     if (rb_k == 0 || rb_ff == 0 || n_tokens <= 0 || n_used <= 0 || n_expert <= 0 || n_ff <= 0) {
         return LING3_ERR_ARG;
     }
-    // Jay 2026-10-01: one set of scratch buffers, grown on demand, instead of 4 hipMalloc + 4 hipFree per call (each hipFree
+    // One set of scratch buffers, grown on demand, instead of 4 hipMalloc + 4 hipFree per call (each hipFree
     // is an implicit device sync; ~84 calls per token).
     static float *g = nullptr, *u = nullptr, *h = nullptr, *p = nullptr;
     static int ff_cap = 0, k_cap = 0;
@@ -717,7 +717,7 @@ extern "C" int ling3_expert_ffn(
     const uint8_t * gate_b = (const uint8_t *) gate;
     const uint8_t * up_b = (const uint8_t *) up;
     const uint8_t * down_b = (const uint8_t *) down;
-    // LS1 2026-10-01: with the integer path, every matvec wants its input as Q8_1.
+    // With the integer path, every matvec wants its input as Q8_1.
     // Here both producer and consumer are inside this function, so the activation is
     // quantised once and reused: xt is shared by gate and up of every selected expert
     // (one quantisation per token, not per expert), and h is per expert (one each).
@@ -804,10 +804,10 @@ extern "C" int ling3_dense_ffn(
 }
 
 // ---------------------------------------------------------------------------
-// RV25 WAVE 1, F2 + F3 -- the n_used == 1, w == 1.0 expert: the shared expert of a
+// The n_used == 1, w == 1.0 expert: the shared expert of a
 // MoE layer, and the whole FFN of a dense layer. Decode only (n_tokens == 1).
 // Everything the streaming branch and the MTP verify use is untouched: they keep
-// ling3_expert_ffn / ling3_dense_ffn exactly as they were (RV25 §5).
+// ling3_expert_ffn / ling3_dense_ffn exactly as they were.
 //
 // F2 -- `xq_ready` says the caller has ALREADY quantised `x` into LING3_Q8_SLOT_FFN_X.
 //   On a MoE layer the resident grouped call (ling3_expert_ffn_dev) did exactly
@@ -874,11 +874,11 @@ extern "C" int ling3_dense_ffn_w1(
 }
 
 // ---------------------------------------------------------------------------
-// LS1 PHASE7 ITEM 2a -- the new router logit matvec. This is what landed, and it is
+// The new router logit matvec. This is what landed, and it is
 // PROVEN bit-identical: tools/ling3_route_test.cpp reports logits_diff = 0 on every
 // case at both the small shape and Ling's real one.
 //
-// build24's k_route_logits (kept verbatim above as k_route_logits_ref) was
+// The earlier k_route_logits (kept verbatim above as k_route_logits_ref) was
 // <<<n_expert, 64, 0, stream>>> with a 64-deep LDS reduction tree and six __syncthreads, measured
 // at 117.7 GB/s -- 48.5 % of this box's 231.06 GB/s 4-byte read roof
 // (tools/ling3_roof_bench.cpp, 1 GiB working set, MALL-cold). It is a plain dense matvec
@@ -887,7 +887,7 @@ extern "C" int ling3_dense_ffn_w1(
 // One warp per row, eight warps per CTA, no LDS tree, no __syncthreads, and the
 // activation staged in LDS once per CTA and shared by every row that CTA handles.
 //
-// BIT-IDENTICAL BY CONSTRUCTION, not by tolerance. build24's reduction was
+// BIT-IDENTICAL BY CONSTRUCTION, not by tolerance. The earlier reduction was
 //     s_t    = SUM over increasing j of row[t + 64j] * x[t + 64j]
 //     red[t] = s_t ; then off = 32, 16, 8, 4, 2, 1 ; logits = red[0]
 // With one warp per row, lane l carries BOTH old thread l's series AND old thread l+32's
@@ -928,20 +928,22 @@ __global__ void k_route_logits(const float * x, const float * gate, int n_expert
 }
 
 // The shipped router. Same signature and the same results as ling3_route_ref: the
-// logits kernel is proven bit-identical, and k_route -- the core -- is build24's network,
-// UNCHANGED.
+// logits kernel is proven bit-identical, and k_route -- the core -- is the
+// earlier network, UNCHANGED.
 //
-// ITEM 2b WAS ATTEMPTED AND REVERTED. A selection-based core (per-group top-2 sums, then a
-// top-(n_used+1) selection, with build24's bitonic network kept as a tie-fallback) was
-// bit-identical at n_expert=64 / n_used=4 / k=256 and WRONG at Ling's real shape
-// (512 experts, n_used=8, k=2560) -- and forcing the fallback there produced the SAME wrong
-// ids as the fast path, so the fast path was not the only thing at fault. Five bugs were
-// found and fixed on the way (an unbroadcast warp-argmax threshold; a top-2 warp merge that
-// dropped the other lane's runner-up; a round-0 filter starting at 0.f instead of -INFINITY;
-// an in-place group mask that corrupted the fallback before it ran; and a keep-mask pointer
-// one past the end of the LDS float array, which returned ids like -1072994156). The sixth
-// was not found. Shipping a router that is right at one shape and wrong at the model's own
-// was not an option, so the core is build24's network. REPORT7.md has the record.
+// ITEM 2b WAS ATTEMPTED AND REVERTED. A selection-based core (per-group top-2
+// sums, then a top-(n_used+1) selection, with the earlier bitonic network kept
+// as a tie-fallback) was bit-identical at n_expert=64 / n_used=4 / k=256 and
+// WRONG at Ling's real shape (512 experts, n_used=8, k=2560) -- and forcing the
+// fallback there produced the SAME wrong ids as the fast path, so the fast path
+// was not the only thing at fault. Five bugs were found and fixed on the way
+// (an unbroadcast warp-argmax threshold; a top-2 warp merge that dropped the
+// other lane's runner-up; a round-0 filter starting at 0.f instead of
+// -INFINITY; an in-place group mask that corrupted the fallback before it ran;
+// and a keep-mask pointer one past the end of the LDS float array, which
+// returned ids like -1072994156). The sixth was not found. Shipping a router
+// that is right at one shape and wrong at the model's own was not an option, so
+// the core is the earlier network.
 extern "C" int ling3_route(
         const float * x, const float * gate, const float * bias,
         int k, int n_expert, int n_used, int n_groups, int n_group_used,
@@ -986,11 +988,12 @@ extern "C" int ling3_route(
     }
     {
         const size_t smem = ((size_t) nf * sizeof(float) + (size_t) ni * sizeof(int) + 255) & ~(size_t) 255;
-        // LR2 SPEC2 2026-10-03 (v2): k_route_fast is the default at EVERY in-contract
-        // shape -- including the model's own n_group_used = 4 of 8 (v1 refused != 2 and
-        // moved the scalar fingerprint to 14650fb0739d0383). LING3_ROUTE_REF=1 falls back
-        // to build24's bitonic network for the route test and regression hunts; cached
-        // once on first call so the per-token cost is a branch.
+        // k_route_fast is the default at EVERY in-contract
+        // shape -- including the model's own n_group_used = 4 of 8 (v1 refused
+        // != 2 and moved the scalar fingerprint to 14650fb0739d0383).
+        // LING3_ROUTE_REF=1 falls back to the earlier bitonic network for the
+        // route test and regression hunts; cached once on first call so the
+        // per-token cost is a branch.
         static int use_ref = -1;
         if (use_ref < 0) {
             const char * e = getenv("LING3_ROUTE_REF");

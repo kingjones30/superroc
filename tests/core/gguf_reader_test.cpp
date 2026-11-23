@@ -383,6 +383,80 @@ void TestSplitGgufDiscovery() {
   std::filesystem::remove_all(temp_dir);
 }
 
+void TestTensorOverlay() {
+  const auto temp_dir =
+      std::filesystem::temp_directory_path() /
+      ("superroc-gguf-overlay-" + std::to_string(static_cast<long>(getpid())));
+  std::filesystem::create_directories(temp_dir);
+  const auto base_path = temp_dir / "model.gguf";
+  const auto overlay_path = temp_dir / "overlay.gguf";
+  const auto wrong_path = temp_dir / "wrong.gguf";
+
+  GgufBuilder base;
+  base.AddMetadataString("general.architecture", "qwen35");
+  base.AddTensor("blk.0.attn_output.weight", {8, 4},
+                 superroc::core::GgmlType::kBF16, 0);
+  base.AddTensor("output_norm.weight", {4}, superroc::core::GgmlType::kF32, 64);
+  GgufBuilder overlay;
+  overlay.AddTensor("blk.0.attn_output.weight", {8, 4},
+                    superroc::core::GgmlType::kF32, 0);
+  overlay.AddTensor("blk.99.not_in_the_model.weight", {4},
+                    superroc::core::GgmlType::kF32, 128);
+  GgufBuilder wrong;
+  wrong.AddTensor("output_norm.weight", {8}, superroc::core::GgmlType::kF32, 0);
+  WriteBinaryFile(base_path, base.Build(128));
+  WriteBinaryFile(overlay_path, overlay.Build(256));
+  WriteBinaryFile(wrong_path, wrong.Build(64));
+
+  std::string err;
+  setenv("SUPERROC_TENSOR_OVERLAY", overlay_path.c_str(), 1);
+  {
+    const auto reader = superroc::core::GgufReader::OpenFile(base_path, &err);
+    Expect(reader != nullptr, "A model opens with an overlay: " + err);
+    const auto* swapped = reader->FindTensor("blk.0.attn_output.weight");
+    Expect(
+        swapped != nullptr && swapped->type == superroc::core::GgmlType::kF32,
+        "The overlay's tensor replaces the model's copy");
+    Expect(reader->FindTensor("output_norm.weight")->type ==
+               superroc::core::GgmlType::kF32,
+           "A tensor the overlay does not hold stays");
+    Expect(reader->FindTensor("blk.99.not_in_the_model.weight") == nullptr,
+           "A tensor the model does not have is ignored");
+    Expect(reader->GetTensorCount() == 2, "The tensor count stays the model's");
+    Expect(reader->GetMappedRegions().size() == 2,
+           "The overlay adds one mapped region");
+    const auto* first =
+        static_cast<const std::uint8_t*>(reader->GetMappedRegions()[1].data);
+    const auto* data = static_cast<const std::uint8_t*>(swapped->data);
+    Expect(data >= first && data < first + reader->GetMappedRegions()[1].size,
+           "The replaced tensor's bytes come from the overlay");
+  }
+  {
+    // A draft model, an MTP head or a vision projector is opened as a sidecar:
+    // the overlay is for the model file, also when a name matches.
+    const auto sidecar = superroc::core::GgufReader::OpenFile(
+        base_path, &err, superroc::core::GgufReader::FileRole::kSidecar);
+    Expect(sidecar != nullptr, "A sidecar opens with an overlay set: " + err);
+    Expect(sidecar->FindTensor("blk.0.attn_output.weight")->type ==
+               superroc::core::GgmlType::kBF16,
+           "A sidecar keeps its own tensor");
+    Expect(sidecar->GetMappedRegions().size() == 1,
+           "A sidecar maps no overlay");
+  }
+  setenv("SUPERROC_TENSOR_OVERLAY", wrong_path.c_str(), 1);
+  err.clear();
+  Expect(superroc::core::GgufReader::OpenFile(base_path, &err) == nullptr &&
+             !err.empty(),
+         "An overlay tensor with other dimensions is refused");
+  err.clear();
+  Expect(superroc::core::GgufReader::OpenFile(
+             base_path, &err, superroc::core::GgufReader::FileRole::kSidecar) !=
+             nullptr,
+         "A sidecar is not checked against the overlay: " + err);
+  unsetenv("SUPERROC_TENSOR_OVERLAY");
+  std::filesystem::remove_all(temp_dir);
+}
+
 void TestVisionExclusionValidation() {
   GgufBuilder builder;
   builder.AddMetadataString("general.architecture", "qwen35");
@@ -687,6 +761,7 @@ int main() {
   TestBasicGgufParsing();
   TestQwen38_27BParsing();
   TestSplitGgufDiscovery();
+  TestTensorOverlay();
   TestVisionExclusionValidation();
   TestQuantizationLabel();
   TestMalformedGgufRejection();

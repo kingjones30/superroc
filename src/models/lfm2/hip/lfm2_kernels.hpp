@@ -57,7 +57,7 @@ Lfm2LaunchStatus LaunchLfm2MoeRoute(const float* x, const float* gate_inp,
                                     int* ids, float* weights,
                                     hipStream_t stream);
 
-// LFM2: tiled fp32 flash-attention prefill for head_dim 64 / GQA (SPEC2).
+// LFM2: tiled fp32 flash-attention prefill for head_dim 64 / GQA.
 // q/out are [batch][heads][64]; the KV cache is fp32 head-major
 // (k_cache[((layer*kv_heads+kvh)*max_ctx+pos)*64+d], v_cache = k_cache+plane).
 // Query row r is at absolute position start_pos+r and attends [0,start_pos+r]
@@ -68,7 +68,7 @@ Lfm2LaunchStatus LaunchLfm2PrefillAttention(
     std::uint32_t max_ctx, std::uint32_t heads, std::uint32_t kv_heads,
     hipStream_t stream);
 
-// LFM2 (SPEC3): the same prefill attention over the fp16 token-major cache
+// LFM2: the same prefill attention over the fp16 token-major cache
 // (element ((layer*max_ctx+pos)*kv_heads+kvh)*64+d, V plane = K + plane).
 Lfm2LaunchStatus LaunchLfm2PrefillAttentionF16(
     const float* q, const std::uint16_t* k_cache, const std::uint16_t* v_cache,
@@ -76,7 +76,7 @@ Lfm2LaunchStatus LaunchLfm2PrefillAttentionF16(
     std::uint32_t batch, std::uint32_t max_ctx, std::uint32_t heads,
     std::uint32_t kv_heads, hipStream_t stream);
 
-// LFM2 (SPEC3): batched fp16 KV write. k/v are [batch][kv] fp32 (kv =
+// LFM2: batched fp16 KV write. k/v are [batch][kv] fp32 (kv =
 // kv_heads*head_dim); row r lands at token-major row layer*max_ctx +
 // start_pos + r. Round to nearest even.
 Lfm2LaunchStatus LaunchLfm2BatchedWriteKvF16(
@@ -93,7 +93,7 @@ Lfm2LaunchStatus LaunchLfm2MoeRouteBatch(
     std::uint32_t n_expert, std::uint32_t n_tokens, std::uint32_t n_used,
     float* logits, int* ids, float* weights, hipStream_t stream);
 
-// LFM2 (LKF): hidden += add, then out = RMSNorm(hidden, eps) * weight, in one
+// LFM2: hidden += add, then out = RMSNorm(hidden, eps) * weight, in one
 // 256-thread block. Same arithmetic as LaunchResidualAdd followed by
 // LaunchRMSNorm (generic RMSNormKernel<>), so the result is bit-identical;
 // one launch instead of two. weight may be null (scale 1).

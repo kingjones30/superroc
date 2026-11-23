@@ -1,10 +1,10 @@
 #pragma once
 // ling3_gemm.hpp — batched-prefill GEMM + batched MoE router for
-// Ling-3.0-flash. Lane LS3 (GLM 5.3), Ling speed wave, 2026-10-01. ADDITIVE to
-// LX's ling3_moe.hip: nothing in that file (or any other lane's file) is
+// Ling-3.0-flash. ADDITIVE to
+// ling3_moe.hip: nothing in that file (or any other file) is
 // modified here.
 //
-// Why this exists (H1 REPORT7 §3/§5): LX's ling3_gemm is
+// Why this exists: the reference ling3_gemm is
 // one-thread-per-output-row with a serial k dot and the naive per-element FP4
 // decode, so batching the projections through it was 5x SLOWER than the scalar
 // path, and it was never validated at m > 1. Every projection of a batched
@@ -61,7 +61,7 @@ int ling3_gemm_grp(int qtype, const void* W, size_t expert_stride,
                    const int* grp_zp, int total_tiles);
 
 /// Dense convenience: y[t*n + r] = dot(W_row_r, x_t), t in [0, m). Same math
-/// and layout as LX's ling3_gemm, on the fast tiled kernel.
+/// and layout as the reference ling3_gemm, on the fast tiled kernel.
 int ling3_gemm_fast(int qtype, const void* W, const float* x, float* y, int k,
                     int n, int m);
 

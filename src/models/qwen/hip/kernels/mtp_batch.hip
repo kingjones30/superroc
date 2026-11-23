@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
 
 #include "src/models/qwen/hip/ops/norm_residual.hpp"
 #include "src/core/hip_launch_check.hpp"
@@ -83,6 +84,49 @@ void LaunchMtpFusionNorms(const float* embed_rows, const float* h_rows,
                          stream>>>(embed_rows, h_rows, enorm, hnorm, fusion,
                                    hidden, eps);
   SUPERROC_CHECK_LAUNCH("MtpFusionNormsKernel");
+}
+
+// Probability of the drafted token under the draft head: one block sums
+// exp(logit - peak) over the scored rows, where peak is the logit at the token
+// the argmax kernel just wrote. The peak's own term is 1, so the sum is at
+// least 1 and the result is in (0, 1]. Logits that are not finite add nothing.
+__global__ void MtpTop1ProbabilityKernel(const float* __restrict__ logits,
+                                         std::uint32_t rows,
+                                         const std::uint32_t* __restrict__ token,
+                                         float* __restrict__ probability) {
+  const std::uint32_t peak_row = token[0] < rows ? token[0] : 0U;
+  const float peak = logits[peak_row];
+  float sum = 0.0F;
+  for (std::uint32_t row = threadIdx.x; row < rows; row += blockDim.x) {
+    const float value = logits[row];
+    if (isfinite(value)) {
+      sum += expf(value - peak);
+    }
+  }
+  __shared__ float s_sum[1024];
+  s_sum[threadIdx.x] = sum;
+  __syncthreads();
+  for (std::uint32_t stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+    if (threadIdx.x < stride) {
+      s_sum[threadIdx.x] += s_sum[threadIdx.x + stride];
+    }
+    __syncthreads();
+  }
+  if (threadIdx.x == 0) {
+    const float total = s_sum[0];
+    probability[0] = (isfinite(peak) && total >= 1.0F) ? 1.0F / total : 0.0F;
+  }
+}
+
+void LaunchMtpTop1Probability(const float* logits, std::size_t rows,
+                              const std::uint32_t* token, float* probability,
+                              hipStream_t stream) {
+  if (rows == 0 || rows > 0xFFFFFFFFULL) {
+    throw std::runtime_error("MTP draft probability row count is invalid");
+  }
+  MtpTop1ProbabilityKernel<<<1, 1024, 0, stream>>>(
+      logits, static_cast<std::uint32_t>(rows), token, probability);
+  SUPERROC_CHECK_LAUNCH("MtpTop1ProbabilityKernel");
 }
 
 }  // namespace superroc::hip

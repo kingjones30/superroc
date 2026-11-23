@@ -10,16 +10,16 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace {
 
 constexpr int kThreads = 256;
 // 1024 * top-8 = 8192 slots, the largest shape superroc_fp4_moe_group_batch runs
 // on its parallel kernel (slots <= 8192 and dynamic smem <= 48 KB).
-// KPF: default for the SUPERROC_KAT_SUB_TOKENS knob (1024 | 2048 | 4096);
+// Default for the SUPERROC_KAT_SUB_TOKENS knob (1024 | 2048 | 4096);
 // larger sub-batches run the grouper's serial kernel.
-constexpr int kSubTokens = 4096;  // KPF2: 32k grouper handles slots <= 32768.
+constexpr int kSubTokens = 4096;  // 32k grouper handles slots <= 32768.
 constexpr int kGroupCap = 256;
 constexpr int kActTileBytes = 576;
 constexpr int kMaxTokens = 4096;
@@ -92,14 +92,14 @@ std::size_t Q8Bytes(int tiles, int k) {
          static_cast<std::size_t>(std::max(k / 32, 1)) * kActTileBytes;
 }
 
-// KPF SPEC1 step 2: routed sub-batch token knob, read once. 1024 | 2048 |
+// Routed sub-batch token knob, read once. 1024 | 2048 |
 // 4096; anything else (including unset) falls back to kSubTokens with one
 // stderr line. Larger sub-batches make slots = sub * n_used exceed the
 // parallel grouper's 8192-slot cap; superroc_fp4_moe_group_batch then runs its
 // serial kernel (its oracle, no cap), so no grouper change is needed.
 int KatSubTokens() {
   static const int sub = [] {
-    const char* e = ::superroc::core::GetEnvCompat("SUPERROC_KAT_SUB_TOKENS");
+    const char* e = ::superroc::core::GetEnv("SUPERROC_KAT_SUB_TOKENS");
     if (e != nullptr && (std::strcmp(e, "1024") == 0 ||
                          std::strcmp(e, "2048") == 0 ||
                          std::strcmp(e, "4096") == 0)) {
@@ -112,18 +112,18 @@ int KatSubTokens() {
   return sub;
 }
 
-// KPF SPEC1 step 3: when SUPERROC_KAT_MOE_DRAIN=0, skip the Drain at the top of
+// When SUPERROC_KAT_MOE_DRAIN=0, skip the Drain at the top of
 // LaunchKatMoeRoutedGrouped (the one inside Ensure on reallocation stays).
 // Default (unset or anything but "0") keeps the drain.
 bool KatMoeDrain() {
   static const bool drain = [] {
-    const char* e = ::superroc::core::GetEnvCompat("SUPERROC_KAT_MOE_DRAIN");
+    const char* e = ::superroc::core::GetEnv("SUPERROC_KAT_MOE_DRAIN");
     return e == nullptr || std::strcmp(e, "0") != 0;
   }();
   return drain;
 }
 
-// KPF SPEC1 step 4: sync attribution behind KAT_SYNC_PROF=1. drain counts
+// Sync attribution behind KAT_SYNC_PROF=1. drain counts
 // Drain() calls (one hipStreamSynchronize each), order counts OrderEvent()
 // calls, ensure counts KatBuf (re)allocations (the Ensure realloc path),
 // other counts the OnNull hipEventRecord + hipStreamWaitEvent ops. Syncs
@@ -195,7 +195,7 @@ struct KatScratch {
   hipEvent_t order = nullptr;
   KatBuf slot_tok, slot_w, token_slots, slot_dest;
   KatBuf grp_e, grp_off, grp_cnt, grp_zp, grp_zb;
-  KatBuf hdr;  // KPF2: device header (4 ints) for batch32k; zeroed once per chunk.
+  KatBuf hdr;  // Device header (4 ints) for batch32k; zeroed once per chunk.
   KatBuf gate_e, up_e, hs, down_e;
   KatBuf q8_e, q8_h;
 
@@ -293,12 +293,12 @@ int CheckShape(int qtype, int n_tokens, int hidden, int n_ff) {
   return SUPERROC_FP4_OK;
 }
 
-// MG64: 64-token grouped GEMM gate, read once. SUPERROC_FP4_GRP64 zero
+// 64-token grouped GEMM gate, read once. SUPERROC_FP4_GRP64 zero
 // keeps the 16-token path; unset or anything else takes the 64-token
 // path when the shape gate (average >= 32 tokens per group) passes.
 bool Grp64Enabled() {
   static const bool on = [] {
-    const char* e = ::superroc::core::GetEnvCompat("SUPERROC_FP4_GRP64");
+    const char* e = ::superroc::core::GetEnv("SUPERROC_FP4_GRP64");
     return e == nullptr || std::strcmp(e, "0") != 0;
   }();
   return on;
@@ -319,7 +319,7 @@ int RoutedSub(int qtype, const void* gate, const void* up, const void* down,
       static_cast<std::size_t>(n_ff) * superroc_fp4_row_bytes(qtype, hidden);
   const std::size_t stride_ff =
       static_cast<std::size_t>(hidden) * superroc_fp4_row_bytes(qtype, n_ff);
-  // KPF2: the header lives on the device now (s.hdr, 4 ints, zeroed once per
+  // The header lives on the device now (s.hdr, 4 ints, zeroed once per
   // chunk by the caller). No D2H here: n_groups/total_tiles come out of
   // hdr_dev inside the GEMM kernels, which launch over the host-known bound
   // max_tiles = GroupQ8Tiles(slots, n_expert) (>= the true tile count, the
@@ -361,8 +361,8 @@ int RoutedSub(int qtype, const void* gate, const void* up, const void* down,
       s.down_e.bytes < static_cast<std::size_t>(slots) * hidden * sizeof(float)) {
     return SUPERROC_FP4_ERR_ARG;
   }
-  // MG64: 64-token blocks when the average group holds >= 32 tokens. KPF2:
-  // the true tiles/groups need the header D2H this lane removes, so the
+  // 64-token blocks when the average group holds >= 32 tokens:
+  // the true tiles/groups need the header D2H, so the
   // gate runs on the host-known bounds (both GEMM paths are
   // bit-identical; this only moves the crossover). max_tiles >=
   // 2 * grp_capacity first holds at slots >= 4404 for 256 experts.
@@ -459,7 +459,7 @@ int LaunchKatMoeRoutedGrouped(int qtype, const void* gate, const void* up,
   }
   rc = Scratch().Ensure(n_tokens, n_used, n_expert, hidden, n_ff);
   if (rc != SUPERROC_FP4_OK) return rc;
-  // KPF2: one zeroing of the device header per chunk; batch32k only ever
+  // One zeroing of the device header per chunk; batch32k only ever
   // sets STATUS (sticky ERR), so a single D2H after the sub-batch loop sees
   // every sub-batch's status. Synchronous (16 bytes), hence ordered before
   // the default-stream grouper kernels.
@@ -477,7 +477,7 @@ int LaunchKatMoeRoutedGrouped(int qtype, const void* gate, const void* up,
                    n_expert, hidden, n_ff, y + tok * hidden, stream);
     if (rc != SUPERROC_FP4_OK) return rc;
   }
-  // KPF2: the single host read of the chunk's header. A non-OK status fails
+  // The single host read of the chunk's header. A non-OK status fails
   // the chunk with the existing message.
   int hdr_host[SUPERROC_FP4_LS1_HDR_WORDS] = {0, 0, 0, 0};
   if (hipMemcpy(hdr_host, Scratch().hdr.As<int>(),

@@ -418,7 +418,8 @@ HttpResponse HandleImageApiRequest(const HttpRequest& request,
   } catch (const std::invalid_argument& error) {
     return Error(400, error.what(), "invalid_request");
   } catch (const std::exception& error) {
-    return Error(500, error.what(), "image_generation_failed");
+    Logger::Error("image", error.what());
+    return Error(500, "internal server error", "image_generation_failed");
   }
 }
 

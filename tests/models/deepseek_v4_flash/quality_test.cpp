@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "src/core/crypto/sha256.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
 
 namespace superroc::testing::ds4 {
@@ -1400,7 +1400,7 @@ void CheckDsparkReproducibility(
 int main(int argc, char** argv) try {
   std::cout << std::unitbuf;
   const char* model_path =
-      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
+      ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_V4_FLASH_MODEL");
   if (model_path == nullptr || model_path[0] == '\0') {
     std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_MODEL is not set\n";
     return 77;
@@ -1434,9 +1434,9 @@ int main(int argc, char** argv) try {
     return 2;
   }
   const char* dspark_model_path =
-      dspark ? ::superroc::core::GetEnvCompat(
-                   "SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL")
-             : nullptr;
+      dspark
+          ? ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL")
+          : nullptr;
   if (dspark && (dspark_model_path == nullptr || *dspark_model_path == '\0')) {
     std::cout << "SKIP: SUPERROC_DEEPSEEK_V4_FLASH_DSPARK_MODEL is not set\n";
     return 77;

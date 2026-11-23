@@ -1,13 +1,13 @@
-// ling3-route-test — is the new router BIT-IDENTICAL to build24's?
+// ling3-route-test — is the new router BIT-IDENTICAL to the earlier one?
 //
 // PHASE7 rule, learned the hard way: **bounds discipline in every harness.** Before
 // any launch this file validates, ON THE HOST, every index it is about to hand the
 // device against the same constants it sized the allocations with, and refuses to
 // launch if they disagree. That rule exists because at 2026-10-02T01:58:04Z a test
-// in this lane handed expert ids of up to 448 into buffers sized for 8, the kernel
+// here handed expert ids of up to 448 into buffers sized for 8, the kernel
 // read off the end, and the GPU page faulted and reset -- which kills every live
-// seat on the box. A harness that can fault the GPU needs the same discipline as
-// the kernel it tests.
+// seat on the test machine. A harness that can fault the GPU needs the same
+// discipline as the kernel it tests.
 //
 // The comparison is old-against-NEW ON THE DEVICE, which is the only comparison
 // that can be bit-exact and that does not depend on my re-deriving the router's
@@ -141,8 +141,8 @@ void RunCase(const char * label, const std::vector<float> & x,
   hipMemset(d_ia, 0x7f, nid_b); hipMemset(d_ib, 0x7f, nid_b);
   hipMemset(d_wa, 0x7f, nwt_b); hipMemset(d_wb, 0x7f, nwt_b);
 
-  // 1. build24's router, as the reference. Read back before anything else runs, because
-  //    the next two calls overwrite the same device buffers.
+  // 1. the earlier router, as the reference. Read back before anything else
+  //    runs, because the next two calls overwrite the same device buffers.
   const int rc_a = ling3_route_ref(d_x, d_gate, d_bias, k_hidden, n_expert, n_used,
                                    n_groups, n_group_used, 1.0f, 1, d_ia, d_wa);
   CHECK(rc_a == LING3_OK, "ling3_route_ref rc");
@@ -153,9 +153,10 @@ void RunCase(const char * label, const std::vector<float> & x,
   hipMemcpy(ia.data(), d_ia, nid_b, hipMemcpyDeviceToHost);
   hipMemcpy(wa.data(), d_wa, nwt_b, hipMemcpyDeviceToHost);
 
-  // 2. the new router as shipped. Its core is build24's network; what changed is
-  //    the logits kernel, so this checks BOTH: the logits are the item-2a claim, and the
-  //    ids/weights prove the untouched core still reproduces build24's order.
+  // 2. the new router as shipped. Its core is the earlier network; what
+  //    changed is the logits kernel, so this checks BOTH: the logits are the
+  //    item-2a claim, and the ids/weights prove the untouched core still
+  //    reproduces the earlier order.
   const int rc_b = ling3_route(d_x, d_gate, d_bias, k_hidden, n_expert, n_used,
                                n_groups, n_group_used, 1.0f, 1, d_ib, d_wb);
   CHECK(rc_b == LING3_OK, "ling3_route rc");
@@ -175,9 +176,9 @@ void RunCase(const char * label, const std::vector<float> & x,
     // against the expert count BEFORE anything downstream is asked to use them.
     CHECK(ibv[i] >= 0 && ibv[i] < n_expert, "returned expert id is inside the expert range");
   }
-  CHECK(ldiff == 0, "router logits differ from build24's");
-  CHECK(iddiff == 0, "router ids differ from build24's (order included)");
-  CHECK(wdiff == 0, "router weights differ from build24's");
+  CHECK(ldiff == 0, "router logits differ from the reference router's");
+  CHECK(iddiff == 0, "router ids differ from the reference router's (order included)");
+  CHECK(wdiff == 0, "router weights differ from the reference router's");
   if (verbose || ldiff || iddiff || wdiff) {
     std::printf("  ROUTE %-36s logits_diff=%d ids_diff=%d weights_diff=%d\n",
                 label, ldiff, iddiff, wdiff);
@@ -205,7 +206,7 @@ int main() {
   if (const char * e = getenv("LING3_ROUTE_NEXPERT")) n_expert = atoi(e);
   if (const char * e = getenv("LING3_ROUTE_NUSED")) n_used = atoi(e);
   if (const char * e = getenv("LING3_ROUTE_K")) k_hidden = atoi(e);
-  // LR2 SPEC2: the model's gate shape is 512/8/8/4 (GGUF expert_group_used_count = 4).
+  // The model's gate shape is 512/8/8/4 (GGUF expert_group_used_count = 4).
   if (const char * e = getenv("LING3_ROUTE_NGROUPS")) n_groups = atoi(e);
   if (const char * e = getenv("LING3_ROUTE_NGROUPUSED")) n_group_used = atoi(e);
   int trials = 8;
@@ -246,10 +247,10 @@ int main() {
     // Two clear winners, then everything else tied at the boundary.
     for (std::size_t i = 0; i < nb; ++i) gate[i] = 0.0f;
     for (int i = 0; i < n_expert; ++i) bias[i] = 0.0f;
-    bias[7] = 5.0f; if (n_expert > 300) bias[300] = 5.0f;  // LR2: 300 is OOB below n_expert=301
+    bias[7] = 5.0f; if (n_expert > 300) bias[300] = 5.0f;  // 300 is OOB below n_expert=301
     RunCase("two winners then a tie", x, gate, bias);
 
-    // LR2 SPEC2: tie AT THE GROUP KEEP CUT -- the case that decides 4-of-8 selection.
+    // Tie AT THE GROUP KEEP CUT -- the case that decides 4-of-8 selection.
     // Groups 0..2 are clear winners; every remaining group has the SAME gscore, so which
     // tied group takes the last keep slot (n_group_used = 4 in the model) is decided by
     // the group bitonic's network tie order -- a hand-rolled arg-max keep-set can diverge
@@ -271,7 +272,7 @@ int main() {
 
   }
 
-  // Real router inputs, if Jay captured them: LING3_ROUTE_CAPTURE=<file> holding
+  // Real router inputs, if captured: LING3_ROUTE_CAPTURE=<file> holding
   // n_expert*k floats per case, one after another.
   if (const char * cap = getenv("LING3_ROUTE_CAPTURE")) {
     std::FILE * f = std::fopen(cap, "rb");
@@ -292,7 +293,7 @@ int main() {
     }
   }
 
-  // LR2 SPEC2 item 3: microseconds per call at THIS shape, for whichever core this
+  // Microseconds per call at THIS shape, for whichever core this
   // process selects (LING3_ROUTE_REF=1 -> k_route, default -> k_route_fast). Both paths
   // run the SAME k_route_logits, so (REF us) - (default us) = k_route - k_route_fast.
   if (const char * e = getenv("LING3_ROUTE_TIME")) {
@@ -344,6 +345,6 @@ int main() {
     std::printf("FAIL: %d check(s)\n", failures);
     return 1;
   }
-  std::printf("PASS: router logits, ids (in order) and weights are bit-identical to build24's\n");
+  std::printf("PASS: router logits, ids (in order) and weights are bit-identical to the reference router's\n");
   return 0;
 }

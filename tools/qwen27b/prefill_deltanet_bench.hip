@@ -502,7 +502,8 @@ __launch_bounds__(256) __global__
 // ---------------------------------------------------------------------------
 
 // __shfl_xor lowers to ds_bpermute_b32, which takes the LDS path. For xor masks
-// inside a 16-lane DPP row the same exchange is a pure ALU-path DPP modifier.
+// inside a DPP row of 16 lanes the same exchange is a pure ALU-path DPP
+// modifier.
 template<int kMask>
 __device__ __forceinline__ float XorAddDpp(float x) {
   const int y = __builtin_amdgcn_update_dpp(0, __builtin_bit_cast(int, x),

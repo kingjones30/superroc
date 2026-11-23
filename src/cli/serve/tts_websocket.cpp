@@ -212,8 +212,15 @@ HttpResponse HandleTtsWebSocket(const HttpRequest& request,
         } else {
           throw std::invalid_argument("unsupported speech stream event");
         }
-      } catch (const std::exception& exception) {
+      } catch (const std::invalid_argument& exception) {
         if (!error(exception.what()))
+          return;
+      } catch (const std::length_error& exception) {
+        if (!error(exception.what()))
+          return;
+      } catch (const std::exception& exception) {
+        Logger::Error("tts", exception.what());
+        if (!error("speech synthesis failed"))
           return;
       }
     }

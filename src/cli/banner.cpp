@@ -52,13 +52,13 @@ void PrintStartupBanner(std::string_view version,
   const bool unicode = SupportsUnicode();
   const char* marker = unicode ? "▶" : ">";
   const char* separator = unicode ? " · " : " - ";
-  // Super ROC: product red.
+  // Super Roc: product red.
   const char* tint = color ? "\033[38;2;220;38;38m" : "";
   const char* bold = color ? "\033[1m" : "";
   const char* reset = color ? "\033[0m" : "";
 
-  // Super ROC: two-line text banner; same tty/NO_COLOR/unicode rules.
-  std::clog << "  " << tint << marker << reset << " " << bold << "Super ROC"
+  // Super Roc: two-line text banner; same tty/NO_COLOR/unicode rules.
+  std::clog << "  " << tint << marker << reset << " " << bold << "Super Roc"
             << reset << ' ' << version << '\n'
             << "    LLM inference for Strix Halo" << separator << "gfx1151\n"
             << std::flush;

@@ -28,8 +28,7 @@ void Check(bool condition, const std::string& message) {
 int main(int argc, char** argv) {
   // Optional argv: model dir. When absent, skips if default location missing.
   const std::string model_dir =
-      argc > 1 ? argv[1]
-               : "/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+      argc > 1 ? argv[1] : "/path/to/Qwen3-TTS-12Hz-1.7B-CustomVoice";
 
   if (!std::filesystem::exists(model_dir + "/config.json")) {
     std::cerr << "SKIP qwen3_tts_loader_test: model not present at "

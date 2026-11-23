@@ -6,7 +6,7 @@
 #include <stdexcept>
 #include <string>
 namespace superroc::hip_check {
-// audit F04: a launch whose configuration is invalid never enqueues;
+// A launch whose configuration is invalid never enqueues;
 // hipGetLastError reports it here instead of later stale data.
 inline void ThrowIfLaunchFailed(const char* what, const char* file, int line) {
   const hipError_t e = hipGetLastError();

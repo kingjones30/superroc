@@ -14,6 +14,7 @@
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/quant/ggml_dequant.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
+#include "src/models/qwen/hip/kernels/fp4_decode.hpp"
 #include "src/models/qwen/hip/kernels/small_batch_gemm.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
 
@@ -142,10 +143,10 @@ __launch_bounds__(WM * WN * WaveSize, 1) __global__
                                         float* __restrict__ y,
                                         std::size_t batch, std::size_t m,
                                         std::size_t k) {
-  constexpr bool PerHalfScale =
-      WType == core::GgmlType::kQ6_K || WType == core::GgmlType::kQ3_K ||
-      WType == core::GgmlType::kQ4_0_ROCMFP4 ||  // lqw:perhalf
-      WType == core::GgmlType::kQ4_0_ROCMFP4_FAST;
+  constexpr bool PerHalfScale = WType == core::GgmlType::kQ6_K ||
+                                WType == core::GgmlType::kQ3_K ||
+                                WType == core::GgmlType::kQ4_0_ROCMFP4 ||
+                                WType == core::GgmlType::kQ4_0_ROCMFP4_FAST;
   constexpr bool HasOffset =
       WType == core::GgmlType::kQ4_K || WType == core::GgmlType::kQ5_K;
 
@@ -250,6 +251,17 @@ __launch_bounds__(WM * WN * WaveSize, 1) __global__
   int32x4_t r_b[kStageTiles][BK];
   float r_dx[kStageTiles][BK];
   float r_sx[kStageTiles][HasOffset ? BK : 1];
+  // An FP4 block stays raw until the commit, so the stage's matrix work covers
+  // its load. Arithmetic on a load result here would wait for every load.
+  // Short chunks only: on the 128-token tile it loses 4 to 7 % prefill.
+  constexpr bool kFp4Raw =
+      BN < 128 && (WType == core::GgmlType::kQ4_0_ROCMFP4 ||
+                   WType == core::GgmlType::kQ4_0_ROCMFP4_FAST);
+  constexpr std::size_t kFp4Block =
+      WType == core::GgmlType::kQ4_0_ROCMFP4_FAST ? 17 : 18;
+  std::uint32_t r_fp4[kFp4Raw ? kPrefetch : 1][4];
+  std::uint32_t r_fp4_scale[kFp4Raw ? kPrefetch : 1];
+  float r_fp4_live[kFp4Raw ? kPrefetch : 1];
 
   const int num_kb = static_cast<int>(num_blocks);
   const int m_i = static_cast<int>(m);
@@ -295,18 +307,28 @@ __launch_bounds__(WM * WN * WaveSize, 1) __global__
       const int kb = kb0 + (idx_clamped % BK);
       const int kb_clamped = (kb < num_kb) ? kb : (num_kb - 1);
       const float live = (kb < num_kb) ? row_live[p] : 0.0F;
-      QuantSub16 lo;
-      QuantSub16 hi;
-      DecodeQuantSub16<WaveSize == 64>(
-          WType, w_row[p], static_cast<std::size_t>(kb_clamped) * 2, lo);
-      DecodeQuantSub16<WaveSize == 64>(
-          WType, w_row[p], (static_cast<std::size_t>(kb_clamped) * 2) + 1, hi);
-      __builtin_memcpy(&r_q0[p], lo.q, 16);
-      __builtin_memcpy(&r_q1[p], hi.q, 16);
-      r_dw0[p] = lo.scale * live;
-      r_dw1[p] = hi.scale * live;
-      if constexpr (HasOffset) {
-        r_off[p] = lo.offset * live;
+      if constexpr (kFp4Raw) {
+        const std::uint8_t* blk =
+            w_row[p] + static_cast<std::size_t>(kb_clamped) * kFp4Block;
+        __builtin_memcpy(r_fp4[p], blk, 16);
+        // The scale bytes end the block: a word over them never over-reads.
+        __builtin_memcpy(&r_fp4_scale[p], blk + kFp4Block - 4, 4);
+        r_fp4_live[p] = live;
+      } else {
+        QuantSub16 lo;
+        QuantSub16 hi;
+        DecodeQuantSub16<WaveSize == 64>(
+            WType, w_row[p], static_cast<std::size_t>(kb_clamped) * 2, lo);
+        DecodeQuantSub16<WaveSize == 64>(
+            WType, w_row[p], (static_cast<std::size_t>(kb_clamped) * 2) + 1,
+            hi);
+        __builtin_memcpy(&r_q0[p], lo.q, 16);
+        __builtin_memcpy(&r_q1[p], hi.q, 16);
+        r_dw0[p] = lo.scale * live;
+        r_dw1[p] = hi.scale * live;
+        if constexpr (HasOffset) {
+          r_off[p] = lo.offset * live;
+        }
       }
     }
 #pragma unroll
@@ -351,6 +373,23 @@ __launch_bounds__(WM * WN * WaveSize, 1) __global__
       const int slot = WaveSize == 32
                            ? ((rl % 2 == 0) ? (rl / 2) : (8 + (rl / 2)))
                            : ((rl % 4) * 4 + rl / 4);
+      if constexpr (kFp4Raw) {
+        std::uint32_t q0[4];
+        std::uint32_t q1[4];
+#pragma unroll
+        for (int j = 0; j < 4; ++j) {
+          q0[j] = RocmFp4Lookup4(r_fp4[p][j] & 0x0F0F0F0FU);
+          q1[j] = RocmFp4Lookup4((r_fp4[p][j] >> 4) & 0x0F0F0F0FU);
+        }
+        __builtin_memcpy(&r_q0[p], q0, 16);
+        __builtin_memcpy(&r_q1[p], q1, 16);
+        const std::uint32_t scales = r_fp4_scale[p];
+        const auto high = static_cast<std::uint8_t>(scales >> 24);
+        const auto low =
+            kFp4Block == 17 ? high : static_cast<std::uint8_t>(scales >> 16);
+        r_dw0[p] = RocmFp4Ue4m3Select(low) * r_fp4_live[p];
+        r_dw1[p] = RocmFp4Ue4m3Select(high) * r_fp4_live[p];
+      }
       weight_stage(kk)[rs][rl] = r_q0[p];
       weight_stage(kk)[rs][16 + rl] = r_q1[p];
       s_dw[kk][0][rs][slot] = r_dw0[p];

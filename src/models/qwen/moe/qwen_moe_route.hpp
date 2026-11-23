@@ -5,7 +5,7 @@
 
 // KAT: one-token Qwen MoE router. Coalesced F32 GEMV (one CTA per expert
 // row, strided threads + fixed tree reduce) feeding a one-wave top-k head
-// (Super ROC QRH): the top n_used logits in rank order (bigger first, equal
+// (Super Roc QRH): the top n_used logits in rank order (bigger first, equal
 // logits -> lower expert id, NaN read as -inf) and weights = softmax over
 // the picked logits, which equals the fork norm_w renorm of the full
 // softmax (its denominator cancels). The id SET matches
@@ -21,9 +21,12 @@
 // The logits kernel touches gate row e only for e < n_expert and columns
 // [0, k); the head reads logits[0, n_expert) and writes ids/weights
 // [0, n_used). No other global access.
+// n_select, when above n_used, is how many experts the weights are normalized
+// over: the first n_used keep their share of them, so routing fewer experts
+// does not amplify the ones it keeps.
 int LaunchQwenMoeRoute(const float* x, const float* gate, int k, int n_expert,
                        int n_used, float* logits, int* ids, float* weights,
-                       hipStream_t stream);
+                       hipStream_t stream, int n_select = 0);
 
 // KAT: batched router for prefill. Logits come from the rocm_fp4
 // register-tiled GEMM (deterministic; requires k % 32 == 0), then the same
@@ -33,9 +36,9 @@ int LaunchQwenMoeRoute(const float* x, const float* gate, int k, int n_expert,
 int LaunchQwenMoeRouteBatch(const float* x, const float* gate, int k,
                             int n_expert, int n_tokens, int n_used,
                             float* logits, int* ids, float* weights,
-                            hipStream_t stream);
+                            hipStream_t stream, int n_select = 0);
 
-// Super ROC QVB: LaunchQwenMoeRoute for n_rows (1..4) token rows x[r*k..],
+// Super Roc QVB: LaunchQwenMoeRoute for n_rows (1..4) token rows x[r*k..],
 // logits [n_rows][n_expert], ids/weights [n_rows][n_used], with the router
 // read once for all rows; plus, when shexp_gate is set, each row's
 // shared-expert gate sig_out[r] = sigmoid(shexp_gate . x_r) (what
@@ -45,14 +48,16 @@ int LaunchQwenMoeRouteBatch(const float* x, const float* gate, int k,
 int LaunchQwenMoeRouteRows(const float* x, const float* gate, int k,
                            int n_expert, int n_rows, int n_used, float* logits,
                            int* ids, float* weights, const float* shexp_gate,
-                           float* sig_out, hipStream_t stream);
+                           float* sig_out, hipStream_t stream,
+                           int n_select = 0);
 
-// Test seam (Super ROC QRH): runs only the head on caller logits.
+// Test seam (Super Roc QRH): runs only the head on caller logits.
 // n_tokens == 0 -> the single-token kernel on logits[0, n_expert);
 // n_tokens >= 1 -> the batch kernel on [n_tokens, n_expert] logits.
 // Same return contract as above.
 int LaunchQwenMoeRouteHeadForTest(const float* logits, int n_tokens,
                                   int n_expert, int n_used, int* ids,
-                                  float* weights, hipStream_t stream);
+                                  float* weights, hipStream_t stream,
+                                  int n_select = 0);
 
 #endif

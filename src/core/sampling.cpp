@@ -183,12 +183,76 @@ constexpr std::size_t kSkipBlock = 64;
 
 }  // namespace
 
+ReasoningLoopGuardPeriods ParseReasoningLoopGuardPeriods(
+    std::string_view text) {
+  const auto fail = [&](std::string_view why) {
+    throw std::invalid_argument(
+        "SUPERROC_REASONING_LOOP_GUARD=\"" + std::string(text) +
+        "\" is malformed (" + std::string(why) +
+        "): want <min_period>:<max_period>:<repeats> with 1 <= min_period <= "
+        "max_period, repeats >= 2 and max_period * repeats <= 65536, for "
+        "example \"16:512:3\"");
+  };
+  // Strict unsigned decimal runs separated by exactly two colons; nothing else.
+  std::uint64_t parts[3] = {0, 0, 0};
+  std::size_t fields = 0;
+  std::uint64_t value = 0;
+  bool digits = false;
+  const auto flush = [&] {
+    if (!digits || fields >= 3)
+      fail("expected three colon-separated integers");
+    parts[fields++] = value;
+    value = 0;
+    digits = false;
+  };
+  for (const char c : text) {
+    if (c == ':') {
+      flush();
+      continue;
+    }
+    if (c < '0' || c > '9')
+      fail("expected three colon-separated integers");
+    value = value * 10 + static_cast<std::uint64_t>(c - '0');
+    // Any field above 65536 already breaks max_period * repeats <= 65536
+    // (min_period >= 1 and repeats >= 2), and the cap keeps the product in
+    // 32 bits.
+    if (value > 65536)
+      fail("a field exceeds 65536");
+    digits = true;
+  }
+  flush();
+  if (fields != 3)
+    fail("expected three colon-separated integers");
+  if (parts[0] < 1 || parts[0] > parts[1])
+    fail("need 1 <= min_period <= max_period");
+  if (parts[2] < 2)
+    fail("need repeats >= 2");
+  if (parts[1] * parts[2] > 65536)
+    fail("need max_period * repeats <= 65536");
+  return {.min_period = static_cast<std::uint32_t>(parts[0]),
+          .max_period = static_cast<std::uint32_t>(parts[1]),
+          .repeats = static_cast<std::uint32_t>(parts[2])};
+}
+
 void SamplingConfig::Validate() const {
   if (constraint && (!constraint->grammar || !constraint->vocabulary ||
                      constraint->vocabulary->size() == 0))
     throw std::invalid_argument("sampling constraint is incomplete");
   if (reasoning_budget && reasoning_budget->forced.empty())
     throw std::invalid_argument("reasoning budget has no forced end");
+  if (reasoning_word_ban && reasoning_word_ban->ends.empty())
+    throw std::invalid_argument("reasoning word ban has no reasoning ends");
+  if (reasoning_loop_guard) {
+    const auto& guard = *reasoning_loop_guard;
+    // A zero or single repeat would fire on any suffix; an inverted range or
+    // a zero period can never match. Reject all four up front.
+    if (guard.forced.empty())
+      throw std::invalid_argument("reasoning loop guard has no forced end");
+    if (guard.min_period < 1 || guard.min_period > guard.max_period ||
+        guard.repeats < 2 ||
+        static_cast<std::size_t>(guard.max_period) * guard.repeats > 65536)
+      throw std::invalid_argument("reasoning loop guard periods are invalid");
+  }
   if (!std::isfinite(temperature) || temperature < 0.0F) {
     throw std::invalid_argument(
         "sampling temperature must be finite and nonnegative");
@@ -231,10 +295,19 @@ bool SamplingConfig::can_use_unmodified_argmax() const noexcept {
          !penalties_enabled();
 }
 
+bool SamplerState::IsBanned(TokenId token) const noexcept {
+  return ban_armed_ && token < config_.reasoning_word_ban->banned.size() &&
+         config_.reasoning_word_ban->banned[token];
+}
+
 bool SamplerState::CanSelectArgmax(TokenId token,
                                    bool penalties_applied) const {
   if (const auto forced = ForcedToken())
     return !pending_sample_ && token == *forced;
+  // A banned token is never a selectable argmax while reasoning: every call
+  // site that trusts a raw device argmax diverts to a masked host selection.
+  if (IsBanned(token))
+    return false;
   if (pending_sample_ || config_.temperature != 0.0F ||
       (!penalties_applied && config_.penalties_enabled()))
     return false;
@@ -414,7 +487,8 @@ SamplingDistribution BuildDistribution(
     std::span<const float> logits, const SamplingConfig& config,
     std::span<const TokenId> prompt_tokens,
     std::span<const TokenId> generated_tokens) {
-  if (config.constraint || config.reasoning_budget) {
+  if (config.constraint || config.reasoning_budget ||
+      config.reasoning_word_ban) {
     SamplerState sampler(config, prompt_tokens);
     sampler.Accept(generated_tokens);
     return sampler.Distribution(logits);
@@ -471,7 +545,18 @@ SamplerState::SamplerState(const SamplerState& other)
       pending_sample_(other.pending_sample_),
       reasoning_phase_(other.reasoning_phase_),
       reasoning_remaining_(other.reasoning_remaining_),
-      reasoning_forced_(other.reasoning_forced_) {}
+      reasoning_forced_(other.reasoning_forced_),
+      loop_guard_window_(other.loop_guard_window_),
+      loop_guard_armed_(other.loop_guard_armed_),
+      loop_guard_pending_(other.loop_guard_pending_),
+      loop_guard_forcing_(other.loop_guard_forcing_),
+      loop_guard_forced_(other.loop_guard_forced_),
+      loop_guard_seen_(other.loop_guard_seen_),
+      loop_guard_fired_(other.loop_guard_fired_),
+      loop_guard_period_(other.loop_guard_period_),
+      loop_guard_repeats_(other.loop_guard_repeats_),
+      loop_guard_reasoning_tokens_(other.loop_guard_reasoning_tokens_),
+      ban_armed_(other.ban_armed_) {}
 
 SamplerState& SamplerState::operator=(const SamplerState& other) {
   if (this == &other) {
@@ -489,6 +574,17 @@ SamplerState& SamplerState::operator=(const SamplerState& other) {
   reasoning_phase_ = other.reasoning_phase_;
   reasoning_remaining_ = other.reasoning_remaining_;
   reasoning_forced_ = other.reasoning_forced_;
+  loop_guard_window_ = other.loop_guard_window_;
+  loop_guard_armed_ = other.loop_guard_armed_;
+  loop_guard_pending_ = other.loop_guard_pending_;
+  loop_guard_forcing_ = other.loop_guard_forcing_;
+  loop_guard_forced_ = other.loop_guard_forced_;
+  loop_guard_seen_ = other.loop_guard_seen_;
+  loop_guard_fired_ = other.loop_guard_fired_;
+  loop_guard_period_ = other.loop_guard_period_;
+  loop_guard_repeats_ = other.loop_guard_repeats_;
+  loop_guard_reasoning_tokens_ = other.loop_guard_reasoning_tokens_;
+  ban_armed_ = other.ban_armed_;
   return *this;
 }
 
@@ -524,10 +620,10 @@ std::vector<float> SamplerState::ConstrainedLogits(
         "JSON constraint vocabulary differs from logits");
   std::vector<float> masked(logits.begin(), logits.end());
   for (std::size_t i = 0; i < masked.size(); ++i) {
-    const auto token = ids.empty() ? i : ids[i];
+    const auto token = ids.empty() ? static_cast<TokenId>(i) : ids[i];
     if (token >= mask->size())
       throw std::invalid_argument("invalid compact token ID");
-    if (!(*mask)[token])
+    if (!(*mask)[token] || IsBanned(token))
       masked[i] = -std::numeric_limits<float>::infinity();
   }
   return masked;
@@ -578,11 +674,36 @@ void SamplerState::Accept(TokenId token) {
 std::optional<TokenId> SamplerState::ForcedToken() const noexcept {
   if (reasoning_phase_ == ReasoningPhase::kForcing)
     return config_.reasoning_budget->forced[reasoning_forced_];
+  if (loop_guard_forcing_)
+    return config_.reasoning_loop_guard->forced[loop_guard_forced_];
   return std::nullopt;
 }
 
 void SamplerState::StartReasoning() {
   reasoning_phase_ = ReasoningPhase::kOff;
+  // An empty match set arms nothing, so ban-only requests without a single
+  // banned token keep today's path instruction for instruction.
+  ban_armed_ = config_.reasoning_word_ban != nullptr &&
+               std::ranges::any_of(config_.reasoning_word_ban->banned,
+                                   [](bool banned) { return banned; });
+  loop_guard_window_.clear();
+  loop_guard_armed_ = config_.reasoning_loop_guard != nullptr;
+  loop_guard_pending_ = false;
+  loop_guard_forcing_ = false;
+  loop_guard_forced_ = 0;
+  loop_guard_seen_ = 0;
+  loop_guard_fired_ = false;
+  loop_guard_period_ = 0;
+  loop_guard_repeats_ = 0;
+  loop_guard_reasoning_tokens_ = 0;
+  if (loop_guard_armed_) {
+    // One reservation for the whole request: the window never grows past
+    // max_period * repeats, so detection allocates nothing per token after
+    // this.
+    const auto& guard = *config_.reasoning_loop_guard;
+    loop_guard_window_.reserve(static_cast<std::size_t>(guard.max_period) *
+                               guard.repeats);
+  }
   const auto& budget = config_.reasoning_budget;
   if (!budget)
     return;
@@ -598,6 +719,11 @@ void SamplerState::StartReasoning() {
 // one forced token per accepted token, and a spent budget waits for a token
 // that completes its UTF-8 character.
 void SamplerState::AdvanceReasoning(TokenId token) {
+  // The loop guard won the race and its forced end is emitting: the budget
+  // stands down, so exactly one forcing runs at a time. When the end
+  // completes, the guard closes reasoning, as the budget's own forcing does.
+  if (loop_guard_forcing_)
+    return;
   const auto& budget = *config_.reasoning_budget;
   switch (reasoning_phase_) {
     case ReasoningPhase::kOff:
@@ -628,10 +754,138 @@ void SamplerState::AdvanceReasoning(TokenId token) {
   }
 }
 
+bool SamplerState::LoopGuardCharComplete(TokenId token) const noexcept {
+  const auto& partial = config_.reasoning_loop_guard->partial_utf8;
+  return !partial || token >= partial->size() || !(*partial)[token];
+}
+
+// After every accepted generated token while the request is still reasoning.
+// The guard fires when, for some period P in [min_period, max_period], the
+// last P*repeats reasoning tokens are `repeats` identical copies of one
+// P-token block. Periods scan smallest-first from the most recent tokens, so
+// a genuine loop is found after a few compares; a per-token compare budget
+// of max_period * repeats bounds adversarial inputs.
+void SamplerState::AdvanceLoopGuard(TokenId token) {
+  const auto& guard = *config_.reasoning_loop_guard;
+  // The token budget won the race: reasoning already forced its end or closed.
+  // A closed budget with no natural end token cannot happen (only an end
+  // token closes it), but the phase check below states the rule plainly.
+  if (reasoning_phase_ == ReasoningPhase::kForcing ||
+      (config_.reasoning_budget != nullptr &&
+       reasoning_phase_ == ReasoningPhase::kOff)) {
+    loop_guard_armed_ = false;
+    loop_guard_pending_ = false;
+    return;
+  }
+  if (loop_guard_forcing_) {
+    if (++loop_guard_forced_ >= guard.forced.size()) {
+      loop_guard_forcing_ = false;
+      loop_guard_armed_ = false;
+      loop_guard_pending_ = false;
+      // The forced end closed reasoning, as the budget's own forcing does:
+      // answer tokens are never scanned and a lingering budget can no longer
+      // spend mid-answer.
+      reasoning_phase_ = ReasoningPhase::kOff;
+    }
+    return;
+  }
+  if (std::ranges::find(guard.ends, token) != guard.ends.end()) {
+    loop_guard_armed_ = false;
+    loop_guard_pending_ = false;
+    return;
+  }
+  if (!loop_guard_armed_ && !loop_guard_pending_)
+    return;
+  ++loop_guard_seen_;
+  const std::size_t cap =
+      static_cast<std::size_t>(guard.max_period) * guard.repeats;
+  loop_guard_window_.push_back(token);
+  if (loop_guard_window_.size() > cap)
+    loop_guard_window_.erase(loop_guard_window_.begin());
+  if (loop_guard_pending_) {
+    // The loop was already found; only a token completing its UTF-8
+    // character starts the forced end, exactly as the budget does.
+    if (LoopGuardCharComplete(token)) {
+      loop_guard_pending_ = false;
+      loop_guard_forcing_ = true;
+      loop_guard_forced_ = 0;
+      loop_guard_fired_ = true;
+    }
+    return;
+  }
+  const std::size_t n = loop_guard_window_.size();
+  // Every period in [min, max] is checked on every token. A period whose last
+  // token differs from the token one period back is rejected with one compare,
+  // so non-repeating text costs about one compare per period; the worst case
+  // is (repeats - 1) * P compares for period P.
+  for (std::uint32_t period = guard.min_period; period <= guard.max_period;
+       ++period) {
+    const std::size_t step = period;
+    const std::size_t need = step * guard.repeats;
+    if (need > n)
+      break;
+    if (loop_guard_window_[n - 1] != loop_guard_window_[n - 1 - step])
+      continue;
+    bool match = true;
+    for (std::size_t copy = 1; copy < guard.repeats && match; ++copy) {
+      for (std::size_t i = 0; i < step; ++i) {
+        if (loop_guard_window_[n - (copy + 1) * step + i] !=
+            loop_guard_window_[n - step + i]) {
+          match = false;
+          break;
+        }
+      }
+    }
+    if (match) {
+      loop_guard_period_ = period;
+      loop_guard_repeats_ = guard.repeats;
+      loop_guard_reasoning_tokens_ = loop_guard_seen_;
+      loop_guard_armed_ = false;
+      if (LoopGuardCharComplete(token)) {
+        loop_guard_forcing_ = true;
+        loop_guard_forced_ = 0;
+        loop_guard_fired_ = true;
+      } else {
+        loop_guard_pending_ = true;
+      }
+      return;
+    }
+  }
+}
+
+// After the budget and guard advances for the same token. Disarms when
+// reasoning ends: an `ends` token, a budget that closed (a natural end or a
+// completed forcing), or a fired guard whose forcing completed. Answer tokens
+// are never banned, and the forced message/end sequence itself bypasses the
+// ban through `ForcedToken()`.
+void SamplerState::AdvanceBan(TokenId token) {
+  const auto& ban = *config_.reasoning_word_ban;
+  if (std::ranges::find(ban.ends, token) != ban.ends.end()) {
+    ban_armed_ = false;
+    return;
+  }
+  if (config_.reasoning_budget != nullptr &&
+      reasoning_phase_ == ReasoningPhase::kOff) {
+    ban_armed_ = false;
+    return;
+  }
+  if (config_.reasoning_loop_guard != nullptr && loop_guard_fired_ &&
+      !loop_guard_forcing_ && !loop_guard_pending_) {
+    ban_armed_ = false;
+  }
+}
+
 void SamplerState::Accept(std::span<const TokenId> tokens) {
   if (reasoning_phase_ != ReasoningPhase::kOff)
     for (const auto token : tokens)
       AdvanceReasoning(token);
+  if (config_.reasoning_loop_guard != nullptr &&
+      (loop_guard_armed_ || loop_guard_pending_ || loop_guard_forcing_))
+    for (const auto token : tokens)
+      AdvanceLoopGuard(token);
+  if (ban_armed_)
+    for (const auto token : tokens)
+      AdvanceBan(token);
   if (config_.constraint) {
     auto next = constraint_state_;
     for (const auto token : tokens)
@@ -709,6 +963,7 @@ SamplingDistribution SamplerState::Distribution(
     // and emits the end as its correction.
     auto unforced = *this;
     unforced.reasoning_phase_ = ReasoningPhase::kOff;
+    unforced.loop_guard_forcing_ = false;
     return unforced.Distribution(logits, token_ids);
   }
   if (NeedsConstraintMask()) {
@@ -717,6 +972,24 @@ SamplingDistribution SamplerState::Distribution(
   }
   if (logits.size() != token_ids.size())
     throw std::invalid_argument("compact logits and token IDs differ in size");
+  // A drafted shortlist may hold a banned token: mask those entries so the
+  // target correction never emits one. Indices are preserved, so the forced
+  // end above still resolves; an all-banned shortlist fails closed below.
+  std::vector<float> masked_logits;
+  std::span<const float> selected = logits;
+  if (ban_armed_) {
+    for (std::size_t i = 0; i < token_ids.size(); ++i) {
+      if (IsBanned(token_ids[i])) {
+        masked_logits.assign(logits.begin(), logits.end());
+        for (std::size_t j = 0; j < token_ids.size(); ++j) {
+          if (IsBanned(token_ids[j]))
+            masked_logits[j] = -std::numeric_limits<float>::infinity();
+        }
+        selected = masked_logits;
+        break;
+      }
+    }
+  }
   std::vector<TokenPenalty> penalties;
   penalties.reserve(token_ids.size());
   for (std::size_t i = 0; i < token_ids.size(); ++i) {
@@ -728,14 +1001,68 @@ SamplingDistribution SamplerState::Distribution(
       penalties.push_back(penalty);
     }
   }
-  return DistributionWithPenalties(logits, config_, penalties);
+  return DistributionWithPenalties(selected, config_, penalties);
+}
+
+CapturedTokenLogprobs SamplerState::CaptureLogprobs(
+    std::span<const float> logits, TokenId token, std::size_t top_n) const {
+  CapturedTokenLogprobs captured;
+  captured.token = token;
+  if (logits.empty()) {
+    // No distribution to quote: the entry keeps the token with a non-finite
+    // logprob, which the transport serializes as null, never 0.0.
+    captured.logprob = std::numeric_limits<double>::quiet_NaN();
+    return captured;
+  }
+  if (const auto forced = ForcedToken()) {
+    // A forced token's distribution is a point mass, whatever the sampler
+    // would otherwise compute.
+    if (token == *forced) {
+      captured.logprob = 0.0;
+      if (top_n > 0) {
+        captured.top.push_back({token, 0.0, {}});
+      }
+    } else {
+      captured.logprob = -std::numeric_limits<double>::infinity();
+    }
+    return captured;
+  }
+  const SamplerState* source = this;
+  SamplerState tempered;
+  if (!NeedsConstraintMask() && config_.temperature == 0.0F) {
+    // Greedy decoding draws no distribution: rank the full vocabulary with
+    // a temperature-1 softmax over the same penalty-adjusted logits. Its
+    // top entry is the greedy winner, so the report stays calibrated.
+    tempered = *this;
+    tempered.config_.temperature = 1.0F;
+    tempered.config_.top_k = 0;
+    tempered.config_.top_p = 1.0F;
+    tempered.config_.min_p = 0.0F;
+    tempered.config_.min_keep = 0;
+    source = &tempered;
+  }
+  const auto distribution = source->Distribution(logits);
+  const double probability = distribution.probability(token);
+  captured.logprob = probability > 0.0
+                         ? std::log(probability)
+                         : -std::numeric_limits<double>::infinity();
+  captured.top = TopLogprobEntries(distribution, top_n);
+  return captured;
 }
 
 void SamplerState::DeferSample(TokenId token) {
   if (pending_sample_) {
     throw std::logic_error("a sampled token is already pending");
   }
-  pending_sample_ = token;
+  pending_sample_ = PendingSample{.token = token};
+}
+
+void SamplerState::DeferSample(TokenId token, CapturedTokenLogprobs logprobs) {
+  if (pending_sample_) {
+    throw std::logic_error("a sampled token is already pending");
+  }
+  pending_sample_ =
+      PendingSample{.token = token, .logprobs = std::move(logprobs)};
 }
 
 TokenId SamplerState::Sample(std::span<const float> logits) {
@@ -754,10 +1081,10 @@ TokenId SamplerState::Sample(std::span<const float> logits) {
     return *forced;
   }
   if (pending_sample_) {
-    if (*pending_sample_ >= logits.size()) {
+    if (pending_sample_->token >= logits.size()) {
       throw std::invalid_argument("pending sample exceeds vocabulary");
     }
-    const auto token = *pending_sample_;
+    const auto token = pending_sample_->token;
     if (config_.constraint &&
         !config_.constraint->Allowed(constraint_state_)->at(token))
       throw std::runtime_error("pending sample violates JSON constraint");
@@ -845,6 +1172,12 @@ TokenId SamplerState::SampleGreedy(std::span<const float> logits) const {
       if (!std::isfinite(logits[index])) {
         continue;
       }
+      // A banned token can never win while reasoning; every other step keeps
+      // the raw argmax. Checked only on this masked-selection path, never on
+      // the device fast path (call sites divert there with one lookup).
+      if (IsBanned(static_cast<TokenId>(index))) {
+        continue;
+      }
       // Both vocab IDs and sparse penalties are sorted. Walk them together
       // instead of binary-searching the history for every vocabulary entry.
       while (penalty != penalty_counts_.end() && penalty->token < index)
@@ -882,7 +1215,8 @@ TokenId SamplerState::SampleConstrainedGreedy(
   TokenId best_token = 0;
   bool found = false;
   for (std::size_t index = 0; index < logits.size(); ++index) {
-    if (!(*mask)[index] || !std::isfinite(logits[index]))
+    if (!(*mask)[index] || !std::isfinite(logits[index]) ||
+        IsBanned(static_cast<TokenId>(index)))
       continue;
     const double value = penalty_counts_.empty()
                              ? static_cast<double>(logits[index])
@@ -907,7 +1241,7 @@ SamplingDistribution SamplerState::LinearDistribution(
   candidates.reserve(logits.size());
   double maximum = -std::numeric_limits<double>::infinity();
   for (std::size_t i = 0; i < logits.size(); ++i) {
-    if (!std::isfinite(logits[i]))
+    if (!std::isfinite(logits[i]) || IsBanned(static_cast<TokenId>(i)))
       continue;
     const double value =
         penalty_counts_.empty()
@@ -956,7 +1290,9 @@ void SamplerState::PrepareSelected(std::span<const float> logits) {
   const auto for_each_adjusted = [&](auto&& visit) {
     auto penalty = penalty_counts_.begin();
     for (std::size_t index = 0; index < logits.size(); ++index) {
-      if (std::isfinite(logits[index]))
+      // Sampled requests renormalise without the banned tokens.
+      if (std::isfinite(logits[index]) &&
+          !IsBanned(static_cast<TokenId>(index)))
         visit(index, adjusted_at(index, penalty));
     }
   };
@@ -965,7 +1301,8 @@ void SamplerState::PrepareSelected(std::span<const float> logits) {
     candidate_scratch_.reserve(limit);
     auto penalty = penalty_counts_.begin();
     const auto offer = [&](std::size_t index) {
-      if (!std::isfinite(logits[index])) {
+      if (!std::isfinite(logits[index]) ||
+          IsBanned(static_cast<TokenId>(index))) {
         return;
       }
       const Probability candidate{

@@ -1,6 +1,7 @@
 #include "src/models/ling3/chat_template.hpp"
 
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace superroc::models::ling3::chat {
@@ -49,11 +50,10 @@ std::string Tool::to_json() const {
   return out;
 }
 
-std::optional<std::string> RenderChat(const std::vector<Message>& messages,
-                                      const std::vector<Tool>& tools,
-                                      bool enable_thinking,
-                                      bool add_generation_prompt,
-                                      std::string* error) {
+std::optional<std::string> RenderChat(
+    const std::vector<Message>& messages, const std::vector<Tool>& tools,
+    bool enable_thinking, bool add_generation_prompt, std::string* error,
+    std::vector<core::TextSpan>* content_spans) {
   const std::string thinking = enable_thinking ? "on" : "off";
   std::string out;
 
@@ -63,6 +63,14 @@ std::optional<std::string> RenderChat(const std::vector<Message>& messages,
     }
     return std::nullopt;
   };
+  // Client text goes through `text` so its byte range is recorded.
+  const auto text = [&](std::string_view piece) {
+    const std::size_t begin = out.size();
+    out += piece;
+    if (content_spans != nullptr && !piece.empty()) {
+      content_spans->push_back({begin, piece.size()});
+    }
+  };
 
   // The template emits <role>SYSTEM</role> unconditionally, even with no system
   // message at all, and then appends the first message's content only when it
@@ -71,14 +79,14 @@ std::optional<std::string> RenderChat(const std::vector<Message>& messages,
   out += "<role>SYSTEM</role>";
   const bool has_system = !messages.empty() && messages[0].role == "system";
   if (has_system) {
-    out += messages[0].content;
+    text(messages[0].content);
   }
   out += '\n';
   if (!tools.empty()) {
     out += kToolsPreamble;
     for (const Tool& t : tools) {
       out += '\n';
-      out += t.to_json();
+      text(t.to_json());
     }
     out += kToolsPostamble;
   }
@@ -98,7 +106,7 @@ std::optional<std::string> RenderChat(const std::vector<Message>& messages,
       // because the header below already consumed it.
       if (i != 0) {
         out += "<role>SYSTEM</role>";
-        out += m.content;
+        text(m.content);
         out += markers::kRoleEnd;
       }
       continue;
@@ -106,7 +114,7 @@ std::optional<std::string> RenderChat(const std::vector<Message>& messages,
 
     if (m.role == "user") {
       out += "<role>HUMAN</role>";
-      out += m.content;
+      text(m.content);
       out += markers::kRoleEnd;
       continue;
     }
@@ -152,17 +160,17 @@ std::optional<std::string> RenderChat(const std::vector<Message>& messages,
         }
         out += '\n';
         out += markers::kThinkOpen;
-        out += body;
+        text(body);
         out += markers::kThinkClose;
         while (!content.empty() && content.front() == '\n') {
           content.erase(content.begin());
         }
-        out += content;
+        text(content);
       } else {
         out += '\n';
         out += markers::kThinkOpen;
         out += markers::kThinkClose;
-        out += content;
+        text(content);
       }
 
       for (std::size_t c = 0; c < m.tool_calls.size(); ++c) {
@@ -174,13 +182,13 @@ std::optional<std::string> RenderChat(const std::vector<Message>& messages,
           out += '\n';
         }
         out += markers::kToolCallOpen;
-        out += tc.name;
+        text(tc.name);
         for (const ToolCallArgument& a : tc.arguments) {
           out += "<arg_key>";
-          out += a.key;
+          text(a.key);
           out += "</arg_key>";
           out += "\n<arg_value>";
-          out += a.value;
+          text(a.value);
           out += "</arg_value>";
         }
         out += '\n';
@@ -199,7 +207,7 @@ std::optional<std::string> RenderChat(const std::vector<Message>& messages,
         out += "<role>OBSERVATION</role>";
       }
       out += "\n<tool_response>\n";
-      out += m.content;
+      text(m.content);
       out += "\n</tool_response>";
       if (last) {
         out += markers::kRoleEnd;

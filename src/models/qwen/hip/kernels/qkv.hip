@@ -252,7 +252,7 @@ void LaunchFusedQKVProjections(const void* q_w, core::GgmlType q_type,
                                float* v_out, std::size_t q_dim,
                                std::size_t kv_dim, std::size_t hidden_size,
                                hipStream_t stream) {
-  // lqw:qkv. One activation quant, three GEMVs. Outputs are overwritten by A4
+  // One activation quant, three GEMVs. Outputs are overwritten by A4
   // if any launch is rejected before it runs.
   if (IsRocmFp4(q_type) && IsRocmFp4(k_type) && IsRocmFp4(v_type) &&
       RocmFp4ShapeOk(q_dim, hidden_size) &&
@@ -271,6 +271,19 @@ void LaunchFusedQKVProjections(const void* q_w, core::GgmlType q_type,
     LaunchQ4_0Gemv(q_w, x, q_out, q_dim, hidden_size, stream);
     LaunchQ4_0Gemv(k_w, x, k_out, kv_dim, hidden_size, stream);
     LaunchQ4_0Gemv(v_w, x, v_out, kv_dim, hidden_size, stream);
+    return;
+  }
+  // A Q4_0 matrix beside another type (an MTP block re-encoded at load keeps
+  // the file's Q8_0 K and V). The fused kernel below has no Q4_0 row, so each
+  // matrix takes its own GEMV.
+  if (q_type == core::GgmlType::kQ4_0 || k_type == core::GgmlType::kQ4_0 ||
+      v_type == core::GgmlType::kQ4_0) {
+    LaunchGEMV(q_w, q_type, x, q_out, q_dim, hidden_size, stream,
+               models::qwen::QwenGemmMode::kHipMtp);
+    LaunchGEMV(k_w, k_type, x, k_out, kv_dim, hidden_size, stream,
+               models::qwen::QwenGemmMode::kHipMtp);
+    LaunchGEMV(v_w, v_type, x, v_out, kv_dim, hidden_size, stream,
+               models::qwen::QwenGemmMode::kHipMtp);
     return;
   }
   const std::size_t total_rows = q_dim + (2 * kv_dim);

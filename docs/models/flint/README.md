@@ -20,7 +20,7 @@ Flint is a 40B mixture-of-experts coding-agent model (about 2.5B active) with 25
 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Flint-40B-A2.5B-Q4_0-ROCmFP4-COHERENT-PAS.gguf --served-model-name flint --context 32768
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.2.4. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 

@@ -53,8 +53,13 @@ struct Config {
   std::uint32_t ssm_inner_size{0};   ///< 6144
 
   // Mixture of experts with one always-on shared expert.
-  std::uint32_t num_experts{0};       ///< 512
-  std::uint32_t num_experts_used{0};  ///< 10
+  std::uint32_t num_experts{0};  ///< 512
+  /// Routed experts per token in the trunk: 10, or fewer with
+  /// SUPERROC_ROUTED_EXPERTS, which reads fewer bytes per token for some loss
+  /// of quality.
+  std::uint32_t num_experts_used{0};
+  /// The file's own count, which the draft head keeps.
+  std::uint32_t num_experts_file{0};
   std::uint32_t expert_ff{0};         ///< 640
   std::uint32_t shared_expert_ff{0};  ///< 640
 
@@ -125,7 +130,7 @@ struct Config {
            indexer_top_k == trunk.indexer_top_k &&
            compress_ratio == trunk.compress_ratio &&
            num_experts == trunk.num_experts &&
-           num_experts_used == trunk.num_experts_used &&
+           num_experts_file == trunk.num_experts_file &&
            expert_ff == trunk.expert_ff &&
            shared_expert_ff == trunk.shared_expert_ff;
   }

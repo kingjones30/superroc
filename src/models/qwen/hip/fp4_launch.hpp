@@ -19,7 +19,7 @@
 #if defined(ENGINE_ENABLE_HIP)
 #include <hip/hip_runtime.h>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::hip {
 
@@ -28,7 +28,7 @@ namespace superroc::hip {
          type == core::GgmlType::kQ4_0_ROCMFP4_FAST;
 }
 
-// lqw:capture-warmup. superroc_fp4_quant_q8 grows its slot buffers lazily
+// superroc_fp4_quant_q8 grows its slot buffers lazily
 // (hipFree/hipMalloc); inside a captured decode graph that poisons the
 // capture. WarmupRocmFp4Slots() pre-grows every slot at model load; the
 // warmed-width checks below then reject (falling back to the A4 sub16 path)
@@ -37,7 +37,7 @@ namespace superroc::hip {
 [[nodiscard]] std::size_t RocmFp4WarmedK() noexcept;
 bool WarmupRocmFp4Slots(std::size_t k, hipStream_t stream);
 
-// lqw:rv27-fix2: clears the warm mark (see fp4_warmup.cpp). Call when a
+// clears the warm mark (see fp4_warmup.cpp). Call when a
 // load-time warmup step failed, so no FP4 intercept can run afterwards.
 void DiscardRocmFp4Warmup() noexcept;
 
@@ -52,15 +52,14 @@ void DiscardRocmFp4Warmup() noexcept;
   return static_cast<int>(type);
 }
 
-// sq16 SPEC2 (S2-1 test hook): SUPERROC_FP4_FORCE_REFUSE=1 makes every FP4 GEMV
+// SUPERROC_FP4_FORCE_REFUSE=1 makes every FP4 GEMV
 // intercept decline (decode and verify alike), so the fallback paths can be
 // proven bit-identical. The MoE expert FFN is untouched. Off unless set.
-// SPEC3 (2): says so once per process on stderr when it takes effect (read
+// Says so once per process on stderr when it takes effect (read
 // once, inside this lambda; the hot path still pays one cached-bool branch).
 [[nodiscard]] inline bool SuperROCFp4ForceRefuse() {
   static const bool on = [] {
-    const char* env =
-        ::superroc::core::GetEnvCompat("SUPERROC_FP4_FORCE_REFUSE");
+    const char* env = ::superroc::core::GetEnv("SUPERROC_FP4_FORCE_REFUSE");
     const bool refuse = env != nullptr && env[0] == '1';
     if (refuse) {
       std::fprintf(stderr,
@@ -117,7 +116,7 @@ inline bool PrepareRocmFp4Act(const float* x, std::size_t k, int slot,
          SUPERROC_FP4_OK;
 }
 
-// SQ10: gate and up scratch for the fused SwiGLU intercept, one pair per slot
+// Gate and up scratch for the fused SwiGLU intercept, one pair per slot
 // set. Streams attach 1:1 under the same rule as the Q8 slots (see
 // superroc_fp4_gemv_q8.hpp); the intercept names its stream, so two decode
 // streams can never share a pair. Pairs are never freed (process lifetime, one
@@ -146,7 +145,7 @@ inline void RocmFp4SwigluSetsEnsure(int n) {
   }
 }
 
-// lqw:rv27-fix2. Readiness probe: reports whether the load-time grow already
+// Readiness probe: reports whether the load-time grow already
 // covers n WITHOUT allocating, so the SwiGLU intercept can decline (and the
 // A4 fallback serve the step) instead of hipMallocing mid-capture.
 inline bool RocmFp4SwigluScratchReady(std::size_t n, hipStream_t stream) {

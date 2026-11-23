@@ -22,12 +22,6 @@
 
 namespace superroc::speculative {
 
-/// One measured plain-decode rate at a context length, for the guard floor.
-struct PlainDecodeRatePoint {
-  std::uint32_t context_tokens{0};
-  double tokens_per_second{0.0};
-};
-
 struct SpeculativeOptions {
   std::uint32_t max_draft_tokens{4};
   std::uint32_t min_draft_tokens{1};
@@ -38,11 +32,7 @@ struct SpeculativeOptions {
   bool use_batched_verification{false};
   bool retain_frontier_logits{false};
   DFlashDraftPolicy dflash_policy{DFlashDraftPolicy::kAdaptive};
-  /// Guard floor: measured plain-decode tok/s per context length, ascending.
-  /// A request whose speculative output runs slower than the interpolated
-  /// plain rate over the guard window switches to plain decoding. An empty
-  /// table disables the guard.
-  std::vector<PlainDecodeRatePoint> plain_decode_rates;
+  bool prompt_lookup{false};
 };
 
 struct SpeculativeStats {
@@ -293,12 +283,35 @@ public:
 
   /// Resets target and draft state, prefills the prompt, and returns the first
   /// target token. This setup is outside benchmarked decode regions.
+  /// total_prompt_tokens is the final prompt length this chunk belongs to
+  /// (zero when unknown); with a bounded-window drafter it lets the verifier
+  /// skip rows that can never enter the drafter's attention window.
+  /// Called by Prime and ExtendPrompt when the target's last logits are
+  /// readable, before the drafter consumes the prompt.
+  void SetTargetLogitsHook(std::function<void(tokenization::TokenId)> hook) {
+    target_logits_hook_ = std::move(hook);
+  }
+
   [[nodiscard]] tokenization::TokenId Prime(
       std::span<const tokenization::TokenId> prompt_tokens,
-      bool compute_logits = true);
+      bool compute_logits = true, std::uint32_t total_prompt_tokens = 0U);
   [[nodiscard]] tokenization::TokenId ExtendPrompt(
       std::span<const tokenization::TokenId> tokens, std::uint32_t position,
-      bool compute_logits = true);
+      bool compute_logits = true, std::uint32_t total_prompt_tokens = 0U);
+
+  /// One target pass over the rest of the prompt, which holds a cache boundary.
+  /// `save_target` runs when the first token is out and returns the target's
+  /// frontier at the boundary. The drafter is fed up to the boundary, captured
+  /// into `snapshot`, then fed the rest.
+  [[nodiscard]] tokenization::TokenId PromptThrough(
+      std::span<const tokenization::TokenId> tokens, std::uint32_t position,
+      std::uint32_t boundary, std::uint32_t total_prompt_tokens,
+      const std::function<tokenization::TokenId()>& save_target,
+      std::unique_ptr<SpeculativeVerifierSnapshot>* snapshot);
+  /// Exact bytes of Snapshot() once PromptThrough has fed the drafter up to
+  /// `boundary`. Empty when the drafter cannot say in advance.
+  [[nodiscard]] std::optional<std::size_t> SnapshotPayloadBytesAt(
+      std::uint32_t boundary, bool fresh_prompt) const;
 
   /// Commits one externally supplied continuation token through the target
   /// model and updates draft-provider state with the matching target features.
@@ -308,6 +321,11 @@ public:
   /// Performs a single speculative verification step
   struct StepResult {
     std::vector<tokenization::TokenId> emitted_tokens;
+    /// Target-model logprobs parallel to `emitted_tokens`, filled only when
+    /// the request armed logprobs; empty otherwise. A position the target
+    /// never exposed on the host keeps a placeholder (token set, non-finite
+    /// logprob, empty text and top).
+    std::vector<sampling::CapturedTokenLogprobs> emitted_target_logprobs;
     std::size_t accepted_count{0};
     std::size_t draft_count{0};
     tokenization::TokenId next_token{0};
@@ -324,6 +342,10 @@ public:
     tokenization::TokenId eos_id;
     std::uint32_t max_emitted_tokens;
     sampling::SamplerState& sampler;
+    /// Arms emitted_target_logprobs reporting (off by default).
+    bool logprobs{false};
+    /// Top-N depth for emitted_target_logprobs.
+    std::uint32_t logprobs_top_n{0};
   };
 
   [[nodiscard]] static std::vector<StepResult> VerifyBatch(
@@ -367,87 +389,17 @@ public:
     return current_draft_length_;
   }
 
-  /// Feeds the drafter the target contexts queued by Prime() and
-  /// ExtendPrompt(). Priming is deferred out of time-to-first-token; the
-  /// first operation that needs the drafter (proposal, committed-token
-  /// append) calls this first.
-  void FlushPendingDraftContext();
-
-  /// True while Prime()/ExtendPrompt() queued target features that have not
-  /// reached the drafter yet. Snapshot capture must refuse such a session:
-  /// its drafter is not primed for the target's committed context.
-  [[nodiscard]] bool HasPendingDraftContext() const noexcept {
-    return !pending_draft_contexts_.empty();
-  }
-
-  /// Guard bookkeeping for one completed speculative round: tokens
-  /// published, wall-clock seconds, and the committed context length. The
-  /// window is the last kGuardWindowRounds recorded rounds; after the
-  /// request has published kGuardSettleTokens tokens, a window that falls
-  /// below the configured plain rate for this context must repeat
-  /// kGuardConfirmWindows times before speculation is disabled for the rest
-  /// of the request (see SpeculationDisabled). The round that drained the
-  /// deferred drafter prime is not recorded: its cost is time-to-first-
-  /// token work, not decode throughput. A no-op without a rate table.
-  static constexpr std::size_t kGuardWindowRounds = 8;
-  static constexpr std::size_t kGuardSettleTokens = 48;
-  static constexpr std::size_t kGuardSettleRounds = 24;
-  static constexpr std::size_t kGuardConfirmWindows = 3;
-  void RecordDecodeRound(std::size_t published_tokens, double seconds,
-                         std::uint32_t context_length);
-
-  /// True once the guard switched this request to plain decoding. Reset by
-  /// BeginRequest() and Reset().
-  [[nodiscard]] bool SpeculationDisabled() const noexcept {
-    return speculation_disabled_;
-  }
-
   [[nodiscard]] std::size_t SnapshotPayloadBytes() const;
-
-  /// Exact payload bytes of SnapshotAtPosition(): the drafter state truncated
-  /// to an earlier committed target position.
-  [[nodiscard]] std::size_t SnapshotPayloadBytesAtPosition(
-      std::uint32_t position) const;
-
-  /// Snapshot of the drafter state as of an earlier committed target
-  /// position. Refuses like Snapshot() while priming is queued; the drafter
-  /// context must cover the position.
-  [[nodiscard]] std::unique_ptr<SpeculativeVerifierSnapshot> SnapshotAtPosition(
-      std::uint32_t position) const;
-
   void Reset() noexcept;
 
 private:
+  std::function<void(tokenization::TokenId)> target_logits_hook_;
   [[nodiscard]] bool IsStopToken(tokenization::TokenId token,
                                  tokenization::TokenId eos_id) const noexcept;
-  /// Adds the verifier-owned snapshot tail (rolling acceptance, stats, draft
-  /// length) to a drafter payload size, with the same overflow checks both
-  /// sizing paths share.
-  [[nodiscard]] std::size_t TrailingSnapshotBytes(std::size_t bytes) const;
   void ConfigureAdaptiveDraftPolicy();
   void ResetAdaptiveDraftLength() noexcept;
   void UpdateAdaptiveDraftLength(std::size_t accepted, std::size_t drafted);
   struct PreparedStep;
-  // Target features captured during a prompt chunk, waiting to reach the
-  // drafter. Rows are addressed by offset into the executor's accumulating
-  // capture buffer: a reallocation moves the storage but keeps the rows, so
-  // only a buffer clear (a new prompt or a restore, both of which also drop
-  // the queue) can invalidate them.
-  struct PendingDraftContext {
-    std::vector<tokenization::TokenId> tokens;
-    std::size_t hidden_offset{0};
-    std::size_t hidden_count{0};
-    std::size_t hidden_size{0};
-    tokenization::TokenId first_token{0};
-    std::uint32_t position{0};
-    bool append{false};
-  };
-  void QueueDraftContext(std::span<const tokenization::TokenId> tokens,
-                         std::size_t hidden_offset, std::size_t hidden_count,
-                         std::size_t hidden_size,
-                         tokenization::TokenId first_token,
-                         std::uint32_t position, bool append);
-  std::vector<PendingDraftContext> pending_draft_contexts_;
   [[nodiscard]] PreparedStep PrepareStep(const StepRequest& request,
                                          bool defer_target_only = false,
                                          bool defer_proposal = false);
@@ -462,7 +414,9 @@ private:
   [[nodiscard]] StepResult VerifySequentialStep(
       std::span<const tokenization::TokenId> current_sequence,
       std::uint32_t cur_pos, tokenization::TokenId current_token,
-      tokenization::TokenId eos_id, std::uint32_t max_emitted_tokens);
+      tokenization::TokenId eos_id, std::uint32_t max_emitted_tokens,
+      sampling::SamplerState& sampler, std::uint32_t logprobs_top_n = 0,
+      bool logprobs = false);
 
   std::unique_ptr<ISpeculativeTargetExecutor> owned_target_executor_;
   ISpeculativeTargetExecutor* target_executor_;
@@ -472,19 +426,6 @@ private:
   std::uint32_t current_draft_length_{3};
   std::deque<float> rolling_acceptance_;
   bool use_batched_verification_{false};
-  /// Guard state: the last rounds' (published tokens, seconds) and the
-  /// per-request switch flag. options_.plain_decode_rates is the floor
-  /// table; an empty table keeps the guard off.
-  std::deque<std::pair<std::size_t, double>> guard_rounds_;
-  std::size_t guard_recorded_rounds_{0};
-  std::size_t guard_published_tokens_{0};
-  std::size_t guard_below_floor_windows_{0};
-  bool speculation_disabled_{false};
-
-  /// Interpolated plain-decode tok/s at a context length; the table is
-  /// validated ascending and non-empty by the caller of RecordDecodeRound.
-  [[nodiscard]] double PlainRateForContext(
-      std::uint32_t context_length) const noexcept;
 };
 
 #endif  // defined(ENGINE_ENABLE_HIP)

@@ -16,9 +16,9 @@
 // more likely to encode my own misunderstanding than to catch one in the
 // reference, and the real bisect gives a sharper answer in minutes.
 //
-// Runs on the Mac. No model file, no GPU, all tensors F32, and no superroc_core at
-// runtime (the few quant entry points are stubbed because F32 never reaches
-// them).
+// Runs on any host. No model file, no GPU, all tensors F32, and no
+// superroc_core at runtime (the few quant entry points are stubbed because
+// F32 never reaches them).
 
 #include <cmath>
 #include <cstdint>

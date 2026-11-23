@@ -670,11 +670,134 @@ static int prepare_hc_down() {
     return 0;
 }
 
+// ue4m3 scale byte of an FP4 block: e > 0x7e -> +0; exp == 0 -> man / 1024;
+// else 2^(exp - 8) * (1 + man / 8).
+__device__ __forceinline__ float qfn_fp4_scale(unsigned e) {
+    if (e > 0x7eu) return 0.0f;
+    const unsigned exp = (e >> 3) & 0xFu;
+    const unsigned man = e & 0x7u;
+    if (exp == 0) return static_cast<float>(man) * (1.0f / 1024.0f);
+    const unsigned bits = ((exp + 119u) << 23) | (man << 20);
+    float value;
+    __builtin_memcpy(&value, &bits, sizeof(value));
+    return value;
+}
+
+// Four FP4 nibbles (the low four bits of each byte; upper bits ignored) to
+// four signed int8 codes: {0,1,2,3,4,6,8,10}, negated when bit 3 is set.
+__device__ __forceinline__ int qfn_fp4_codes(unsigned nib) {
+    const unsigned pos =
+        __builtin_amdgcn_perm(0x0A080604u, 0x03020100u, nib & 0x07070707u);
+    const unsigned neg =
+        __builtin_amdgcn_perm(0xF6F8FAFCu, 0xFDFEFF00u, nib & 0x07070707u);
+    // Selector byte i: i (second operand) for a clear sign bit, 4 + i (first
+    // operand) for a set one.
+    const unsigned select = 0x03020100u | ((nib & 0x08080808u) >> 1);
+    return static_cast<int>(__builtin_amdgcn_perm(neg, pos, select));
+}
+
+// The 320-row HC down projection over FP4 FAST weights: 17-byte blocks, 16
+// nibble bytes (element j in the low nibble of byte j, element 16 + j in the
+// high one) and one scale byte. Four lanes share a block, one dword of nibbles
+// each, and four blocks are fetched together, because a row has too few waves
+// to hide its K loads. It reads the same Q8_1 rows as the Q8_0 kernel. Every
+// token count sums in one order, so a row's result does not depend on the
+// batch it is computed in.
+template<int tokens>
+__launch_bounds__(32) __global__ static void qfn_fp4_hc_down_kernel(
+        const uint8_t* __restrict__ weights,
+        const block_q8_1* __restrict__ input, float* __restrict__ output) {
+    constexpr int blocks = 10240 / QK8_0;
+    constexpr int block_bytes = 17;
+    constexpr int prefetch = 4;
+    static_assert(blocks % (8 * prefetch) == 0);
+    const int lane = threadIdx.x;
+    const int word = lane & 3;
+    const uint8_t* row = weights + size_t(blockIdx.x) * (blocks * block_bytes);
+    float sum[tokens] = {};
+    for (int first = lane / 4; first < blocks; first += 8 * prefetch) {
+        unsigned nib[prefetch], scale_byte[prefetch];
+        int u[prefetch][tokens][2];
+        half dx[prefetch][tokens];
+#pragma unroll
+        for (int j = 0; j < prefetch; ++j) {
+            const int kb = first + 8 * j;
+            const uint8_t* block = row + kb * block_bytes;
+            // Blocks are 17 bytes apart: the dword is not aligned.
+            __builtin_memcpy(&nib[j], block + 4 * word, 4);
+            scale_byte[j] = block[16];
+#pragma unroll
+            for (int t = 0; t < tokens; ++t) {
+                const auto& x = input[t * blocks + kb];
+                dx[j][t] = __low2half(x.ds);
+                u[j][t][0] = get_int_b4(x.qs, word);
+                u[j][t][1] = get_int_b4(x.qs, word + 4);
+            }
+        }
+        __builtin_amdgcn_sched_barrier(0);
+#pragma unroll
+        for (int j = 0; j < prefetch; ++j) {
+            const int low = qfn_fp4_codes(nib[j]);
+            const int high = qfn_fp4_codes(nib[j] >> 4);
+            const float dw = qfn_fp4_scale(scale_byte[j]);
+#pragma unroll
+            for (int t = 0; t < tokens; ++t) {
+                int dot = ggml_hip_dp4a(low, u[j][t][0], 0);
+                dot = ggml_hip_dp4a(high, u[j][t][1], dot);
+                const float scale = __fmul_rn(dw, __half2float(dx[j][t]));
+                const float product = __fmul_rn(scale, static_cast<float>(dot));
+                sum[t] = __fadd_rn(sum[t], product);
+            }
+        }
+    }
+#pragma unroll
+    for (int t = 0; t < tokens; ++t) {
+        sum[t] = warp_reduce_sum<32>(sum[t]);
+        if (lane == 0) output[t * 320 + blockIdx.x] = sum[t];
+    }
+}
+
+template<int tokens = 1>
+static int prepare_fp4_hc_down() {
+    hipFuncAttributes attributes{};
+    if (hipFuncGetAttributes(
+            &attributes,
+            reinterpret_cast<const void*>(qfn_fp4_hc_down_kernel<tokens>)) != hipSuccess)
+        return -2;
+    if constexpr (tokens < MMVQ_MAX_BATCH_SIZE)
+        return prepare_fp4_hc_down<tokens + 1>();
+    return 0;
+}
+
+template<int tokens = 1>
+static void launch_fp4_hc_down(const void* weights, const void* input,
+                               float* output, int rows, hipStream_t stream) {
+    if (rows == tokens) {
+        qfn_fp4_hc_down_kernel<tokens><<<320, 32, 0, stream>>>(
+            static_cast<const uint8_t*>(weights),
+            static_cast<const block_q8_1*>(input), output);
+    } else if constexpr (tokens < MMVQ_MAX_BATCH_SIZE) {
+        launch_fp4_hc_down<tokens + 1>(weights, input, output, rows, stream);
+    }
+}
+
+extern "C" int qfn_mmq_fp4_hc_down_vec_preq(const void* W, const void* X_q8,
+                                            float* out_f32, int N,
+                                            hipStream_t stream) {
+    if (!W || !X_q8 || !out_f32 || N <= 0 || N > MMVQ_MAX_BATCH_SIZE) {
+        fprintf(stderr, "qfn_mmq_fp4_hc_down_vec_preq: bad arguments N=%d\n", N);
+        return -1;
+    }
+    launch_fp4_hc_down(W, X_q8, out_f32, N, stream);
+    return hipGetLastError() == hipSuccess ? 0 : -3;
+}
+
 static int prepare_decode_kernels() {
     // Resolving the first scalar HC function can leave a ~30 ms GPU idle
     // gap after prefill. Load the AR/MTP functions before serving, without
     // trial launches, temporary activations, or changes to session state.
-    const auto status = prepare_hc_down();
+    auto status = prepare_hc_down();
+    if (status == 0) status = prepare_fp4_hc_down();
     return status == 0 ? prepare_q8_decode() : status;
 }
 
@@ -723,7 +846,7 @@ extern "C" int qfn_mmq_q8_0_dense_vec_preq(const void* W, const void* W_gate,
   return hipGetLastError() == hipSuccess ? 0 : -3;
 }
 
-// LFX: dense Q6_K GEMV over pre-quantized Q8_1 activations (the ROC LM
+// Dense Q6_K GEMV over pre-quantized Q8_1 activations (the ROC LM
 // head on narrow batches). Only N output rows are written.
 extern "C" int qfn_mmq_q6_K_dense_vec_preq(const void* W, const void* X_q8,
                                            float* out_f32, int M, int N, int K,

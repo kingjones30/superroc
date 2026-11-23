@@ -32,9 +32,13 @@ if (ENGINE_ENABLE_HIP)
     "gpu;hip;target;external-model")
   add_qwen27b_test(verify_equals_decode_test verify_equals_decode_test.cpp
     "gpu;hip;verify;external-model")
+  # SUPERROC_CANONICAL_CACHE=1: the prompt state is the same bits wherever
+  # earlier requests cut the prompt.
+  add_qwen27b_test(qwen27b_prompt_split_test prompt_split_test.cpp
+    "gpu;hip;cache;external-model")
   add_qwen27b_test(fp4_slot_grow_test fp4_slot_grow_test.cpp
     "gpu;hip;rocm_fp4;external-model")
-  # sq16 SPEC2 (S2-4): four KAT+MTP sessions at once, three fresh servers;
+  # Four KAT+MTP sessions at once, three fresh servers;
   # every client's text equals its one-session text. Skips (77) without
   # SUPERROC_SQ16_KAT_MODEL, like the other external-model gates.
   add_test(NAME sq16_four_session
@@ -44,11 +48,20 @@ if (ENGINE_ENABLE_HIP)
     LABELS "qwen27b;gpu;hip;verify;external-model;slow"
     SKIP_RETURN_CODE 77)
   add_qwen27b_test(qwen_mtp_gpu_test mtp_test.cpp "gpu;hip;mtp;external-model")
+  # The same checks with the draft block at the file's own precision, where
+  # the GPU pass has to match the CPU reference closely.
+  add_test(NAME qwen_mtp_gpu_file_precision_test COMMAND qwen_mtp_gpu_test)
+  set_tests_properties(qwen_mtp_gpu_file_precision_test PROPERTIES
+    LABELS "qwen27b;gpu;hip;mtp;external-model" SKIP_RETURN_CODE 77
+    ENVIRONMENT "SUPERROC_MTP_DRAFT_Q4=0")
   add_qwen27b_test(qwen_dflash_gpu_test dflash_test.cpp
     "gpu;hip;dflash;dflash2;external-model")
   add_qwen27b_test(qwen_dflash_noncausal_attention_ops_test attention_test.cpp
     "gpu;hip;dflash;dflash2;kernels")
   target_link_libraries(qwen_dflash_noncausal_attention_ops_test PRIVATE hip::host)
+  add_qwen27b_test(dspark_trim_test dspark_trim_test.hip
+    "gpu;hip;dflash;dspark;kernels")
+  target_link_libraries(dspark_trim_test PRIVATE hip::host)
   add_library(qwen_serving_test_support STATIC
     ${PROJECT_SOURCE_DIR}/src/cli/serve/component_text_cache.cpp
     ${SUPERROC_SERVE_TEXT_SOURCES})

@@ -95,7 +95,7 @@ public:
       TextRunnerState& state, sampling::SamplerState& sampler) const override;
   void Advance(TextRunnerState& state, TextRunnerToken token) const override;
 
-  /// LS4 (LING3_MTP=1): the speculative step. The default implementation in
+  /// The speculative step. The default implementation in
   /// TextModelRunner is the one-token SelectNext/Advance loop; this override
   /// replaces it with Session::EvaluateSpeculative, which drafts with the MTP
   /// head, verifies the whole block in ONE batched ForwardBatch, and can
@@ -109,7 +109,7 @@ public:
   /// Falls back to the default one-token behaviour whenever speculation is off,
   /// cannot run, or the remaining budget cannot hold a whole block -- so the
   /// tail of a request decodes normally.
-  /// RV4 (Jay build28f): samples the first token without advancing, so the
+  /// Samples the first token without advancing, so the
   /// scheduler can publish it before the next forward. The scheduler passes a
   /// sampler copy; DecodeStep must reproduce this token first (it checks).
   [[nodiscard]] std::optional<TextDecodeSelection> PreviewFirstToken(

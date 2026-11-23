@@ -219,7 +219,7 @@ void CheckRouter(int tokens, int experts, int used, int pattern) {
   std::vector<std::int32_t> first_ids;
   for (int replay = 0; replay < 2; ++replay) {
     q::RouterTopK(d_logits, stride, d_ids + 1, d_weights + 1, tokens, experts,
-                  used, nullptr);
+                  used, used, nullptr);
     CheckHip(hipDeviceSynchronize(), "router");
     std::vector<float> weights(count + 2);
     std::vector<std::int32_t> ids(count + 2);
@@ -278,6 +278,34 @@ void CheckRouter(int tokens, int experts, int used, int pattern) {
             std::abs(weights[at] - expected) > 2e-6) {
           throw std::runtime_error("router differs from softmax reference");
         }
+      }
+    }
+  }
+  // Fewer routed experts keep the share they have among `used`, ids in the same
+  // order.
+  const int fewer = used - 1;
+  q::RouterTopK(d_logits, stride, d_ids + 1, d_weights + 1, tokens, experts,
+                fewer, used, nullptr);
+  CheckHip(hipDeviceSynchronize(), "router with fewer experts");
+  std::vector<float> fewer_weights(count + 2);
+  std::vector<std::int32_t> fewer_ids(count + 2);
+  CheckHip(
+      hipMemcpy(fewer_weights.data(), d_weights,
+                fewer_weights.size() * sizeof(float), hipMemcpyDeviceToHost),
+      "download fewer weights");
+  CheckHip(
+      hipMemcpy(fewer_ids.data(), d_ids,
+                fewer_ids.size() * sizeof(std::int32_t), hipMemcpyDeviceToHost),
+      "download fewer ids");
+  for (int t = 0; t < tokens; ++t) {
+    for (int i = 0; i < fewer; ++i) {
+      const auto at = 1 + static_cast<std::size_t>(t) * fewer + i;
+      const auto full = 1 + static_cast<std::size_t>(t) * used + i;
+      if (fewer_ids[at] != first_ids[full] ||
+          std::bit_cast<std::uint32_t>(fewer_weights[at]) !=
+              std::bit_cast<std::uint32_t>(first_weights[full])) {
+        throw std::runtime_error(
+            "fewer experts changed a kept expert's weight");
       }
     }
   }

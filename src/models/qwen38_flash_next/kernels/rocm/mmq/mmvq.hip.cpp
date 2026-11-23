@@ -134,7 +134,7 @@ __launch_bounds__(32, 1) static __global__
     output[row] = sum;
 }
 
-// LFX: dense Q6_K GEMV for the ROC LM head (248320x2560). Same grid as
+// Dense Q6_K GEMV for the ROC LM head (248320x2560). Same grid as
 // mul_mat_vec_q8 (one wave per weight row, up to eight inputs per wave).
 // Each Q6_K block spans QK_K/QK8_1 Q8_1 input blocks, so the input advances
 // by that many blocks per weight block -- the same indexing the MoE kernel
@@ -811,7 +811,7 @@ void mul_mat_vec_q8_dispatch(const void* weights, const void* gate,
   }
 }
 
-// LFX: launchers for the dense Q6_K GEMV, mirroring the Q8_0 ones.
+// Launchers for the dense Q6_K GEMV, mirroring the Q8_0 ones.
 template <int tokens>
 static void launch_q6_K(const void* weights, const block_q8_1* input,
                         float* output, int k, int rows, int input_stride,

@@ -213,13 +213,8 @@ void TestLifecycleAndRange(const std::filesystem::path& root) {
   VideoJobService service(Options(root, &runner));
   Check(service.ready(), service.initialization_error());
 
-  // Compatibility: the previous engine-name extension key, built
-  // from parts so its spelling never appears here; the server accepts it.
-  const std::string previous_extension = std::string("\"g") + "ufo\":";
   const std::string request =
-      R"({"model":"minimax-h3-dev","prompt":"private fox prompt","size":"256x256","seconds":"1",)" +
-      previous_extension +
-      R"({"seed":7,"frames":22,"output_format":"ppm","selected_frame":4}})";
+      R"({"model":"minimax-h3-dev","prompt":"private fox prompt","size":"256x256","seconds":"1","superroc":{"seed":7,"frames":22,"output_format":"ppm","selected_frame":4}})";
   const HttpResponse created = Send(service, "POST", "/v1/videos", request, {},
                                     "application/json; charset=utf-8");
   Check(created.status == 202 &&

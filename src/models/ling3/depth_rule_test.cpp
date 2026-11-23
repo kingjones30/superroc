@@ -1,5 +1,5 @@
-// Host test for the SPEC8 depth rule. No HIP. Built and run on amdaimax2
-// through gpu-run (see ~/ls/lm1/h-build.sh).
+// Host test for the depth rule. No HIP. Built and run on one machine
+// on an otherwise idle GPU.
 #include "depth_rule.hpp"
 
 #include <algorithm>
@@ -163,7 +163,7 @@ static void TestShortDraftFloor() {
   CHECK(dr::DraftShort(proven, 32, 0.0));
 }
 
-// Jay 13:21: a low-acceptance prose request, then a code request in the same
+// A low-acceptance prose request, then a code request in the same
 // bucket. The code request drafts on its first eligible step. The observed
 // mix does not stick, and one prose request is not a structural deny.
 static void TestProseThenCode() {

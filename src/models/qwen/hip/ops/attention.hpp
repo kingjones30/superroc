@@ -141,7 +141,7 @@ void LaunchBatchedFusedQKNormRoPEKvWrite(
 /// inputs, outputs or each other. Heads reuse the workspace in bounded groups
 /// when the full layout does not fit. Persistent KV storage is unchanged.
 /// Returns false when the shape is unsupported, so the caller can fall back.
-/// LGA: window is the sliding-window size (0 = full attention). Only the
+/// Window is the sliding-window size (0 = full attention). Only the
 /// Glimmer (32,2,128) instantiation reads it; the (24,4)/(16,2) arms ignore
 /// it.
 [[nodiscard]] bool LaunchQwenWmmaAttention(
@@ -154,7 +154,8 @@ void LaunchBatchedFusedQKNormRoPEKvWrite(
     std::uint32_t key_begin = 0, bool skip_kv_write = false,
     std::span<float> packed_k_workspace = {},
     std::span<float> packed_v_workspace = {}, std::uint32_t window = 0,
-    const float* sinks = nullptr, std::uint32_t key_limit = 0);
+    const float* sinks = nullptr, std::uint32_t key_limit = 0,
+    bool single_sweep = false);
 
 /// Large-batch causal attention using float32 QK/PV GEMMs and one reusable
 /// [batch, context] score buffer.

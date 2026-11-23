@@ -44,8 +44,7 @@ def main() -> None:
         ["model", "dflash_model"] if args.suite == "serving" else [])
     for name in required:
         variable = "SUPERROC_QWEN27B_" + name.upper()
-        legacy = "G" + "UFO_QWEN27B_" + name.upper()
-        value = getattr(args, name) or environment.get(variable) or environment.get(legacy)
+        value = getattr(args, name) or environment.get(variable)
         if not value or not Path(value).is_file():
             parser.error(f"missing artifact: --{name.replace('_', '-')}")
         environment[variable] = str(Path(value).resolve())

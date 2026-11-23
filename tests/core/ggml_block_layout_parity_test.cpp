@@ -1,7 +1,7 @@
 // Parity proof for the canonical quantized block layouts exported from
 // src/core/quant/ggml_dequant.hpp.
 //
-// Goal (R2 risk): static_assert(sizeof(...)) proves byte SIZE but NOT field
+// Goal: static_assert(sizeof(...)) proves byte SIZE but NOT field
 // ORDER. If the canonical header structs had the wrong field order, dequant
 // via the struct would silently diverge from the true byte-level format. This
 // test dequantizes identical packed bytes TWO independent ways:

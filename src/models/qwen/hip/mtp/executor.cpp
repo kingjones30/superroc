@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/hip/snapshot_transfer.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
@@ -25,6 +25,12 @@
 #include "src/models/qwen/hip/ops.hpp"
 
 namespace superroc::hip {
+
+/// LaunchMtpTop1Probability lives in kernels/mtp_batch.hip.
+void LaunchMtpTop1Probability(const float* logits, std::size_t rows,
+                              const std::uint32_t* token, float* probability,
+                              hipStream_t stream);
+
 namespace {
 
 template<typename T>
@@ -32,7 +38,7 @@ void AllocateBuffer(T*& pointer, std::size_t elements) {
   pointer = static_cast<T*>(detail::AllocateDevice(elements * sizeof(T)));
 }
 
-// lqw:spec5-prof. One speculative draft forward, split with HIP events.
+// One speculative draft forward, split with HIP events.
 // SUPERROC_MTP_PROFILE=1. Events are recorded on the draft stream and read
 // after the step's existing sync, so the spans are GPU time.
 struct DraftStepProf {
@@ -40,7 +46,7 @@ struct DraftStepProf {
   hipEvent_t ev[8]{};
 
   DraftStepProf() {
-    const char* env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_PROFILE");
+    const char* env = ::superroc::core::GetEnv("SUPERROC_MTP_PROFILE");
     on = env != nullptr && env[0] != '\0' && env[0] != '0';
     if (!on) {
       return;
@@ -85,7 +91,7 @@ struct DraftStepProf {
       return (cols / 32) * 17 * rows;
     case core::GgmlType::kQ8_0:
       return (cols / 32) * 34 * rows;
-    // Super ROC DVT: K-quant and IQ row sizes, the same block sizes
+    // Super Roc DVT: K-quant and IQ row sizes, the same block sizes
     // quant_ops.hpp static_asserts (Q6_K is a common LM head type).
     case core::GgmlType::kQ8_K:
       return (cols / 256) * 292 * rows;
@@ -109,6 +115,16 @@ struct DraftStepProf {
 
 }  // namespace
 
+bool QwenMtpGpuExecutor::KvSinglePlane() noexcept {
+  static const bool kv_one = [] {
+    // M5: the single F16 plane is the default; SUPERROC_MTP_KV_ONE=0 restores
+    // the old F32+F16 two-copy plane.
+    const char* e = ::superroc::core::GetEnv("SUPERROC_MTP_KV_ONE");
+    return e == nullptr || e[0] != '0';
+  }();
+  return kv_one;
+}
+
 QwenMtpGpuExecutor::QwenMtpGpuExecutor(
     std::shared_ptr<const QwenMtpGpuModel> model, std::uint32_t max_context)
     : model_(std::move(model)),
@@ -125,7 +141,7 @@ QwenMtpGpuExecutor::QwenMtpGpuExecutor(
   }
 }
 
-// SQ10 SPEC2 (R3): declared locally (not via the rocm_fp4 header) so this
+// Declared locally (not via the rocm_fp4 header) so this
 // TU's include block stays untouched.
 extern "C" int superroc_fp4_slot_stream_detach(hipStream_t stream);
 
@@ -139,25 +155,25 @@ QwenMtpGpuExecutor::~QwenMtpGpuExecutor() {
   Free();
 }
 
-// Super ROC DVT. The head is row-major (row r at r * row_bytes for every type
+// Super Roc DVT. The head is row-major (row r at r * row_bytes for every type
 // DraftWeightBytes knows), so a row prefix and a row tail are themselves
 // valid matrices for the same GEMV. Ids below N cover 99.8 % of English,
-// C++, Python and Markdown tokens at N = 98304 on the Qwen3.5 vocab (Jay's
-// count, 602,738 tokens); the special tokens (chat, think, tool call) sit at
+// C++, Python and Markdown tokens at N = 98304 on the Qwen3.5 vocab (a
+// count of 602,738 tokens); the special tokens (chat, think, tool call) sit at
 // the top of the vocab, so the tail keeps all of them.
 void QwenMtpGpuExecutor::ConfigureDraftVocab() {
   draft_head_rows_ = 0;
   draft_tail_start_ = 0;
   draft_rows_ = 0;
-  // Default N = 98304 (lane DVT, KAT on MAX1: draft counts unchanged, decode
+  // Default N = 98304 (KAT: draft counts unchanged, decode
   // +8-11 %). SUPERROC_MTP_DRAFT_VOCAB=0 keeps the full head; another N trims
   // to N.
-  const char* env = ::superroc::core::GetEnvCompat("SUPERROC_MTP_DRAFT_VOCAB");
+  const char* env = ::superroc::core::GetEnv("SUPERROC_MTP_DRAFT_VOCAB");
   const bool env_set = env != nullptr && env[0] != '\0';
   const auto& weights = model_->GetWeights();
   const std::size_t vocab = weights.config.vocab_size;
   const std::size_t hidden = weights.config.hidden_size;
-  // HT2 (Muse Wonder W2 DVT-1): the default was measured on the Qwen3.5 BPE
+  // The default was measured on the Qwen3.5 BPE
   // vocab of 248,320 tokens only (frequent tokens at low ids); any other vocab
   // trims only when SUPERROC_MTP_DRAFT_VOCAB asks for it.
   if (!env_set && vocab != 248320) {
@@ -167,16 +183,14 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
                  vocab);
     return;
   }
-  // HT2 (W2 DVT-2, W6 D-2): p-min and the TF dump read the draft
-  // distribution, so either keeps the full head, and wins over an explicit
-  // SUPERROC_MTP_DRAFT_VOCAB. Same parser as the p-min gate (kat_mtp_pmin.hpp).
-  const bool tf_dump =
-      ::superroc::core::GetEnvCompat("SUPERROC_MTP_TF_DUMP") != nullptr;
-  if (MtpPMinFromEnv() > 0.0F || tf_dump) {
-    std::fprintf(
-        stderr,
-        "MTP draft vocab: full head (%s reads the draft distribution)\n",
-        tf_dump ? "SUPERROC_MTP_TF_DUMP" : "SUPERROC_MTP_PMIN");
+  // The TF dump reads the whole draft distribution, so it keeps the full
+  // head and wins over an explicit SUPERROC_MTP_DRAFT_VOCAB. The p-min gate
+  // reads only the drafted token's probability, which the trimmed rows give
+  // to within the mass of the rows left out.
+  if (::superroc::core::GetEnv("SUPERROC_MTP_TF_DUMP") != nullptr) {
+    std::fprintf(stderr,
+                 "MTP draft vocab: full head (SUPERROC_MTP_TF_DUMP reads the "
+                 "draft distribution)\n");
     return;
   }
   long requested = 98304L;
@@ -197,7 +211,7 @@ void QwenMtpGpuExecutor::ConfigureDraftVocab() {
   if (requested <= 0 || static_cast<std::size_t>(requested) >= vocab) {
     return;
   }
-  // HT2 (W2 DVT-3): a whole number of blocks per row for every type the row
+  // A whole number of blocks per row for every type the row
   // size table knows (256 covers the K/IQ super-blocks and the 32-blocks).
   const char* refused = nullptr;
   if (requested < 1024) {
@@ -298,21 +312,36 @@ void QwenMtpGpuExecutor::Allocate() {
   AllocateBuffer(d_ffn_out_, hidden);
   AllocateBuffer(d_feedback_hidden_, hidden);
   AllocateBuffer(d_logits_, config.vocab_size);
-  AllocateBuffer(d_kv_cache_, 2 * total_kv);
+  // M2/M5 (single F16 plane, the default since M5): the F32 plane is never
+  // allocated; writers take null F32 pointers and the F16 plane is the only
+  // copy. SUPERROC_MTP_KV_ONE=0 restores the old two-copy plane.
+  if (KvSinglePlane()) {
+    d_kv_cache_ = nullptr;
+    static bool announced = false;
+    if (!announced) {
+      announced = true;
+      std::fprintf(stderr,
+                   "MTP KV: single F16 plane (default; "
+                   "SUPERROC_MTP_KV_ONE=0 restores two planes)\n");
+    }
+  } else {
+    AllocateBuffer(d_kv_cache_, 2 * total_kv);
+  }
   d_kv_cache_f16_ =
       detail::AllocateDevice(2 * total_kv * sizeof(std::uint16_t));
   const std::size_t split_k_elements = detail::DecodeAttentionScratchElements(
       config.num_attention_heads, config.head_dim);
   AllocateBuffer(d_split_k_scratch_, split_k_elements);
   AllocateBuffer(d_out_token_, 1);
-  // RV44 cosmetic: the draft-owned MoE scratch below is per-step scratch too,
+  AllocateBuffer(d_out_probability_, 1);
+  // The draft-owned MoE scratch below is per-step scratch too,
   // so it is counted in scratch_bytes_ at the end of this function.
   std::size_t moe_scratch_bytes = 0;
   if (model_->GetWeights().layer.is_moe) {
     // KAT-MTP: one-token MoE scratch. The dense SwiGLU buffers stay allocated
     // from intermediate_size; this block is what the FFN actually runs.
     const std::size_t n_expert = config.expert_count;
-    const std::size_t n_used = config.expert_used_count;
+    const std::size_t n_used = config.ExpertsInFile();
     const std::size_t ff = std::max(config.expert_feed_forward_length,
                                     config.expert_shared_feed_forward_length);
     if (n_expert == 0 || n_used == 0 || n_used > 8 || ff == 0) {
@@ -334,40 +363,55 @@ void QwenMtpGpuExecutor::Allocate() {
         n_used * sizeof(int);
   }
 
-  const std::size_t rows = kPrimeBatchRows;
+  // The KV-only prime's scratch. The full-block prime's buffers and the
+  // Q4_0 weight image are allocated on first use (EnsureFullPrimeScratch,
+  // RunPrimeGemm): a session that never takes those paths does not hold them.
+  const std::size_t rows = kPrimeScratchRows;
   AllocateBuffer(d_b_tokens_, rows);
   AllocateBuffer(d_b_h_, rows * hidden);
   AllocateBuffer(d_b_embed_, rows * hidden);
   AllocateBuffer(d_b_fusion_, rows * 2 * hidden);
   AllocateBuffer(d_b_hidden_, rows * hidden);
   AllocateBuffer(d_b_normed_, rows * hidden);
-  AllocateBuffer(d_b_qg_, rows * 2 * attention);
-  AllocateBuffer(d_b_q_, rows * attention);
-  AllocateBuffer(d_b_gate_, rows * attention);
   AllocateBuffer(d_b_k_, rows * kv);
   AllocateBuffer(d_b_v_, rows * kv);
-  AllocateBuffer(d_b_context_, rows * attention);
-  AllocateBuffer(d_b_attn_out_, rows * hidden);
-  AllocateBuffer(d_b_ffn_act_, rows * intermediate);
-  AllocateBuffer(d_b_ffn_up_, rows * intermediate);
-  AllocateBuffer(d_b_ffn_out_, rows * hidden);
   const std::size_t widest =
       std::max(std::max(2 * hidden, intermediate), attention);
   b_bf16_elems_ = rows * widest;
   AllocateBuffer(d_b_bf16_, b_bf16_elems_);
-  // Largest prime weight is an FFN matrix (intermediate x hidden).
-  q4_bf16_elems_ = intermediate * hidden;
-  AllocateBuffer(d_q4_bf16_, q4_bf16_elems_);
 
   // Account what Allocate() just reserved, in the same terms the serving layer
-  // reports: the two context-scaling KV copies are retained state, everything
-  // else is per-step scratch that is reused on every drafted token.
-  state_bytes_ = 2 * total_kv * (sizeof(float) + sizeof(std::uint16_t));
+  // reports: the context-scaling KV copy (or copies) is retained state,
+  // everything else is per-step scratch that is reused on every drafted token.
+  // M2: a single F16 plane holds half the state.
+  state_bytes_ = KvSinglePlane()
+                     ? 2 * total_kv * sizeof(std::uint16_t)
+                     : 2 * total_kv * (sizeof(float) + sizeof(std::uint16_t));
   scratch_bytes_ =
       (5 * hidden + 2 * hidden + 2 * attention + 3 * attention + 2 * kv +
        2 * hidden + intermediate + config.vocab_size + 1) *
           sizeof(float) +
       split_k_elements * sizeof(float) + moe_scratch_bytes;
+}
+
+void QwenMtpGpuExecutor::EnsureFullPrimeScratch() {
+  if (d_b_ffn_out_ != nullptr) {
+    return;
+  }
+  const auto& config = model_->GetConfig();
+  const std::size_t hidden = config.hidden_size;
+  const std::size_t attention = config.AttentionSize();
+  const std::size_t intermediate = config.intermediate_size;
+  const std::size_t rows = kPrimeScratchRows;
+  AllocateBuffer(d_b_qg_, rows * 2 * attention);
+  AllocateBuffer(d_b_q_, rows * attention);
+  AllocateBuffer(d_b_gate_, rows * attention);
+  AllocateBuffer(d_b_context_, rows * attention);
+  AllocateBuffer(d_b_attn_out_, rows * hidden);
+  AllocateBuffer(d_b_ffn_act_, rows * intermediate);
+  AllocateBuffer(d_b_ffn_up_, rows * intermediate);
+  // Last: its pointer is the "already allocated" mark above.
+  AllocateBuffer(d_b_ffn_out_, rows * hidden);
 }
 
 void QwenMtpGpuExecutor::Free() noexcept {
@@ -397,6 +441,7 @@ void QwenMtpGpuExecutor::Free() noexcept {
   free_buffer(d_kv_cache_f16_);
   free_buffer(d_split_k_scratch_);
   free_buffer(d_out_token_);
+  free_buffer(d_out_probability_);
   free_buffer(d_moe_logits_);
   free_buffer(d_moe_ids_);
   free_buffer(d_moe_w_);
@@ -542,11 +587,36 @@ tokenization::TokenId QwenMtpGpuExecutor::Run(tokenization::TokenId input_token,
   LaunchRoPE(d_q_, d_k_, config.num_attention_heads, config.num_key_value_heads,
              config.head_dim, config.rotary_dim, position, config.rope_theta,
              stream_, vision_input_ ? vision_input_->rope() : nullptr);
-  LaunchAttention(
-      d_q_, d_k_, d_v_, d_gate_, d_kv_cache_, d_kv_cache_ + total_kv,
-      d_kv_cache_f16_, static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv,
-      d_context_, 0, position, max_context_, config.num_attention_heads,
-      config.num_key_value_heads, config.head_dim, stream_, d_split_k_scratch_);
+  // Draft attention reads the FP16 K/V like the target does; proposals never
+  // reach the output. SUPERROC_MTP_KV_F32=1 keeps the FP32 read. M2: with a
+  // single F16 plane there is no FP32 cache to read, so the flag is off.
+  static const bool kv_f32_read = [] {
+    const char* e = ::superroc::core::GetEnv("SUPERROC_MTP_KV_F32");
+    return e != nullptr && e[0] == '1' && !KvSinglePlane();
+  }();
+  if (kv_f32_read) {
+    LaunchAttention(d_q_, d_k_, d_v_, d_gate_, d_kv_cache_,
+                    d_kv_cache_ + total_kv, d_kv_cache_f16_,
+                    static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv,
+                    d_context_, 0, position, max_context_,
+                    config.num_attention_heads, config.num_key_value_heads,
+                    config.head_dim, stream_, d_split_k_scratch_);
+  } else {
+    // M2: d_kv_cache_ is null, so the F32 writes are null too (the kernel
+    // null-checks each plane); d_kv_cache_ + total_kv must NOT be formed.
+    float* const kv_f32_k = KvSinglePlane() ? nullptr : d_kv_cache_;
+    float* const kv_f32_v = KvSinglePlane() ? nullptr : d_kv_cache_ + total_kv;
+    LaunchKatMtpWriteKv(d_k_, d_v_, kv_f32_k, kv_f32_v, d_kv_cache_f16_,
+                        static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv,
+                        position, 1, max_context_, config.num_key_value_heads,
+                        config.head_dim, stream_);
+    LaunchAttention(
+        d_q_, nullptr, nullptr, d_gate_, nullptr, nullptr, d_kv_cache_f16_,
+        static_cast<std::uint16_t*>(d_kv_cache_f16_) + total_kv, d_context_, 0,
+        position, max_context_, config.num_attention_heads,
+        config.num_key_value_heads, config.head_dim, stream_,
+        d_split_k_scratch_, /*skip_kv_write=*/true);
+  }
   LaunchGEMV(layer.attn_output.data, layer.attn_output.type, d_context_,
              d_attn_out_, hidden, attention, stream_,
              models::qwen::QwenGemmMode::kHipMtp);
@@ -585,7 +655,7 @@ tokenization::TokenId QwenMtpGpuExecutor::Run(tokenization::TokenId input_token,
   prof.Mark(4, stream_);
   ++next_position_;
 
-  // SQ10 SPEC3 (S3-1): the drafter stream is aliased to its session's FP4
+  // The drafter stream is aliased to its session's FP4
   // slot set, so no entry may return with work still queued: drain here too,
   // not just on the logits path below. The logits path is unchanged (it
   // already pays exactly one sync); this adds one sync per no-logits draft
@@ -614,19 +684,29 @@ tokenization::TokenId QwenMtpGpuExecutor::Run(tokenization::TokenId input_token,
     }
   }
   prof.Mark(5, stream_);
-  // QSM: the target decode's two-phase tiled argmax (same answer as the
+  // The target decode's two-phase tiled argmax (same answer as the
   // one-block scan: lowest index of the largest finite logit). d_ffn_out_
   // (hidden floats) was consumed by the residual add and holds the partials.
   LaunchBatchedGPUArgmax(d_logits_, d_out_token_, 1,
                          draft_rows_ == 0 ? config.vocab_size : draft_rows_,
                          std::span<float>(d_ffn_out_, hidden), stream_);
   tokenization::TokenId result = 0;
-  const auto copy_error = hipMemcpyAsync(&result, d_out_token_, sizeof(result),
-                                         hipMemcpyDeviceToHost, stream_);
+  float probability = 0.0F;
+  auto copy_error = hipMemcpyAsync(&result, d_out_token_, sizeof(result),
+                                   hipMemcpyDeviceToHost, stream_);
+  if (draft_probability_ && copy_error == hipSuccess) {
+    LaunchMtpTop1Probability(d_logits_,
+                             draft_rows_ == 0 ? config.vocab_size : draft_rows_,
+                             d_out_token_, d_out_probability_, stream_);
+    copy_error =
+        hipMemcpyAsync(&probability, d_out_probability_, sizeof(probability),
+                       hipMemcpyDeviceToHost, stream_);
+  }
   prof.Mark(6, stream_);
   if (copy_error != hipSuccess || hipStreamSynchronize(stream_) != hipSuccess) {
     throw std::runtime_error("MTP GPU result synchronization failed");
   }
+  last_top1_probability_ = probability;
   if (draft_rows_ != 0 && result >= draft_head_rows_) {
     result = static_cast<tokenization::TokenId>(draft_tail_start_ +
                                                 (result - draft_head_rows_));
@@ -683,7 +763,7 @@ std::span<const float> QwenMtpGpuExecutor::CopyLastHidden() {
 
 std::span<const float> QwenMtpGpuExecutor::CopyLastLogits() {
   if (draft_rows_ != 0) {
-    // DVT: unpack head + tail into full-vocab order; rows the draft did not
+    // Unpack head + tail into full-vocab order; rows the draft did not
     // score read -inf, so callers indexing by token id stay correct.
     const auto error = hipMemcpyAsync(h_draft_logits_.data(), d_logits_,
                                       h_draft_logits_.size() * sizeof(float),
@@ -785,14 +865,23 @@ QwenMtpGpuSnapshot::~QwenMtpGpuSnapshot() {
 }
 
 std::size_t QwenMtpGpuExecutor::SnapshotPayloadBytes() const {
+  return SnapshotPayloadBytesAt(next_position_);
+}
+
+std::size_t QwenMtpGpuExecutor::SnapshotPayloadBytesAt(
+    std::uint32_t position) const {
   const auto& config = model_->GetConfig();
-  if (next_position_ > max_context_ || config.num_key_value_heads == 0 ||
+  if (position > max_context_ || config.num_key_value_heads == 0 ||
       config.head_dim == 0) {
     throw std::logic_error("MTP snapshot boundary is invalid");
   }
   const std::size_t kv =
       MtpCheckedMultiply(config.num_key_value_heads, config.head_dim);
-  const std::size_t rows = MtpCheckedMultiply(next_position_, kv);
+  const std::size_t rows = MtpCheckedMultiply(position, kv);
+  // M2: the snapshot holds only the F16 plane.
+  if (KvSinglePlane()) {
+    return MtpCheckedMultiply(rows, 2 * sizeof(std::uint16_t));
+  }
   return MtpCheckedSum(MtpCheckedMultiply(rows, 2 * sizeof(float)),
                        MtpCheckedMultiply(rows, 2 * sizeof(std::uint16_t)));
 }
@@ -820,30 +909,35 @@ std::unique_ptr<QwenMtpGpuSnapshot> QwenMtpGpuExecutor::SaveSnapshot() const {
   }
   // Each buffer is assigned before the next allocation, so a failed hipMalloc
   // frees what succeeded through the snapshot dtor (a capture skip, not a
-  // leak). Copies run after all four allocations succeed.
+  // leak). Copies run after all allocations succeed. M2: only F16 is copied.
   const std::size_t f32_plane =
       MtpCheckedMultiply(MtpCheckedMultiply(valid, kv), sizeof(float));
   const std::size_t f16_plane =
       MtpCheckedMultiply(MtpCheckedMultiply(valid, kv), sizeof(std::uint16_t));
-  snapshot->d_k_f32_ = detail::AllocateDevice(f32_plane);
-  snapshot->d_v_f32_ = detail::AllocateDevice(f32_plane);
+  const bool kv_one = KvSinglePlane();
+  if (!kv_one) {
+    snapshot->d_k_f32_ = detail::AllocateDevice(f32_plane);
+    snapshot->d_v_f32_ = detail::AllocateDevice(f32_plane);
+  }
   snapshot->d_k_f16_ = detail::AllocateDevice(f16_plane);
   snapshot->d_v_f16_ = detail::AllocateDevice(f16_plane);
 
-  // FP32 planes are head-major [head][pos][dim]; FP16 planes are token-major
-  // [pos][kv_width] (attention_decode.hip WriteKVCacheKernel).
-  const std::size_t row_width =
-      MtpCheckedMultiply(MtpCheckedMultiply(valid, dim), sizeof(float));
-  const std::size_t src_pitch =
-      MtpCheckedMultiply(MtpCheckedMultiply(max_context_, dim), sizeof(float));
-  const auto* src_k = static_cast<const float*>(d_kv_cache_);
-  const auto* src_v = static_cast<const float*>(d_kv_cache_) + total_kv;
-  HIP_CHECK(hipMemcpy2DAsync(snapshot->d_k_f32_, row_width, src_k, src_pitch,
-                             row_width, heads, hipMemcpyDeviceToDevice,
-                             stream_));
-  HIP_CHECK(hipMemcpy2DAsync(snapshot->d_v_f32_, row_width, src_v, src_pitch,
-                             row_width, heads, hipMemcpyDeviceToDevice,
-                             stream_));
+  if (!kv_one) {
+    // FP32 planes are head-major [head][pos][dim]; FP16 planes are token-major
+    // [pos][kv_width] (attention_decode.hip WriteKVCacheKernel).
+    const std::size_t row_width =
+        MtpCheckedMultiply(MtpCheckedMultiply(valid, dim), sizeof(float));
+    const std::size_t src_pitch = MtpCheckedMultiply(
+        MtpCheckedMultiply(max_context_, dim), sizeof(float));
+    const auto* src_k = static_cast<const float*>(d_kv_cache_);
+    const auto* src_v = static_cast<const float*>(d_kv_cache_) + total_kv;
+    HIP_CHECK(hipMemcpy2DAsync(snapshot->d_k_f32_, row_width, src_k, src_pitch,
+                               row_width, heads, hipMemcpyDeviceToDevice,
+                               stream_));
+    HIP_CHECK(hipMemcpy2DAsync(snapshot->d_v_f32_, row_width, src_v, src_pitch,
+                               row_width, heads, hipMemcpyDeviceToDevice,
+                               stream_));
+  }
   const auto* src_k16 = static_cast<const std::uint8_t*>(d_kv_cache_f16_);
   HIP_CHECK(hipMemcpyAsync(snapshot->d_k_f16_, src_k16, f16_plane,
                            hipMemcpyDeviceToDevice, stream_));
@@ -867,9 +961,14 @@ void QwenMtpGpuExecutor::RestoreSnapshot(const QwenMtpGpuSnapshot& snapshot) {
   }
   const std::size_t kv = MtpCheckedMultiply(heads, dim);
   const std::size_t rows = MtpCheckedMultiply(valid, kv);
+  // M2: the snapshot holds only the F16 plane; a snapshot from the other mode
+  // fails this size check (clean reject, never a partial restore).
+  const bool kv_one = KvSinglePlane();
   const std::size_t expected =
-      MtpCheckedSum(MtpCheckedMultiply(rows, 2 * sizeof(float)),
-                    MtpCheckedMultiply(rows, 2 * sizeof(std::uint16_t)));
+      kv_one
+          ? MtpCheckedMultiply(rows, 2 * sizeof(std::uint16_t))
+          : MtpCheckedSum(MtpCheckedMultiply(rows, 2 * sizeof(float)),
+                          MtpCheckedMultiply(rows, 2 * sizeof(std::uint16_t)));
   if (snapshot.payload_bytes_ != expected) {
     throw std::invalid_argument("MTP snapshot payload size is inconsistent");
   }
@@ -878,7 +977,8 @@ void QwenMtpGpuExecutor::RestoreSnapshot(const QwenMtpGpuSnapshot& snapshot) {
     f16_prefix_packed_ = 0;
     return;
   }
-  if (snapshot.d_k_f32_ == nullptr || snapshot.d_v_f32_ == nullptr ||
+  if ((!kv_one &&
+       (snapshot.d_k_f32_ == nullptr || snapshot.d_v_f32_ == nullptr)) ||
       snapshot.d_k_f16_ == nullptr || snapshot.d_v_f16_ == nullptr) {
     throw std::invalid_argument("MTP snapshot payload is incomplete");
   }
@@ -886,18 +986,20 @@ void QwenMtpGpuExecutor::RestoreSnapshot(const QwenMtpGpuSnapshot& snapshot) {
       MtpCheckedMultiply(MtpCheckedMultiply(heads, max_context_), dim);
   const std::size_t f16_plane =
       MtpCheckedMultiply(MtpCheckedMultiply(valid, kv), sizeof(std::uint16_t));
-  const std::size_t row_width =
-      MtpCheckedMultiply(MtpCheckedMultiply(valid, dim), sizeof(float));
-  const std::size_t dst_pitch =
-      MtpCheckedMultiply(MtpCheckedMultiply(max_context_, dim), sizeof(float));
-  auto* dst_k = static_cast<float*>(d_kv_cache_);
-  auto* dst_v = static_cast<float*>(d_kv_cache_) + total_kv;
-  HIP_CHECK(hipMemcpy2DAsync(dst_k, dst_pitch, snapshot.d_k_f32_, row_width,
-                             row_width, heads, hipMemcpyDeviceToDevice,
-                             stream_));
-  HIP_CHECK(hipMemcpy2DAsync(dst_v, dst_pitch, snapshot.d_v_f32_, row_width,
-                             row_width, heads, hipMemcpyDeviceToDevice,
-                             stream_));
+  if (!kv_one) {
+    const std::size_t row_width =
+        MtpCheckedMultiply(MtpCheckedMultiply(valid, dim), sizeof(float));
+    const std::size_t dst_pitch = MtpCheckedMultiply(
+        MtpCheckedMultiply(max_context_, dim), sizeof(float));
+    auto* dst_k = static_cast<float*>(d_kv_cache_);
+    auto* dst_v = static_cast<float*>(d_kv_cache_) + total_kv;
+    HIP_CHECK(hipMemcpy2DAsync(dst_k, dst_pitch, snapshot.d_k_f32_, row_width,
+                               row_width, heads, hipMemcpyDeviceToDevice,
+                               stream_));
+    HIP_CHECK(hipMemcpy2DAsync(dst_v, dst_pitch, snapshot.d_v_f32_, row_width,
+                               row_width, heads, hipMemcpyDeviceToDevice,
+                               stream_));
+  }
   auto* dst_k16 = static_cast<std::uint8_t*>(d_kv_cache_f16_);
   HIP_CHECK(hipMemcpyAsync(dst_k16, snapshot.d_k_f16_, f16_plane,
                            hipMemcpyDeviceToDevice, stream_));
@@ -925,16 +1027,21 @@ std::size_t QwenMtpGpuSnapshot::SerializePersistent(
     throw std::invalid_argument("MTP GPU snapshot metadata is malformed");
   }
   const std::size_t kv = static_cast<std::size_t>(num_kv_heads_) * head_dim_;
+  // M2: the F32 plane is absent, so the persistent header records f32_plane 0
+  // (the layout version is unchanged: the plane sizes were always fields).
   const std::size_t f32_plane =
-      MtpCheckedMultiply(MtpCheckedMultiply(valid_context_, kv), sizeof(float));
+      QwenMtpGpuExecutor::KvSinglePlane()
+          ? 0
+          : MtpCheckedMultiply(MtpCheckedMultiply(valid_context_, kv),
+                               sizeof(float));
   const std::size_t f16_plane = MtpCheckedMultiply(
       MtpCheckedMultiply(valid_context_, kv), sizeof(std::uint16_t));
   const std::size_t expected_payload = MtpCheckedSum(
       MtpCheckedMultiply(f32_plane, 2), MtpCheckedMultiply(f16_plane, 2));
   if (payload_bytes_ != expected_payload ||
       ((f32_plane != 0 || f16_plane != 0) &&
-       (d_k_f32_ == nullptr || d_v_f32_ == nullptr || d_k_f16_ == nullptr ||
-        d_v_f16_ == nullptr))) {
+       ((f32_plane != 0 && (d_k_f32_ == nullptr || d_v_f32_ == nullptr)) ||
+        d_k_f16_ == nullptr || d_v_f16_ == nullptr))) {
     throw std::invalid_argument("MTP GPU snapshot payload is malformed");
   }
 
@@ -1013,9 +1120,15 @@ void QwenMtpGpuExecutor::RestorePersistentSnapshot(
       MtpCheckedMultiply(MtpCheckedMultiply(valid, kv), sizeof(float));
   const std::size_t expected_f16 =
       MtpCheckedMultiply(MtpCheckedMultiply(valid, kv), sizeof(std::uint16_t));
-  if (f32_plane != expected_f32 || f16_plane != expected_f16 ||
-      payload_bytes != MtpCheckedSum(MtpCheckedMultiply(expected_f32, 2),
-                                     MtpCheckedMultiply(expected_f16, 2)) ||
+  // M2: an F16-only payload (f32_plane 0) restores the F16 plane; a full
+  // payload restores F16 and ignores the F32 part. A base-mode executor still
+  // rejects an F16-only payload via the f32_plane check below.
+  const bool kv_one = QwenMtpGpuExecutor::KvSinglePlane();
+  const bool f32_ok = kv_one ? (f32_plane == 0 || f32_plane == expected_f32)
+                             : (f32_plane == expected_f32);
+  const std::size_t stored_payload = MtpCheckedSum(
+      MtpCheckedMultiply(f32_plane, 2), MtpCheckedMultiply(f16_plane, 2));
+  if (!f32_ok || f16_plane != expected_f16 || payload_bytes != stored_payload ||
       total_bytes != payload.size() ||
       MtpCheckedSum(kMtpGpuPersistentHeaderBytes, payload_bytes) !=
           payload.size()) {
@@ -1033,12 +1146,17 @@ void QwenMtpGpuExecutor::RestorePersistentSnapshot(
   const std::size_t dst_pitch =
       MtpCheckedMultiply(MtpCheckedMultiply(max_context_, dim), sizeof(float));
   const std::uint8_t* planes = payload.data() + kMtpGpuPersistentHeaderBytes;
-  auto* dst_k = static_cast<float*>(d_kv_cache_);
-  auto* dst_v = static_cast<float*>(d_kv_cache_) + total_kv;
-  HIP_CHECK(hipMemcpy2DAsync(dst_k, dst_pitch, planes, row_width, row_width,
-                             heads, hipMemcpyHostToDevice, stream_));
-  HIP_CHECK(hipMemcpy2DAsync(dst_v, dst_pitch, planes + f32_plane, row_width,
-                             row_width, heads, hipMemcpyHostToDevice, stream_));
+  // M2: no F32 cache exists, so only the F16 plane is restored (a full
+  // payload's F32 part is skipped by the f32_plane offset below).
+  if (!kv_one) {
+    auto* dst_k = static_cast<float*>(d_kv_cache_);
+    auto* dst_v = static_cast<float*>(d_kv_cache_) + total_kv;
+    HIP_CHECK(hipMemcpy2DAsync(dst_k, dst_pitch, planes, row_width, row_width,
+                               heads, hipMemcpyHostToDevice, stream_));
+    HIP_CHECK(hipMemcpy2DAsync(dst_v, dst_pitch, planes + f32_plane, row_width,
+                               row_width, heads, hipMemcpyHostToDevice,
+                               stream_));
+  }
   auto* dst_k16 = static_cast<std::uint8_t*>(d_kv_cache_f16_);
   HIP_CHECK(hipMemcpyAsync(dst_k16, planes + f32_plane + f32_plane, f16_plane,
                            hipMemcpyHostToDevice, stream_));

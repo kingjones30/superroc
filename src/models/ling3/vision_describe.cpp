@@ -1,4 +1,4 @@
-// LVV: greedy describe through the ling3 engine, plus the text-only check.
+// Greedy describe through the ling3 engine, plus the text-only check.
 // Usage:
 //   lvv_describe selfcheck
 //   lvv_describe plan <model.gguf> <w> <h>

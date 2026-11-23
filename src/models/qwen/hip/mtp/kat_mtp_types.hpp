@@ -32,7 +32,7 @@ namespace superroc::hip {
   }
 }
 
-// KAT-MTP F2 (RV44): the one load-time type gate for the embedded nextn
+// KAT-MTP F2: the one load-time type gate for the embedded nextn
 // block. QwenMtpGpuModel::CreateFromEmbedded (hip/mtp/model.cpp) calls this
 // before it builds anything, so an unsupported tensor type is refused at load
 // instead of throwing on the first draft step (an HTTP 500 in serve) or being

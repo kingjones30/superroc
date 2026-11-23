@@ -1,4 +1,4 @@
-// FRZA SPEC2: host-only test (no GPU) for the Qwen FP4 F16 prefill gate.
+// Host-only test (no GPU) for the Qwen FP4 F16 prefill gate.
 // File mix -> route, before and after the patch, plus the env tri-state.
 // Neighbour style: tests/models/qwen/gemm_route_test.cpp (Check + abort).
 #include <cstddef>

@@ -50,11 +50,12 @@ if (ENGINE_ENABLE_HIP)
     ${PROJECT_SOURCE_DIR}/src/models/lfm2/hip/lfm2_attention.hip  # LFM2
     ${PROJECT_SOURCE_DIR}/src/models/glimmer/hip/glimmer_prefill.hip  # GLIMMER
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/batched_ssm.hip
-    ${PROJECT_SOURCE_DIR}/src/models/glimmer/hip/glimmer_attention.hip  # LGA
+    ${PROJECT_SOURCE_DIR}/src/models/glimmer/hip/glimmer_attention.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_embed.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_gemm.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_quant_gemm.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_fp16.hip
+    ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_int4.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_quant_wave64.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/small_batch_wave64.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/small_batch_quant16_wave64.hip
@@ -130,12 +131,12 @@ if (ENGINE_ENABLE_HIP)
     TARGET_DIRECTORY superroc_core
     PROPERTIES COMPILE_OPTIONS
     "-mwavefrontsize64;-gline-tables-only;-Xarch_device;-mllvm=-amdgpu-sched-strategy=iterative-ilp")
-  # lqw:cmake-hip. Renamed Ling FP4 kernels. wmma stays wave64; the others stay wave32.
+  # Renamed Ling FP4 kernels. wmma stays wave64; the others stay wave32.
   target_sources(superroc_core PRIVATE
     ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_gemv_q8.hip
     ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_gemm.hip
     ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_wmma.hip
-    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/fp4_f16_prefill.hip  # SQ1:
+    ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/fp4_f16_prefill.hip
     ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_moe_group.hip
     ${PROJECT_SOURCE_DIR}/src/models/qwen/moe/qwen_moe_route.hip  # KAT:
     ${PROJECT_SOURCE_DIR}/src/models/qwen/moe/qwen_moe_ffn.hip  # KAT:
@@ -153,7 +154,7 @@ if (ENGINE_ENABLE_HIP)
     ${PROJECT_SOURCE_DIR}/src/core/rocm_fp4/superroc_fp4_wmma.hip
     TARGET_DIRECTORY superroc_core
     PROPERTIES LANGUAGE HIP COMPILE_OPTIONS -mwavefrontsize64)
-  # SQ1: the promoted FP4->F16 prefill kernels. Wave32 like kernels.hip.cpp;
+  # the promoted FP4->F16 prefill kernels. Wave32 like kernels.hip.cpp;
   # -ffast-math -fno-finite-math-only match that TU's codegen exactly, so the
   # moved kernels are bit-identical to the Flash-Next build. The two -Wno-
   # flags match its warning behaviour too: superroc_core builds with -Wall -Wextra
@@ -180,8 +181,8 @@ if (ENGINE_ENABLE_HIP)
     ${PROJECT_SOURCE_DIR}/tools/flint_parity.cpp)
   target_link_libraries(flint_parity PRIVATE superroc_core)
 
-  # SQ1: ported-kernel unit test + 27B-shape microbench. GPU-only tools,
-  # EXCLUDE_FROM_ALL like the other qualification tools; run via gpu-run.
+  # ported-kernel unit test + 27B-shape microbench. GPU-only tools,
+  # EXCLUDE_FROM_ALL like the other qualification tools; run on an otherwise idle GPU.
   add_executable(qwen_fp4_f16_prefill_test EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tests/models/qwen/hip/fp4_f16_prefill_test.cpp)
   # The tiled-Q8 producer and the Q8_0 cross-check kernel stay Flash-Next
@@ -208,13 +209,13 @@ if (ENGINE_ENABLE_HIP)
     APPEND PROPERTY COMPILE_OPTIONS -fno-slp-vectorize)
 endif()
 
-# lqw:qwen35_ppl. Teacher-forced perplexity on the GPU executor over a prompt
+# Teacher-forced perplexity on the GPU executor over a prompt
 # file (the superroc-side leg of the fork llama-perplexity comparison).
 add_executable(qwen35_ppl EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/qwen35_ppl.cpp)
 target_link_libraries(qwen35_ppl PRIVATE superroc_core)
 
-# lqw:spec6. Bitwise small-m FP4 GEMV against real 27B layers.
+# Bitwise small-m FP4 GEMV against real 27B layers.
 add_executable(qwen35_fp4_m_test EXCLUDE_FROM_ALL
   ${PROJECT_SOURCE_DIR}/tools/qwen35_fp4_m_test.cpp)
 target_link_libraries(qwen35_fp4_m_test PRIVATE superroc_core)

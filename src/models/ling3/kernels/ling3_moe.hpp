@@ -26,7 +26,7 @@
 
 #include "ling3_cpu.hpp"
 
-// LI1: LS2 phase-14 dropped-stream fixes. The entry points below take an
+// Dropped-stream fixes. The entry points below take an
 // optional launch stream, defaulted so every existing call site is unchanged.
 // hipStream_t is needed only for those declarations; ling3_ops.hpp includes
 // this header for the same reason.
@@ -43,7 +43,7 @@ int ling3_gemv(int qtype, const void* W, const float* x, float* y, int k, int n,
 int ling3_gemm(int qtype, const void* W, const float* x, float* y, int k, int n,
                int m, hipStream_t stream = nullptr);
 
-/// Test-only: force the router's tie-fallback network (PHASE7 item 2b).
+/// Test-only: force the router's tie-fallback network.
 void ling3_route_set_force_network(int on);
 
 int ling3_route(const float* x, const float* gate, const float* bias, int k,
@@ -67,7 +67,7 @@ int ling3_dense_ffn(int qtype, const void* gate, const void* up,
                     int n_ff, float limit, float* y,
                     hipStream_t stream = nullptr);
 
-/// RV25 wave1 F2+F3: ling3_dense_ffn for the n_used == 1, w == 1.0 case (the
+/// ling3_dense_ffn for the n_used == 1, w == 1.0 case (the
 /// shared expert of a MoE layer, the whole FFN of a dense layer), decode only
 /// (n_tokens == 1), ROCmFP4. Two changes, both bit-identical:
 ///   xq_ready  1 = `x` is ALREADY quantised into LING3_Q8_SLOT_FFN_X (the

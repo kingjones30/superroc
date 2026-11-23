@@ -236,28 +236,27 @@ std::shared_ptr<const QwenGpuModel> QwenGpuModel::CreateFromGguf(
   bool remapped = remap(weights_opt->token_embd) &&
                   remap(weights_opt->output_norm) && remap(weights_opt->output);
   for (auto& layer : weights_opt->layers) {
-    remapped =
-        remapped && remap(layer.attn_norm) && remap(layer.attn_q) &&
-        remap(layer.attn_k) && remap(layer.attn_v) &&
-        remap(layer.attn_output) && remap(layer.attn_q_norm) &&
-        remap(layer.attn_k_norm) && remap(layer.attn_qkv) &&
-        remap(layer.attn_gate) && remap(layer.ssm_out) &&
-        remap(layer.ssm_conv1d) && remap(layer.ssm_alpha) &&
-        remap(layer.ssm_beta) && remap(layer.ssm_a) && remap(layer.ssm_dt) &&
-        remap(layer.ssm_norm) && remap(layer.ffn_norm) &&
-        remap(layer.ffn_gate) && remap(layer.ffn_up) && remap(layer.ffn_down) &&
-        remap(layer.attn_post_norm) &&  // GLIMMER
-        remap(layer.ffn_post_norm) && remap(layer.ffn_gate_inp) &&
-        remap(layer.ffn_gate_exps) && remap(layer.ffn_up_exps) &&
-        remap(layer.ffn_down_exps) && remap(layer.ffn_gate_inp_shexp) &&
-        remap(layer.ffn_gate_shexp) && remap(layer.ffn_up_shexp) &&
-        remap(layer.ffn_down_shexp) && remap(layer.nextn_eh_proj) &&
-        remap(layer.nextn_enorm) && remap(layer.nextn_hnorm) &&
-        remap(layer.nextn_shared_head_norm) &&  // KAT:
-        remap(layer.shortconv_conv) &&
-        remap(layer.shortconv_in_proj) &&                               // LFM2
-        remap(layer.shortconv_out_proj) && remap(layer.exp_probs_b) &&  // LFM2
-        remap(layer.attn_sinks);
+    remapped = remapped && remap(layer.attn_norm) && remap(layer.attn_q) &&
+               remap(layer.attn_k) && remap(layer.attn_v) &&
+               remap(layer.attn_output) && remap(layer.attn_q_norm) &&
+               remap(layer.attn_k_norm) && remap(layer.attn_qkv) &&
+               remap(layer.attn_gate) && remap(layer.ssm_out) &&
+               remap(layer.ssm_conv1d) && remap(layer.ssm_alpha) &&
+               remap(layer.ssm_beta) && remap(layer.ssm_a) &&
+               remap(layer.ssm_dt) && remap(layer.ssm_norm) &&
+               remap(layer.ffn_norm) && remap(layer.ffn_gate) &&
+               remap(layer.ffn_up) && remap(layer.ffn_down) &&
+               remap(layer.attn_post_norm) &&  // GLIMMER
+               remap(layer.ffn_post_norm) && remap(layer.ffn_gate_inp) &&
+               remap(layer.ffn_gate_exps) && remap(layer.ffn_up_exps) &&
+               remap(layer.ffn_down_exps) && remap(layer.ffn_gate_inp_shexp) &&
+               remap(layer.ffn_gate_shexp) && remap(layer.ffn_up_shexp) &&
+               remap(layer.ffn_down_shexp) && remap(layer.nextn_eh_proj) &&
+               remap(layer.nextn_enorm) && remap(layer.nextn_hnorm) &&
+               remap(layer.nextn_shared_head_norm) &&  // KAT:
+               remap(layer.shortconv_conv) && remap(layer.shortconv_in_proj) &&
+               remap(layer.shortconv_out_proj) && remap(layer.exp_probs_b) &&
+               remap(layer.attn_sinks);
   }
   // KAT: the MTP block is not in layers. Empty tensors remap as true.
   if (weights_opt->mtp.has_value()) {
@@ -290,7 +289,7 @@ std::shared_ptr<const QwenGpuModel> QwenGpuModel::CreateFromGguf(
 
 namespace {
 
-// lqw:rv27-fix1. True when the model actually carries a ROCmFP4 (type
+// True when the model actually carries a ROCmFP4 (type
 // 100/101) tensor, so the capture warmup below only runs for FP4 seats. The
 // walk lists every QwenLayerWeights member: a new tensor field means a new
 // term here.
@@ -342,7 +341,7 @@ bool ModelHasRocmFp4Tensors(const models::QwenModelWeights& weights) {
 
 }  // namespace
 
-// SQ19-2: load-time attach for one executor stream, called from the
+// Load-time attach for one executor stream, called from the
 // QwenGpuExecutor constructor (raw-constructed executors never pass through
 // Create). Sizes and failure handling mirror Create's pre-warm below: every
 // buffer of the attached set is allocated and warmed here, outside any
@@ -407,7 +406,7 @@ std::unique_ptr<QwenGpuExecutor> QwenGpuExecutor::Create(
     return nullptr;
   }
 
-  // lqw:capture-warmup. Pre-grow the copied Ling FP4 GEMV slots and the fused
+  // Pre-grow the copied Ling FP4 GEMV slots and the fused
   // SwiGLU scratch before the first decode graph capture: both allocate
   // lazily, and an allocation inside an active capture poisons it.
   // rv27 fix 1: only a model that actually carries a type-100/101 tensor pays
@@ -422,13 +421,13 @@ std::unique_ptr<QwenGpuExecutor> QwenGpuExecutor::Create(
                                config.ssm_inner_size, config.AttentionSize()});
     const std::size_t wk = (wide + 31) / 32 * 32;
     (void)WarmupRocmFp4Slots(wk, nullptr);
-    // SQ10: size every set's MoE scratch from the config maxima (the
+    // Size every set's MoE scratch from the config maxima (the
     // single-token hs covers the routed and shared experts; the m-pair covers
     // 4-token input quants and hs quants), and the SwiGLU pair for every set.
     const std::size_t hs_elems =
         std::max(config.expert_used_count * config.expert_feed_forward_length,
                  config.expert_shared_feed_forward_length);
-    // SPEC2 (R5): the small-m scratch serves the shared expert too
+    // The small-m scratch serves the shared expert too
     // (expert_ffn_shared_m grows moe_hs_m to n_tokens * shared_ff, n <= 4),
     // so cover it exactly like the single-token group above.
     const std::size_t hs_m_elems =
@@ -448,8 +447,8 @@ std::unique_ptr<QwenGpuExecutor> QwenGpuExecutor::Create(
   }
   auto executor =
       std::make_unique<QwenGpuExecutor>(std::move(model), max_context, policy);
-  // SQ10: this executor's stream owns one slot set for the session's life
-  // (detached in ~QwenGpuExecutor, R3). SQ19-2: the load-time entry grows
+  // This executor's stream owns one slot set for the session's life
+  // (detached in ~QwenGpuExecutor). The load-time entry grows
   // the table when no set is free (a second backend, or a reload with
   // another session count), so this never refuses below the cap; for an
   // FP4 model the constructor already attached this stream and this only

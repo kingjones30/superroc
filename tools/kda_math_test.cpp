@@ -1,10 +1,10 @@
-// kda_math_test — validate LG's KDA math against the fork's CPU kernels,
-// standalone. No model file, no GPU; runs on the Mac.
+// kda_math_test — validate the engine's KDA math against the fork's CPU kernels,
+// standalone. No model file, no GPU; runs on any host.
 //
 // Three pieces, compared bit-for-bit:
-//   1. ggml_ssm_conv        vs LG's causal depthwise conv
-//   2. ggml_l2_norm         vs LG's L2Norm
-//   3. ggml_gated_delta_net vs LG's KdaScan recurrence (expf vs std::exp)
+//   1. ggml_ssm_conv        vs the engine's causal depthwise conv
+//   2. ggml_l2_norm         vs the engine's L2Norm
+//   3. ggml_gated_delta_net vs the engine's KdaScan recurrence (expf vs std::exp)
 //
 // Fork loops transcribed from ggml/src/ggml-cpu/ops.cpp:
 //   ggml_compute_forward_ssm_conv_f32          (~9582)
@@ -54,7 +54,7 @@ void ForkSsmConv(const float* src0, std::size_t ncs, const float* src1,
   }
 }
 
-/// LG: conv_buf is [kc][inner] row-major (row c = all channels for tap c),
+/// Conv_buf is [kc][inner] row-major (row c = all channels for tap c),
 /// matching reference.cpp. taps_by_channel is [inner][kc] because
 /// `DequantizeRow(convw, 0, d, taps_)` reads row d of the [kc, inner] view.
 void LgCausalConv(const float* conv_buf, std::size_t kc, std::size_t inner,
@@ -83,7 +83,7 @@ void ForkL2Norm(float* x, std::size_t n, float eps) {
   for (std::size_t i = 0; i < n; ++i) x[i] *= scale;
 }
 
-/// LG, after the fix: same float product, same double accumulator.
+/// After the fix: same float product, same double accumulator.
 void LgL2Norm(float* x, std::size_t n, float eps) {
   double sum = 0.0;
   for (std::size_t i = 0; i < n; ++i) {
@@ -129,7 +129,7 @@ void ForkGdnKda(std::vector<float>& state, const float* q, const float* k,
   }
 }
 
-/// 3b. LG: a literal copy of the phase structure in reference.cpp, including
+/// 3b. A literal copy of the phase structure in reference.cpp, including
 /// the reusable `decay_` / `delta_` scratch and std::exp.
 void LgKdaScan(std::vector<float>& state, const float* qh, const float* kh,
                const float* vh, const float* gh, float beta, std::size_t hd,
@@ -177,7 +177,7 @@ int main() {
 
       // Build the same logical conv_x[channel][row] twice, once in ggml's
       // layout (index row + channel*ncs, because conv_x is a {ncs, inner}
-      // tensor) and once in LG's [row][channel] layout (index row*inner +
+      // tensor) and once in the engine's [row][channel] layout (index row*inner +
       // channel). Mixing the two up is exactly the mistake this test exists to
       // catch, so both are built explicitly from one set of values.
       std::vector<float> ggml_x(ncs * inner);
@@ -190,7 +190,7 @@ int main() {
         }
       }
       // conv_w[ch][c]: the fork reads it as reshape_2d([kc,1,inner]) -> [kc,
-      // inner], i.e. index c + ch*kc. LG reads row ch of the same matrix.
+      // inner], i.e. index c + ch*kc. The engine reads row ch of the same matrix.
       std::vector<float> ggml_w(kc * inner);
       std::vector<float> taps(inner * kc);
       for (std::size_t ch = 0; ch < inner; ++ch) {

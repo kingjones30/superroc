@@ -1,14 +1,14 @@
-// superroc_quant_failure_test — LQP SPEC3 item 5 + SPEC4 item 3 + SPEC5 item 2:
+// superroc_quant_failure_test — failure paths:
 // superroc-quant failure paths. A failed run must leave NOTHING shaped like a
-// model behind, must never hang, and must exit 2 with one stderr line
-// (RV-LQP2 F1/F2, RV-LQP3 F5). Each part below FAILS on the older binary and
+// model behind, must never hang, and must exit 2 with one stderr line.
+// Each part below FAILS on the older binary and
 // PASSES on v0.9 (and v0.9.1):
 //
 //   Part 0  in-process: a throwing pool task invokes the error callback, so a
 //           waiter on the caller's own condition variable wakes (F2).
 //   (a) RLIMIT_FSIZE below the output size -> exit 2, final path ABSENT,
 //       partial absent, no .gq-lock left.
-//   (b) a worker really fails in the MIDDLE of the encode (RV-LQP3 F5): the
+//   (b) a worker really fails in the MIDDLE of the encode: the
 //       test-only hooks binary throws from a chunk task; the run ends within
 //       the bound, exit 2, no final file, no partial, no .gq-lock. On the v0.8
 //       binary the hook env var is ignored, so this case FAILS there.
@@ -18,11 +18,11 @@
 //       dry-run and real; no .gq-lock.
 //   (f) a successful run leaves no partial and no .gq-lock beside the output.
 //   (g) a `<out>.gq-lock` left by a SIGNAL-killed run is taken over and removed
-//       (SPEC5 item 2): a child takes the real flock and is SIGKILLed, so the
+//: a child takes the real flock and is SIGKILLed, so the
 //       file stays and the lock is free; the tool must then claim it and remove
 //       it at exit. FAILS on v0.9 (the file is never removed).
 //   (h) the loser of a race leaves the winner's lock file alone while the
-//       winner runs (SPEC5 item 2): this process holds the flock, a full run is
+//       winner runs: this process holds the flock, a full run is
 //       refused with the pid, and the winner's file is untouched -- then a
 //       later run takes the claim over and removes it.
 //
@@ -313,7 +313,7 @@ void PartB(const std::string& superroc_quant_hooks,
   const std::string out = (dir / "b-out.gguf").string();
   const std::string slog = (dir / "b-stdout.txt").string();
   const std::string elog = (dir / "b-stderr.txt").string();
-  // RV-LQP3 F5: a worker really fails in the MIDDLE of the encode. The
+  // A worker really fails in the MIDDLE of the encode. The
   // test-only hook throws from every chunk task, so no payload completes and
   // the writer must be woken (F2) and fail fast. On the v0.8 binary the env
   // var is meaningless -- the run SUCCEEDS -- so this case fails there.

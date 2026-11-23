@@ -149,7 +149,17 @@ std::string PythonJsonSpacing(std::string_view value) {
   return output;
 }
 
-void AppendToolsPrompt(std::string& output, std::span<const ChatTool> tools) {
+// Appends client text and records its byte range when `spans` is set.
+void AppendClient(std::string& output, std::vector<core::TextSpan>* spans,
+                  std::string_view text) {
+  const std::size_t begin = output.size();
+  output.append(text);
+  if (spans != nullptr && !text.empty())
+    spans->push_back({begin, text.size()});
+}
+
+void AppendToolsPrompt(std::string& output, std::span<const ChatTool> tools,
+                       std::vector<core::TextSpan>* spans) {
   if (tools.empty()) {
     return;
   }
@@ -195,8 +205,9 @@ void AppendToolsPrompt(std::string& output, std::span<const ChatTool> tools) {
       "### Available Tool Schemas\n\n");
   for (std::size_t index = 0; index < tools.size(); ++index) {
     const auto& tool = tools[index];
+    const std::size_t tool_begin = output.size();
     if (!tool.definition_json.empty()) {
-      output.append(PythonJsonSpacing(tool.definition_json));
+      AppendClient(output, spans, PythonJsonSpacing(tool.definition_json));
       if (index + 1 < tools.size())
         output.push_back('\n');
       continue;
@@ -210,6 +221,8 @@ void AppendToolsPrompt(std::string& output, std::span<const ChatTool> tools) {
                       ? "{}"
                       : PythonJsonSpacing(tool.parameters_json));
     output.push_back('}');
+    if (spans != nullptr)
+      spans->push_back({tool_begin, output.size() - tool_begin});
     if (index + 1 < tools.size()) {
       output.push_back('\n');
     }
@@ -220,7 +233,8 @@ void AppendToolsPrompt(std::string& output, std::span<const ChatTool> tools) {
 }
 
 void AppendToolCalls(std::string& output,
-                     std::span<const ChatMessage::ToolCall> calls) {
+                     std::span<const ChatMessage::ToolCall> calls,
+                     std::vector<core::TextSpan>* spans) {
   if (calls.empty()) {
     return;
   }
@@ -232,7 +246,7 @@ void AppendToolCalls(std::string& output,
     output.append(DeepSeekToolSyntax::kInvokeOpens[0]);
     output.push_back(' ');
     output.append(DeepSeekToolSyntax::kNameAttribute);
-    output.append(call.name);
+    AppendClient(output, spans, call.name);
     output.append("\">\n");
     for (std::size_t argument_index = 0; argument_index < call.arguments.size();
          ++argument_index) {
@@ -240,12 +254,12 @@ void AppendToolCalls(std::string& output,
       output.append(DeepSeekToolSyntax::kParameterOpens[0]);
       output.push_back(' ');
       output.append(DeepSeekToolSyntax::kNameAttribute);
-      output.append(argument.name);
+      AppendClient(output, spans, argument.name);
       output.append("\" ");
       output.append(DeepSeekToolSyntax::kStringAttribute);
       output.append(argument.is_string ? "true" : "false");
       output.append("\">");
-      output.append(argument.value);
+      AppendClient(output, spans, argument.value);
       output.append(DeepSeekToolSyntax::kParameterCloses[0]);
       if (argument_index + 1 < call.arguments.size()) {
         output.push_back('\n');
@@ -292,6 +306,13 @@ std::string RenderChat(std::span<const ChatMessage> messages,
 std::string RenderChat(std::span<const ChatMessage> messages,
                        std::span<const ChatTool> tools,
                        const ChatTemplateOptions& options) {
+  return RenderChat(messages, tools, options, nullptr);
+}
+
+std::string RenderChat(std::span<const ChatMessage> messages,
+                       std::span<const ChatTool> tools,
+                       const ChatTemplateOptions& options,
+                       std::vector<core::TextSpan>* spans) {
   std::string output(kBos);
   if (options.enable_thinking) {
     AppendEffortPrompt(output, options.reasoning_effort);
@@ -318,7 +339,7 @@ std::string RenderChat(std::span<const ChatMessage> messages,
       }
     }
     if (tool_host_index == messages.size()) {
-      AppendToolsPrompt(output, tools);
+      AppendToolsPrompt(output, tools, spans);
     }
   }
 
@@ -327,12 +348,12 @@ std::string RenderChat(std::span<const ChatMessage> messages,
     const auto& message = messages[index];
     const std::string_view role = message.role;
     if (role == "system") {
-      output.append(message.content);
+      AppendClient(output, spans, message.content);
       if (index == tool_host_index) {
         if (!message.content.empty()) {
           output.append("\n\n");
         }
-        AppendToolsPrompt(output, tools);
+        AppendToolsPrompt(output, tools, spans);
       }
       continue;
     }
@@ -342,12 +363,12 @@ std::string RenderChat(std::span<const ChatMessage> messages,
         continue;
       }
       output.append(kUser);
-      output.append(message.content);
+      AppendClient(output, spans, message.content);
       if (index == tool_host_index) {
         if (!message.content.empty()) {
           output.append("\n\n");
         }
-        AppendToolsPrompt(output, tools);
+        AppendToolsPrompt(output, tools, spans);
       }
       continue;
     }
@@ -382,10 +403,10 @@ std::string RenderChat(std::span<const ChatMessage> messages,
           output.append("\n\n");
         }
         if (messages[index].role == "user") {
-          output.append(messages[index].content);
+          AppendClient(output, spans, messages[index].content);
         } else {
           output.append("<tool_result>");
-          output.append(tool_results[result_index++]->content);
+          AppendClient(output, spans, tool_results[result_index++]->content);
           output.append("</tool_result>");
         }
         first_block = false;
@@ -406,13 +427,13 @@ std::string RenderChat(std::span<const ChatMessage> messages,
       if (options.enable_thinking &&
           (preserve_thinking || index > last_user_index)) {
         output.append(kThinkStart);
-        output.append(message.reasoning_content);
+        AppendClient(output, spans, message.reasoning_content);
         output.append(kThinkEnd);
       } else {
         output.append(kThinkEnd);
       }
-      output.append(message.content);
-      AppendToolCalls(output, message.tool_calls);
+      AppendClient(output, spans, message.content);
+      AppendToolCalls(output, message.tool_calls, spans);
       output.append(kEos);
       continue;
     }

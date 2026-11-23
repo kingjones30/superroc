@@ -32,7 +32,7 @@
 #include <hip/hip_runtime.h>
 
 #include "src/core/hip/hip_utils.hpp"
-#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // SQ10 SPEC2 (R1): alias.
+#include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"  // alias.
 #include "src/core/speculative/speculative_verifier.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 #include "src/models/qwen/hip/executor.hpp"
@@ -1278,7 +1278,7 @@ int RunBench(std::span<const char* const> args) {
     return RunQwen38FlashNextBenchmark(opt, reader, model_load_start);
   }
 
-  // SQ17-2 (F1): the qwen prefill path throws (the baseline LDS guard's
+  // The qwen prefill path throws (the baseline LDS guard's
   // length_error for a long span, backend init failures). Catch it like the
   // prompt CLI's Flash-Next path does: print the message, exit non-zero.
   try {
@@ -1347,15 +1347,23 @@ int RunBench(std::span<const char* const> args) {
         std::cerr << "MTP requires --mtp-model\n";
         return 1;
       }
-      auto mtp_reader_owner = core::GgufReader::OpenFile(mtp_path, &err);
+      auto mtp_reader_owner = core::GgufReader::OpenFile(
+          mtp_path, &err,
+          core::GgufReader::SidecarRole(mtp_path, opt.model_path));
       if (mtp_reader_owner == nullptr) {
         std::cerr << "Error loading MTP GGUF model: " << err << '\n';
         return 1;
       }
       std::shared_ptr<const core::GgufReader> mtp_reader(
           std::move(mtp_reader_owner));
-      mtp_gpu_model = hip::QwenMtpGpuModel::Create(
-          std::move(mtp_reader), gpu_exec->GetSharedModel(), &err);
+      // A MoE target binds the sidecar's own nextn block; a dense target keeps
+      // the standalone-sidecar pack.
+      auto target_model = gpu_exec->GetSharedModel();
+      mtp_gpu_model = target_model->GetConfig().is_moe
+                          ? hip::QwenMtpGpuModel::CreateFromMoeSidecar(
+                                std::move(mtp_reader), target_model, &err)
+                          : hip::QwenMtpGpuModel::Create(std::move(mtp_reader),
+                                                         target_model, &err);
       if (mtp_gpu_model == nullptr) {
         std::cerr << "Error creating GPU MTP model: " << err << '\n';
         return 1;
@@ -1504,12 +1512,8 @@ int RunBench(std::span<const char* const> args) {
         const auto cache_begin = preparation_end;
         prepared_target =
             gpu_exec->SaveSnapshot(static_cast<std::uint32_t>(depth));
-        if (dflash_verifier) {
-          // Deferred drafter priming (out of time-to-first-token) must
-          // reach the drafter before the depth checkpoint is captured.
-          dflash_verifier->FlushPendingDraftContext();
+        if (dflash_verifier)
           prepared_draft = dflash_verifier->Snapshot();
-        }
         const auto cache_end = std::chrono::steady_clock::now();
         if (opt.verbose) {
           const double preparation_seconds =
@@ -1607,7 +1611,7 @@ int RunBench(std::span<const char* const> args) {
             if (draft_backend == nullptr) {
               throw std::runtime_error("MTP initialization failed: " + err);
             }
-            // SQ10 SPEC2 (R1): the drafter's stream uses this session's set.
+            // The drafter's stream uses this session's set.
             if (superroc_fp4_slot_stream_alias(
                     static_cast<hip::QwenMtpGpuDraftBackend*>(
                         draft_backend.get())

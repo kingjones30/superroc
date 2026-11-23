@@ -3,30 +3,16 @@
 from __future__ import annotations
 
 import json
-import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 SCHEMA = "superroc-model-bench/1"
-# Previous schema spelling, built from parts so the old spelling never
-# appears here; recorded bench.json artifacts keep validating.
-_PREVIOUS_SCHEMA = "g" + "ufo-model-bench/1"
 TARGETS = ("superroc", "reference")
-# Previous target spelling, built from parts so the old spelling
-# never appears here; recorded bench.json configs keep loading
-# (their engine section is aliased to the new name).
-_PREVIOUS_TARGET = "g" + "ufo"
 
 
 def _canonical_target(value):
-    """Map the previous target spelling to the new one."""
-    if value == _PREVIOUS_TARGET:
-        warnings.warn(
-            "target uses the previous engine name; treating it "
-            "as 'superroc' (rename it to silence this)",
-            DeprecationWarning, stacklevel=2)
-        return "superroc"
+    """Validate the bench target spelling."""
     if value not in TARGETS:
         raise ValueError(
             "unknown target %r (choose from %s)"
@@ -162,15 +148,8 @@ def load_config(root: Path, model: str, path: Path | None = None) -> BenchConfig
     if not path.exists():
         raise SystemExit(f"no bench.json for {model}: {path}")
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema") not in (SCHEMA, _PREVIOUS_SCHEMA):
+    if data.get("schema") != SCHEMA:
         raise SystemExit(f"{path}: expected schema {SCHEMA}")
-    if _PREVIOUS_TARGET in data and "superroc" not in data:
-        warnings.warn(
-            "bench.json engine section uses the previous name; "
-            "treating it as 'superroc' (rename the section to "
-            "silence this)",
-            DeprecationWarning, stacklevel=2)
-        data["superroc"] = data[_PREVIOUS_TARGET]
     return BenchConfig(model=model, root=root, data=data)
 
 

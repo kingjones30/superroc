@@ -120,7 +120,7 @@ std::string_view ReasoningStrength(QwenReasoningEffort effort) noexcept {
   return "high";
 }
 
-// GLM: llama.cpp's strftime_now('%Y-%m-%d') on the default system message.
+// llama.cpp's strftime_now('%Y-%m-%d') on the default system message.
 void AppendCurrentDate(std::string* out) {
   const std::time_t now = std::time(nullptr);
   std::tm local{};
@@ -140,7 +140,7 @@ void AppendSystemTail(std::string* out, const ChatTemplateOptions& options,
                       std::span<const ChatTool> tools) {
   out->append("\n\n");
   out->append("Reasoning strength: ");
-  // GLM: the pinned template uses reasoning_strength, else "high".
+  // The pinned template uses reasoning_strength, else "high".
   if (!options.reasoning_strength.empty()) {
     out->append(options.reasoning_strength);
   } else {
@@ -213,7 +213,7 @@ std::optional<std::string> GlimmerRender(  // audit J1
     out.append(
         "<|start|>system<|message|>You are a helpful AI assistant.\n"
         "Knowledge cutoff: 2026-01-04.");
-    // GLM: the pinned template inserts today's date before the strength line.
+    // The pinned template inserts today's date before the strength line.
     AppendCurrentDate(&out);
     AppendSystemTail(&out, options, tools);
   }

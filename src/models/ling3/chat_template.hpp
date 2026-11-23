@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include "src/core/text/content_spans.hpp"
+
 /// C++ rendering of Ling-3.0's Bailing-V3 chat template.
 ///
 /// Transcribed from the model's own `tokenizer.chat_template` (and the matching
@@ -59,10 +61,15 @@ struct Message {
 ///
 /// Returns nullopt and fills `error` for a role this template does not define,
 /// or for a tool call with no name.
+/// When `content_spans` is given, it receives the byte range of every piece of
+/// client-supplied text in the render (message text, reasoning, tool-call
+/// names and arguments, tool results, tool definitions), in order, so the
+/// caller can keep that text from being read as control tokens.
 [[nodiscard]] std::optional<std::string> RenderChat(
     const std::vector<Message>& messages, const std::vector<Tool>& tools = {},
     bool enable_thinking = true, bool add_generation_prompt = true,
-    std::string* error = nullptr);
+    std::string* error = nullptr,
+    std::vector<core::TextSpan>* content_spans = nullptr);
 
 /// The marker strings, exposed because the tokenizer needs to recognise them
 /// and because they are the easiest thing to corrupt.

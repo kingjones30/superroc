@@ -1,4 +1,4 @@
-// superroc_quant_rules_test — LQP SPEC1 item 6: superroc-quant v0.5 rules,
+// superroc_quant_rules_test — superroc-quant v0.5 rules,
 // protect files, fork head flags, census, and manifest.
 //
 //   Part 1  in-process rule matching: exact/anchor/glob/substring + kinds.
@@ -62,7 +62,7 @@ void Part1() {
   auto R = [](const std::string& spec) {
     return gqt::ParseRule(spec, (gqt::Type)8, "cli");
   };
-  // The motivating case (SPEC1 item 1): substring `output.weight` hits
+  // The motivating case: substring `output.weight` hits
   // blk.N.attn_output.weight; `=output.weight` does not.
   gqt::Rule sub = R("output.weight");
   Expect(sub.kind == gqt::RuleKind::kSubstring, "P1: plain is substring");
@@ -396,7 +396,7 @@ void Part4(const std::string& superroc_quant,
     Expect(ReadFile(dry_tab) == ReadFile(real_tab),
            "P4: dry-run table == real-run table");
   }
-  // v0.6 (SPEC2 DECISIONS 12:54): --dry-run is header-only (no tensor
+  // v0.6: --dry-run is header-only (no tensor
   // reads, no hashing), so with --manifest it records sizes without sha256
   // and says so in the JSON.
   {
@@ -577,7 +577,7 @@ void Part4(const std::string& superroc_quant,
     Expect(j.find("\"types_2d\"") != std::string::npos, "P4: json types");
     Expect(j.find("\"provenance\"") != std::string::npos, "P4: json prov");
   }
-  // RV-LQP1 F1: census of a file with a non-writable type (Q4_K) succeeds
+  // Census of a file with a non-writable type (Q4_K) succeeds
   // and sizes it at 144 B/block; F5: a missing file exits 2, never aborts.
   {
     const std::string qs = MakeQ4KSynth(dir, "q4k.gguf");

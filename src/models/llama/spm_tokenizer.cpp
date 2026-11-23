@@ -138,7 +138,7 @@ std::optional<SpmTokenizer> SpmTokenizer::FromGguf(
     }
   }
   if (unk < 0) {
-    // NBFAST: some published GGUFs (bartowski Nanbeige4.3-33B instruct)
+    // Some published GGUFs (bartowski Nanbeige4.3-33B instruct)
     // type <unk> as CONTROL instead of UNKNOWN; honor the explicit
     // unknown_token_id metadata before refusing the file. Files with an
     // UNKNOWN-typed token never reach this branch.
@@ -397,6 +397,20 @@ std::string SpmTokenizer::TokenText(std::int32_t token) const {
   std::string text = raw;
   UnescapeWhitespace(&text);
   return text;
+}
+
+std::vector<std::string> SpmTokenizer::SpecialSpellings() const {
+  std::vector<std::string> spellings;
+  for (std::size_t i = 0; i < texts_.size(); ++i) {
+    const TokenType type = types_[i];
+    if (type != TokenType::kControl && type != TokenType::kUnknown) {
+      continue;
+    }
+    if (!texts_[i].empty()) {
+      spellings.push_back(texts_[i]);
+    }
+  }
+  return spellings;
 }
 
 std::string SpmTokenizer::Decode(std::span<const std::int32_t> tokens) const {

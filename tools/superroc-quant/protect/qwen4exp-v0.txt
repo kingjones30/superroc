@@ -1,6 +1,6 @@
-# qwen4exp protect preset v0 (QF_BRIEF §1.C; rule grammar from tools/superroc-quant/rules.hpp v0.5)
-# LFT-proven splice set (LFT-C byte-reproduces from this preset).
-# Notes on the prior draft (rejected 16:21 CDT, see DECISIONS):
+# qwen4exp protect preset v0 (rule grammar from tools/superroc-quant/rules.hpp v0.5)
+# The tested splice set: the reference file reproduces byte for byte from this preset.
+# Notes on an earlier draft of these rules:
 #   - `*ple_.* as-is` was a parse error (no `as-is` in TypeNameTable; "no rule = stock type stays" is the fix).
 #   - `^hc_.*_down` / `^hc_.*_up` / `^hc_.*_inject` looked like regex but `*` is a full-name glob and `.`
 #     is literal; a glob with `^` prefix does a STARTS-WITH check on the LITERAL pat, so `^hc\.\*\_down`
@@ -13,10 +13,9 @@
 #     below are split by exact projection name (q_proj / k_proj) — norms are intentionally untouched.
 #   - Router F32 "no-op" rules (`*ffn_gate_inp.weight F32`, `*ffn_gate_inp_shexp.weight F32`) removed; the
 #     loader already forces these to F32 — a protect-to-F32 rule is a no-op that confuses `--protect-allow-unmatched`.
-# Re-verified against superroc at 1194feaa9fbee6ca0438ca5af882ee09ac62bea4, 2026-10-10.
-# DECISIONS binding (16:21 CDT): rule LITERALS below match DESIGN §1.4; this file adds
-# `# why` tails citing the engine line that pays for each rule (no rule change).
-# DECISIONS condition: every rule matches >= 1 tensor on the shipped arch file
+# Re-verified against the engine, 2026-10-10.
+# Each rule's `# why` tail cites the engine line that pays for it.
+# Every rule matches at least one tensor of the shipped architecture's file
 # (this preset is NOT allow-unmatched; Flash-Next-Uncensored is the reference trunk file).
 blk.*.hc_attn_down.weight Q8_0  # wide-mixer gate: hc_ffn.down.type == kQ8_0 (or FP4 under F16 prefill); Q8_0 takes W8A8BlockedWmmaGEMMKernel — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:659-672
 blk.*.hc_ffn_down.weight Q8_0  # as above (the wide-mixer runs on either attn or ffn down) — src/models/qwen38_flash_next/kernels/rocm/executor.cpp:659-672

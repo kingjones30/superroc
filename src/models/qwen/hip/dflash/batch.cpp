@@ -12,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/models/qwen/hip/dflash.hpp"
 #include "src/models/qwen/hip/dflash/dspark_sampling.hpp"
@@ -24,7 +24,7 @@ namespace superroc::hip {
 namespace {
 
 [[nodiscard]] bool DsparkEnvOff(const char* name) {
-  const char* value = ::superroc::core::GetEnvCompat(name);
+  const char* value = ::superroc::core::GetEnv(name);
   return value != nullptr && value[0] == '0' && value[1] == '\0';
 }
 

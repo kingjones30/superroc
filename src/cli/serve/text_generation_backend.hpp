@@ -186,10 +186,25 @@ public:
     }
   };
 
+  /// One published piece together with its token's logprobs, delivered to
+  /// streaming transports in publication order, just before the piece.
+  struct TokenMeta {
+    tokenization::TokenId token{0};
+    std::string piece;
+    sampling::CapturedTokenLogprobs logprobs;
+  };
+  using TokenMetaCallback = std::function<bool(const TokenMeta&)>;
+
   struct Result {
     std::optional<ComponentCacheMetrics> component_cache;
     std::string text;
     std::vector<tokenization::TokenId> tokens;
+    /// Per-emitted-token logprobs parallel to `tokens`: empty unless the
+    /// request asked for logprobs. When armed, one entry per emitted token;
+    /// a placeholder carries the token with a non-finite logprob and empty
+    /// text and top. Consumers must treat empty as "no logprobs", never as
+    /// a vector parallel to `tokens`.
+    std::vector<sampling::CapturedTokenLogprobs> token_logprobs;
     std::size_t prompt_tokens{0};
     std::size_t cached_prompt_tokens{0};
     std::size_t cache_restore_bytes{0};
@@ -203,6 +218,9 @@ public:
     std::size_t completion_tokens{0};
     /// Generated reasoning tokens, excluding the closing template delimiter.
     std::size_t reasoning_tokens{0};
+    /// The reasoning loop guard fired on this request and forced the reasoning
+    /// end; also carried on the request's `event=completed` log line.
+    bool loop_guard_fired{false};
     /// Number of speculative verification rounds actually executed.
     std::size_t draft_rounds{0};
     std::size_t draft_tokens{0};
@@ -238,7 +256,12 @@ public:
     double ttft_ms{0.0};
     double mean_inter_token_ms{0.0};
     double max_inter_token_ms{0.0};
+    /// Prompt time: the prefill steps, up to the first token when that token
+    /// goes out inside the step that ends the prompt.
     double prefill_ms{0.0};
+    /// What that last step did after the first token was out: the draft
+    /// model's catch-up on the prompt and the prompt snapshot.
+    double prefill_tail_ms{0.0};
     double decode_ms{0.0};
     std::string client_id{"anonymous"};
     std::string execution_plan{"serial-c1"};
@@ -279,6 +302,11 @@ public:
     ToolFormat() const {
       return std::nullopt;
     }
+    /// Streaming transports call this before Wait when they consume
+    /// per-token logprobs. The default ignores it; scheduler-backed requests
+    /// deliver one TokenMeta per published piece. Non-scheduler backends
+    /// (deferred requests) never deliver metas.
+    virtual void SetTokenMetaCallback(const TokenMetaCallback&) {}
   };
 
   TextGenerationBackend() = default;
@@ -320,7 +348,7 @@ public:
       const ChatRequest&) const {
     return InitialOutputState::kAuto;
   }
-  /// GLM: true when the loaded model is Muse Glimmer (attention-only channels).
+  /// True when the loaded model is Muse Glimmer (attention-only channels).
   [[nodiscard]] virtual bool muse_channel_parse() const { return false; }
   /// LFM2: true when the model emits LFM2.5 pythonic tool calls.
   [[nodiscard]] virtual bool lfm2_pythonic_tools() const { return false; }

@@ -1,5 +1,5 @@
 #!/bin/bash
-# SQ10 SPEC3 (S3-3): the alias wiring through the real serve path.
+# The alias wiring through the real serve path.
 #
 # Serves the KAT+MTP model named by SUPERROC_FP4_TEST_KAT_MODEL at one session
 # and answers one drafted request. This goes through the production alias
@@ -9,7 +9,7 @@
 # tree every draft launch refuses (SUPERROC_FP4_SLOT_REFUSE lines). Without a
 # model file it SKIPs (exit 77) for ctest SKIP_RETURN_CODE.
 #
-# SQ10 SPEC4: (1) trap EXIT INT TERM HUP so a ctest timeout (SIGTERM) still
+# (1) trap EXIT INT TERM HUP so a ctest timeout (SIGTERM) still
 # kills the server instead of orphaning it on the port and GPU; (2) probe the
 # port before launch and FAIL clearly when a foreign server holds it, instead
 # of talking to the wrong server and misreporting a freeze; (3) positive
@@ -49,14 +49,14 @@ cleanup() {
   fi
 }
 trap cleanup EXIT INT TERM HUP
-# SPEC4 item 2: probe before launch. If something already answers /health on
+# Probe before launch. If something already answers /health on
 # the port, the request below would go to that foreign server and a failure
 # would misreport as a freeze of ours. FAIL here with the cause instead.
 if curl -sf -m 1 "localhost:$PORT/health" >/dev/null 2>&1; then
   echo "FAIL fp4_slot_alias_serve: port $PORT already answers /health before launch - a foreign server holds it; refusing to run"
   exit 1
 fi
-# Flags are Jay's KAT+MTP seat flags (sq10v2/job.sh): built-in drafter, greedy.
+# Flags are the KAT+MTP seat flags: built-in drafter, greedy.
 (SUPERROC_FP4_SLOT_TRACE=1 exec "$BIN" serve -i 127.0.0.1 -p "$PORT" -j 1 llm \
   -m "$SUPERROC_FP4_TEST_KAT_MODEL" --served-model-name m --context 32768 \
   --think off -t 0 --presence-penalty 0 -d 3 --min-draft-tokens 1 \
@@ -70,7 +70,7 @@ for _ in $(seq 1 100); do
 done
 if [ "$up" != 1 ]; then
   echo "FAIL fp4_slot_alias_serve: server never came up on port $PORT"
-  # SPEC4 item 3: name a mis-set model file instead of leaving a bare startup
+  # Name a mis-set model file instead of leaving a bare startup
   # failure. A non-KAT file is refused here at load (no embedded nextn block).
   if grep -q 'requires --mtp-model\|Failed to create Qwen MTP model' "$LOG" 2>/dev/null; then
     echo "FAIL fp4_slot_alias_serve: the model file has no embedded KAT+MTP drafter path: $SUPERROC_FP4_TEST_KAT_MODEL"
@@ -121,7 +121,7 @@ if [ "$SLOTS" = 0 ]; then
   echo "FAIL fp4_slot_alias_serve: no SUPERROC_FP4_SLOTS load_end line in server log"
   exit 1
 fi
-# SPEC4 item 3: positive proof the drafter path really ran through the alias.
+# Positive proof the drafter path really ran through the alias.
 # Without this a file that loads but never drafts passes vacuously (no
 # refusal, no wait, one load_end line). The MTP draft weights must have
 # loaded, and the answer's usage must show drafts proposed.

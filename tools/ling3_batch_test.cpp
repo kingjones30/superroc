@@ -1,15 +1,15 @@
-// ling3_batch_test.cpp — LS3's model-level gate for batched prefill.
+// ling3_batch_test.cpp — model-level gate for batched prefill.
 // Loads the real Ling-3.0-flash GGUF on the ROCm backend and compares
 // ForwardBatch against the token-at-a-time Step on the same weights:
 //   * a length-1 batch (T=1) vs Step: max |logit diff|  -- separates the
-//     batched kernels from the wiring, the experiment H1 never ran;
+//     batched kernels from the wiring;
 //   * per-position teacher-forced argmax agreement (>= 99% is the gate),
 //     using the all-position logits mode (LING3_BATCH_ALL_LOGITS=1);
 //   * final-position argmax + top-5 set equality on prompts of several
 //     lengths, including one that crosses the 512-token chunk boundary;
 //   * an 8-token greedy continuation off the batched state (the mixed
 //     batched-prefill -> scalar-decode path serve actually runs).
-// Run inside gpu-run with the model path as argv[1] (or $LING3_GGUF).
+// Run on an otherwise idle GPU with the model path as argv[1] (or $LING3_GGUF).
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -24,7 +24,7 @@ namespace ling3 {
 void kda_decode_test_pick(int pick, const char * variant);
 }
 
-// Jay 2026-10-03: FNV-1a-64 over raw float bytes, folded 8 bytes at a time (bit-identity fingerprint).
+// FNV-1a-64 over raw float bytes, folded 8 bytes at a time (bit-identity fingerprint).
 static unsigned long long JayHash(unsigned long long h, const float* p, std::size_t n_floats) {
     const unsigned char* b = reinterpret_cast<const unsigned char*>(p);
     const std::size_t nb = n_floats * sizeof(float);
@@ -225,7 +225,7 @@ int main(int argc, char** argv) {
         rep("Ling-3.0-flash is a hybrid recurrent model. ", 22),
         rep("The history of computing is long. ", 160),   // ~1.1k tokens: crosses the 512 chunk boundary
     };
-    // Jay 2026-10-01: LING3_BATCH_TEST_PROMPT_FILE runs only the prompt read from that file (a long real document
+    // LING3_BATCH_TEST_PROMPT_FILE runs only the prompt read from that file (a long real document
     // exercises many 512-token chunks); LING3_BATCH_TEST_MAX_TOKENS raises the 2000-token cap.
     if (const char* pf = std::getenv("LING3_BATCH_TEST_PROMPT_FILE"); pf != nullptr && *pf != 0) {
         std::FILE* f = std::fopen(pf, "rb");

@@ -141,7 +141,7 @@ struct ModelWeights {
 
 /// The MTP draft block. The stock `shared-*` sidecar borrows the trunk's
 /// token embedding and LM head and names its draft mixer
-/// `blk.N.nextn.hc_head_*`. King's ROC sidecar
+/// `blk.N.nextn.hc_head_*`. The ROC sidecar
 /// (`mtp-Qwen3.8-Flash-Next-Q8_0`) instead carries `token_embd`, `output`,
 /// and top-level `output_hc_*` — the tensors the fork's `graph_mtp` reads
 /// as `model.tok_embd` / `model.output` / `model.hc_head`. Those three stay

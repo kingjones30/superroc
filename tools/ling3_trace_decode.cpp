@@ -1,4 +1,4 @@
-// ling3_trace_decode.cpp — LS3 PHASE6: a minimal decode runner for kernel
+// ling3_trace_decode.cpp — a minimal decode runner for kernel
 // tracing. Loads the model on the ROCm backend, batch-prefills a whole prompt
 // file, then runs EXACTLY `ntok` greedy Step tokens (the server's decode
 // path). A 2 s sleep after prefill puts an unambiguous gap in the kernel

@@ -1,16 +1,16 @@
 # Models
 
-## Super ROC model cards
+## Super Roc model cards
 
 One card per model: the exact files (with Hugging Face links), the serve command, measured speed and tool-call results on
 Strix Halo, quality numbers where they exist, and known limits.
 
 | Model | Card |
 |---|---|
-| Qwen3.8-27B on Super ROC (ROCmFP4 and stock 4-bit, DFlash2 drafter) | [card](qwen3.8-27b/SUPERROC.md) |
+| Qwen3.8-27B on Super Roc (ROCmFP4 and stock 4-bit, DFlash2 drafter) | [card](qwen3.8-27b/SUPERROC.md) |
 | Qwen3.8-27B Uncensored, ROCmFP4 STRIX_LEAN with MTP | [card](qwen3.8-27b-uncensored/README.md) |
 | Qwen3.8-27B TURBO Fable Cold Fusion Heretic, ROCmFP4 FAST imatrix with MTP | [card](qwen3.8-27b-fable-heretic/README.md) |
-| Qwen3.8-Flash-Next on Super ROC (Uncensored ROCmFP4 and stock 4-bit, MTP drafter) | [card](qwen3.8-flash-next/SUPERROC.md) |
+| Qwen3.8-Flash-Next on Super Roc (Uncensored ROCmFP4 and stock 4-bit, MTP drafter) | [card](qwen3.8-flash-next/SUPERROC.md) |
 | KAT-Coder-V2.5-Dev Abliterated, ROCmFP4 STRIX_LEAN with an 8-bit MTP head | [card](kat-coder-v2.5/README.md) |
 | Agents-A1 Abliterated, ROCmFP4 STRIX_LEAN | [card](agents-a1/README.md) |
 | Agnes-3.0-Flash-Preview, ROCmFP4 STRIX_LEAN with a Q8_0 MTP sidecar | [card](agnes-3.0-flash/README.md) |
@@ -26,9 +26,10 @@ Strix Halo, quality numbers where they exist, and known limits.
 | Flint 40B-A2.5B, ROCmFP4 COHERENT-PAS | [card](flint/README.md) |
 | Nanbeige4.3-33B-Base, Q4_K_M (`llama`, serve-only) | [card](llama/README.md) |
 
-## Models from Gufo v0.19.0
+## Models from the upstream project
 
-The guides below are Gufo's, with Gufo's measurements.
+These usage guides come from the project Super Roc was forked from.
+Their measurements were taken on that engine.
 
 Linux x86-64 / AMD Strix Halo gfx1151 is the production target. Build with
 `nix build`; Python/reference toolchains are development-only. Model weights
@@ -44,13 +45,9 @@ are downloaded separately and are not part of the runtime package.
 | Qwen-Image-2.1 | BF16 safetensors; generation and image editing | [Usage](qwen-image-2.1/README.md) |
 | MiniMax H3 FL2VA | Pinned safetensors; text to audiovisual output | [Presets and usage](minimax-h3/README.md) |
 
-Each model folder contains:
-
-- `README.md`: model card, acquisition, usage and modes.
-- `BENCHMARKS.md`: current retained measurements, scope/date and TODO cells.
-- `QUALITY.md`: measured quality, reference/scope, replay guarantees and unresolved gaps.
-- `EXPERIMENTS.md`: short retained/rejected decisions.
-- `artifacts/`: only useful machine-readable results/calibration, when present.
+Each of these model folders contains `README.md`: model card, acquisition, usage and modes. The DeepSeek V4
+Flash, Qwen3.8 27B and Flash-Next folders also hold `artifacts/bench.json`, the benchmark tool's table
+definitions.
 
 Keep executable fixtures with their tests. New logit/trace dumps and local
 profiles belong in ignored top-level `artifacts/`; commit only independent

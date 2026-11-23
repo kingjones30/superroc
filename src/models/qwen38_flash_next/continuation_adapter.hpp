@@ -22,6 +22,17 @@ public:
   // all transfers before the callback returns and the shared arena is reused.
   void PrefillThrough(cache::Slot&, std::span<const std::int32_t>,
                       std::uint32_t boundary, const std::function<void()>&);
+  /// Dual in-pass capture: one pass freezing the earlier
+  /// boundary_first (P) and boundary (S). The consumer runs once per frozen
+  /// view, in ascending boundary order, receiving that view's boundary.
+  void PrefillThroughPair(cache::Slot&, std::span<const std::int32_t>,
+                          std::uint32_t boundary_first, std::uint32_t boundary,
+                          const std::function<void(std::uint32_t)>&);
+  /// Single in-pass capture: one pass freezing only `boundary` (P) while it
+  /// runs on to the prompt end. The consumer runs once for that view.
+  void PrefillThroughBoundary(cache::Slot&, std::span<const std::int32_t>,
+                              std::uint32_t boundary,
+                              const std::function<void(std::uint32_t)>&);
   [[nodiscard]] std::vector<ContinuationBackingClass> BackingPlan(
       std::size_t ram_bytes) const {
     return layout_.BackingPlan(ram_bytes, model_->DecodeConcurrency());

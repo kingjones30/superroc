@@ -21,7 +21,7 @@ Ling-3.0-flash-VL is a 124B native multimodal mixture-of-experts model (5.5B act
 LING3_MLA_WMMA2=1 LING3_MLA_TILE=1 LING3_MLA_TILE_MAX=16384 LING3_MOE_V2=4 LING3_MLA_FW=1 superroc serve --host 127.0.0.1 --port 8080 llm -m /path/to/Ling-3.0-flash-VL-MTP-Q4_0-ROCmFP4-STRIX_LEAN.gguf --served-model-name ling-3.0-flash-vl --mmproj /path/to/mmproj-Ling-3.0-flash-VL-BF16.gguf --context 32768
 ```
 
-## Measured on Super ROC
+## Measured on Super Roc
 
 AMD Ryzen AI Max+ 395 (Radeon 8060S, gfx1151), 128 GB, ROCm 7.13.0. One request at a time, temperature 0, cold prompt cache, drafter as in the serve command.
 

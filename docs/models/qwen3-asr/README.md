@@ -4,8 +4,6 @@ Native BF16 safetensors speech recognition on gfx1151. The 1.7B checkpoint is
 supported; 0.6B, forced alignment and audio GGUFs are unsupported. Python runs
 only offline reference checks. Generation is deterministic greedy decoding.
 
-[Benchmarks](BENCHMARKS.md) · [Quality](QUALITY.md) · [Experiments](EXPERIMENTS.md)
-
 ```sh
 nix develop -c hf download Qwen/Qwen3-ASR-1.7B \
   --revision 7278e1e70fe206f11671096ffdd38061171dd6e5 \
@@ -61,4 +59,4 @@ Two requests can prepare CPU frontends concurrently. Device state remains
 isolated by FIFO admission between audio chunks; cancellation removes queued
 work. `--context` controls capacity per chunk; `--served-model-name` sets
 the public model ID. TTS runs separately with `superroc serve tts`.
-See [server limits](../../SERVER.md) and [quality gaps](QUALITY.md).
+See [server limits](../../SERVER.md).

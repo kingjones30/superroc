@@ -16,7 +16,7 @@
 #include <vector>
 
 #include "src/cli/serve/inference_backend.hpp"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/core/hip/hip_utils.hpp"
 #include "src/models/qwen/chat_template.hpp"
@@ -412,8 +412,7 @@ void CheckGeneratedFrontierReuse(
 int main(int argc, const char* const* argv) {
   try {
     const char* model_path =
-        argc > 1 ? argv[1]
-                 : ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_MODEL");
+        argc > 1 ? argv[1] : ::superroc::core::GetEnv("SUPERROC_QWEN27B_MODEL");
     if (model_path == nullptr) {
       std::cout << "SKIP: pass a Qwen GGUF path for the gfx1151 server test; "
                    "append --full for the exhaustive suite\n";
@@ -421,7 +420,7 @@ int main(int argc, const char* const* argv) {
     }
 
     const char* draft_model_path =
-        ::superroc::core::GetEnvCompat("SUPERROC_QWEN27B_DFLASH_MODEL");
+        ::superroc::core::GetEnv("SUPERROC_QWEN27B_DFLASH_MODEL");
     bool run_full_suite = draft_model_path != nullptr;
     bool sampling_only = false;
     bool cache_only = false;
@@ -474,8 +473,8 @@ int main(int argc, const char* const* argv) {
     Expect(!backend.load(
                model, &error, context, state_count, {}, {},
                {.backend = superroc::server::TextSpeculativeBackend::kMtp}) &&
-               error.find("Flash-Next") != std::string::npos,
-           "Qwen27B must reject MTP instead of silently running AR");
+               error.find("--mtp-model") != std::string::npos,
+           "Qwen27B must refuse MTP without an MTP file, not run AR silently");
     Expect(!backend.load(
                model, &error, context, state_count, {}, {},
                {.backend = superroc::server::TextSpeculativeBackend::kDFlash,
@@ -772,6 +771,12 @@ int main(int argc, const char* const* argv) {
     Expect(rendered_chat.has_value() && !rendered_chat->empty(),
            "CLI chat prompt rendering");
     const auto chat_prompt = model->GetTokenizer().Encode(*rendered_chat);
+    // What a restart can reuse of this prompt from disk: the whole prompt, or
+    // its stable boundary, which is the prompt without the assistant opening
+    // (a few tokens). The full-prompt copy is an optional retry copy in RAM.
+    const auto disk_prefix = [&chat_prompt](std::size_t cached) {
+      return cached <= chat_prompt.size() && chat_prompt.size() - cached <= 8;
+    };
     const auto direct_chat = GenerateDirect(*direct, chat_prompt, 2);
     const auto http_chat = backend.chat(cache_request(messages), 2, {});
     Expect(http_chat.tokens == direct_chat,
@@ -893,10 +898,10 @@ int main(int argc, const char* const* argv) {
       Expect(restored_continuation.cache_hit &&
                  restored_continuation.cache_disk_hit,
              "fresh Qwen backend did not restore its disk prefix");
-      Expect(restored_continuation.cached_prompt_tokens == chat_prompt.size() &&
+      Expect(disk_prefix(restored_continuation.cached_prompt_tokens) &&
                  restored_continuation.cached_prompt_tokens <
                      restored_continuation.prompt_tokens,
-             "Qwen disk restore did not report its exact reusable prefix");
+             "Qwen disk restore did not report its reusable prefix");
       Expect(restored_continuation.cache_restore_bytes > 0,
              "Qwen disk restore did not report restored bytes");
       Expect(restored_continuation.tokens == direct_continuation,
@@ -967,13 +972,12 @@ int main(int argc, const char* const* argv) {
         Expect(restored_dflash_continuation.cache_hit &&
                    restored_dflash_continuation.cache_disk_hit,
                "fresh DFlash backend did not restore its disk prefix");
-        Expect(restored_dflash_continuation.cached_prompt_tokens ==
-                       chat_prompt.size() &&
+        Expect(disk_prefix(restored_dflash_continuation.cached_prompt_tokens) &&
                    warm_dflash_continuation.cached_prompt_tokens >=
                        restored_dflash_continuation.cached_prompt_tokens &&
                    restored_dflash_continuation.cached_prompt_tokens <
                        restored_dflash_continuation.prompt_tokens,
-               "DFlash disk restore did not report its exact prefix");
+               "DFlash disk restore did not report its reusable prefix");
         Expect(restored_dflash_continuation.tokens ==
                    warm_dflash_continuation.tokens,
                "DFlash disk restore changed continuation tokens");

@@ -1,11 +1,11 @@
 #pragma once
 #include <hip/hip_runtime.h>
-// LS1 PHASE8 item 2. See superroc_fp4_moe_group.hip for what this replaces and
+// See superroc_fp4_moe_group.hip for what this replaces and
 // why it is ordered the way it is.
 /// Tokens per CTA tile in the tiled router logits kernel.
 enum { SUPERROC_FP4_LS1_ROUTE_TY = 8 };
 
-// LS1 PHASE9: the smallest chunk, in tokens, at which the 2D register-tiled
+// The smallest chunk, in tokens, at which the 2D register-tiled
 // router GEMM is used. Its grid is ceil(E/BM) x ceil(T/BN), so it needs enough
 // tokens to fill the 20 CUs; below this the kernel it replaces runs unchanged.
 // Overridable at runtime with SUPERROC_FP4_ROUTE_GEMM_MIN_T so the crossover
@@ -25,17 +25,17 @@ int superroc_fp4_route_logits_tiled(const float* x, const float* gate, int k,
                                     int n_expert, int n_tokens, int ty,
                                     float* logits);
 
-/// LV1 router logits: logits[t][e] = sum_i x[t][i] * gate[e][i]. One CTA owns
+/// Router logits: logits[t][e] = sum_i x[t][i] * gate[e][i]. One CTA owns
 /// 64 experts x 64 tokens, 128 threads, each an 8x4 register tile, K stepped by
 /// 32 in float4. fp32 accumulate, k ascending, no atomics, one writer per
-/// output. Replaces the PHASE9 64x32 scalar tile. Returns SUPERROC_FP4_ERR_ARG
+/// output. Replaces the 64x32 scalar tile. Returns SUPERROC_FP4_ERR_ARG
 /// unless K is a multiple of 32.
 int superroc_fp4_route_logits_gemm_launch(const float* x, const float* gate,
                                           int K, int E, int T, float* logits,
                                           hipStream_t stream = nullptr);
 
-/// The PHASE9 tile superroc_fp4_route_logits_gemm_launch used to run. Same K %
-/// 32 rule. The unit test reports max_abs / top-8 of the LV1 kernel against
+/// The tile superroc_fp4_route_logits_gemm_launch used to run. Same K %
+/// 32 rule. The unit test reports max_abs / top-8 of the kernel against
 /// this one.
 int superroc_fp4_route_logits_gemm_legacy_launch(const float* x,
                                                  const float* gate, int K,
@@ -61,8 +61,8 @@ enum {
 /// replaces three D2H and eight H2D copies per MoE layer per chunk.
 ///
 /// Every extent is audited on the host before the launch, and a router id
-/// outside [0, n_expert) sets the status word rather than indexing -- so this
-/// cannot repeat the lane's 2026-10-02T01:58:04Z out-of-range fault.
+/// outside [0, n_expert) sets the status word rather than indexing -- so an
+/// out-of-range id cannot fault.
 int superroc_fp4_moe_group_batch(const int* ids, const float* wts,
                                  const int* rc_in, int n, int kMaxExperts,
                                  int n_used, int n_expert, int group_cap,
@@ -71,7 +71,7 @@ int superroc_fp4_moe_group_batch(const int* ids, const float* wts,
                                  int* grp_zp, int* slot_dest, int grp_capacity,
                                  int slots, int* out_hdr_host);
 
-/// KPF2: multi-block stable grouper for 0 < slots <= 32768, bit-identical
+/// Multi-block stable grouper for 0 < slots <= 32768, bit-identical
 /// to the serial oracle (same counting sort, same kGroupCap split, same
 /// 16-aligned tile prefix, same slot -> destination map). Same argument
 /// list and output layout as superroc_fp4_moe_group_batch, but the 4 header
@@ -89,14 +89,14 @@ int superroc_fp4_moe_group_batch32k(const int* ids, const float* wts,
                                     int* grp_cnt, int* grp_zp, int* slot_dest,
                                     int grp_capacity, int slots, int* hdr_dev);
 
-/// KPF2: device-sized grp_zb block prefix. Same contract as
+/// Device-sized grp_zb block prefix. Same contract as
 /// superroc_fp4_moe_group_blocks, but n_groups is read from the 32k grouper's
 /// hdr_dev inside the kernel instead of passed on the host. A non-OK
 /// STATUS leaves grp_zb untouched.
 int superroc_fp4_moe_group_blocks_dev(const int* grp_cnt, const int* hdr_dev,
                                       int bn, int* grp_zb, hipStream_t stream);
 
-/// MG64: BN-block prefix over the group counts for the 64-token grouped GEMM.
+/// BN-block prefix over the group counts for the 64-token grouped GEMM.
 /// One block, one thread on `stream`: grp_zb[g] is group g's first BN-block
 /// and grp_zb[n_groups] is the total block count. bn must be 16, 32, or 64.
 /// Returns SUPERROC_FP4_OK, SUPERROC_FP4_ERR_ARG (null pointers, n_groups <= 0,

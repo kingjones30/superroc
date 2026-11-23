@@ -33,7 +33,7 @@ enum {
   SUPERROC_FP4_ERR_ARG = 1,
   SUPERROC_FP4_ERR_TYPE = 2,
   SUPERROC_FP4_ERR_HIP = 3,
-  // SQ10 SPEC2 (R2): no free slot set for an unseen stream. Reported as
+  // No free slot set for an unseen stream. Reported as
   // -SUPERROC_FP4_ERR_BUSY (negative, never a valid set index) by the resolver,
   // attach() and every entry that resolves a set.
   SUPERROC_FP4_ERR_BUSY = 4

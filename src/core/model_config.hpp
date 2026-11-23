@@ -43,7 +43,15 @@ struct ModelConfig {
   // KAT: qwen35moe routed experts. is_moe is true when expert_count > 0.
   // intermediate_size stays at its default when feed_forward_length is absent.
   std::uint32_t expert_count{0};
+  // Routed experts per token in the trunk: the file's count, or fewer with
+  // SUPERROC_ROUTED_EXPERTS.
   std::uint32_t expert_used_count{0};
+  // The file's own count, when the reader set it. Routed weights keep their
+  // share of it, and a draft head routes it.
+  std::uint32_t expert_used_file{0};
+  [[nodiscard]] std::uint32_t ExpertsInFile() const {
+    return expert_used_file != 0 ? expert_used_file : expert_used_count;
+  }
   std::uint32_t expert_feed_forward_length{0};
   std::uint32_t expert_shared_feed_forward_length{0};
   bool is_moe{false};
@@ -61,21 +69,21 @@ struct ModelConfig {
   float final_softcap{0.0F};
   // LFM2: default-off. LiquidAI lfm2moe on the qwen chassis (short-conv + GQA
   // attention, sigmoid-routed MoE).
-  bool lfm2{false};  // LFM2
+  bool lfm2{false};
   /// LFM2: 1 = attention layer, 0 = short-conv layer (head_count_kv[i] > 0).
-  std::array<std::uint8_t, 128> lfm2_attn{};  // LFM2
+  std::array<std::uint8_t, 128> lfm2_attn{};
   /// LFM2: ordinal of the layer within its kind. Attention layers index the KV
   /// cache with it, conv layers index the conv state with it.
-  std::array<std::uint8_t, 128> lfm2_kind_index{};  // LFM2
+  std::array<std::uint8_t, 128> lfm2_kind_index{};
   /// LFM2: layers [0, dense_lead_layers) use the dense SwiGLU FFN; the rest are
   /// MoE.
-  std::uint32_t dense_lead_layers{0};  // LFM2
+  std::uint32_t dense_lead_layers{0};
   /// LFM2: short-conv kernel length (GGUF shortconv.l_cache). The state keeps
   /// l_cache - 1 columns.
-  std::uint32_t shortconv_l_cache{0};  // LFM2
+  std::uint32_t shortconv_l_cache{0};
   /// LFM2: sigmoid router; selection adds exp_probs_b; weights are the unbiased
   /// scores normalized over the top-k.
-  bool moe_sigmoid_bias{false};  // LFM2
+  bool moe_sigmoid_bias{false};
   /// Flint: RecursiveSI/flint on the qwen chassis (sliding/NoPE GQA, sigmoid
   /// MoE, attention sinks).
   bool flint{false};
@@ -89,7 +97,7 @@ struct ModelConfig {
   [[nodiscard]] constexpr std::uint32_t AttentionSize() const noexcept {
     const std::uint64_t n =
         static_cast<std::uint64_t>(num_attention_heads) * head_dim;
-    return n > 0xFFFFFFFFULL ? 0U : static_cast<std::uint32_t>(n);  // audit F05
+    return n > 0xFFFFFFFFULL ? 0U : static_cast<std::uint32_t>(n);
   }
 
   [[nodiscard]] constexpr std::uint32_t FullAttentionLayerCount()
@@ -102,7 +110,7 @@ struct ModelConfig {
       for (std::uint32_t i = 0; i < num_layers && i < lfm2_attn.size(); ++i)
         n += lfm2_attn[i] != 0 ? 1U : 0U;
       return n;
-    }  // LFM2
+    }
     return full_attention_interval == 0 ? 0
                                         : num_layers / full_attention_interval;
   }
@@ -115,7 +123,7 @@ struct ModelConfig {
   [[nodiscard]] constexpr std::uint32_t SsmLayerIndex(
       std::uint32_t layer) const noexcept {
     if (lfm2)
-      return Lfm2KindIndex(layer);  // LFM2
+      return Lfm2KindIndex(layer);
     return full_attention_interval == 0
                ? layer
                : layer - layer / full_attention_interval;
@@ -143,19 +151,18 @@ struct ModelConfig {
 
   /// LFM2: true for an attention layer of an lfm2 config.
   [[nodiscard]] constexpr bool LayerIsLfm2Attention(
-      std::uint32_t layer) const noexcept {  // LFM2
+      std::uint32_t layer) const noexcept {
     return lfm2 && layer < lfm2_attn.size() && lfm2_attn[layer] != 0;
   }
   /// LFM2: ordinal within the layer's kind (KV slot for attention, conv-state
   /// slot for conv).
   [[nodiscard]] constexpr std::uint32_t Lfm2KindIndex(
-      std::uint32_t layer) const noexcept {  // LFM2
+      std::uint32_t layer) const noexcept {
     return layer < lfm2_kind_index.size() ? lfm2_kind_index[layer] : 0U;
   }
   /// LFM2: floats of conv state per conv layer: (l_cache - 1) columns of
   /// hidden_size.
-  [[nodiscard]] constexpr std::size_t Lfm2ConvStateFloats()
-      const noexcept {  // LFM2
+  [[nodiscard]] constexpr std::size_t Lfm2ConvStateFloats() const noexcept {
     return shortconv_l_cache < 2
                ? 0
                : static_cast<std::size_t>(shortconv_l_cache - 1) * hidden_size;
@@ -199,8 +206,8 @@ struct ModelConfig {
     }
     // LFM2: own structural rule; the interval-4 / DeltaNet rule below does not
     // apply.
-    if (lfm2) {  // LFM2
-      // Super ROC: lfm2 (dense: every layer SwiGLU) or lfm2moe (MoE after
+    if (lfm2) {
+      // Super Roc: lfm2 (dense: every layer SwiGLU) or lfm2moe (MoE after
       // dense_lead_layers).
       const bool ffn_ok =
           is_moe ? (expert_count > 0 && expert_count <= 256 &&
@@ -250,8 +257,8 @@ struct ModelConfig {
            num_attention_heads > 0 && num_key_value_heads > 0 &&
            num_key_value_heads <= num_attention_heads &&
            (num_attention_heads % num_key_value_heads) == 0 &&
-           num_layers <= 512 &&  // audit F02 F09
-           vocab_size > 0 && full_attention_interval == 4 &&
+           num_layers <= 512 && vocab_size > 0 &&
+           full_attention_interval == 4 &&
            (num_layers % full_attention_interval) == 0 && rotary_dim > 0 &&
            rotary_dim <= head_dim && (rotary_dim % 2) == 0 &&
            ssm_conv_kernel == 4 && ssm_state_size == 128 &&

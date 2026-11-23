@@ -1,4 +1,4 @@
-// SQ19-2: one FP4 slot set per executor, however the process was configured.
+// One FP4 slot set per executor, however the process was configured.
 //
 // Scenario A (unconfigured): four executors share one KAT model without any
 // configure call; each attach grows the table (sets == 4, zero refusals).
@@ -29,7 +29,7 @@
 #include <unistd.h>
 #endif
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/gguf_reader.hpp"
 #include "src/core/rocm_fp4/superroc_fp4_gemv_q8.hpp"
 #include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
@@ -229,7 +229,7 @@ int main(int argc, const char* const* argv) {
       }
     }
     if (model == nullptr) {
-      model = ::superroc::core::GetEnvCompat("SUPERROC_FP4_TEST_KAT_MODEL");
+      model = ::superroc::core::GetEnv("SUPERROC_FP4_TEST_KAT_MODEL");
     }
     if (model == nullptr) {
       std::cout << "Set SUPERROC_FP4_TEST_KAT_MODEL for fp4_slot_grow_test.\n";

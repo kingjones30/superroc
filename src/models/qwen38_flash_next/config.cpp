@@ -2,11 +2,13 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <string_view>
 #include <utility>
 #include <variant>
 
+#include "src/core/env.hpp"
 #include "src/core/model_family.hpp"
 
 namespace superroc::models::qwen38_flash_next {
@@ -193,6 +195,13 @@ std::optional<Config> Config::FromGguf(const core::GgufReader& gguf,
 
   c.num_experts = r.U32(key("expert_count"));
   c.num_experts_used = r.U32(key("expert_used_count"));
+  c.num_experts_file = c.num_experts_used;
+  if (const char* env = ::superroc::core::GetEnv("SUPERROC_ROUTED_EXPERTS");
+      env != nullptr && env[0] != '\0') {
+    const int routed = std::atoi(env);
+    if (routed > 0 && static_cast<std::uint32_t>(routed) < c.num_experts_used)
+      c.num_experts_used = static_cast<std::uint32_t>(routed);
+  }
   c.expert_ff = r.U32(key("expert_feed_forward_length"));
   c.shared_expert_ff = r.U32(key("expert_shared_feed_forward_length"));
 
@@ -277,7 +286,7 @@ std::optional<Config> Config::FromGguf(const core::GgufReader& gguf,
       c.indexer_top_k != 2048 || c.compress_ratio != 4 ||
       c.ssm_conv_kernel != 4 || c.ssm_head_dim != 128 ||
       c.ssm_num_k_heads != 16 || c.ssm_num_v_heads != 48 ||
-      c.num_experts != 512 || c.num_experts_used != 10 || c.expert_ff != 640 ||
+      c.num_experts != 512 || c.num_experts_file != 10 || c.expert_ff != 640 ||
       c.shared_expert_ff != 640 ||
       (c.ple_layer >= 0 &&
        (c.ple_ngram_size != 3 || c.ple_heads_per_ngram != 8 ||

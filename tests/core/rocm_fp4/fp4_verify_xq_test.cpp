@@ -1,4 +1,4 @@
-// Super ROC QVO: superroc_fp4_gemv_verify_m_xq reuses the Q8 copy of x that the
+// Super Roc QVO: superroc_fp4_gemv_verify_m_xq reuses the Q8 copy of x that the
 // stream's slot set holds. It must be bit-identical to
 // superroc_fp4_gemv_verify_m for the same x, m and k, and refuse
 // (SUPERROC_FP4_ERR_ARG) when the copy is of a different x, m or k. Runs on a

@@ -1,4 +1,4 @@
-// moe_router_test — verify LG's MoE router and clamped SwiGLU against a
+// moe_router_test — verify the engine's MoE router and clamped SwiGLU against a
 // separate, literal transcription of the fork's build_moe_ffn. Mac, no model.
 //
 // The two bugs already found by this method were both "right for the first
@@ -55,7 +55,7 @@ Router MakeRouter(float limit) {
   return r;
 }
 
-// --- LG's MoeFfn selection, mirroring reference.cpp ----------------------
+// --- The engine's MoeFfn selection, mirroring reference.cpp ----------------------
 void LgSelect(const Router& r, const std::vector<float>& x,
               std::vector<std::size_t>* chosen, std::vector<float>* weights) {
   const std::size_t Eg = kE / kG;

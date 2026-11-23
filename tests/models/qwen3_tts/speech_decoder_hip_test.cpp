@@ -177,8 +177,7 @@ Comparison Report(std::string_view name, std::span<const float> actual,
 
 int main(int argc, char** argv) {
   const std::filesystem::path model_root =
-      argc > 1 ? argv[1]
-               : "/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+      argc > 1 ? argv[1] : "/path/to/Qwen3-TTS-12Hz-1.7B-CustomVoice";
   const std::filesystem::path artifacts =
       argc > 2 ? argv[2]
                : std::filesystem::path(__FILE__)

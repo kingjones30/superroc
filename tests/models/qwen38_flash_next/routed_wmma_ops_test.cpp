@@ -1001,7 +1001,7 @@ void CheckFp4DecodeExact() {
       }
     }
   }
-  // SPEC2 item 3: the kernel's commit stage converts scale bytes through
+  // The kernel's commit stage converts scale bytes through
   // the constant table; it must equal the scalar twin for every byte.
   for (int i = 0; i < 256; ++i) {
     const auto sb = static_cast<std::uint8_t>(i);
@@ -1577,7 +1577,7 @@ int main() {
     ok = Ok(Run(q::WeightType::kQ8_0, 3000, 1, 64, 2560, 640, 0x16160004U,
                 16)) &&
          ok;
-    // LFQ SPEC1 item 4: FP4 routed experts, 512 experts, top-10.
+    // FP4 routed experts, 512 experts, top-10.
     CheckFp4DecodeExact();
     ok = OkFp4(RunFp4(q::WeightType::kQ4_0_ROCMFP4_FAST, true, 16, 10, 512, 640,
                       2560, 0xF40116U, 16)) &&

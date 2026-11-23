@@ -13,6 +13,7 @@ function(add_qwen38_flash_next_test name library labels)
 endfunction()
 
 add_qwen38_flash_next_test(config superroc_qwen38_flash_next "cpu")
+add_qwen38_flash_next_test(weights_bind superroc_qwen38_flash_next "cpu")
 add_qwen38_flash_next_test(continuation_layout superroc_qwen38_flash_next "cpu")
 add_qwen38_flash_next_test(ngram superroc_qwen38_flash_next "cpu")
 add_qwen38_flash_next_test(mtp_sampling superroc_core "cpu")
@@ -27,7 +28,7 @@ set_source_files_properties(reference_probe.cpp PROPERTIES COMPILE_OPTIONS "-O2"
 # FLASHNEXT G1-CPU: binder + oracle qualification against the real ROCmFP4
 # artifact. EXCLUDE_FROM_ALL and unregistered with ctest: it mmaps the 105 GB
 # seat file, whose path is a command-line argument, and is run explicitly
-# through gpu-run.
+# on an otherwise idle GPU.
 add_executable(qwen38_flash_next_rocmfp4_oracle_test EXCLUDE_FROM_ALL
   rocmfp4_oracle_test.cpp)
 target_link_libraries(qwen38_flash_next_rocmfp4_oracle_test PRIVATE
@@ -37,8 +38,8 @@ set_source_files_properties(rocmfp4_oracle_test.cpp PROPERTIES
 
 # FLASHNEXT G1-GPU: S6 dense type-mix qualification against the real ROC
 # artifact. EXCLUDE_FROM_ALL and unregistered with ctest: it needs the GPU
-# and the HIP half of the model library, and is run explicitly through
-# gpu-run.
+# and the HIP half of the model library, and is run explicitly
+# on an otherwise idle GPU.
 if (ENGINE_ENABLE_HIP)
   add_executable(qwen38_flash_next_rocmfp4_gpu_test EXCLUDE_FROM_ALL
     rocmfp4_gpu_test.cpp)
@@ -50,8 +51,8 @@ endif()
 
 if (ENGINE_ENABLE_HIP)
   foreach(name IN ITEMS mtp_ops blaslt_ops hc_mix_ops gdn_ops
-      attention_ops moe_epilogue_ops moe_ids_ops projection_ops routed_wmma_ops
-      select_ops snapshot_copy)
+      attention_ops verify_attn_shared prep_attn_split_ops moe_epilogue_ops
+      moe_ids_ops projection_ops routed_wmma_ops select_ops snapshot_copy)
     add_qwen38_flash_next_test(${name} superroc_qwen38_flash_next "hip;gpu;gfx1151")
   endforeach()
 
@@ -75,6 +76,10 @@ if (ENGINE_ENABLE_HIP)
   add_executable(qwen38_flash_next_continuation_probe EXCLUDE_FROM_ALL
     continuation_probe.cpp)
   target_link_libraries(qwen38_flash_next_continuation_probe PRIVATE
+    superroc_qwen38_flash_next)
+  add_executable(qwen38_flash_next_split_probe EXCLUDE_FROM_ALL
+    split_probe.cpp)
+  target_link_libraries(qwen38_flash_next_split_probe PRIVATE
     superroc_qwen38_flash_next)
   add_custom_target(qwen38_flash_next_model_tests
     DEPENDS qwen38_flash_next_session_test qwen38_flash_next_snapshot_test
@@ -105,8 +110,8 @@ if (ENGINE_ENABLE_HIP)
     superroc_qwen38_flash_next_reference)
 endif()
 
-# LFP item 1: per-shape dense GEMM microbench (timing only, random weights).
-# EXCLUDE_FROM_ALL, run explicitly through gpu-run.
+# Per-shape dense GEMM microbench (timing only, random weights).
+# EXCLUDE_FROM_ALL, run explicitly on an otherwise idle GPU.
 if (ENGINE_ENABLE_HIP)
   add_executable(qwen38_flash_next_fp4_dense_bench EXCLUDE_FROM_ALL
     fp4_dense_bench.cpp)
@@ -114,7 +119,7 @@ if (ENGINE_ENABLE_HIP)
     superroc_qwen38_flash_next)
 endif()
 
-# LFP item 4: FP4->F16 decode exactness + GEMM qualification. LANGUAGE HIP: the
+# FP4->F16 decode exactness + GEMM qualification. LANGUAGE HIP: the
 # 4a kernel calls fp4_f16::Fp4DecodeBlock directly.
 if (ENGINE_ENABLE_HIP)
   add_qwen38_flash_next_test(fp4_f16 superroc_qwen38_flash_next "hip;gpu;gfx1151")

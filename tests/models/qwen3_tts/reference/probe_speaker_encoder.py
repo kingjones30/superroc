@@ -54,26 +54,26 @@ def read_wav(path):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reference-root", default="/home/fbozzo/projects/Qwen3-TTS")
+    parser.add_argument("--reference-root", default="/path/to/Qwen3-TTS")
     parser.add_argument(
         "--dependency-root",
         help="site-packages containing the official pinned Qwen dependencies",
     )
     parser.add_argument(
         "--model",
-        default=("/home/fbozzo/projects/audio.cpp/models/Qwen3-TTS-12Hz-1.7B-Base"),
+        default=("/path/to/audio.cpp/models/Qwen3-TTS-12Hz-1.7B-Base"),
     )
     parser.add_argument(
         "--audio",
         default=(
-            "/home/fbozzo/projects/superroc/"
+            "/path/to/superroc/"
             "artifacts/qwen3_tts/base/reference.wav"
         ),
     )
     parser.add_argument(
         "--out",
         default=(
-            "/home/fbozzo/projects/superroc/"
+            "/path/to/superroc/"
             "artifacts/qwen3_tts/base/speaker_encoder"
         ),
     )

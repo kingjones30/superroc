@@ -1,4 +1,4 @@
-// tests/models/qwen/hip/fp4_f16_prefill_test.cpp — SQ1 SPEC1 item 6.
+// tests/models/qwen/hip/fp4_f16_prefill_test.cpp.
 //
 // The ported FP4->F16 prefill kernels vs a CPU reference:
 // (a) occupancy: every ported instantiation holds >= 2 waves/SIMD;
@@ -10,7 +10,8 @@
 //     the producer the route consumes in production).
 // FP4 decode on the host uses the header's scalar twins, pinned to the
 // superroc_fp4 CPU oracle over all 256 scales x 16 codes x both types first.
-// Run under gpu-run. Links superroc_core + superroc_qwen38_flash_next.
+// Run on an otherwise idle GPU. Links superroc_core +
+// superroc_qwen38_flash_next.
 
 #include "src/core/rocm_fp4/fp4_f16_prefill.hpp"
 
@@ -641,7 +642,7 @@ int main() {
   TestInt8One(32, 256, 512, stream);
   TestInt8One(100, 640, 1024, stream);
   TestInt8One(128, 320, 10240, stream);
-  // SQ1-diag (tkA 00:22Z: the (128,320,10240) cell OVERed 144x while small-k
+  // Diag: the (128,320,10240) cell OVERed 144x while small-k
   // cells pass with 8-16x margin — a cliff, not noise growth). Separate an
   // m=320 tail-tile effect from a big-k effect + locate the cliff.
   TestInt8One(128, 320, 1024, stream);

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <span>
 #include <stdexcept>
 #include <utility>
@@ -11,6 +12,7 @@
 
 #include "src/core/crypto/sha256.hpp"
 #include "src/core/image.hpp"
+#include "src/core/text/content_spans.hpp"
 #include "src/models/ling3/chat_template.hpp"
 #include "src/models/ling3/mtp_gpu.hpp"
 #include "src/models/ling3/vision_tower.hpp"
@@ -90,7 +92,7 @@ TextRunnerDescriptor Ling3TextRunner::Descriptor() const {
   // then fault on use.
   d.capabilities.snapshot = false;
   d.capabilities.fork = false;
-  // LS4 phase 3: prompt-prefix reuse is turned OFF while speculative decoding
+  // Prompt-prefix reuse is turned OFF while speculative decoding
   // is on. A speculative step advances the runner position by 1..n per
   // scheduler step, and the reuse path validates that position against
   // prompt+generated on the NEXT request; with drafting on it can land outside
@@ -99,14 +101,22 @@ TextRunnerDescriptor Ling3TextRunner::Descriptor() const {
   // is the safe resolution -- it only costs prompt-cache reuse, and only in the
   // drafting-on configuration. With drafting off nothing changes.
   d.capabilities.prefix_reuse = !models::ling3::mtp::SpeculativeEnabled();
-  // LS4 (LING3_MTP=1): the scheduler only calls DecodeStep -- the hook the MTP
+  // The scheduler only calls DecodeStep -- the hook the MTP
   // head implements -- when this capability is advertised. Left false by
   // default, so the default build decodes one token at a time exactly as
   // before. batched_multi_token_decode stays false: this runner does not
   // override DecodeBatch, and advertising it would let the scheduler take a
   // path that has no implementation here.
   d.capabilities.multi_token_decode = models::ling3::mtp::SpeculativeEnabled();
-  // Jay 2026-10-01: no persistence -- superroc's ValidateRunner refuses
+  // Ling's non-stream decode is the exact concatenation of the per-token
+  // pieces this runner publishes: LingTokenizer::Decode is
+  // `out += TokenText(t)` per token (src/models/ling3/tokenizer.cpp),
+  // and every published piece below is model_->TokenText(...) -- the same
+  // function. A multi-byte UTF-8 scalar can split across two pieces (byte-
+  // level BPE), but both paths join the identical per-token bytes, so the
+  // incremental stream is exact and stop sequences can match on it.
+  d.capabilities.incremental_text_is_exact = true;
+  // No persistence -- superroc's ValidateRunner refuses
   // persistence without snapshot+fork ("text runner persistence requires
   // snapshot and fork support"), which is exactly what this runner declares
   // false above. Leave it std::nullopt.
@@ -122,7 +132,7 @@ TextRunnerResourceClaim Ling3TextRunner::ResourceClaim() const {
     scratch += vision_->ScratchBytes();
   }
   c.resident_weights_bytes = resident;
-  // Jay 2026-10-01: 0 made ValidateRunner throw "request-state claim exceeds
+  // 0 made ValidateRunner throw "request-state claim exceeds
   // state capacity" (capacity / per_request = 0 < 1 state). std::nullopt = "not
   // yet measurable": the pool skips the check and CreateState fails loudly if
   // memory is really short.
@@ -173,13 +183,24 @@ std::optional<std::vector<TextRunnerToken>> Ling3TextRunner::RenderAndTokenize(
   }
 
   std::string error;
-  auto rendered = lgchat::RenderChat(messages, tools,
-                                     /*enable_thinking=*/false,
-                                     /*add_generation_prompt=*/true, &error);
+  // SR-03: client text must never become a control token. The renderer
+  // records the byte range of every piece of client text; a range that
+  // overlaps a special spelling is encoded with special parsing off.
+  // Ordinary prompts encode exactly as before (see content_spans.hpp).
+  std::vector<core::TextSpan> spans;
+  auto rendered =
+      lgchat::RenderChat(messages, tools,
+                         /*enable_thinking=*/false,
+                         /*add_generation_prompt=*/true, &error, &spans);
   if (!rendered.has_value()) {
     return std::nullopt;
   }
-  const auto ids = model_->tokenizer().Encode(*rendered);
+  const models::ling3::LingTokenizer& tokenizer = model_->tokenizer();
+  const auto ids = core::EncodeWithContentSpans<std::int32_t>(
+      *rendered, spans, tokenizer.SpecialSpellings(),
+      [&](std::size_t /*offset*/, std::string_view piece, bool parse_special) {
+        return tokenizer.Encode(piece, /*add_bos=*/false, parse_special);
+      });
   return std::vector<TextRunnerToken>(ids.begin(), ids.end());
 }
 
@@ -219,7 +240,7 @@ TextPrefillStep Ling3TextRunner::Prefill(
         "ling3: prefill offset does not match the session position");
   }
 
-  // LS3 2026-10-01: prefill in ForwardBatch chunks (up to the batch chunk
+  // Prefill in ForwardBatch chunks (up to the batch chunk
   // cap) when the model supports it; LING3_PREFILL_BATCH=0 falls back to the
   // token-at-a-time path (the decode step, unchanged).
   const bool use_batch =
@@ -260,8 +281,8 @@ TextPrefillStep Ling3TextRunner::Prefill(
   TextPrefillStep step;
   step.consumed_tokens = end - offset;
   // Decode-ready only at the prompt frontier: the scheduler requires
-  // decode_ready == (offset + consumed == prompt.size()). Jay 2026-10-01: the
-  // old "any token evaluated" rule made every prompt longer than kPrefillChunk
+  // decode_ready == (offset + consumed == prompt.size()). The old "any token
+  // evaluated" rule made every prompt longer than kPrefillChunk
   // (16) fail with "text runner returned an inconsistent prefill boundary" --
   // i.e. every /v1/chat/completions request (the chat template alone is > 16
   // tokens).
@@ -284,8 +305,16 @@ TextDecodeSelection Ling3TextRunner::SelectNext(
       model_->IsStopToken(static_cast<std::int32_t>(token))) {
     return TextDecodeSelection{true, 0, {}};
   }
+  std::optional<sampling::CapturedTokenLogprobs> logprobs;
+  if (sampler.logprobs_enabled()) {
+    const auto top_n = sampler.logprobs_top_n();
+    logprobs = sampler.CaptureLogprobs(
+        logits, static_cast<sampling::TokenId>(token), top_n);
+    logprobs->text = model_->TokenText(static_cast<std::int32_t>(token));
+  }
   return TextDecodeSelection{
-      false, token, model_->TokenText(static_cast<std::int32_t>(token))};
+      false, token, model_->TokenText(static_cast<std::int32_t>(token)),
+      std::move(logprobs)};
 }
 
 std::optional<TextDecodeSelection> Ling3TextRunner::PreviewFirstToken(
@@ -327,7 +356,7 @@ TextDecodeStep Ling3TextRunner::DecodeStep(
   // decode one token at a time.
   const int n_max = static_cast<int>(session.SpecPolicy().n_max);
   const bool have_room = max_tokens >= static_cast<std::size_t>(n_max) + 1;
-  // SPEC8: a short answer does not probe an unproven depth. Position() here is
+  // A short answer does not probe an unproven depth. Position() here is
   // the prompt length; max_tokens is what is left of this step's budget.
   const bool depth_ok = models::ling3::mtp::DepthDraftOk(
       static_cast<int>(session.Position()), static_cast<int>(max_tokens));
@@ -364,8 +393,18 @@ TextDecodeStep Ling3TextRunner::DecodeStep(
       step.stop = true;
       break;
     }
-    step.selections.push_back(
-        TextDecodeSelection{false, t, model_->TokenText(consumed[i])});
+    std::optional<sampling::CapturedTokenLogprobs> extra_logprobs;
+    if (sampler.logprobs_enabled()) {
+      // Extra MTP tokens bypass the sampler, so there is no distribution to
+      // quote: report a placeholder per token, only when armed, so streaming
+      // and non-streaming stay parallel.
+      extra_logprobs = sampling::CapturedTokenLogprobs{
+          .token = static_cast<sampling::TokenId>(t),
+          .logprob = std::numeric_limits<double>::quiet_NaN(),
+          .text = model_->TokenText(consumed[i])};
+    }
+    step.selections.push_back(TextDecodeSelection{
+        false, t, model_->TokenText(consumed[i]), std::move(extra_logprobs)});
   }
   // `drafted_now` counts what the head produced; the accepted ones are the
   // selections after the first that we actually emitted.

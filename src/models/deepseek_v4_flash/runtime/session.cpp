@@ -11,7 +11,7 @@
 #include "dspark_internal.h"
 #include "dspark_policy.h"
 #include "native_internal.h"
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 #define DS4_SESSION_NEG_INF (-1.0e30f)
 
@@ -576,8 +576,7 @@ static void session_dspark_note_cycle(ds4_session* session,
 
 // Cost units are hundredths of one ordinary batch decode step, calibrated
 // offline on gfx1151 at 0/4K/16K with tg128, rounded up to five units.
-// See docs/models/deepseek-v4-flash/artifacts/cost-calibration.json. Runtime wall clocks
-// never influence token decisions.
+// Runtime wall clocks never influence token decisions.
 static uint32_t session_dspark_cycle_cost(const ds4_session* session,
                                           uint32_t tail, size_t concurrency) {
   return ds4_dspark_cycle_cost(session->checkpoint.len, tail, concurrency);
@@ -681,7 +680,7 @@ static void session_dspark_update_adaptive_width(ds4_session* session,
     next = std::max(previous - 1u, 1u);
   }
   session->dspark_state.concurrent_width = next;
-  if (::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_DSPARK_WIDTH_TRACE") != nullptr) {
+  if (::superroc::core::GetEnv("SUPERROC_DEEPSEEK_DSPARK_WIDTH_TRACE") != nullptr) {
     fprintf(stderr,
             "ds4: DSpark adaptive width previous=%u drafted=%u "
             "accepted=%u next=%u maximum=%u\n",
@@ -770,7 +769,7 @@ static int session_dspark_finish_verified(
     if (row_tops[i - 1u] == drafts[i])
       positional_accepted++;
   }
-  if (::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_DSPARK_TRACE") != nullptr) {
+  if (::superroc::core::GetEnv("SUPERROC_DEEPSEEK_DSPARK_TRACE") != nullptr) {
     fprintf(stderr, "ds4: DSpark %s cycle drafted=%u accepted=%u draft=",
             sampled ? "sampled" : "greedy", drafted, accepted);
     for (uint32_t i = 0; i < drafted; ++i) {
@@ -889,7 +888,7 @@ static int session_dspark_finish_verified(
       return 1;
     }
     if (sequential_top != drafts[i]) {
-      if (::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_DSPARK_TRACE") != nullptr) {
+      if (::superroc::core::GetEnv("SUPERROC_DEEPSEEK_DSPARK_TRACE") != nullptr) {
         fprintf(stderr,
                 "ds4: DSpark replay shortened at row=%u "
                 "verify_accept=%d sequential=%d\n",
@@ -1223,7 +1222,7 @@ int ds4_sessions_dspark_step_batch(const ds4_session_dspark_batch_item* items,
   std::array<uint32_t, 8> verify_counts{};
   std::array<uint32_t, 8> tail_drafted{};
   const bool trace_timing =
-      ::superroc::core::GetEnvCompat("SUPERROC_DEEPSEEK_DSPARK_TIMING") != nullptr;
+      ::superroc::core::GetEnv("SUPERROC_DEEPSEEK_DSPARK_TIMING") != nullptr;
   const double draft_t0 = trace_timing ? ds4_now_seconds() : 0.0;
   std::array<ds4_rocm_dspark_draft_item, 8> draft_items{};
   size_t draft_item_count = 0;

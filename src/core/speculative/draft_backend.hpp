@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string_view>
@@ -29,6 +30,13 @@ struct DraftTargetContext {
   std::span<const float> prompt_hidden_states;
   std::size_t hidden_size{0};
   tokenization::TokenId first_token{0};
+  /// Leading prompt rows the caller knows can never enter the drafter's
+  /// attention window (they fall below the final prompt length minus the
+  /// backend's TargetHistoryCapacity). Backends with a bounded history window
+  /// may advance over them without injecting; every other backend must ignore
+  /// this and consume all rows. When skip_tokens covers the whole chunk the
+  /// caller passes no features at all (empty hidden span, hidden_size zero).
+  std::uint32_t skip_tokens{0};
 };
 
 class IDraftBackend;
@@ -140,6 +148,12 @@ public:
     return false;
   }
 
+  /// Rows of committed target history the drafter's attention can still read.
+  /// Zero when the drafter has no bounded history window.
+  [[nodiscard]] virtual std::uint32_t TargetHistoryCapacity() const noexcept {
+    return 0U;
+  }
+
   /// Exact zero-based target layer outputs required by the draft backend.
   /// An empty span means the final target layer only.
   [[nodiscard]] virtual std::span<const std::uint32_t> TargetHiddenLayerIds()
@@ -190,26 +204,18 @@ public:
     throw std::logic_error("draft backend does not support snapshot sizing");
   }
 
+  /// Exact payload bytes Snapshot() will allocate once the target context fed
+  /// through PrimeTargetContext or AppendTargetContext reaches `position`.
+  /// Empty when this backend cannot say before it is fed.
+  [[nodiscard]] virtual std::optional<std::size_t> SnapshotPayloadBytesAt(
+      std::uint32_t position) const {
+    (void)position;
+    return std::nullopt;
+  }
+
   [[nodiscard]] virtual std::unique_ptr<IDraftBackendSnapshot> Snapshot()
       const {
     throw std::logic_error("draft backend does not support snapshots");
-  }
-
-  /// Exact payload bytes that SnapshotAtPosition() will allocate for the
-  /// draft state truncated to an earlier committed target position.
-  [[nodiscard]] virtual std::size_t SnapshotPayloadBytesAtPosition(
-      std::uint32_t position) const {
-    (void)position;
-    throw std::logic_error(
-        "draft backend does not support position snapshot sizing");
-  }
-
-  /// Snapshot of the draft state as of an earlier committed target position.
-  /// Providers whose state cannot be truncated to a position must refuse.
-  [[nodiscard]] virtual std::unique_ptr<IDraftBackendSnapshot>
-  SnapshotAtPosition(std::uint32_t position) const {
-    (void)position;
-    throw std::logic_error("draft backend does not support position snapshots");
   }
 
   virtual void RestoreSnapshot(const IDraftBackendSnapshot&) {
@@ -230,6 +236,21 @@ public:
   /// Starts a new generation over retained model state. Request-local proposal
   /// policies must reset so cache reuse does not change seeded generation.
   virtual void BeginRequest() noexcept {}
+
+  /// Draft rows a backend can fill without its adaptive length (prompt lookup).
+  /// Zero for neural drafters.
+  [[nodiscard]] virtual std::uint32_t ExtraDraftCapacity() const noexcept {
+    return 0U;
+  }
+  /// The verifier's current adaptive length, sent before each proposal.
+  virtual void SetAdaptiveDraftLimit(std::uint32_t limit) noexcept {
+    (void)limit;
+  }
+  /// True when the proposal being verified did not come from the adaptive
+  /// drafter.
+  [[nodiscard]] virtual bool ProposalBypassesAdaptiveLength() const noexcept {
+    return false;
+  }
 };
 
 /// Mock / test draft backend for deterministic verification testing

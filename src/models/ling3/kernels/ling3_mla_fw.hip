@@ -1,4 +1,4 @@
-// ling3_mla_fw.hip — LX1 (wave 3): fused WMMA flash-attention for the
+// ling3_mla_fw.hip — fused WMMA flash-attention for the
 // absorbed-MLA prefill. See ling3_mla_fw.hpp for the design and contracts.
 //
 // Layout of the path (per layer per 512-token chunk):
@@ -7,7 +7,7 @@
 //      transposed latent vt [512][cap].
 //   2. fw_qtrans_kernel stages q_nope into the [head][token][dim] layout the
 //      pack GEMM's B fragments need, and writes q16's scaled rope tail.
-//   3. fw_pack_kernel absorbs (RV3 C2): q16[r][0:512] =
+//   3. fw_pack_kernel absorbs: q16[r][0:512] =
 //      f16(scale * wk_b[h] . q_nope) as ONE f16 WMMA GEMM per head with f32
 //      accumulation. w2's serial-dot packq is latency-bound and costs
 //      MEASURED 77 ms at the whole-chunk row count (16,384 rows); this is
@@ -55,8 +55,8 @@
 //              out[(tok_base+t)*o_tok + h*head_v + ro] and gate at
 //              (tok_base+t)*g_tok + h, only for live t.
 //
-// WMMA fragment maps: the wave32 f16 builtin with the maps measured by LW1
-// (from superroc's qwen attention_wmma.hip) and LF1's impulse probe:
+// WMMA fragment maps: the wave32 f16 builtin with the measured maps
+// (from superroc's qwen attention_wmma.hip) and the impulse probe:
 //   A frag: lane L is matrix row L%16, 16 contiguous K values.
 //   B frag: lane L is matrix column L%16, 16 contiguous K values from an
 //           [N][K]-major tile.
@@ -180,7 +180,7 @@ __global__ __launch_bounds__(FW_THREADS) void fw_attn_kernel(
 
     // GEMM2 accumulator: warp w owns dims [64*w, 64*w + 64) x all 32 rows =
     // 2 row tiles x 4 dim tiles x 8 elements = 64 f32 per lane (8 chains —
-    // LF1's measured WMMA sweet spot, far from the 256-VGPR spill regime).
+    // The measured WMMA sweet spot, far from the 256-VGPR spill regime).
     v8f acc[2][4];
     for (int r2 = 0; r2 < 2; ++r2) {
         for (int dt = 0; dt < 4; ++dt) acc[r2][dt] = {};
@@ -236,7 +236,7 @@ __global__ __launch_bounds__(FW_THREADS) void fw_attn_kernel(
                 mx = fmaxf(mx, __shfl_xor(mx, off));
             }
 
-            // H1 (RV17): the STANDARD online-softmax form. m_new =
+            // H1: the STANDARD online-softmax form. m_new =
             // fmaxf(m_old, mx) keeps every rescale factor <= 1, so a later
             // chunk whose max drops far below the running max (a > ~88 gap
             // overflows expf) can no longer send l_run and the O
@@ -337,7 +337,7 @@ __global__ __launch_bounds__(FW_THREADS) void fw_attn_kernel(
 }
 
 // ---------------------------------------------------------------------------
-// Absorb / de-absorb as WMMA GEMMs (RV3 C2). w2's serial-dot packq/out are
+// Absorb / de-absorb as WMMA GEMMs. w2's serial-dot packq/out are
 // latency-bound and cost MEASURED 77 + 84 ms at the whole-chunk row count
 // (16,384 rows); the same arithmetic as f16 WMMA GEMMs with f32 accumulation
 // is ~0.3 ms each.
@@ -531,7 +531,7 @@ __global__ __launch_bounds__(256) void fw_deabsorb_kernel(
 // host side: audit + launch
 // ---------------------------------------------------------------------------
 
-// LF1's lf_audit model: enumerate every invariant the kernels rely on and
+// The lf_audit model: enumerate every invariant the kernels rely on and
 // refuse the launch (caller falls back) if any fails. No GPU fault may come
 // from a bad index.
 static bool fw_audit(const MlaShape & sh, const MlaWeights & w, int n_pos,
@@ -541,7 +541,7 @@ static bool fw_audit(const MlaShape & sh, const MlaWeights & w, int n_pos,
     const char * bad = nullptr;
     if (sh.n_head != FW_NHEAD || sh.head_k != 192 || sh.nope != 128 ||
         sh.rot != 64 || sh.kv != FW_KV || sh.kv_a() != FW_KVA ||
-        sh.head_v != 128)   // H2 (RV17): deabsorb bakes head_v = 128
+        sh.head_v != 128)   // H2: deabsorb bakes head_v = 128
         bad = "unsupported MlaShape (needs 32/192/128/64/512/576/head_v 128)";
     else if (in.n_seqs != 1) bad = "n_seqs != 1";
     else if (tok_base < 0 || tok_count <= 0) bad = "tok range";
@@ -549,7 +549,7 @@ static bool fw_audit(const MlaShape & sh, const MlaWeights & w, int n_pos,
     else if (chunk_tokens <= 0 || chunk_tokens > kMlaFwChunkTokens)
         bad = "chunk_tokens out of (0, 512]";
     else if (chunk_tokens > in.n_tokens)
-        bad = "chunk_tokens > in.n_tokens";   // H3 (RV17), as w2 refuses
+        bad = "chunk_tokens > in.n_tokens";   // H3, as w2 refuses
     else if (tok_count > kMlaFwChunkTokens) bad = "tok_count > 512";
     else if (n_pos <= 0 || n_pos > w2b.cap || (w2b.cap & 63) != 0)
         bad = "n_pos out of (0, cap] or cap not a multiple of 64";

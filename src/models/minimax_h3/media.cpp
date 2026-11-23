@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 
 #ifndef SUPERROC_FFMPEG_EXECUTABLE
 #define SUPERROC_FFMPEG_EXECUTABLE "ffmpeg"
@@ -72,13 +72,13 @@ void SetError(std::string* error, std::string message) {
 }
 
 const char* FfmpegProgram() {
-  const char* override = ::superroc::core::GetEnvCompat("SUPERROC_FFMPEG");
+  const char* override = ::superroc::core::GetEnv("SUPERROC_FFMPEG");
   return override != nullptr && *override != '\0' ? override
                                                   : SUPERROC_FFMPEG_EXECUTABLE;
 }
 
 const char* FfprobeProgram() {
-  const char* override = ::superroc::core::GetEnvCompat("SUPERROC_FFPROBE");
+  const char* override = ::superroc::core::GetEnv("SUPERROC_FFPROBE");
   return override != nullptr && *override != '\0' ? override
                                                   : SUPERROC_FFPROBE_EXECUTABLE;
 }

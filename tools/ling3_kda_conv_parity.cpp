@@ -1,33 +1,34 @@
-// tools/ling3_kda_conv_parity.cpp — LC1 (wave 3, 2026-10-03): is the token-parallel KDA
-// conv BIT-IDENTICAL to build28g's serial one, and how much faster is it at n_tokens 512?
+// tools/ling3_kda_conv_parity.cpp — is the token-parallel KDA
+// conv BIT-IDENTICAL to the reference build's serial one, and how much faster is it at n_tokens 512?
 //
-// The "old" side is a VERBATIM copy of build28g's conv_silu_kernel + conv_silu_body
-// (gufo-ling-int-28g/src/models/ling3/kernels/ling3_kda.hip), compiled into this binary as
+// The "old" side is a VERBATIM copy of the reference build's conv_silu_kernel + conv_silu_body
+// (src/models/ling3/kernels/ling3_kda.hip), compiled into this binary as
 // the reference. The "new" side is ling3::kda_conv_silu_qkv / ling3::kda_conv_silu out of
-// kernels/ling3_kda.hip — the code that ships. LG1's parity test called kda_conv_silu_qkv
+// kernels/ling3_kda.hip — the code that ships. An earlier parity test called kda_conv_silu_qkv
 // for BOTH sides, so once its change was in it compared the new path with itself
-// (./LG1-parity-test-VACUOUS.cpp in the lane dir); this one also asserts
+//; this one also asserts
 // ling3::kda_conv_silu_last_path(), so a silent fallback to the serial kernel cannot pass.
 //
 // Gates (every one must print IDENTICAL):
-//   n_tokens  1, 2, 3, 4, 5, 64, 511, 512   (2 is the state-update case LG1 got wrong:
-//             28g reads st[n_tokens + tap], LG1's pass 2 wrote st[tap])
+//   n_tokens  1, 2, 3, 4, 5, 64, 511, 512   (2 is the state-update case an earlier version got wrong:
+//             28g reads st[n_tokens + tap], an earlier pass 2 wrote st[tap])
 //   d_conv    the model's — bailingmoe3.ssm.conv_kernel = 4 in the GGUF the seat serves,
 //             which is what MakeKdaShape() hands the kernels — and 3/4/5 for the general
 //             kernel
 //   state     zeroed and random, with the q, k and v histories filled from DIFFERENT random
-//             values (a shared history hides a missing which-slice offset — LG1's first bug)
+//             values (a shared history hides a missing which-slice offset — an earlier bug)
 //   n_seqs    1 and 2
 //   every output float equal, and the whole conv state memcmp-equal, byte for byte
 // then ms/call old vs new at n_tokens = 512 with the model's d_inner (n_head 32 * head_dim
 // 128 = 4096).
 //
 // Every buffer is sized from the geometry it is indexed with — state bytes go into a
-// state-sized host buffer, never a y-sized one (LG1's test did that and page-faulted the
+// state-sized host buffer, never a y-sized one (an earlier test did that and page-faulted the
 // GPU at 15:28Z) — and the same index audit the launchers run is repeated on the host
 // before each launch and printed.
 //
-// Build: target superroc_ling3_kda_conv_parity (src/models/ling3/CMakeLists.txt). gpu-run only.
+// Build: target superroc_ling3_kda_conv_parity
+// (src/models/ling3/CMakeLists.txt). Needs an otherwise idle GPU.
 
 #include <hip/hip_runtime.h>
 
@@ -91,8 +92,8 @@ struct Buf {
 };
 
 // ---------------------------------------------------------------------------
-// VERBATIM copy of build28g's conv_silu_kernel + conv_silu_body (gufo-ling-int-28g,
-// src/models/ling3/kernels/ling3_kda.hip, the conv_silu_body / conv_silu_kernel pair),
+// VERBATIM copy of the reference build's conv_silu_kernel + conv_silu_body
+// (src/models/ling3/kernels/ling3_kda.hip, the conv_silu_body / conv_silu_kernel pair),
 // silu_f included. This is the oracle: do not "fix" or reformat anything inside it. It
 // sits in an anonymous namespace so its names do not collide with the ones in
 // kernels/ling3_kda.hip.
@@ -156,7 +157,7 @@ static __global__ void conv_silu_kernel(const float * __restrict__ xq,
 // end of the verbatim copy
 // ---------------------------------------------------------------------------
 
-// The serial launch exactly as kda_conv_silu_qkv makes it (before LC1's split).
+// The serial launch exactly as kda_conv_silu_qkv makes it.
 void RefQkvLaunch(const ::ling3::KdaShape& sh,
                   const ::ling3::ViewC& q, const ::ling3::ViewC& k, const ::ling3::ViewC& v,
                   const ::ling3::View& qo, const ::ling3::View& ko, const ::ling3::View& vo,
@@ -586,7 +587,7 @@ void Bench(int n_tokens, int d_conv, int d_inner, hipStream_t stream) {
 
 int main() {
     const int d_inner = 32 * 128;  // the model's: bailingmoe3.attention.head_count * kda.head_dim
-    std::printf("LC1 KDA-conv parity: token-parallel prefill vs build28g's serial conv_silu_kernel\n");
+    std::printf("LC1 KDA-conv parity: token-parallel prefill vs the reference build's serial conv_silu_kernel\n");
     std::printf("  model: bailingmoe3.ssm.conv_kernel=4 (GGUF), head_count=32, kda.head_dim=128, "
                 "d_inner=%d\n", d_inner);
 

@@ -484,8 +484,6 @@ and continues the compacted conversation. Cold controls run after every warm
 request. The seed is a genuine model reply; tool calls/results and the summary
 are deterministic client-authored fixtures. This covers compaction mechanics,
 not a real client's summary generation or retention under RAM/disk pressure.
-The [card 01 results](../../docs/cache-redesign/cards/01-functional-coverage.md#results)
-record all scenario families, including failures on the legacy cache.
 
 Run `cache-transforms` with a roomy RAM budget in its own invocation. Its
 retried prompts end with a user turn after a tool result, and Qwen templates

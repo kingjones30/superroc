@@ -1,7 +1,7 @@
 # Third-party notices
 
-Gufo's original source is MIT licensed; this does not relicense dependencies or
-model weights. This inventory covers direct dependencies, adapted code and
+Super Roc's source, and the Gufo source it was forked from, are MIT licensed; this
+does not relicense dependencies or model weights. This inventory covers direct dependencies, adapted code and
 acknowledged optimization references.
 Transitive system/toolchain dependencies retain their upstream licenses.
 `flake.lock` pins Nixpkgs revision `2fcb964de67fcf60b43471c55d5d99e61a9ccb5a`;
@@ -27,9 +27,9 @@ Non-Nix builds must retain the notices of the versions they actually distribute.
 | libjpeg-turbo | Linked; JPEG decoding | `IJG AND BSD-3-Clause AND Zlib` | 3.1.4.1; flake.lock | [libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo) |
 | libwebp | Linked; WebP decoding | `BSD-3-Clause` | 1.6.0; flake.lock | [webmproject/libwebp](https://chromium.googlesource.com/webm/libwebp) |
 | FFmpeg | Separate ffmpeg/ffprobe executables for media | `GPL-3.0-or-later` (Nix build with GPL/version3 components) | 8.1.2; flake.lock | [FFmpeg](https://github.com/FFmpeg/FFmpeg) |
-| GNU C/C++/OpenMP runtimes | System runtime libraries; no Gufo source import | `LGPL-2.1-or-later AND (GPL-3.0-or-later WITH GCC-exception-3.1)` | glibc/GCC packages in flake.lock | [GNU](https://www.gnu.org/software/) |
+| GNU C/C++/OpenMP runtimes | System runtime libraries; no source import | `LGPL-2.1-or-later AND (GPL-3.0-or-later WITH GCC-exception-3.1)` | glibc/GCC packages in flake.lock | [GNU](https://www.gnu.org/software/) |
 | llama.cpp / ggml | Adapted quantization, attention and model-private HIP kernels | `MIT` | `5c0e9468378eba6bf3cc1989ff5d62fbbe4d9e3a`; attention `e9fa0781f1c25fc4fe8c86be1edc6970661ad6f0` | [llama.cpp](https://github.com/ggml-org/llama.cpp) |
-| ROCmFPX (llama.cpp fork with the ROCm-FP4 formats) | ROCm-FP4 formats (GGML types 100/101): Ling-3.0-flash FP4 kernels; `tools/gufo-quant` encoder, recipe ladder and k-quant reference routines ported verbatim | `MIT` | a local ROCmFPX tree (2026-10); ggml authors' notice in [licenses/llama.cpp.txt](licenses/llama.cpp.txt) | [ROCmFPX](https://github.com/charlie12345/ROCmFPX) |
+| ROCmFPX (llama.cpp fork with the ROCm-FP4 formats) | ROCm-FP4 formats (GGML types 100/101): Ling-3.0-flash FP4 kernels; `tools/superroc-quant` encoder, recipe ladder and k-quant reference routines ported verbatim | `MIT` | a local ROCmFPX tree (2026-10); ggml authors' notice in [licenses/llama.cpp.txt](licenses/llama.cpp.txt) | [ROCmFPX](https://github.com/charlie12345/ROCmFPX) |
 | mikealanni/gufo | Adapted Flash-Next GDN row reuse and SSM stride optimization | `MIT` | `f450218743bcaf77e3e1f8fab78f4cd4e4aafae3` | [gufo fork](https://github.com/mikealanni/gufo/tree/f450218743bcaf77e3e1f8fab78f4cd4e4aafae3) |
 | Qwen chat templates | Reference Jinja and adapted renderer behavior | `Apache-2.0` | `1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0` (27B), `de4b8e4d43b917e7706784d8bb445c9af86a3540` (Flash-Next) | [Qwen](https://huggingface.co/Qwen/Qwen3.8-27B) |
 | DS4 | Adapted loader, tokenizer, sessions and HIP kernels | `MIT` | `84cc882352757baf628a1776badf7cc54d584e28` | [antirez/ds4](https://github.com/antirez/ds4) |
@@ -40,19 +40,18 @@ Non-Nix builds must retain the notices of the versions they actually distribute.
 Upstream license texts are retained in `licenses/` and
 [src/models/deepseek_v4_flash/LICENSE.ds4](src/models/deepseek_v4_flash/LICENSE.ds4).
 CMake installs these with `LICENSE`, `NOTICE` and this inventory under
-`share/licenses/gufo`. Preserve embedded copyright notices when modifying
+`share/licenses/superroc`. Preserve embedded copyright notices when modifying
 adapted code. Model-private changes and import boundaries are recorded in the
 [DS4 provenance](src/models/deepseek_v4_flash/UPSTREAM.md),
 [DS4 HIP import](src/models/deepseek_v4_flash/kernels/rocm/mmq/VENDOR.md),
-[Flash-Next HIP import](src/models/qwen38_flash_next/kernels/rocm/mmq/VENDOR.md)
-and [H3 quality record](docs/models/minimax-h3/QUALITY.md).
+[Flash-Next HIP import](src/models/qwen38_flash_next/kernels/rocm/mmq/VENDOR.md).
 
 This software is based in part on the work of the Independent JPEG Group.
 
 The mikealanni/gufo fork retains the same Copyright (c) 2026 gufo contributors
-notice and MIT text as Gufo's root `LICENSE`.
+notice and MIT text as the root `LICENSE`.
 
-FFmpeg is invoked as a separate process, not linked into Gufo. The pinned Nix
+FFmpeg is invoked as a separate process, not linked into Super Roc. The pinned Nix
 build enables GPL/version3 components; a system FFmpeg build can have different
 terms. Redistributors bundling FFmpeg or other copyleft dependencies must also
 provide their applicable license texts and corresponding source/build materials,
@@ -67,7 +66,7 @@ its upstream MIT notice. External model files are never part of the binary packa
 
 ## Optimization inspiration
 
-The following projects informed Gufo's Strix Halo optimization work:
+The following projects informed the Strix Halo optimization work:
 
 - [LaurentZuijdwijk/llama.cpp](https://github.com/LaurentZuijdwijk/llama.cpp) — [MIT license](https://github.com/LaurentZuijdwijk/llama.cpp/blob/11bfe8a633fa02bac251db6cf21bd5ddab282a64/LICENSE).
 - [Nathanw1014/strix-halo-llamacpp](https://github.com/Nathanw1014/strix-halo-llamacpp) — [MIT license](https://github.com/Nathanw1014/strix-halo-llamacpp/blob/ce15ecca66e5e5a9aefa1ebc82357cb901330c86/LICENSE).
@@ -93,15 +92,15 @@ Nathan Wilson's notice is retained in
 | Requests | Evaluation HTTP client | `Apache-2.0` | flake.lock | [Requests](https://github.com/psf/requests) |
 | OpenAI Python SDK | Local API compatibility checks; not shipped | `Apache-2.0` | 2.41.1; flake.lock | [openai-python](https://github.com/openai/openai-python) |
 | SoX | Development audio utility | `GPL-2.0-or-later` | flake.lock | [SoX](https://sourceforge.net/projects/sox/) |
-| antirez/ds4 | Optional benchmark package; not shipped with Gufo | `MIT` | `0aaea5a238fb41a35106a551e73c8409dfb751ac` | [Nix recipe](.devops/nix/ds4-reference.nix) |
-| llama.cpp reference builds | Optional benchmark packages; not shipped with Gufo | `MIT` | Release `68d9053a`; Flash-Next MTP `6fcaa16f` | [Nix recipes](.devops/nix/llama-cpp-reference.nix) |
+| antirez/ds4 | Optional benchmark package; not shipped with Super Roc | `MIT` | `0aaea5a238fb41a35106a551e73c8409dfb751ac` | [Nix recipe](.devops/nix/ds4-reference.nix) |
+| llama.cpp reference builds | Optional benchmark packages; not shipped with Super Roc | `MIT` | Release `68d9053a`; Flash-Next MTP `6fcaa16f` | [Nix recipes](.devops/nix/llama-cpp-reference.nix) |
 | Torchvision AlexNet weights | Evaluation data only; not shipped | `NOASSERTION` | SHA-256 `7be5be791159472b1fbf3c69796f7cb30dca7ad8466c2df70058c37116cdee02` | [PyTorch model distribution](https://download.pytorch.org/models/alexnet-owt-7be5be79.pth) |
 
-Python/PyTorch and reference scripts are not installed with Gufo. Their own
+Python/PyTorch and reference scripts are not installed with Super Roc. Their own
 transitive dependencies, including Triton and MIOpen, remain development-only. Kernel/tuning
-executables are built only with `GUFO_BUILD_TOOLS=ON`; ROCprofiler is supplied
+executables are built only with `SUPERROC_BUILD_TOOLS=ON`; ROCprofiler is supplied
 by the development shell. Ordinary build tools (CMake, Ninja, pkg-config,
-and the host compiler) retain their own licenses and are not Gufo code.
+and the host compiler) retain their own licenses and are not Super Roc code.
 
 The LPIPS evaluator checks the AlexNet digest above and calibration digest
 `df73285e35b22355a2df87cdb6b70b343713b667eddbda73e1977e0c860835c0`, records the
@@ -109,7 +108,7 @@ loaded module hash and library versions, and requires locally available weights.
 
 ## External Model Artifacts (Non-Distributed)
 
-Model checkpoints are not part of the gufo source or binary
+Model checkpoints are not part of the Super Roc source or binary
 distribution. Operators obtain them directly from their publisher and remain
 responsible for the terms governing their location and use.
 
@@ -120,7 +119,7 @@ responsible for the terms governing their location and use.
   safetensors, tokenizer and model configuration.
 - **License**: [Qwen Research License Agreement, September 20, 2026](https://huggingface.co/Qwen/Qwen-Image-2.1/blob/b3179ad355be050328e483a9dfdd9e60cd62adfa/LICENSE).
   The granted use is non-commercial; commercial use requires a separate license.
-  Gufo neither ships nor automatically downloads these weights.
+  Super Roc neither ships nor automatically downloads these weights.
 - **Reference implementation**: Diffusers and Transformers, Apache-2.0.
   Native inference follows the [pinned operator contract](src/models/qwen_image_21/UPSTREAM.md);
   Python reference dependencies are development-only.
@@ -143,10 +142,10 @@ responsible for the terms governing their location and use.
 - **Copyright / Notice Source**: Copyright © 2026 MiniMax. All Rights Reserved.
 - **Relationship**: External, access-controlled, operator-supplied runtime
   artifact. It is never committed, packaged, mirrored, automatically
-  downloaded, or redistributed by gufo.
+  downloaded, or redistributed by Super Roc.
 - **Operational Boundary**: Every operator must independently obtain access
   from MiniMax, accept or obtain the terms applicable to that operator, and
-  configure a local checkpoint path. Possession of the gufo source
+  configure a local checkpoint path. Possession of the Super Roc source
   does not grant model rights.
 - **Serving Boundary**: The engine supplies numerical execution only. Anyone
   exposing H3 through an API is responsible for the publisher's user terms,
@@ -166,7 +165,7 @@ determination about a downstream operator.
 - **Component Used**: H3 prompt encoder through layer 50
 - **SPDX License Identifier**: `Apache-2.0`
 - **Relationship**: External model component within the operator-supplied H3
-  checkpoint; not distributed by gufo
+  checkpoint; not distributed by Super Roc
 
 See [the MiniMax H3 guide](docs/models/minimax-h3/README.md) for the acquisition, release, and
 runtime boundary.

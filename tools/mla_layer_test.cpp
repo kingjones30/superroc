@@ -1,5 +1,5 @@
-// mla_layer_test — verify LG's absorbed gated-MLA layer against a literal
-// transcription of the fork's graph. Runs on the Mac; no model.
+// mla_layer_test — verify the engine's absorbed gated-MLA layer against a literal
+// transcription of the fork's graph. Runs on any host; no model.
 //
 // Ling ships attn_k_b / attn_v_b, not attn_kv_b, so the fork takes the
 // ABSORBED branch of bailingmoe3.cpp: the non-rotated part of each query head is
@@ -94,7 +94,7 @@ W MakeW() {
 }
 
 // ---------------------------------------------------------------------------
-// LG's MlaLayer, mirroring src/models/ling3/reference.cpp.
+// The engine's MlaLayer, mirroring src/models/ling3/reference.cpp.
 // ---------------------------------------------------------------------------
 void LgLayer(const W& w, std::vector<float>* latent, const std::vector<float>& x,
              std::size_t pos, std::vector<float>* out) {

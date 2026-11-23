@@ -1,10 +1,10 @@
-// LFP item 4 (+ SPEC2 item 6): (a) FP4->F16 decode exactness vs the
+// (a) FP4->F16 decode exactness vs the
 // superroc_fp4_elem CPU oracle (all 16 codes x all 256 scale bytes x types
 // 100/101, bitwise + max_abs); (b) Fp4DenseF16Gemm vs an F64 reference on
 // every dense (m, k) at 16/96/1024/2048 tokens, next to DenseF16Gemm/Q8_0's
 // own error, plus bitwise determinism; 6(a) FP4->int8 code exactness;
 // 6(b) Fp4Int8Gemm vs F64 on 320x10240 and 2560x6144; mixer F16-vs-F32
-// equivalence. Run under gpu-run. (LANGUAGE HIP.)
+// equivalence. Run on an otherwise idle GPU. (LANGUAGE HIP.)
 #include "src/models/qwen38_flash_next/kernels/rocm/fp4_f16.hpp"
 
 #include <hip/hip_fp16.h>
@@ -20,6 +20,7 @@
 
 #include "src/core/rocm_fp4/superroc_fp4_quant.hpp"
 #include "src/models/qwen38_flash_next/kernels/rocm/kernels.hpp"
+#include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
 namespace {
 namespace rocm = superroc::models::qwen38_flash_next::rocm;
@@ -467,7 +468,200 @@ void Int8GemmCase(std::size_t batch, std::size_t m, std::size_t k) {
   LFP_HIP_CHECK(hipStreamDestroy(st));
 }
 
-// SPEC2 item 1 proof: the F16 mixer route against the F32 route on
+// IEEE half bits to float, on the host.
+float HalfBitsToFloat(std::uint16_t h) {
+  const int sign = h >> 15;
+  const int exp = (h >> 10) & 0x1F;
+  const int man = h & 0x3FF;
+  double v;
+  if (exp == 0) {
+    v = std::ldexp(static_cast<double>(man), -24);
+  } else if (exp == 31) {
+    v = man == 0 ? HUGE_VAL : NAN;
+  } else {
+    v = std::ldexp(static_cast<double>(man + 1024), exp - 25);
+  }
+  return static_cast<float>(sign != 0 ? -v : v);
+}
+
+std::vector<std::uint8_t> MakeHcDownFp4() {
+  auto w = MakeFp4(320, 10240, true);
+  // Realistic scales (exp <= 3), as in Int8GemmCase.
+  for (std::size_t i = 16; i < w.size(); i += 17) {
+    w[i] &= 0x1F;
+  }
+  return w;
+}
+
+// The fused mixer down projection (FP4 FAST weights, SiLU(x / 4), F16 out)
+// against the separate kernel's F32 result, twice for determinism, and the
+// first 96 rows of the batch against a 96-row launch.
+void HcDownFusedCase(std::size_t batch) {
+  g_hip_case = __func__;
+  constexpr std::size_t m = 320;
+  constexpr std::size_t k = 10240;
+  constexpr std::uint32_t small = 96;
+  const auto w = MakeHcDownFp4();
+  std::vector<float> xf(batch * k);
+  for (float& v : xf) {
+    v = static_cast<float>(Next() & 0xFFFF) / 65535.f - 0.5f;
+  }
+  const std::size_t qb = rocm::Q8TiledBytes(batch, k);
+  Dev d_w(w.size()), d_x(xf.size() * 4), d_q(qb), d_f(batch * m * 4),
+      d_h1(batch * m * 2), d_h2(batch * m * 2),
+      d_hs(static_cast<std::size_t>(small) * m * 2);
+  LFP_HIP_CHECK(hipMemcpy(d_w.p, w.data(), w.size(), hipMemcpyHostToDevice));
+  LFP_HIP_CHECK(
+      hipMemcpy(d_x.p, xf.data(), xf.size() * 4, hipMemcpyHostToDevice));
+  hipStream_t st = nullptr;
+  LFP_HIP_CHECK(hipStreamCreate(&st));
+  rocm::QuantizeQ8Tiled(static_cast<const float*>(d_x.p), d_q.p, batch, k, st);
+  LFP_LAUNCHED();
+  const bool ok_f = rocm::Fp4Int8Gemm(d_w.p, d_q.p, static_cast<float*>(d_f.p),
+                                      batch, m, k, true, st);
+  LFP_LAUNCHED();
+  const auto n32 = static_cast<std::uint32_t>(batch);
+  const bool ok_1 = rocm::Fp4HcDownF16Gemm(
+      d_w.p, d_q.p, static_cast<__half*>(d_h1.p), n32, st);
+  LFP_LAUNCHED();
+  const bool ok_2 = rocm::Fp4HcDownF16Gemm(
+      d_w.p, d_q.p, static_cast<__half*>(d_h2.p), n32, st);
+  LFP_LAUNCHED();
+  const bool ok_s = rocm::Fp4HcDownF16Gemm(
+      d_w.p, d_q.p, static_cast<__half*>(d_hs.p), small, st);
+  LFP_LAUNCHED();
+  LFP_HIP_CHECK(hipStreamSynchronize(st));
+  Check(ok_f && ok_1 && ok_2 && ok_s,
+        "fused mixer down launcher returned false");
+  std::vector<float> f(batch * m);
+  std::vector<std::uint16_t> h1(batch * m), h2(batch * m),
+      hs(static_cast<std::size_t>(small) * m);
+  LFP_HIP_CHECK(
+      hipMemcpy(f.data(), d_f.p, f.size() * 4, hipMemcpyDeviceToHost));
+  LFP_HIP_CHECK(
+      hipMemcpy(h1.data(), d_h1.p, h1.size() * 2, hipMemcpyDeviceToHost));
+  LFP_HIP_CHECK(
+      hipMemcpy(h2.data(), d_h2.p, h2.size() * 2, hipMemcpyDeviceToHost));
+  LFP_HIP_CHECK(
+      hipMemcpy(hs.data(), d_hs.p, hs.size() * 2, hipMemcpyDeviceToHost));
+  Check(std::memcmp(h1.data(), h2.data(), h1.size() * 2) == 0,
+        "nondeterministic fused mixer down");
+  Check(std::memcmp(h1.data(), hs.data(), hs.size() * 2) == 0,
+        "fused mixer down rows depend on the batch size");
+  double max_err = 0.0;
+  double max_ref = 0.0;
+  for (std::size_t i = 0; i < f.size(); ++i) {
+    const double scaled = 0.25 * static_cast<double>(f[i]);
+    const double ref = scaled / (1.0 + std::exp(-scaled));
+    const double got = HalfBitsToFloat(h1[i]);
+    // One F16 rounding step plus the device's F32 sigmoid.
+    max_err = std::max(
+        max_err, std::fabs(got - ref) / std::max(std::fabs(ref), 1.0 / 1024.0));
+    max_ref = std::max(max_ref, std::fabs(ref));
+  }
+  std::printf("6c batch=%4zu fused mixer down rel=%.2e max_ref=%.3f\n", batch,
+              max_err, max_ref);
+  Check(max_err < 1.5e-3 && max_ref > 0.01, "fused mixer down error");
+  Check(!rocm::Fp4HcDownF16Gemm(d_w.p, d_q.p, static_cast<__half*>(d_h1.p), 95,
+                                st),
+        "fused mixer down accepted fewer than 96 rows");
+  LFP_HIP_CHECK(hipStreamDestroy(st));
+}
+
+// The FP4 FAST mixer-down decode kernel against an F64 reference on the Q8_1
+// rows it reads, and every row alone against the same row inside a batch.
+void HcDownVecCase() {
+  g_hip_case = __func__;
+  constexpr int m = 320;
+  constexpr int k = 10240;
+  constexpr int tokens = 8;
+  const auto w = MakeHcDownFp4();
+  std::vector<float> xf(static_cast<std::size_t>(tokens) * k);
+  for (float& v : xf) {
+    v = static_cast<float>(Next() & 0xFFFF) / 65535.f - 0.5f;
+  }
+  const std::size_t row_bytes = qfn_mmq_q8_1_bytes(1, k);
+  const std::size_t q_bytes = qfn_mmq_q8_1_bytes(tokens, k);
+  Check(row_bytes == static_cast<std::size_t>(k) / 32 * 36 &&
+            q_bytes == tokens * row_bytes,
+        "Q8_1 rows of the mixer width are padded");
+  Dev d_w(w.size()), d_x(xf.size() * 4), d_q(q_bytes),
+      d_one(static_cast<std::size_t>(tokens) * m * 4),
+      d_many(static_cast<std::size_t>(tokens) * m * 4 + 16);
+  LFP_HIP_CHECK(hipMemcpy(d_w.p, w.data(), w.size(), hipMemcpyHostToDevice));
+  LFP_HIP_CHECK(
+      hipMemcpy(d_x.p, xf.data(), xf.size() * 4, hipMemcpyHostToDevice));
+  Check(qfn_mmq_quantize_q8_1(static_cast<const float*>(d_x.p), d_q.p, tokens,
+                              k, nullptr) == 0,
+        "mixer down input quantization failed");
+  LFP_LAUNCHED();
+  const auto* dq = static_cast<const std::uint8_t*>(d_q.p);
+  auto* one = static_cast<float*>(d_one.p);
+  for (int t = 0; t < tokens; ++t) {
+    Check(qfn_mmq_fp4_hc_down_vec_preq(d_w.p, dq + t * row_bytes, one + t * m,
+                                       1, nullptr) == 0,
+          "mixer down decode kernel failed");
+    LFP_LAUNCHED();
+  }
+  LFP_HIP_CHECK(hipDeviceSynchronize());
+  std::vector<float> scalar(static_cast<std::size_t>(tokens) * m);
+  std::vector<std::uint8_t> q(q_bytes);
+  LFP_HIP_CHECK(hipMemcpy(scalar.data(), d_one.p, scalar.size() * 4,
+                          hipMemcpyDeviceToHost));
+  LFP_HIP_CHECK(hipMemcpy(q.data(), d_q.p, q_bytes, hipMemcpyDeviceToHost));
+  for (int n = 2; n <= tokens; ++n) {
+    std::vector<float> batch(static_cast<std::size_t>(n) * m + 4);
+    LFP_HIP_CHECK(hipMemset(d_many.p, 0xA5, batch.size() * 4));
+    // The batch ends at the end of the input allocation.
+    Check(qfn_mmq_fp4_hc_down_vec_preq(d_w.p, dq + (tokens - n) * row_bytes,
+                                       static_cast<float*>(d_many.p), n,
+                                       nullptr) == 0,
+          "batched mixer down decode kernel failed");
+    LFP_LAUNCHED();
+    LFP_HIP_CHECK(hipDeviceSynchronize());
+    LFP_HIP_CHECK(hipMemcpy(batch.data(), d_many.p, batch.size() * 4,
+                            hipMemcpyDeviceToHost));
+    Check(std::memcmp(scalar.data() + static_cast<std::size_t>(tokens - n) * m,
+                      batch.data(), static_cast<std::size_t>(n) * m * 4) == 0,
+          "mixer down decode rows depend on the batch size, n=" +
+              std::to_string(n));
+    std::uint32_t guard = 0;
+    std::memcpy(&guard, &batch[static_cast<std::size_t>(n) * m], 4);
+    Check(guard == 0xA5A5A5A5u, "mixer down decode kernel wrote past its rows");
+  }
+  double max_err = 0.0;
+  double max_ref = 0.0;
+  for (int t = 0; t < tokens; ++t) {
+    const std::uint8_t* xrow = q.data() + t * row_bytes;
+    for (int r = 0; r < m; ++r) {
+      const std::uint8_t* wrow =
+          &w[static_cast<std::size_t>(r) * (k / 32) * 17];
+      double ref = 0.0;
+      for (int b = 0; b < k / 32; ++b) {
+        const std::uint8_t* xb = xrow + static_cast<std::size_t>(b) * 36;
+        std::uint16_t d_bits;
+        std::memcpy(&d_bits, xb, 2);
+        const double d = HalfBitsToFloat(d_bits);
+        double dot = 0.0;
+        for (int i = 0; i < 32; ++i) {
+          dot += static_cast<double>(superroc_fp4_elem(101, wrow, b * 32 + i)) *
+                 static_cast<std::int8_t>(xb[4 + i]);
+        }
+        ref += d * dot;
+      }
+      max_err = std::max(max_err, std::fabs(scalar[t * m + r] - ref));
+      max_ref = std::max(max_ref, std::fabs(ref));
+    }
+  }
+  std::printf("6d mixer down decode kernel rel=%.2e max_ref=%.3f\n",
+              max_err / max_ref, max_ref);
+  Check(max_err / max_ref < 2e-6 && max_ref > 0.01,
+        "mixer down decode kernel error");
+  Check(qfn_mmq_fp4_hc_down_vec_preq(d_w.p, dq, one, 9, nullptr) != 0,
+        "mixer down decode kernel accepted nine rows");
+}
+
+// The F16 mixer route against the F32 route on
 // identical inputs. Both parts must agree within F16 rounding.
 void MixerEquiv() {
   g_hip_case = __func__;
@@ -619,13 +813,15 @@ float HostSsmConv(const float* w, float x0, float x1, float x2, float x3) {
   return acc / (1.0f + std::exp(-acc));
 }
 
-// SPEC2 item 1b(a): Fp4SsmF16Gemm vs two separate Fp4DenseF16Gemm runs
+// Fp4SsmF16Gemm vs two separate Fp4DenseF16Gemm runs
 // (raw rows must be BITWISE identical: same tile, same K order) and the
-// convolved rows vs a host 4-tap reference (silu/exp to ~1ulp).
-void SsmFusedCase(std::size_t batch) {
+// convolved rows vs a host 4-tap reference (silu/exp to ~1ulp). fast_qkv
+// runs the qkv tensor in the FAST (17-byte block) layout, which the fused
+// kernel takes through its own instantiation.
+void SsmFusedCase(std::size_t batch, bool fast_qkv = false) {
   g_hip_case = __func__;
   const std::size_t k = 2560, qkv = 10240, gate = 6144, m = 16384;
-  auto wq = MakeFp4(qkv, k, false);
+  auto wq = MakeFp4(qkv, k, fast_qkv);
   auto wg = MakeFp4(gate, k, true);
   std::vector<__half> xh(batch * k);
   for (__half& v : xh) {
@@ -658,12 +854,13 @@ void SsmFusedCase(std::size_t batch) {
       static_cast<const float*>(d_cw.p), static_cast<const float*>(d_hi.p),
       static_cast<float*>(d_qkvz.p), static_cast<float*>(d_conv.p),
       static_cast<std::uint32_t>(batch), static_cast<std::uint32_t>(m),
-      static_cast<std::uint32_t>(k), static_cast<std::uint32_t>(qkv), 4, st);
+      static_cast<std::uint32_t>(k), static_cast<std::uint32_t>(qkv), 4, st,
+      fast_qkv);
   LFP_LAUNCHED();
   Check(ok, "ssm launcher returned false");
   const bool ok1 = rocm::Fp4DenseF16Gemm(
       d_wq.p, static_cast<const __half*>(d_x.p), static_cast<float*>(d_raw1.p),
-      batch, qkv, k, false, st);
+      batch, qkv, k, fast_qkv, st);
   LFP_LAUNCHED();
   const bool ok2 = rocm::Fp4DenseF16Gemm(
       d_wg.p, static_cast<const __half*>(d_x.p), static_cast<float*>(d_raw2.p),
@@ -675,7 +872,8 @@ void SsmFusedCase(std::size_t batch) {
       static_cast<const float*>(d_cw.p), static_cast<const float*>(d_hi.p),
       static_cast<float*>(d_qkvz2.p), static_cast<float*>(d_conv2.p),
       static_cast<std::uint32_t>(batch), static_cast<std::uint32_t>(m),
-      static_cast<std::uint32_t>(k), static_cast<std::uint32_t>(qkv), 4, st);
+      static_cast<std::uint32_t>(k), static_cast<std::uint32_t>(qkv), 4, st,
+      fast_qkv);
   LFP_LAUNCHED();
   Check(okr, "ssm replay failed");
   LFP_HIP_CHECK(hipStreamSynchronize(st));
@@ -715,7 +913,8 @@ void SsmFusedCase(std::size_t batch) {
       }
     }
   }
-  std::printf("ssm batch=%4zu raw bitwise_bad=%ld\n", batch, raw_bad);
+  std::printf("ssm batch=%4zu fast_qkv=%d raw bitwise_bad=%ld\n", batch,
+              fast_qkv ? 1 : 0, raw_bad);
   Check(raw_bad == 0, "ssm raw mismatch");
   // Convolved rows vs the host 4-tap reference (all tokens x all channels
   // would take minutes; stride to ~2M cells).
@@ -740,7 +939,7 @@ void SsmFusedCase(std::size_t batch) {
   LFP_HIP_CHECK(hipStreamDestroy(st));
 }
 
-// SPEC2 item 1b(b): Fp4SplitF16Gemm vs Fp4DenseF16Gemm + UnpackQGate.
+// Fp4SplitF16Gemm vs Fp4DenseF16Gemm + UnpackQGate.
 // Same tile and K order feed the same scatter, so q|gate must be
 // BITWISE identical to the two-kernel reference (24 heads x d256).
 void SplitCase(std::size_t batch) {
@@ -839,9 +1038,16 @@ int main() {
   Int8GemmCase(96, 320, 10240);
   Int8GemmCase(2048, 2560, 6144);
   Int8GemmCase(96, 2560, 6144);
+  HcDownFusedCase(96);
+  HcDownFusedCase(224);
+  HcDownFusedCase(2048);
+  Check(qfn_mmq_init(0) == 0, "decode kernel setup failed");
+  HcDownVecCase();
   MixerEquiv();
   SsmFusedCase(1024);
   SsmFusedCase(2048);
+  SsmFusedCase(1024, true);
+  SsmFusedCase(2048, true);
   Check(!rocm::Fp4SplitF16Gemm(nullptr, nullptr, nullptr, nullptr, 95, 12288,
                                2560, true, nullptr),
         "split batch guard missing");

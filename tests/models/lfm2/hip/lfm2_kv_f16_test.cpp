@@ -1,4 +1,4 @@
-// LFM2 (SPEC3) fp16 token-major KV GPU test. The fp16 kernels convert each
+// LFM2 fp16 token-major KV GPU test. The fp16 kernels convert each
 // element to fp32 on load and otherwise run the fp32 kernels' math, so on a
 // cache whose fp32 values are exactly the fp16 values they must match the
 // fp32 kernels bit for bit; both are also checked against a CPU double

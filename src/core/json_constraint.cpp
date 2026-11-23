@@ -23,6 +23,11 @@ constexpr std::uint32_t kArguments = 1U << 29;
 constexpr std::uint32_t kLeaf = kTerminal | kLexeme;
 constexpr std::size_t kMaxSchemaBytes = 2 * 1024 * 1024;
 constexpr std::size_t kMaxRules = 262144;
+static constexpr std::size_t kMaxConjoinCalls = 100000;
+// Work units (schema nodes visited, member lookups, value comparisons) that
+// all intersections of one compile may spend. Bounds the cost of a single
+// Conjoin over wide objects, which the call count alone does not.
+static constexpr std::size_t kMaxConjoinWork = 10000000;
 constexpr std::size_t kMaxDepth = 16;
 constexpr std::size_t kMaxStates = 8192;
 constexpr std::size_t kMaxStack = 16384;
@@ -287,7 +292,7 @@ private:
   }
 
 public:
-  // LFM2 (Super ROC): see JsonConstraint::Lfm2RequiredCall. Every piece is
+  // LFM2 (Super Roc): see JsonConstraint::Lfm2RequiredCall. Every piece is
   // one the parser in lfm2_tool_parse.cpp accepts.
   std::shared_ptr<const JsonConstraint> Lfm2Calls(
       const std::vector<JsonConstraint::Lfm2Tool>& tools, bool parallel) {
@@ -409,7 +414,7 @@ private:
         values && values->is_array() && !values->items().empty() &&
         std::ranges::all_of(values->items(),
                             [](const auto& v) { return v.is_string(); })) {
-      // HTC (RVW C2): '<' is spelled \u003c in both spellings, so an enum
+      // '<' is spelled \u003c in both spellings, so an enum
       // value can never write a tool-call marker (<|tool_call_end|>) into
       // the call body; the reader decodes it back to '<'.
       const auto no_lt = [](std::string text) {
@@ -1103,6 +1108,8 @@ private:
   static bool EqualValue(const json::Value& a, const json::Value& b) {
     if (a.is_number() && b.is_number())
       return a.as_double() == b.as_double();
+    if (a.is_string() && b.is_string())
+      return a.str() == b.str();
     if (a.is_object() && b.is_object()) {
       if (a.size() != b.size())
         return false;
@@ -1131,8 +1138,29 @@ private:
         result.append_member(key, value);
     return result;
   }
+  void ChargeWork(std::size_t units) {
+    if (units > kMaxConjoinWork - conjoin_work_)
+      Invalid("schema expansion exceeds its resource budget");
+    conjoin_work_ += units;
+  }
+  // Charged before a value is copied or walked, so the cost of counting is
+  // itself bounded by the budget.
+  void ChargeNodes(const json::Value& value) {
+    ChargeWork(1);
+    if (value.is_object()) {
+      for (const auto& member : value.members())
+        ChargeNodes(member.second);
+    } else if (value.is_array()) {
+      for (const auto& item : value.items())
+        ChargeNodes(item);
+    }
+  }
   json::Value Conjoin(const json::Value& left, const json::Value& right,
                       unsigned depth = 0) {
+    if (++conjoin_calls_ > kMaxConjoinCalls)
+      Invalid("schema expansion exceeds its resource budget");
+    ChargeNodes(left);
+    ChargeNodes(right);
     if (depth > 64)
       Invalid("schema intersection exceeds its reference budget");
     Keys(left);
@@ -1202,6 +1230,7 @@ private:
       } else if (key == "required") {
         if (!previous->is_array() || !value.is_array())
           Invalid("required must be an array");
+        ChargeWork(previous->size() * value.size());
         for (const auto& field : value.items())
           if (std::ranges::none_of(previous->items(), [&](const auto& old) {
                 return EqualValue(old, field);
@@ -1210,6 +1239,7 @@ private:
       } else if (key == "enum") {
         if (!previous->is_array() || !value.is_array())
           Invalid("enum must be an array");
+        ChargeWork(previous->size() * value.size());
         result[key] = json::Value::array();
         for (const auto& item : previous->items())
           if (std::ranges::any_of(value.items(), [&](const auto& other) {
@@ -1246,6 +1276,8 @@ private:
             right.contains("additionalProperties") &&
             right.find("additionalProperties")->is_bool() &&
             !right.find("additionalProperties")->as_bool();
+        // find() is a linear scan of the members.
+        ChargeWork(2 * previous->size() * value.size());
         auto properties = json::Value::object();
         for (const auto& [name, child] : previous->members()) {
           if (const auto* other = value.find(name))
@@ -1265,6 +1297,11 @@ private:
       }
     }
     if (const auto* properties = result.find("properties")) {
+      const auto* left_fields = left.find("properties");
+      const auto* right_fields = right.find("properties");
+      ChargeWork(properties->size() *
+                 (1 + (left_fields ? left_fields->size() : 0) +
+                  (right_fields ? right_fields->size() : 0)));
       auto allowed = json::Value::object();
       for (const auto& [name, child] : properties->members()) {
         const auto permits = [&](const json::Value& schema) {
@@ -1942,6 +1979,8 @@ private:
   std::map<std::size_t, std::uint32_t> lfm2_values_;
   std::map<const json::Value*, std::uint32_t> compiled_;
   std::deque<json::Value> derived_;
+  std::size_t conjoin_calls_ = 0;
+  std::size_t conjoin_work_ = 0;
   std::map<std::pair<const json::Value*, bool>,
            std::shared_ptr<const JsonSchemaLexeme>>
       value_checks_;
@@ -2462,8 +2501,15 @@ std::shared_ptr<const JsonConstraint> JsonConstraint::WithTools(
     const auto terminal =
         static_cast<std::uint32_t>(kTerminal | grammar->classes_.size());
     grammar->classes_.push_back(whitespace);
-    const auto ws = static_cast<std::uint32_t>(grammar->rules_.size());
-    grammar->rules_.push_back({{}, {terminal, ws}});
+    // At most 8 whitespace bytes before a required call. An unbounded run let a
+    // model that closed its own thinking emit whitespace until max_tokens.
+    auto ws = static_cast<std::uint32_t>(grammar->rules_.size());
+    grammar->rules_.push_back({{}});
+    for (unsigned count = 0; count < 8; ++count) {
+      const auto next = static_cast<std::uint32_t>(grammar->rules_.size());
+      grammar->rules_.push_back({{}, {terminal, ws}});
+      ws = next;
+    }
     alternatives.push_back({ws, literal(marker), calls});
   }
   check_capacity(1, 0, 0);

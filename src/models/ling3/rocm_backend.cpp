@@ -18,7 +18,7 @@
 #include <vector>
 
 #if defined(LING3_WITH_ROCM)
-// LK's and LX's kernels live in the GLOBAL namespace `ling3`, which
+// These kernels live in the GLOBAL namespace `ling3`, which
 // collides with this package's own `superroc::models::ling3`; every
 // reference below is therefore `::ling3::`.
 #include "src/models/ling3/kernels/ling3_gemv_q8.hpp"
@@ -28,14 +28,14 @@
 #include "src/models/ling3/kernels/ling3_moe.hpp"
 #include "src/models/ling3/kernels/ling3_ops.hpp"
 #include "src/models/ling3/kernels/ling3_quant.hpp"
-// LS3: the tiled grouped GEMM + batched router for batched prefill.
+// The tiled grouped GEMM + batched router for batched prefill.
 #include "src/models/ling3/kernels/ling3_gemm.hpp"
 #include "src/models/ling3/kernels/ling3_moe_group.hpp"
-// LS3 P3: the W8A8 int8-WMMA grouped GEMM (superroc skeleton, fork numerics).
+// The W8A8 int8-WMMA grouped GEMM (superroc skeleton, fork numerics).
 #include "src/models/ling3/kernels/ling3_wmma.hpp"
-// LW1 (wave 2): the two-pass WMMA prefill attention, LING3_MLA_WMMA2=1.
+// The two-pass WMMA prefill attention, LING3_MLA_WMMA2=1.
 #include "src/models/ling3/kernels/ling3_mla_w2.hpp"
-// LX1 (wave 3): the fused WMMA flash prefill attention, LING3_MLA_FW=1.
+// The fused WMMA flash prefill attention, LING3_MLA_FW=1.
 #include "src/models/ling3/kernels/ling3_mla_fw.hpp"
 #include "src/models/ling3/vision_prompt.hpp"
 #endif  // LING3_WITH_ROCM
@@ -43,7 +43,7 @@
 #if defined(LING3_WITH_ROCM)
 
 #if defined(LING3_MAC_HIPSTUB)
-// LK's Mac type-check stub (../lk/mactest/hipstub) does not declare
+// The host-only type-check stub does not declare
 // hipMemGetInfo, so the device query below is compiled out for that check only.
 // A real build always runs it.
 #define LING3_SKIP_DEVICE_MEMORY_CHECK 1
@@ -52,16 +52,16 @@
 namespace superroc::models::ling3::rocm {
 namespace {
 
-/// LX's mandatory readable pad past the last byte of any allocation: the
+/// The mandatory readable pad past the last byte of any allocation: the
 /// 17-byte ROCmFP4_FAST block leaves the last row unaligned and the kernels
 /// widen a tail load.
 constexpr std::size_t kPad = LING3_TAIL_PAD;
 constexpr std::size_t kMaxExperts = 8;
 
 /// Zeroes a device buffer with hipMemcpy rather than hipMemset: hipMemset is
-/// absent from LK's Mac type-check stub, and a device memset of several GiB is
-/// an extra kernel launch we do not need -- only the recurrent state and the
-/// activation scratch must start at zero, and those are few MiB.
+/// absent from the host-only type-check stub, and a device memset of several
+/// GiB is an extra kernel launch we do not need -- only the recurrent state
+/// and the activation scratch must start at zero, and those are few MiB.
 void DevZero(void* p, std::size_t bytes) {
   if (p == nullptr || bytes == 0) {
     return;
@@ -76,7 +76,7 @@ void DevZero(void* p, std::size_t bytes) {
                                   : kZeros.size() * sizeof(float);
     (void)hipMemcpy(p, src, chunk, hipMemcpyHostToDevice);
     p = static_cast<std::uint8_t*>(p) + chunk;
-    // Jay 2026-10-01: no "src += chunk" -- the source is the same 4 MiB zero
+    // No "src += chunk" -- the source is the same 4 MiB zero
     // block every time. Advancing it walked off the end of kZeros as soon as a
     // buffer was larger than 4 MiB (H1's F7 made DevZero clear real sizes):
     // SIGSEGV in hipMemcpy at load.
@@ -92,10 +92,10 @@ void* DevAlloc(std::size_t bytes) {
   return p;
 }
 
-// LQ3: LING3_POISON_ALLOC=zero|nan fills every freshly-allocated SCRATCH buffer
+// LING3_POISON_ALLOC=zero|nan fills every freshly-allocated SCRATCH buffer
 // on the batched-prefill path. hipMalloc does not zero: a buffer a kernel reads
 // before anyone wrote it holds whatever the previous process left there, which
-// is exactly the run-to-run nondeterminism this lane is chasing. Poisoning
+// is exactly the run-to-run nondeterminism being chased here. Poisoning
 // makes that read reproducible (zero) or loudly visible (NaN -> the first
 // tensor that turns NaN is the one whose kernel read memory nobody wrote). It
 // is NOT applied to weight loads: DevCopy overwrites those immediately and
@@ -131,7 +131,7 @@ void DevPoison(void* p, std::size_t bytes) {
     dst += chunk;
     left -= chunk;
   }
-  // LQ3 positive control, once: read the fill back so the log PROVES the poison
+  // Positive control, once: read the fill back so the log PROVES the poison
   // reached the device. Without this a clean run means either "no uninitialised
   // read" or "the knob never fired", and the two are indistinguishable.
   static bool checked = false;
@@ -150,8 +150,8 @@ void DevPoison(void* p, std::size_t bytes) {
 /// pointer (the weights are only ever read); hipMemcpy just needs a non-const
 /// destination type.
 bool DevCopy(const void* d, const void* s, std::size_t n) {
-  // Jay 2026-10-01 (hotfix, for LG to adopt): a plain hipMemcpy straight out of
-  // the GGUF mmap stalled the 65 GB Ling load at ~45 GB of GTT on amdaimax2 --
+  // A plain hipMemcpy straight out of
+  // the GGUF mmap stalled the 65 GB Ling load at ~45 GB of GTT --
   // main thread spinning inside libhsa, GPU 0 % busy, no new page faults,
   // `superroc serve` never answered /health in 10 min. HIP pins pageable
   // sources for the DMA; pinning tens of GB of file-backed pages on a 128 GB
@@ -205,7 +205,7 @@ struct Plan {
   int norm_w{1};
   std::vector<float> clamp_exp, clamp_shexp;
   std::vector<bool> is_mla;
-  // LG1 W3: MLA ordinal map, -1 for KDA layers, 0..6 for the 7 MLA layers
+  // MLA ordinal map, -1 for KDA layers, 0..6 for the 7 MLA layers
   // (5, 11, 17, 23, 29, 35, 41 in build28f). Built at Init beside is_mla.
   std::vector<int> mla_ord;
   std::size_t resident{0};
@@ -238,7 +238,7 @@ struct Layer {
   W m_wk_b_packed, m_wv_b_packed;
   const float* m_wk_b_f32{nullptr};
   const float* m_wv_b_f32{nullptr};
-  // SPEC6: row-transposed copies for the decode prep / de-absorb kernels.
+  // Row-transposed copies for the decode prep / de-absorb kernels.
   const float* m_wk_bT{nullptr};
   const float* m_wv_bT{nullptr};
   const float* m_kv_a_norm{nullptr};
@@ -500,7 +500,7 @@ bool Init(const ModelWeights& weights, const core::GgufReader& reader,
           !upv(l.mla_weights.kv_a_norm, &d.m_kv_a_norm)) {
         return fail("MLA upload at layer " + std::to_string(i));
       }
-      // LK's MlaWeights takes wk_b / wv_b as float*, and on disk they are
+      // MlaWeights takes wk_b / wv_b as float*, and on disk they are
       // ROCmFP4. Dequantize once at load: 8.4 MB each per layer.
       const auto mirror = [&](const Layer::W& p, const float** slot) {
         const int rows_all = p.rows * p.experts;
@@ -512,14 +512,14 @@ bool Init(const ModelWeights& weights, const core::GgufReader& reader,
         const std::size_t bytes =
             static_cast<std::size_t>(rows_all) * p.cols * sizeof(float);
         g.resident += bytes + kPad;
-        // Jay 2026-10-01: the mirror was never stored -- `slot` stayed nullptr,
+        // The mirror was never stored -- `slot` stayed nullptr,
         // so MlaWeights.wk_b / wv_b reached mla_block as null and the first MLA
         // layer faulted the GPU (ling3_mla.hip:378, PERMISSION_FAULTS 0x3, two
         // GPU resets).
         *slot = f;
         return ling3_dequant(p.type, p.d, f, p.cols, rows_all) == LING3_OK;
       };
-      // SPEC6: remember the shapes before the packed copies go away.
+      // Remember the shapes before the packed copies go away.
       const int wk_rows = d.m_wk_b_packed.rows * d.m_wk_b_packed.experts;
       const int wk_cols = d.m_wk_b_packed.cols;
       const int wv_rows = d.m_wv_b_packed.rows * d.m_wv_b_packed.experts;
@@ -528,7 +528,7 @@ bool Init(const ModelWeights& weights, const core::GgufReader& reader,
           !mirror(d.m_wv_b_packed, &d.m_wv_b_f32)) {
         return fail("MLA F32 mirror at layer " + std::to_string(i));
       }
-      // SPEC6: one row-transposed copy each, made once at load, for the
+      // One row-transposed copy each, made once at load, for the
       // decode path's prep and de-absorb kernels (coalesced reads). The
       // originals stay as they are: the prefill kernels read wk_b / wv_b.
       {
@@ -676,7 +676,7 @@ namespace {
   return s;
 }
 
-// Jay 2026-10-01: LING3_GPU_TRACE=<pos> prints the same per-block "LG-TRACE
+// LING3_GPU_TRACE=<pos> prints the same per-block "LG-TRACE
 // <block> <name> first3 last3" lines as the CPU oracle
 // (tools/ling3_ref_main.cpp --trace) for the token at that position, so the
 // first diverging tensor names the bug.
@@ -766,7 +766,7 @@ State* NewState(std::uint32_t max_ctx) {
   const ::ling3::MlaShape ms = MakeMlaShape();
   const std::size_t conv_n = static_cast<std::size_t>(ks.embd_r());
   const std::size_t ssm_n = static_cast<std::size_t>(ks.embd_s());
-  // Jay 2026-10-01: H1's F4 (REPORT3 §3) said "mla_n = kv_a() * max_ctx" but
+  // A review note said "mla_n = kv_a() * max_ctx" but
   // its patch only set cache.max_pos = max_ctx -- the allocation stayed ONE
   // position per layer, so the kernel would write rows 1..max_ctx-1 out of
   // bounds. Size it for max_ctx here.
@@ -775,10 +775,10 @@ State* NewState(std::uint32_t max_ctx) {
 
   st->kda_conv_elems = g_dev.layers.size() * conv_n;
   st->kda_ssm_elems = g_dev.layers.size() * ssm_n;
-  // LG1 W3 stage (a): the 35 KDA slots were pure waste (never read, never
+  // the 35 KDA slots were pure waste (never read, never
   // written). The MLA cache holds 7 entries, one per MLA layer, indexed by
   // g.mla_ord. Bit-identical to the old layout: KDA layers never touched
-  // mla_cache (RV6 sec 1.1), so deleting their slots changes no byte any
+  // mla_cache, so deleting their slots changes no byte any
   // kernel reads; each MLA layer's rows keep the same in-slot offsets.
   {
     std::size_t mla_count = 0;
@@ -810,7 +810,7 @@ State* NewState(std::uint32_t max_ctx) {
   // Remember the device pointers by borrowing kda_conv's slot order.
   DevZero(conv_d, st->kda_conv_elems * sizeof(float));
   DevZero(ssm_d, st->kda_ssm_elems * sizeof(float));
-  // LQ3: mla_d was the one state buffer this function never cleared. The
+  // mla_d was the one state buffer this function never cleared. The
   // device side held whatever the previous process left in it. It happens to
   // be written by mla_cache_append before the attention reads it in the
   // normal chunked flow, and Session::Reset/ResetState clears it per request
@@ -890,10 +890,10 @@ State* NewState(std::uint32_t max_ctx) {
     st->kda_scratch = nullptr;
     st->mla_scratch = nullptr;
   }
-  // LS3 PHASE4: split-K decode-attention partials. P7: sized for a FIXED
+  // Split-K decode-attention partials, sized for a FIXED
   // slot count (kMlaSplitkMaxSlices) instead of max_ctx/1024, so the
   // adaptive short slices cannot over-run the buffers; q_abs holds 4 rows
-  // for LM1's multi-row verify entry.
+  // for the multi-row verify entry.
   {
     const std::size_t ks =
         static_cast<std::size_t>(::ling3::kMlaSplitkMaxSlices);
@@ -923,7 +923,7 @@ State* NewState(std::uint32_t max_ctx) {
 }
 
 // ---------------------------------------------------------------------------
-// LS3: batched-prefill scratch.
+// Batched-prefill scratch.
 //
 // One set of chunk-capacity buffers per State, created lazily by the first
 // ForwardBatch and freed by DestroyState. Every buffer here is sized for the
@@ -960,7 +960,7 @@ bool BatchAllLogits() {
 
 /// LING3_BATCH_PROFILE=1: per-section device-synchronised timings, one line
 /// per chunk. Diagnosis only -- each measurement adds a device sync.
-/// LS3 PHASE4 knobs for the split-K decode attention.
+/// Knobs for the split-K decode attention.
 bool MlaSplitkOn() {
   static const bool on = [] {
     const char* e = std::getenv("LING3_MLA_SPLITK");
@@ -968,7 +968,7 @@ bool MlaSplitkOn() {
   }();
   return on;
 }
-/// LS3 PHASE5: 1 = head-shared partial kernel (each cache slice read once per
+/// 1 = head-shared partial kernel (each cache slice read once per
 /// 8-head group instead of once per head). Gates passed (unit <= 1.3e-8 vs the
 /// serial kernel at n_pos <= 30000, 13K PPL A/B 0.093 %, trace 298/5), so ON
 /// by default; LING3_MLA_SPLITK_HEADS=0 restores the per-head kernel.
@@ -1018,7 +1018,7 @@ int MlaSplitkSlice(int n_pos) {
   return ::ling3::mla_splitk_slice_auto(n_pos, wg);
 }
 
-/// Jay build28 glue (RV1 B2): the split-K partials hold kMlaSplitkMaxSlices
+/// The split-K partials hold kMlaSplitkMaxSlices
 /// slots per head; above n_pos 196,608 even a 1,024-position slice needs more,
 /// so those positions take the serial path instead of over-running them.
 bool MlaSplitkSlicesFit(int n_pos) {
@@ -1029,9 +1029,9 @@ bool MlaSplitkSlicesFit(int n_pos) {
 int MlaSplitkMin() {
   static const int min = [] {
     const char* e = std::getenv("LING3_MLA_SPLITK_MIN");
-    // P7: 1024, the measured serial/split-K crossover. MEASURED on MAX-1
-    // (out-p7chain.txt bench arms, sha 6cbab1eaea0df5f2): at ~300 decode
-    // positions (bench.sh short prompts) the serial 32-block kernel wins
+    // P7: 1024, the measured serial/split-K crossover. Measured on a Strix
+    // Halo machine (out-p7chain.txt bench arms, sha 6cbab1eaea0df5f2): at ~300
+    // decode positions (bench.sh short prompts) the serial 32-block kernel
     // (39.20/39.17 tok/s vs split-K's 38.92/38.91); from ~1.4K positions
     // split-K wins big (38.53 vs 34.69 on the 1,387-token bench prompt) and
     // the adaptive slice (MlaSplitkSlice, ~120 workgroups) keeps it ahead at
@@ -1066,9 +1066,9 @@ bool PrefillW8A8() {
   return on;
 }
 
-/// LF1 SPEC3: LING3_MLA_TILE=1 routes batched-prefill MLA attention through
+/// LING3_MLA_TILE=1 routes batched-prefill MLA attention through
 /// the port of the fork's tile flash-attention kernel
-/// (kernels/ling3_mla_tile.hip) instead of LS3's mla_attn_tok. Default OFF.
+/// (kernels/ling3_mla_tile.hip) instead of mla_attn_tok. Default OFF.
 /// Unsupported shapes or misaligned buffers fall back to mla_attn_tok inside
 /// the launcher, so the knob can never leave a chunk without attention.
 bool MlaTile() {
@@ -1079,10 +1079,10 @@ bool MlaTile() {
   return on;
 }
 
-/// Jay build28d glue: LING3_MLA_TILE_MAX caps the tile path by depth. Measured
-/// on amdaimax2 (build28c vs build28b curves): the tile kernel wins at
+/// LING3_MLA_TILE_MAX caps the tile path by depth. Measured
+/// on one machine (build28c vs build28b curves): the tile kernel wins at
 /// 1.6K-27.7K (317 vs 282 tok/s at 27.7K) but loses at 56K (197 vs 213) to
-/// the LW1 two-pass WMMA, so chunks ending beyond the cap take the else-branch
+/// the two-pass WMMA, so chunks ending beyond the cap take the else-branch
 /// (w2 when LING3_MLA_WMMA2 is set, else mla_attn_tok). 0 / unset = no cap.
 bool MlaTileFits(int n_pos) {
   static const long cap = [] {
@@ -1093,7 +1093,7 @@ bool MlaTileFits(int n_pos) {
   return cap == 0 || n_pos <= cap;
 }
 
-/// LX1 SPEC: LING3_MLA_FW=1 routes batched-prefill MLA attention through
+/// LING3_MLA_FW=1 routes batched-prefill MLA attention through
 /// the fused WMMA flash kernel (kernels/ling3_mla_fw.hip): ONE attention
 /// launch for the whole 512-token chunk, absorb/de-absorb as batched
 /// kernels around it, nothing materialized in global memory. Default OFF;
@@ -1106,13 +1106,13 @@ bool MlaFw() {
   return on;
 }
 
-/// LX1: the fused path's depth window — chunks ending at >= min positions
+/// The fused path's depth window — chunks ending at >= min positions
 /// take the fused kernel, and <= max if max > 0 (0 = every depth, the spec's
-/// default: no 16,384-style cap). MEASURED on this box (unit bench, the
-/// four spec anchors + shallow cases): the fused path is faster than the
+/// default: no 16,384-style cap). Measured on the test machine (unit bench,
+/// the four spec anchors + shallow cases): the fused path is faster than the
 /// tile kernel at EVERY measured depth from n_pos 130 up (5.15 vs 7.06 ms
 /// at 512, 21.2 vs 61.3 at 8K, 158.0 vs 517.0 at 57K), so the default min
-/// is one full prefill chunk; see lx1/REPORT.md.
+/// is one full prefill chunk.
 int MlaFwMin() {
   static const int v = [] {
     const char* e = std::getenv("LING3_MLA_FW_MIN");
@@ -1187,9 +1187,9 @@ struct BatchBufs {
   // mla_attn_tok score scratch: [kMlaTokBatch][heads][max_ctx] -- one row per
   // (sub-batched token, head), laid out as the kernel indexes it.
   float* mla_scores{nullptr};
-  // LW1: two-pass WMMA prefill attention staging (LING3_MLA_WMMA2=1).
+  // Two-pass WMMA prefill attention staging (LING3_MLA_WMMA2=1).
   ::ling3::MlaW2Bufs w2{};
-  // LX1: fused WMMA flash prefill staging (LING3_MLA_FW=1); k16/vt are
+  // Fused WMMA flash prefill staging (LING3_MLA_FW=1); k16/vt are
   // shared with w2 above, these are the fused path's own q16/o/rowsum.
   ::ling3::MlaFwBufs fw{};
   // MoE per cap: routed slots [cap * 8] x expert_ff, shared/dense [cap] x
@@ -1205,7 +1205,7 @@ struct BatchBufs {
   float* slot_w{nullptr};
   int* ident{nullptr};  // [cap * 8] = {0,1,...}: slot-row identity for gathers
   int *grp_e{nullptr}, *grp_off{nullptr}, *grp_cnt{nullptr};
-  // LS1 PHASE8 item 2: capacity of grp_e / grp_off / grp_cnt, recorded where
+  // Capacity of grp_e / grp_off / grp_cnt, recorded where
   // they are allocated so the device grouping kernel can be handed the SAME
   // bound the host code used, instead of one guessed at the call site.
   int grp_e_cap{0};
@@ -1230,7 +1230,7 @@ struct BatchBufs {
   float* wts{nullptr};
   // all-position logits, test gate only (LING3_BATCH_ALL_LOGITS=1)
   float* logits_all{nullptr};
-  // LS4: the speculative verify needs the logits of the FIRST few rows of a
+  // The speculative verify needs the logits of the FIRST few rows of a
   // 3-row batch. logit_rows routes those through here -- at most
   // kSpeculativeRows rows, ~5 MiB -- instead of the chunk-sized logits_all
   // scratch, which is 322 MB at chunk 512 and exists only so the
@@ -1239,7 +1239,7 @@ struct BatchBufs {
   std::vector<void*> allocs;
 };
 
-// LS4: the most rows of one ForwardBatch whose logits the speculative verify
+// The most rows of one ForwardBatch whose logits the speculative verify
 // ever reads -- the sampled token plus n_max drafts. 8 rows x 157184 floats is
 // 5.03 MB, against 322 MB for the chunk-sized all-position scratch.
 constexpr int kSpeculativeRows = 8;
@@ -1273,7 +1273,7 @@ BatchBufs* NewBatchBufs(std::uint32_t max_ctx) {
     *slot = p;
     if (p != nullptr) {
       b->allocs.push_back(p);
-      DevPoison(p, floats * sizeof(float));  // LQ3
+      DevPoison(p, floats * sizeof(float));
     }
     return p != nullptr;
   };
@@ -1282,7 +1282,7 @@ BatchBufs* NewBatchBufs(std::uint32_t max_ctx) {
     *slot = p;
     if (p != nullptr) {
       b->allocs.push_back(p);
-      DevPoison(p, ints * sizeof(int));  // LQ3
+      DevPoison(p, ints * sizeof(int));
     }
     return p != nullptr;
   };
@@ -1291,13 +1291,13 @@ BatchBufs* NewBatchBufs(std::uint32_t max_ctx) {
     *slot = p;
     if (p != nullptr) {
       b->allocs.push_back(p);
-      DevPoison(p, bytes);  // LQ3
+      DevPoison(p, bytes);
     }
     return p != nullptr;
   };
 
   b->kda_scratch_bytes = ::ling3::kda_forward_scratch_bytes(ks, cap, 1);
-  // LW1: WMMA prefill staging caps (kernels/ling3_mla_w2.hpp). max_ctx is
+  // WMMA prefill staging caps (kernels/ling3_mla_w2.hpp). max_ctx is
   // rounded up to the 64-position tile geometry the GEMM fragments use.
   const std::size_t W2CAP = ((std::size_t)max_ctx + 63) / 64 * 64;
   const std::size_t W2KV = static_cast<std::size_t>(ms.kv);
@@ -1341,7 +1341,7 @@ BatchBufs* NewBatchBufs(std::uint32_t max_ctx) {
       ai(&b->rc, CAP) && af(&b->wts, SLOTS) &&
       af(&b->logits_spec, static_cast<std::size_t>(kSpeculativeRows) *
                               static_cast<std::size_t>(g.vocab)) &&
-      // LW1: the WMMA prefill attention's staging buffers.
+      // The WMMA prefill attention's staging buffers.
       ab(reinterpret_cast<void**>(&b->w2.k16),
          W2CAP * W2KVA * sizeof(__half)) &&
       ab(reinterpret_cast<void**>(&b->w2.vt), W2KV * W2CAP * sizeof(__half)) &&
@@ -1351,7 +1351,7 @@ BatchBufs* NewBatchBufs(std::uint32_t max_ctx) {
          W2ROWS * W2CAP * sizeof(__half)) &&
       ab(reinterpret_cast<void**>(&b->w2.o), W2ROWS * W2KV * sizeof(float)) &&
       ab(reinterpret_cast<void**>(&b->w2.rowsum), W2ROWS * sizeof(float));
-  // LX1: the fused WMMA flash path's own staging (LING3_MLA_FW=1 only —
+  // The fused WMMA flash path's own staging (LING3_MLA_FW=1 only —
   // q16/o are full-chunk-sized, 52 MB together). k16/vt above are shared.
   if (ok && std::getenv("LING3_MLA_FW") != nullptr) {
     const std::size_t FWR = static_cast<std::size_t>(::ling3::kMlaFwRows);
@@ -1436,7 +1436,7 @@ void DestroyState(State* state) noexcept {
     if (a != nullptr)
       (void)hipFree(a);
   }
-  // LS3: the chunk-sized batch-prefill scratch, if the session ever batched.
+  // The chunk-sized batch-prefill scratch, if the session ever batched.
   if (state->batch != nullptr) {
     FreeBatchBufs(static_cast<BatchBufs*>(state->batch));
     state->batch = nullptr;
@@ -1454,7 +1454,7 @@ void ResetState(State* state) noexcept {
     DevZero(state->kda_conv_device, state->kda_conv_elems * sizeof(float));
   if (state->kda_ssm_device != nullptr)
     DevZero(state->kda_ssm_device, state->kda_ssm_elems * sizeof(float));
-  // RV4 (Jay build28f): the latent cache is position-indexed and written before
+  // The latent cache is position-indexed and written before
   // it is read -- mla_block, mla_block_splitk, ForwardBatch and StepMulti all
   // append rows [n_pos - n_tokens, n_pos) ahead of the attention that reads the
   // first n_pos rows, and every reader is bounded by n_pos. Rewinding `pos` is
@@ -1478,8 +1478,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
   const std::size_t G = static_cast<std::size_t>(g.heads);
   const std::size_t V = static_cast<std::size_t>(g.vocab);
 
-  hipStream_t stream =
-      nullptr;  // the null stream; LK's and LX's kernels use it
+  hipStream_t stream = nullptr;  // the null stream; the kernels use it
 
   // token_embd is Q6_K (text file) or Q5_K (VL file); its type travels in
   // g_dev.token_embd_type and ops_embedding_row decodes whichever it is.
@@ -1502,7 +1501,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
   const ::ling3::MlaShape ms = MakeMlaShape();
   const ::ling3::MlaScalars msc;
 
-  // LS2 PHASE7: push the position ONCE per token from pinned staging, instead
+  // Push the position ONCE per token from pinned staging, instead
   // of a blocking pageable copy inside the MLA branch (7 per token). Safe to
   // rewrite pos_h here: the previous Step ended with a blocking D2H, so the GPU
   // has finished everything that read it.
@@ -1516,7 +1515,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
     }
   }
   // g_dev.experts only holds MoE layers, so index it with its own counter
-  // LS1 PHASE7 item 3: six (MLA: three) projections in a layer all read the
+  // Six (MLA: three) projections in a layer all read the
   // SAME st->normed, and st->normed is re-quantised by every one of them.
   // Quantise it once into a named slot and route them through that. The
   // fallback is deliberate: the MTP block is Q8_0, not ROCmFP4, and for a
@@ -1537,7 +1536,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
   for (std::size_t li = 0; li < n_layers; ++li) {
     Layer& L = g_dev.layers[li];
 
-    // RV25 wave1 F4: layer 0's attn_norm has no residual in front of it (its
+    // Layer 0's attn_norm has no residual in front of it (its
     // input is the embedding row), so it stays a plain rms_norm. Every later
     // layer gets its attn_norm from the fused residual#2 at the END of the
     // previous layer, which already holds a[i]+b[i] in registers and so skips
@@ -1571,7 +1570,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
       in.n_seqs = 1;
 
       ::ling3::MlaCache cache;
-      // LG1 W3: reindex mla_off through the MLA ordinal map. All three
+      // reindex mla_off through the MLA ordinal map. All three
       // construction sites are inside `if (g.is_mla[li])`, so mla_ord[li] >= 0
       // here; the abort is a safety net for any future invariant break.
       if (g.mla_ord[li] < 0) {
@@ -1600,7 +1599,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
         hipMemcpy(st->pos_d, &st->pos, sizeof(int), hipMemcpyHostToDevice);
       }
       // out is [4096] = heads * head_v
-      // LS3 PHASE4: split-K ("flash decoding") attention once the visible
+      // Split-K ("flash decoding") attention once the visible
       // cache is long enough to need it -- the serial mla_attn runs 32
       // blocks total and its throughput falls linearly with the context.
       // LING3_MLA_SPLITK=0 forces the serial path back on.
@@ -1625,13 +1624,13 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
                            ::ling3::make_view(st->k, ms.o_dim(), 1), stream,
                            st->pos_d);
       }
-      // Jay 2026-10-01: the MLA output is o_dim = heads*head_v = 4096 floats;
+      // The MLA output is o_dim = heads*head_v = 4096 floats;
       // attn_out is allocated hidden = 2560, so writing it there overran by
       // 1536 floats (the GPU fault on the first request, ling3_mla.hip:378).
       // And the projection went to `normed` while the residual add below reads
       // attn_out. Raw MLA output -> st->k (4096 floats, unused on the MLA
       // path), projection -> attn_out (hidden), exactly as the KDA branch and
-      // reference.cpp:370 do. LC1 SPEC4 Q2-MLA: the wo Q8_1 quantisation is the
+      // reference.cpp:370 do. The wo Q8_1 quantisation is the
       // decode attention's epilogue, so this projection reads that activation
       // instead of paying a second k_q8_1_quant (-1 launch per MLA layer, -7
       // per token). Bit-identical end to end: the epilogue is k_q8_1_quant's
@@ -1701,7 +1700,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
           static_cast<float*>(st->kda_ssm_device) + st->kda_ssm_off[li];
       ks_state.n_seqs = 1;
 
-      // LKF: when the t32 decode fusion is on, K2's epilogue already wrote the
+      // When the t32 decode fusion is on, K2's epilogue already wrote the
       // wo Q8 slot. Skip k_q8_1_quant and matvec that slot. Other variants keep
       // ling3_gemv, which quantises st->tmp itself.
       int8_t* wo_qs = nullptr;
@@ -1729,7 +1728,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
             ::ling3::make_view(st->tmp, static_cast<int>(I), 1), stream, wo_qs,
             wo_ds);
       }
-      // Jay 2026-10-01: attn_output is [4096 -> 2560]; the input length is
+      // attn_output is [4096 -> 2560]; the input length is
       // d_inner (I), not hidden (reference.cpp:254 MatVec(k.wo,
       // attn_[0:inner])).
       if (wo_fused) {
@@ -1743,7 +1742,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
       GpuTrace(st, static_cast<std::uint32_t>(li), "kda_out", st->attn_out, H);
     }
 
-    // LS2 PHASE7: residual add + the norm that consumes it are one kernel.
+    // Residual add + the norm that consumes it are one kernel.
     // ffn_in is still written -- the second residual add reads it and the trace
     // hook prints it as ffn_inp.
     ::ling3::ops_add_rms_norm(st->x, st->attn_out, L.ffn_norm, st->t,
@@ -1752,10 +1751,10 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
     GpuTrace(st, static_cast<std::uint32_t>(li), "ffn_norm", st->t, H);
 
     // ---- feed forward ----
-    // LS2 PHASE7 devzero: removed. Redundant -- ling3_expert_ffn hipMemset()s y
+    // Devzero removed. Redundant -- ling3_expert_ffn hipMemset()s y
     // at entry, and it is a blocking pageable H2D on every layer (~40/token).
     if (L.dense) {
-      // RV25 wave1 F2/F3. This is an n_used == 1, w == 1.0 expert whose output
+      // This is an n_used == 1, w == 1.0 expert whose output
       // IS st->y. xq_ready = 0: there is no grouped call in front of it, so its
       // FFN_X quant is NOT a duplicate and has to run.
       if (ling3_dense_ffn_w1(L.ffn_gate.type, L.ffn_gate.d, L.ffn_up.d,
@@ -1766,7 +1765,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
         return false;
       }
     } else {
-      // ling3_route writes DEVICE ids and weights. LS1 phase 3: when the
+      // ling3_route writes DEVICE ids and weights. When the
       // experts are resident the grouped FFN reads them WHERE THEY ARE, so the
       // two blocking D2H copies that used to sit here -- 40 GPU syncs per
       // token, each draining the pipeline -- are gone from this branch. The
@@ -1775,7 +1774,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
       ling3_route(st->t, static_cast<const float*>(L.router.d), L.probs_bias,
                   g.hidden, g.n_expert, g.n_used, g.n_groups, g.n_group_used,
                   g.w_scale, g.norm_w, g_dev.d_ids, g_dev.d_weights);
-      // SPEC2: the router's top-k expert ids and the weights it produced, so
+      // The router's top-k expert ids and the weights it produced, so
       // the fork's ffn_moe_topk / ffn_moe_weights_scaled can be compared per
       // layer.
       GpuTraceIds(st, static_cast<std::uint32_t>(li), "ffn_moe_topk",
@@ -1833,14 +1832,14 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
       }
       ++expert_slot;
       // The shared expert is never routed and never scaled.
-      // Jay 2026-10-01: LX's ling3_expert_ffn (and ling3_dense_ffn, which wraps
+      // ling3_expert_ffn (and ling3_dense_ffn, which wraps
       // it) OVERWRITES y (hipMemset at entry), so writing the shared expert
       // into st->y wiped the routed experts' sum -- the GPU trace matched the
       // CPU oracle through block 2's ffn_norm and then ffn_out == ffn_shexp
       // alone. Shared expert -> st->f (d_inner >= hidden floats, idle in the
       // FFN), then add.
       //
-      // RV25 wave1 F2/F3 (verified against the code, not taken on trust):
+      // Verified against the code, not taken on trust:
       //   F2 -- ling3_expert_ffn_dev above quantised THIS SAME st->t, of this
       //   same
       //        length, into THIS SAME LING3_Q8_SLOT_FFN_X
@@ -1852,7 +1851,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
       //   F3 -- the memset + axpy of the n_used == 1 path are dropped; the down
       //        projection writes st->f itself as f[i] = 0.0f + acc, bitwise
       //        what memset(f,0) + k_axpy(1.0f, p, f) produced. k_add below is
-      //        untouched (regrouping (a+b)+c would NOT be bit-identical -- RV25
+      //        untouched (regrouping (a+b)+c would NOT be bit-identical --
       //        §5).
       if (ling3_dense_ffn_w1(L.ffn_gate.type, L.ffn_gate.d, L.ffn_up.d,
                              L.ffn_down.d, st->t, 1, g.hidden, g.expert_ff,
@@ -1864,12 +1863,12 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
       ling3_vec_add(st->y, st->f, st->y, g.hidden, stream);
     }
 
-    // RV25 wave1 F4: residual#2 fused with the norm that consumes it. The
+    // Residual#2 fused with the norm that consumes it. The
     // add_rms_norm_kernel computes the same xi = a[i] + b[i] in the same
     // thread-strided order, writes it to rsum (which IS the st->x the next
     // block reads, so the GpuTrace `l_out` tensor is unchanged) and normalises
     // from it. Bit-identical to ops_residual_add followed by ops_rms_norm --
-    // the LS2 PHASE7 argument, applied one step further along. The last layer
+    // the same argument, applied one step further along. The last layer
     // fuses with the FINAL norm instead. ops_final_norm hardcodes LING3_RMS_EPS
     // (it does not take g.eps), so the fused tail must too.
     if (li + 1 < n_layers) {
@@ -1885,12 +1884,12 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
     GpuTrace(st, static_cast<std::uint32_t>(li), "l_out", st->x, H);
   }
 
-  // LS1 phase 3: the grouped expert FFN leaves its status on the device and
+  // The grouped expert FFN leaves its status on the device and
   // never reads it back per layer -- that readback is a GPU drain, and 40 of
   // them is what this phase is about. One blocking read here covers every MoE
   // layer of the token.
   //
-  // RV25 wave1 F5: that read is a DEBUG check, not a correctness dependency --
+  // That read is a DEBUG check, not a correctness dependency --
   // the status words are only ever written on error (k_route also stamps
   // LING3_OK), and every consumer of the FFN output is downstream of here. So
   // it runs once per LING3_MOE_DEV_CHECK_EVERY decode tokens instead of once
@@ -1916,12 +1915,12 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
     }
   }
 
-  // RV25 wave1 F4: the final norm is fused into the last layer's residual#2
+  // The final norm is fused into the last layer's residual#2
   // (see the end of the layer loop); it wrote st->t there.
   GpuTrace(st, static_cast<std::uint32_t>(-1), "result_norm_input", st->x, H);
   ling3_gemv(g_dev.output_type, g_dev.output, st->t, st->logits, g.hidden,
              g.vocab);
-  // RV25 wave1 F1: the device argmax pair and its blocking 4-byte D2H are gone.
+  // The device argmax pair and its blocking 4-byte D2H are gone.
   // The result was `(void)next`-discarded -- sampling is the host
   // Session::Argmax over the logits this step copies out (engine.cpp), never
   // this value. The kernels themselves are still used by StepMultiMultiRow's
@@ -1941,7 +1940,7 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
 }
 
 // ---------------------------------------------------------------------------
-// LS3: batched prefill.
+// Batched prefill.
 //
 // Same per-block shape as Step -- rms_norm -> (KDA | MLA) -> residual ->
 // rms_norm -> (dense | MoE) -> residual -- with every projection on the tiled
@@ -1949,10 +1948,10 @@ bool Step(std::int32_t token, State* st, std::span<float> out_logits,
 // paths: the KDA recurrence stays token-sequential inside the kernel, MLA
 // masks causally over the chunk), and the MoE routed for all n tokens in one
 // batched router call, grouped per expert into three GEMM launches per layer.
-// Step() above is untouched (LS2 owns it).
+// step() above is untouched.
 //
 // Numerics vs the scalar path: the projections change accumulation shape
-// (tiled k-ascending vs LX's block-wide tree), and the routed-expert sum is
+//, and the routed-expert sum is
 // an atomicAdd in completion order rather than slot order -- both are
 // quantisation-noise-level reorderings of the same arithmetic, gated by the
 // T=1 and teacher-forcing comparisons in tools/ling3_batch_test.cpp.
@@ -1981,8 +1980,8 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
   const std::size_t I = static_cast<std::size_t>(g.inner);
   const std::size_t G = static_cast<std::size_t>(g.heads);
   const std::size_t V = static_cast<std::size_t>(g.vocab);
-  // LS4: logit_rows > 0 asks for the logits of the FIRST logit_rows rows into
-  // the small logits_spec buffer. 0 keeps LS3's two original modes exactly.
+  // logit_rows > 0 asks for the logits of the FIRST logit_rows rows into
+  // the small logits_spec buffer. 0 keeps the two original modes exactly.
   int spec_rows = 0;
   if (logit_rows > 0) {
     if (logit_rows > n || logit_rows > kSpeculativeRows) {
@@ -2000,7 +1999,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
   if (spec_rows == 0 && !want_all && out_logits.size() < V) {
     return fail("logits span too small");
   }
-  // LS4 phase 3: per-row hidden, so the MTP head can be primed over the prompt.
+  // Per-row hidden, so the MTP head can be primed over the prompt.
   int hidden_rows = 0;
   if (!out_hidden_rows.empty()) {
     if (out_hidden_rows.size() % H != 0) {
@@ -2110,7 +2109,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
       }
     }
     std::printf("\n");
-    // LQ3: a whole-row fingerprint on its OWN line (never on the LG-TRACE line
+    // A whole-row fingerprint on its OWN line (never on the LG-TRACE line
     // -- trace.sh parses f[3:] of that as floats and a stray field would make
     // it count the tensor as bad). first3/last3 can miss a difference in the
     // middle of a 2560-wide row; these change if ANY element of the row does.
@@ -2253,7 +2252,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
       in.n_seqs = 1;
 
       ::ling3::MlaCache cache;
-      // LG1 W3: reindex mla_off through the MLA ordinal map. All three
+      // reindex mla_off through the MLA ordinal map. All three
       // construction sites are inside `if (g.is_mla[li])`, so mla_ord[li] >= 0
       // here; the abort is a safety net for any future invariant break.
       if (g.mla_ord[li] < 0) {
@@ -2277,7 +2276,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
       // B->pos already holds pos0..pos0+n-1 on the device.
       sec(kSecMla);
       {
-        // LS3: the same four stages as mla_block, but the attention runs
+        // The same four stages as mla_block, but the attention runs
         // token-parallel (mla_attn_tok) in sub-batches of 64 -- mla_attn's
         // serial token loop left the whole chunk on 32 blocks (profile:
         // 0.75-1.6 s per 512-token chunk, growing with position).
@@ -2291,7 +2290,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
                                  1, in.kv_a.s_tok, in.kv_a.s_seq, stream);
         ::ling3::mla_cache_append(ms, cache, in.kv_a.p, n, in.kv_a.s_tok, 1,
                                   pos0 + n, stream);
-        // LS3 P2 diagnostic knob: LING3_MLA_SERIAL=1 runs the attention through
+        // Diagnostic knob: LING3_MLA_SERIAL=1 runs the attention through
         // the proven serial mla_attn instead of the tiled mla_attn_tok, so a
         // gate failure bisects between the two kernels without a rebuild.
         static const bool mla_serial =
@@ -2309,13 +2308,13 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
                        ::ling3::make_view(B->mlaout, ms.o_dim(), n), B->w2,
                        B->fw, /*tok_base=*/0, /*tok_count=*/n,
                        /*chunk_tokens=*/n, stream)) {
-          // LX1: the fused WMMA flash kernel handled the whole chunk —
+          // The fused WMMA flash kernel handled the whole chunk —
           // prep stages the f16 cache once per layer per chunk (shared
           // with the w2 path), then absorb -> flash -> de-absorb/gate, one
           // attention launch, no materialized S/P. Any refusal in the
           // condition falls through to the proven paths below.
         } else if (MlaTile() && MlaTileFits(pos0 + n)) {
-          // LF1 SPEC3: the ported fork tile kernel. One attention launch for
+          // The ported fork tile kernel. One attention launch for
           // the whole chunk (its f16 cache conversion and the de-absorb GEMM
           // run inside the same call), tok_base 0 / tok_count n / chunk n.
           ::ling3::mla_attn_tile(ms, msc, mw, cache, pos0 + n, in,
@@ -2324,13 +2323,13 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
                                  /*tok_count=*/n, /*chunk_tokens=*/n, stream);
         } else {
           constexpr int kMlaTokBatch = kMlaTokBatchCap;
-          // LW1 (wave 2): the two-pass WMMA attention behind
+          // The two-pass WMMA attention behind
           // LING3_MLA_WMMA2=1 (default OFF). prep stages the f16 cache once
           // per layer per chunk; per sub-batch, any audit refusal falls back
           // to mla_attn_tok (fail-closed). Sub-batches are independent, so a
           // mixed chunk stays correct.
           static const bool mla_w2 = std::getenv("LING3_MLA_WMMA2") != nullptr;
-          // LW1: below ~4K positions the six-kernel chain is latency-bound and
+          // Below ~4K positions the six-kernel chain is latency-bound and
           // loses to mla_attn_tok end to end (measured on this box: 1.6K 338
           // vs 393 tok/s, 3K 340 vs ~402; from 6.5K up w2 wins: 311 vs 294,
           // 262 vs 188 at 13.8K, 200 vs 112 at 27.7K). The spec's "path used
@@ -2455,7 +2454,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
         return fail("router at layer " + std::to_string(li));
       }
       const std::size_t slots = static_cast<std::size_t>(n) * kMaxExperts;
-      // LS1 PHASE8 item 2: the grouping is now done ON THE DEVICE, in the same
+      // The grouping is now done ON THE DEVICE, in the same
       // order, by the same algorithm -- see kernels/ling3_moe_group.hip. This
       // replaces three blocking D2H copies, a host counting sort with its
       // sub-group split and tile prefix, and eight H2D uploads, per MoE layer
@@ -2590,7 +2589,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
   sec(kSecFinal);
   int norm_rows_for_hidden = 1;
   {
-    // LS4: how many rows to final-norm, which logits to produce, and which
+    // How many rows to final-norm, which logits to produce, and which
     // rows' hidden to return are three independent questions. Folding the
     // hidden request into the want_all branch made every batched prefill take
     // the chunk-sized logits_all path, whose buffer only exists under
@@ -2626,10 +2625,10 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
         return fail("all-position logits");
       }
     } else {
-      // LS3's original path: the last position's logits. B->t holds
+      // The original path: the last position's logits. B->t holds
       // norm_rows rows, so the last one is row norm_rows-1 -- NOT row 0.
       // Reading B->t directly returned the FIRST position's logits whenever
-      // anything forced norm_rows above 1 (LS4's per-row hidden), which
+      // anything forced norm_rows above 1, which
       // silently changed generation: the answer began with the chat
       // template's "SYSTEM" marker.
       const float* last_norm =
@@ -2676,7 +2675,7 @@ bool BatchCapable() noexcept {
   return g.ready && !g_dev.stream_experts;
 }
 // ---------------------------------------------------------------------------
-// LS4 phase 4 -- StepMulti / StepMultiDispatch.
+// StepMulti / StepMultiDispatch.
 //
 // StepMulti runs the SAME per-row op sequence Step runs, in order, with the
 // same kernels and the same inputs. Byte-identity with the non-speculative
@@ -2687,10 +2686,10 @@ bool BatchCapable() noexcept {
 // Being m sequential steps, it is also no faster than m sequential steps.
 // That is the honest cost today; the speed is meant to arrive at
 // StepMultiDispatch, the single dispatch point every weight matmul goes
-// through. When LS1's ling3_gemv_multi / ling3_expert_ffn_multi land,
+// through. When ling3_gemv_multi / ling3_expert_ffn_multi land,
 // LING3_MTP_MULTI=1 routes the block through them and nothing else changes.
 
-// LM1 SPEC4 item 1: copy the trunk's whole KDA arrays + the post-norm hidden of
+// Copy the trunk's whole KDA arrays + the post-norm hidden of
 // row `row` into `keep`. Used by the token-outer StepMulti; the layer-outer
 // StepMultiMultiRow fills the same images one layer slice at a time instead
 // (see KeepImageLayer), because that is the only point at which a given layer
@@ -2710,7 +2709,7 @@ bool KeepImageLayer(State* st, MultiRowKeep* keep, std::size_t li, int row) {
   const std::size_t coff = st->kda_conv_off[li];
   const std::size_t soff = st->kda_ssm_off[li];
   const std::size_t r = static_cast<std::size_t>(row);
-  // LM1 00:05: this runs 2 per KDA layer per row -- 72 per verify at m = 2 --
+  // This runs 2 per KDA layer per row -- 72 per verify at m = 2 --
   // and a synchronous hipMemcpy blocks the host until the GPU drains each time,
   // which serialised the verify around ~70 host round trips. Async on the null
   // stream: same ordering, no host block.
@@ -2728,7 +2727,7 @@ bool KeepImageLayer(State* st, MultiRowKeep* keep, std::size_t li, int row) {
                         hipMemcpyDeviceToDevice) == hipSuccess;
 }
 
-// LV1 R6: the reverse of KeepImageLayer, KDA layers only. MLA slices stay the
+// The reverse of KeepImageLayer, KDA layers only. MLA slices stay the
 // zeros NewState wrote; the image's copies of those slices are zeros too.
 bool InstallKdaSlices(State* trunk, const void* conv_row, const void* ssm_row) {
   if (trunk == nullptr || conv_row == nullptr || ssm_row == nullptr ||
@@ -2770,7 +2769,7 @@ bool KeepImageWhole(State* st, MultiRowKeep* keep, int row) {
              static_cast<std::size_t>(row) * keep->conv_bytes;
   auto* sd = static_cast<char*>(keep->kda_ssm) +
              static_cast<std::size_t>(row) * keep->ssm_bytes;
-  // LM1 00:05: async on the null stream -- same stream as the kernels, so the
+  // Async on the null stream -- same stream as the kernels, so the
   // order is kept and the host is not blocked on a GPU drain per copy. The
   // verify's own D2H of the logits is what synchronises before anyone reads.
   return hipMemcpyAsync(cd, st->kda_conv_device, keep->conv_bytes,
@@ -2816,7 +2815,7 @@ bool StepMulti(const std::int32_t* tokens, int m, State* st,
       st->pos = pos0;
       return false;
     }
-    // LM1 SPEC4 item 1: image the trunk state after this row so a rejection can
+    // Image the trunk state after this row so a rejection can
     // be unwound without replaying. Token-outer here, so one whole-array copy
     // per row is the right shape. Rows 0..m-2 only -- row m-1 is the
     // full-accept case.
@@ -2832,9 +2831,9 @@ bool StepMulti(const std::int32_t* tokens, int m, State* st,
 
 #if defined(LING3_HAVE_MULTI_ROW_KERNELS)
 // ---------------------------------------------------------------------------
-// LM1 -- StepMultiMultiRow: the multi-row verify.
+// StepMultiMultiRow: the multi-row verify.
 //
-// LS4's StepMulti is byte-identical to m sequential Step[s] BY CONSTRUCTION and
+// StepMulti is byte-identical to m sequential Step[s] BY CONSTRUCTION and
 // costs exactly that: every weight matrix is read m times. This is the same
 // verify with the weight reads amortised. Every projection is one
 // ling3_gemv_m over m activation columns, the routed experts of one layer are
@@ -2853,16 +2852,16 @@ bool StepMulti(const std::int32_t* tokens, int m, State* st,
 //      how the latter is defined -- the per-thread qb stride is the same, and
 //      ls1_block_sum is the same reduction on the same partials.
 //   ling3_expert_ffn_m / k_moe_*_m    vs  ling3_expert_ffn_dev / k_moe_*
-//      LS1's own gate: bit-exact per column against the m = 1 grouped kernel.
+//      The gate: bit-exact per column against the m = 1 grouped kernel.
 //   ling3_expert_ffn_m at n_used = 1  vs  ling3_dense_ffn / ling3_expert_ffn
 //      the same dots, the same ling3_swiglu_elem, and weight 1.0 into a zero
 //      accumulator is exact, so the dense / shared expert sum is the same
 //      float.
-//   ling3_expert_ffn_shared_m         vs  that n_used = 1 call (LV1 R3)
+//   ling3_expert_ffn_shared_m         vs  that n_used = 1 call
 //      same quant, same per-thread block dots with the weight decoded once,
 //      same swiglu, same acc += weight * part. Routed experts stay on
 //      ling3_expert_ffn_m.
-//   k_route_batch_logits_m            vs  k_route_batch_logits (LV1 R2)
+//   k_route_batch_logits_m            vs  k_route_batch_logits
 //      n_tokens 2..4 only: same per-thread stride, same 64-wide tree.
 //   ling3_route_batch                 vs  ling3_route
 //      k_route_batch is k_route copied verbatim: same sigmoid+bias scores, same
@@ -2871,15 +2870,16 @@ bool StepMulti(const std::int32_t* tokens, int m, State* st,
 //      of each other.
 //
 // The ops_* entry points already take a row count and are the same calls Step
-// makes with rows = 1. LS1's kernels sit behind LING3_HAVE_MULTI_ROW_KERNELS
-// (detected in CMakeLists); without them this function does not compile and
-// StepMultiDispatch keeps StepMulti. Anything this path cannot cover --
-// streamed experts, a non-ROCmFP4 weight, m above LS1_MAX_M -- falls back to
-// StepMulti, which is byte-identical too: a slower verify, never a wrong one.
+// makes with rows = 1. The small-m kernels sit behind
+// LING3_HAVE_MULTI_ROW_KERNELS (detected in CMakeLists); without them this
+// function does not compile and StepMultiDispatch keeps StepMulti. Anything
+// this path cannot cover -- streamed experts, a non-ROCmFP4 weight, m above
+// LS1_MAX_M -- falls back to StepMulti, which is byte-identical too: a slower
+// verify, never a wrong one.
 // ---------------------------------------------------------------------------
 namespace {
 
-// LS1's small-m kernels take m = 1..LS1_MAX_M (4 in ling3_gemv_q8.hip). One set
+// The small-m kernels take m = 1..LS1_MAX_M (4 in ling3_gemv_q8.hip). One set
 // of m-row scratch for the executor, allocated on first use: it is pure
 // workspace, every buffer is written before it is read, so it belongs to the
 // executor and not to a State -- the same choice g_dev.d_ids already makes.
@@ -2920,11 +2920,11 @@ struct MultiScratch {
   bool ready{false};
 };
 
-// LM1: hipEvent timing of the verify itself, printed at process exit.
+// hipEvent timing of the verify itself, printed at process exit.
 //
-// LS4's MTP_SPEC reporter is fed from ~Session and sessions are pooled rather
+// The MTP_SPEC reporter is fed from ~Session and sessions are pooled rather
 // than destroyed, so it prints "steps=0" no matter how much speculation ran
-// (LS4 REPORT3 §6.4 flagged this; it is still true on int-24). This one is fed
+//. This one is fed
 // from the function that does the work, so it cannot miss it. The end-of-call
 // logit readback already synchronises the device, so recording the stop event
 // and asking for its elapsed time costs no extra drain.
@@ -3060,7 +3060,7 @@ bool MultiAlloc(std::string* error_msg) {
 
 // Every weight this path hands the small-m kernels must be ROCmFP4 (100/101):
 // ling3_gemv_m and ling3_expert_ffn_m refuse anything else. Ling-3.0-flash
-// decodes nothing else -- LS1 counted 383 ROCmFP4 tensors and no other quant
+// decodes nothing else -- 383 ROCmFP4 tensors were counted and no other quant
 // type in the decode path -- but a different model would otherwise fail the
 // verify at runtime instead of falling back, so check once and cache it.
 bool MultiWeightsSupported() {
@@ -3221,7 +3221,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
 
     if (g.is_mla[li]) {
       // Three projections, each reading its weights ONCE for all m columns.
-      // LM1 SPEC4 item 2: ONE quantisation of S.normed for all three
+      // ONE quantisation of S.normed for all three
       // projections, exactly as Step does with ling3_act_prepare. Bit-identical
       // either way -- k_q8_1_quant is deterministic per element, so
       // re-quantising would produce the same bytes -- but three quantises
@@ -3259,7 +3259,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
         in.n_seqs = 1;
 
         ::ling3::MlaCache cache;
-        // LG1 W3: reindex mla_off through the MLA ordinal map. All three
+        // reindex mla_off through the MLA ordinal map. All three
         // construction sites are inside `if (g.is_mla[li])`, so mla_ord[li] >=
         // 0 here; the abort is a safety net for any future invariant break.
         if (g.mla_ord[li] < 0) {
@@ -3285,12 +3285,12 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
         // row appends at absolute position pos0 + t -- the same arithmetic
         // Step does with st->pos and one row.
         const int n_pos = pos0 + t + 1;
-        // LM1 SPEC4 item 3: split-K ("flash decoding") attention inside the
+        // Split-K ("flash decoding") attention inside the
         // verify, gated by the SAME guard Step uses. Before this the verify was
         // the only MLA left on the serial path, so at depth the verify's rows
         // scaled with the context while a plain Step's did not -- which is a
         // large part of why a rejected draft was 2.4 plain steps. Per row here;
-        // LS3's m-row entry replaces the loop when it lands.
+        // The m-row entry replaces the loop when it lands.
         if (MlaSplitkOn() && st->mla_sk_acc != nullptr &&
             n_pos <= static_cast<int>(st->max_ctx) && n_pos >= MlaSplitkMin() &&
             MlaSplitkSlicesFit(n_pos)) {
@@ -3323,7 +3323,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
       GpuTrace(st, static_cast<std::uint32_t>(li), "attn_out", S.attn_out, H);
       (void)msc;
     } else {
-      // LM1 SPEC4 item 2: one quantisation of S.normed for all six.
+      // One quantisation of S.normed for all six.
       const int8_t* nq = nullptr;
       const float* nd = nullptr;
       if (ling3_quant_m(S.normed, mm, g.hidden, stream, &nq, &nd) != LING3_OK) {
@@ -3386,7 +3386,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
               ks, ksc, kw, ki, kst,
               ::ling3::make_view(out_t, static_cast<int>(I), 1), stream);
         }
-        // LM1 SPEC4 item 1: this layer has now finished row t; image its slice.
+        // This layer has now finished row t; image its slice.
         if (keep != nullptr && t + 1 < mm && !KeepImageLayer(st, keep, li, t)) {
           return fail("keep image (kda)");
         }
@@ -3408,7 +3408,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
     // floats of ffn_in and the other rows are never written at all. Invisible
     // at rows == 1, the only shape its other caller (Step) uses, and
     // ForwardBatch deliberately does not use it -- it splits the op in two. The
-    // two-kernel form below is the same arithmetic LS2 fused: the residual sum
+    // two-kernel form below is the same fused arithmetic: the residual sum
     // is a[i]+b[i] in both, and the norm consumes exactly that. Byte-identical
     // to Step.
     ::ling3::ops_residual_add(S.x, S.attn_out, S.ffn_in, g.hidden, mm, stream);
@@ -3490,7 +3490,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
 
   // ---- final norm + LM head + argmax, ONE launch each for all m rows ---
   ::ling3::ops_final_norm(S.x, g_dev.output_norm, S.t, g.hidden, mm, stream);
-  // LM1 SPEC4 item 1: row t's post-output_norm hidden, for the same reason --
+  // Row t's post-output_norm hidden, for the same reason --
   // ReadHidden hands the draft head its h_prev from state->t. One contiguous
   // copy of the first m-1 rows; S.t is [m][hidden] token-major.
   if (keep != nullptr && mm > 1 &&
@@ -3513,7 +3513,7 @@ bool StepMultiMultiRow(const std::int32_t* tokens, int m, State* st,
   // `ReadHidden` hands the MTP head its h_prev from state->t, which Step leaves
   // holding the LAST row's post-output_norm hidden. Do the same: without this
   // the next draft would run on whatever the previous call left in state->t and
-  // acceptance would collapse -- LS4 phase 2's stale-hidden bug, in a different
+  // acceptance would collapse -- a stale-hidden bug, in a different
   // buffer. One H-sized D2D copy, against the ~150 MB of weights this call just
   // amortised.
   if (hipMemcpy(st->t, S.t + static_cast<std::size_t>(mm - 1) * H,
@@ -3530,8 +3530,8 @@ bool StepMultiDispatch(const std::int32_t* tokens, int m, State* state,
                        std::span<float> out_logits, std::string* error_msg,
                        MultiRowKeep* keep) {
 #if defined(LING3_HAVE_MULTI_ROW_KERNELS)
-  // LS1 phase 4 slot. Gated on LING3_MTP_MULTI=1 because per-column
-  // bit-exactness against m = 1 is LS1's gate, not ours: if a multi-row kernel
+  // The phase-4 small-m slot. Gated on LING3_MTP_MULTI=1 because per-column
+  // bit-exactness against m = 1 is the kernels' gate: if a multi-row kernel
   // ever disagreed with Step on a single column, drafting would silently stop
   // being byte-identical, which is the one property this path exists to give.
   static const bool use_multi = [] {
@@ -3622,7 +3622,7 @@ void DestroyState(State*) noexcept {}
 bool Step(std::int32_t, State*, std::span<float>, std::string*) {
   return false;
 }
-// LS3: batched prefill refuses without the HIP backend.
+// Batched prefill refuses without the HIP backend.
 bool ForwardBatch(const std::int32_t*, int, State*, std::span<float>,
                   std::string*, int, std::span<float>, std::span<float>) {
   return false;

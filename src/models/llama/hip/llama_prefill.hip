@@ -1,4 +1,5 @@
 #if defined(ENGINE_ENABLE_HIP)
+#include "src/core/canonical.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 
 #include <algorithm>
@@ -63,7 +64,11 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
     throw std::runtime_error("llama requires the fp32 KV cache");
   }
   const std::size_t batch = prompt_tokens.size();
-  if (batch < 2) {
+  // Canonical cache: the chunk route above sends a 1-row pass here; the
+  // batched kernels take one row. Default keeps rejecting it.
+  const bool canonical_one_row =
+      batch == 1 && ::superroc::core::CanonicalCacheOn();
+  if (batch < 2 && !canonical_one_row) {
     throw std::runtime_error("llama batched prefill needs batch >= 2");
   }
   if (batch > arena_.GetMaxBatch()) {
@@ -91,7 +96,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
   float* v_cache = arena_.d_kv_cache + plane;
   void* act_f16 = arena_.d_scratch_bf16;
 
-  // NBFAST T1: DFlash2 prompt hidden capture, appended per chunk in the
+  // DFlash2 prompt hidden capture, appended per chunk in the
   // [token][tap][hidden] layout the Qwen prefill capture produces.
   const std::size_t target_layer_count = arena_.GetTargetLayerCapture().size();
   const std::size_t prompt_capture_offset = h_prompt_hidden_.size();
@@ -245,7 +250,9 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
           arena_.d_q, nullptr, nullptr, nullptr, nullptr, nullptr, k_f16,
           v_f16, arena_.d_ssm_out, l, start_pos, batch, max_ctx, heads,
           kv_heads, head_dim, arena_.stream, nullptr, 0,
-          /*skip_kv_write=*/true, ws.gate, ws.up, 0, nullptr);
+          /*skip_kv_write=*/true, ws.gate, ws.up, 0, nullptr,
+          /*key_limit=*/0,
+          /*single_sweep=*/::superroc::core::CanonicalCacheOn());
       if (!wmma_ok) {
         static bool logged = false;
         if (!logged) {
@@ -377,7 +384,7 @@ tokenization::TokenId QwenGpuExecutor::ForwardLlamaPromptBatch(
   return CheckedSampleToken(next_token_id, config.vocab_size);
 }
 
-// NBFAST T1: block verification through the llama prefill path. Same layer
+// block verification through the llama prefill path. Same layer
 // stack as ForwardLlamaPromptBatch, but every row gets final-norm + LM-head
 // logits (into d_verification_logits_) and, when capture is armed, its
 // target-layer taps in h_verification_hidden_ ([row][tap][hidden]). KV for

@@ -8,11 +8,15 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <vector>
+#include <cstdlib>
+#include <cstdio>
 
 #include "src/core/hip/detail/dispatch_telemetry.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/ops/attention.hpp"
 #include "src/core/hip_launch_check.hpp"
+#include "src/core/env.hpp"
 
 namespace superroc::hip {
 
@@ -876,6 +880,344 @@ __launch_bounds__(32) __global__ void QwenDecodeSplitKAttentionReduceKernel(
   }
 }
 
+// Verification rows of one KV head and split share one block, so the KV partition is read
+// once for every row instead of once per row. Each row keeps its own causal endpoint, query,
+// softmax state and output, and each value matches the per-row kernel bit for bit. The softmax
+// inputs of a token are uniform across a wave, so lane r carries row r through one exp.
+__device__ __forceinline__ __attribute__((convergent)) void SharedKvSync() {
+  asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
+  __builtin_amdgcn_s_barrier();
+  asm volatile("" ::: "memory");
+}
+
+// The partner of a lane across one lane bit, for the score trees below.
+template<unsigned kBit>
+__device__ __forceinline__ float SharedKvXor(float x) {
+  union Bits {
+    float f;
+    unsigned u;
+  };
+  Bits a;
+  Bits b;
+  a.f = x;
+  if constexpr (kBit == 16) {
+    b.u = __builtin_amdgcn_permlanex16(0u, a.u, 0x76543210u, 0xfedcba98u, false, false);
+  } else if constexpr (kBit == 8) {
+    b.u = __builtin_amdgcn_permlane16(0u, a.u, 0xfedcba98u, 0x76543210u, false, false);
+  } else if constexpr (kBit == 4) {
+    b.u = __builtin_amdgcn_permlane16(0u, a.u, 0x32107654u, 0xba98fedcu, false, false);
+  } else if constexpr (kBit == 2) {
+    b.u = __builtin_amdgcn_permlane16(0u, a.u, 0x54761032u, 0xdcfe98bau, false, false);
+  } else {
+    static_assert(kBit == 1);
+    b.u = __builtin_amdgcn_permlane16(0u, a.u, 0x67452301u, 0xefcdab89u, false, false);
+  }
+  return b.f;
+}
+
+// One pass over lane bit kBit for N rows: a lane keeps the half of the rows its bit
+// selects and adds its partner's partial of the same rows.
+template<unsigned kBit, unsigned N>
+__device__ __forceinline__ void SharedKvHalve(float (&w)[8], unsigned lane) {
+  const bool upper = (lane & kBit) != 0;
+#pragma unroll
+  for (unsigned k = 0; k < N / 2; ++k) {
+    const float give = upper ? w[k] : w[k + N / 2];
+    const float keep = upper ? w[k + N / 2] : w[k];
+    w[k] = keep + SharedKvXor<kBit>(give);
+  }
+}
+
+// The scores of P rows of one token, reduced together. Each row's partials pair over lane
+// bits 16, 8, 4, 2 and 1 in that order, the tree a single score takes, so every score
+// keeps its bits; the halving passes only move whole rows between lanes, about five times
+// fewer cross-lane steps than one tree per row. Row r ends on lanes r * (32 / P) onward.
+template<unsigned P>
+__device__ __forceinline__ float SharedKvScoresBatched(float (&w)[8], unsigned lane) {
+  static_assert(P == 2 || P == 4 || P == 8);
+  SharedKvHalve<16, P>(w, lane);
+  if constexpr (P >= 4) SharedKvHalve<8, P / 2>(w, lane);
+  if constexpr (P >= 8) SharedKvHalve<4, P / 4>(w, lane);
+  float s = w[0];
+  if constexpr (P < 4) s = s + SharedKvXor<8>(s);
+  if constexpr (P < 8) s = s + SharedKvXor<4>(s);
+  s = s + SharedKvXor<2>(s);
+  return s + SharedKvXor<1>(s);
+}
+
+template<unsigned kRows, unsigned kGroup, unsigned kMaxSplits>
+__launch_bounds__(kGroup * 32) __global__
+    void QwenVerifySharedKvPartialsKernel(
+        const float* __restrict__ q, const __half* __restrict__ k_cache,
+        const __half* __restrict__ v_cache, float* __restrict__ scratch,
+        std::uint32_t layer_idx, std::uint32_t start_pos,
+        std::uint32_t max_context, std::uint32_t num_heads,
+        std::uint32_t num_kv_heads, std::uint32_t split_count) {
+#pragma clang fp contract(off)
+  constexpr std::uint32_t head_dim = 256;
+  constexpr std::uint32_t tile = kGroup;  // one load per thread for a full tile
+  // Rows rounded up for the score tree, and the lanes a row's state lives on.
+  constexpr unsigned kRowPow = kRows <= 2 ? 2 : (kRows <= 4 ? 4 : 8);
+  constexpr unsigned kRowLanes = 32 / kRowPow;
+  union Bits {
+    float f;
+    unsigned u;
+  };
+  const std::uint32_t kv_head = blockIdx.x;
+  const std::uint32_t head = kv_head * kGroup + threadIdx.x / 32;
+  const std::uint32_t split = blockIdx.y;
+  const std::uint32_t lane = threadIdx.x % 32;
+  if (head >= num_heads || split >= split_count) {
+    return;
+  }
+  const std::size_t kv_width =
+      static_cast<std::size_t>(num_kv_heads) * head_dim;
+  const std::size_t cache_head_offset =
+      (static_cast<std::size_t>(layer_idx) * max_context * kv_width) +
+      (static_cast<std::size_t>(kv_head) * head_dim);
+  std::uint32_t row_begin[kRows];
+  std::uint32_t row_end[kRows];
+  std::uint32_t walk = 0xffffffffu;
+  std::uint32_t walk_end = 0;
+#pragma unroll
+  for (unsigned r = 0; r < kRows; ++r) {
+    const std::uint32_t sequence_length = start_pos + r + 1;
+    const std::uint32_t partition_length =
+        (sequence_length + split_count - 1) / split_count;
+    row_begin[r] = split * partition_length;
+    row_end[r] = min(row_begin[r] + partition_length, sequence_length);
+    if (row_begin[r] < row_end[r]) {
+      walk = min(walk, row_begin[r]);
+      walk_end = max(walk_end, row_end[r]);
+    }
+  }
+  const float scale = rsqrtf(static_cast<float>(head_dim));
+  float negative_zero = -0.0F;
+  asm volatile("" : "+v"(negative_zero));
+
+  float4 query_values[kRows][2];
+  float4 output_values[kRows][2] = {};
+#pragma unroll
+  for (unsigned r = 0; r < kRows; ++r) {
+    const auto* query = reinterpret_cast<const float4*>(
+        q + ((static_cast<std::size_t>(r) * num_heads + head) * head_dim));
+    query_values[r][0] = query[lane];
+    query_values[r][1] = query[lane + 32];
+  }
+  // Lane r holds row r's running maximum and sum.
+  float running_max = -INFINITY;
+  float running_sum = 0.0F;
+
+  const auto dot = [&](const float4& query, __half2 lower, __half2 upper) {
+    float d = fmaf(query.y, __high2float(lower), negative_zero);
+    d = fmaf(query.x, __low2float(lower), d);
+    d = fmaf(query.z, __low2float(upper), d);
+    return fmaf(query.w, __high2float(upper), d);
+  };
+  const auto update = [&](float4& output, __half2 lower, __half2 upper,
+                          float previous_scale, float value_scale) {
+    output.x = fmaf(output.x, previous_scale,
+                    fmaf(value_scale, __low2float(lower), negative_zero));
+    output.y = fmaf(output.y, previous_scale,
+                    fmaf(value_scale, __high2float(lower), negative_zero));
+    output.z = fmaf(__low2float(upper), value_scale,
+                    __fmul_rn(output.z, previous_scale));
+    output.w = fmaf(__high2float(upper), value_scale,
+                    __fmul_rn(output.w, previous_scale));
+  };
+
+  __shared__ __align__(16) __half keys[tile][head_dim];
+  __shared__ __align__(16) __half values[tile][head_dim];
+  while (walk < walk_end) {
+    // The rows live at `walk`, and where that set next changes.
+    std::uint32_t live = 0;
+    std::uint32_t stop = walk_end;
+#pragma unroll
+    for (unsigned r = 0; r < kRows; ++r) {
+      if (walk >= row_begin[r] && walk < row_end[r]) {
+        live |= 1u << r;
+      }
+      if (row_begin[r] > walk) {
+        stop = min(stop, row_begin[r]);
+      }
+      if (row_end[r] > walk) {
+        stop = min(stop, row_end[r]);
+      }
+    }
+    if (live == 0) {
+      walk = stop;
+      continue;
+    }
+    const unsigned lane_row = lane / kRowLanes;
+    const bool lane_live = lane % kRowLanes == 0 && lane_row < kRows &&
+                           ((live >> lane_row) & 1u) != 0;
+    while (walk < stop) {
+      const unsigned count = min(tile, stop - walk);
+      for (unsigned vector = threadIdx.x; vector < count * 32;
+           vector += kGroup * 32) {
+        const unsigned token = vector / 32;
+        const unsigned dim = (vector % 32) * 8;
+        const std::size_t offset = cache_head_offset +
+                                   (static_cast<std::size_t>(walk) + token) * kv_width + dim;
+        *reinterpret_cast<uint4*>(keys[token] + dim) =
+            *reinterpret_cast<const uint4*>(k_cache + offset);
+        *reinterpret_cast<uint4*>(values[token] + dim) =
+            *reinterpret_cast<const uint4*>(v_cache + offset);
+      }
+      SharedKvSync();
+#pragma unroll 1
+      for (unsigned token = 0; token < count; ++token) {
+        const auto* kp = reinterpret_cast<const __half2*>(keys[token]);
+        const __half2 k0 = kp[lane * 2];
+        const __half2 k1 = kp[lane * 2 + 1];
+        const __half2 k2 = kp[(lane + 32) * 2];
+        const __half2 k3 = kp[(lane + 32) * 2 + 1];
+        float partials[8];
+#pragma unroll
+        for (unsigned r = 0; r < kRowPow; ++r) {
+          float partial = 0.0F;
+          if (r < kRows && ((live >> r) & 1u)) {
+            const unsigned q = r < kRows ? r : 0;
+            partial = 0.0F + dot(query_values[q][0], k0, k1);
+            partial = partial + dot(query_values[q][1], k2, k3);
+          }
+          partials[r] = partial;
+        }
+        const float score = SharedKvScoresBatched<kRowPow>(partials, lane) * scale;
+        const float new_max = fmaxf(running_max, score);
+        const float previous_scale = expf(running_max - new_max);
+        const float value_scale = expf(score - new_max);
+        const float new_sum = fmaf(running_sum, previous_scale, value_scale);
+        running_max = lane_live ? new_max : running_max;
+        running_sum = lane_live ? new_sum : running_sum;
+        const auto* vp = reinterpret_cast<const __half2*>(values[token]);
+        const __half2 v0 = vp[lane * 2];
+        const __half2 v1 = vp[lane * 2 + 1];
+        const __half2 v2 = vp[(lane + 32) * 2];
+        const __half2 v3 = vp[(lane + 32) * 2 + 1];
+        Bits pb;
+        Bits vb;
+        pb.f = previous_scale;
+        vb.f = value_scale;
+#pragma unroll
+        for (unsigned r = 0; r < kRows; ++r) {
+          if ((live >> r) & 1u) {
+            Bits ps;
+            Bits vs;
+            ps.u = __builtin_amdgcn_readlane(pb.u, r * kRowLanes);
+            vs.u = __builtin_amdgcn_readlane(vb.u, r * kRowLanes);
+            update(output_values[r][0], v0, v1, ps.f, vs.f);
+            update(output_values[r][1], v2, v3, ps.f, vs.f);
+          }
+        }
+      }
+      SharedKvSync();
+      walk += count;
+    }
+  }
+
+  const std::size_t partition_index =
+      (static_cast<std::size_t>(head) * kMaxSplits) + split;
+  const std::size_t stats_elements =
+      static_cast<std::size_t>(num_heads) * kMaxSplits * 2;
+#pragma unroll
+  for (unsigned r = 0; r < kRows; ++r) {
+    float* row_scratch =
+        scratch + (static_cast<std::size_t>(r) * num_heads * kMaxSplits * (head_dim + 2));
+    if (lane == r * kRowLanes) {
+      row_scratch[(partition_index * 2) + 0] = running_max;
+      row_scratch[(partition_index * 2) + 1] = running_sum;
+    }
+    auto* partial_output = reinterpret_cast<float4*>(row_scratch + stats_elements) +
+                           (partition_index * (head_dim / 4));
+    partial_output[lane] = output_values[r][0];
+    partial_output[lane + 32] = output_values[r][1];
+  }
+}
+
+template<unsigned kGroup, unsigned kMaxSplits>
+static void LaunchSharedKvPartials(const float* q, const __half* k_cache,
+                                   const __half* v_cache, float* scratch,
+                                   std::uint32_t layer_idx, std::uint32_t start_pos,
+                                   unsigned rows, std::uint32_t max_context,
+                                   std::uint32_t num_heads, std::uint32_t num_kv_heads,
+                                   std::uint32_t splits, hipStream_t stream) {
+  const dim3 grid(num_kv_heads, splits);
+#define SUPERROC_SHARED_KV_LAUNCH(R)                                                    \
+  QwenVerifySharedKvPartialsKernel<R, kGroup, kMaxSplits>                           \
+      <<<grid, kGroup * 32, 0, stream>>>(q, k_cache, v_cache, scratch, layer_idx,   \
+                                         start_pos, max_context, num_heads,         \
+                                         num_kv_heads, splits);                     \
+  SUPERROC_CHECK_LAUNCH("QwenVerifySharedKvPartialsKernel");
+  switch (rows) {
+    case 2: SUPERROC_SHARED_KV_LAUNCH(2) break;
+    case 3: SUPERROC_SHARED_KV_LAUNCH(3) break;
+    case 4: SUPERROC_SHARED_KV_LAUNCH(4) break;
+    case 5: SUPERROC_SHARED_KV_LAUNCH(5) break;
+    case 6: SUPERROC_SHARED_KV_LAUNCH(6) break;
+    case 7: SUPERROC_SHARED_KV_LAUNCH(7) break;
+    default: SUPERROC_SHARED_KV_LAUNCH(8) break;
+  }
+#undef SUPERROC_SHARED_KV_LAUNCH
+}
+
+// A verify longer than one block holds splits its rows into groups of at most eight, each
+// sharing every KV tile, so sixteen rows read the cache twice instead of sixteen times. A row
+// keeps its own causal endpoint and scratch slot, so its bits are those of the per-row form.
+template<unsigned kGroup, unsigned kMaxSplits>
+static void LaunchSharedKvRowGroups(const float* q, const __half* k_cache,
+                                    const __half* v_cache, float* scratch,
+                                    std::uint32_t layer_idx, std::uint32_t start_pos,
+                                    unsigned rows, std::uint32_t max_context,
+                                    std::uint32_t num_heads, std::uint32_t num_kv_heads,
+                                    std::uint32_t splits, hipStream_t stream) {
+  const unsigned groups = (rows + 7) / 8;
+  unsigned first = 0;
+  for (unsigned group = 0; group < groups; ++group) {
+    const unsigned count = rows / groups + (group < rows % groups ? 1U : 0U);
+    LaunchSharedKvPartials<kGroup, kMaxSplits>(
+        q + static_cast<std::size_t>(first) * num_heads * 256, k_cache, v_cache,
+        scratch + static_cast<std::size_t>(first) * num_heads * kMaxSplits * (256 + 2),
+        layer_idx, start_pos + first, count, max_context, num_heads, num_kv_heads, splits,
+        stream);
+    first += count;
+  }
+}
+
+// SUPERROC_ATTN_SHARED_CHECK=1 runs both forms on the same inputs and compares every bit.
+static bool SharedKvCheckOn() {
+  static const bool on = ::superroc::core::GetEnv("SUPERROC_ATTN_SHARED_CHECK") != nullptr;
+  return on;
+}
+
+template<typename OldLaunch, typename NewLaunch>
+static void SharedKvCompare(OldLaunch old_launch, NewLaunch new_launch, float* scratch,
+                            std::size_t elements, unsigned rows, std::uint32_t start_pos,
+                            hipStream_t stream) {
+  static unsigned long long calls = 0;
+  static unsigned long long bad = 0;
+  std::vector<std::uint32_t> a(elements);
+  std::vector<std::uint32_t> b(elements);
+  old_launch();
+  hipStreamSynchronize(stream);
+  hipMemcpy(a.data(), scratch, elements * sizeof(std::uint32_t), hipMemcpyDeviceToHost);
+  new_launch();
+  hipStreamSynchronize(stream);
+  hipMemcpy(b.data(), scratch, elements * sizeof(std::uint32_t), hipMemcpyDeviceToHost);
+  ++calls;
+  for (std::size_t i = 0; i < elements; ++i) {
+    if (a[i] != b[i]) {
+      ++bad;
+      fprintf(stderr, "ATTNCHECK differ rows=%u pos=%u element=%zu old=%08x new=%08x\n", rows,
+              start_pos, i, a[i], b[i]);
+      break;
+    }
+  }
+  if (calls % 200 == 0) {
+    fprintf(stderr, "ATTNCHECK calls=%llu bad=%llu pos=%u rows=%u\n", calls, bad, start_pos, rows);
+  }
+}
+
 static void LaunchSplitKAttentionHalfPartials(
     const float* q, const __half* k_cache, const __half* v_cache,
     float* scratch, std::uint32_t layer_idx, std::uint32_t start_pos,
@@ -886,11 +1228,25 @@ static void LaunchSplitKAttentionHalfPartials(
   if (num_heads == 6 * num_kv_heads &&
       static_cast<std::size_t>(start_pos) + 1 >= 512) {
     if (rows > 1) {
-      QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16>
-          <<<dim3(num_kv_heads, rows, splits), 96, 0, stream>>>(
-              q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
-              num_heads, num_kv_heads, splits);
-      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16>");
+      const auto per_row = [&] {
+        QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16>
+            <<<dim3(num_kv_heads, rows, splits), 96, 0, stream>>>(
+                q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
+                num_heads, num_kv_heads, splits);
+        SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16>");
+      };
+      const auto shared = [&] {
+        LaunchSharedKvRowGroups<6, 32>(q, k_cache, v_cache, scratch, layer_idx, start_pos,
+                                       rows, max_context, num_heads, num_kv_heads, splits,
+                                       stream);
+      };
+      if (SharedKvCheckOn()) {
+        SharedKvCompare(per_row, shared, scratch,
+                        static_cast<std::size_t>(rows) * num_heads * 32 * (256 + 2), rows,
+                        start_pos, stream);
+      } else {
+        shared();
+      }
     } else {
       QwenDecodeSplitKAttentionHalfPartialsKernel<true>
           <<<dim3(num_kv_heads, rows, splits), 192, 0, stream>>>(
@@ -902,12 +1258,29 @@ static void LaunchSplitKAttentionHalfPartials(
              static_cast<std::size_t>(start_pos) + 1 >= 512) {
     // KAT 16/2/256 only. 27B 24/4 stays on the branch above.
     if (rows > 1) {
-      QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16, 8,
+      const auto per_row = [&] {
+        QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16, 8,
                                                     detail::kKatGqa8MaxSplits>
-          <<<dim3(num_kv_heads, rows, splits), 128, 0, stream>>>(
-              q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
-              num_heads, num_kv_heads, splits);
-      SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16, 8, detail::kKatGqa8MaxSplits>");
+            <<<dim3(num_kv_heads, rows, splits), 128, 0, stream>>>(
+                q, k_cache, v_cache, scratch, layer_idx, start_pos, max_context,
+                num_heads, num_kv_heads, splits);
+        SUPERROC_CHECK_LAUNCH("QwenDecodeSplitKAttentionHalfPartialsKernel<true, 16, 8, detail::kKatGqa8MaxSplits>");
+      };
+      const auto shared = [&] {
+        LaunchSharedKvPartials<8, detail::kKatGqa8MaxSplits>(
+            q, k_cache, v_cache, scratch, layer_idx, start_pos, rows, max_context, num_heads,
+            num_kv_heads, splits, stream);
+      };
+      if (rows > 8) {
+        per_row();
+      } else if (SharedKvCheckOn()) {
+        SharedKvCompare(per_row, shared, scratch,
+                        static_cast<std::size_t>(rows) * num_heads *
+                            detail::kKatGqa8MaxSplits * (256 + 2),
+                        rows, start_pos, stream);
+      } else {
+        shared();
+      }
     } else {
       QwenDecodeSplitKAttentionHalfPartialsKernel<true, 32, 8,
                                                     detail::kKatGqa8MaxSplits>

@@ -219,15 +219,15 @@ struct Binder {
     }
 
     l.router = Get(p + "ffn_gate_inp.weight", hidden, c.num_experts, 1,
-                   {GgmlType::kF32});
+                   {GgmlType::kF32, GgmlType::kQ8_0});
     l.ffn_gate_exps = Get(p + "ffn_gate_exps.weight", hidden, c.expert_ff,
                           c.num_experts, experts);
     l.ffn_up_exps = Get(p + "ffn_up_exps.weight", hidden, c.expert_ff,
                         c.num_experts, experts);
     l.ffn_down_exps = Get(p + "ffn_down_exps.weight", c.expert_ff, hidden,
                           c.num_experts, experts);
-    l.shexp_gate_inp =
-        Get(p + "ffn_gate_inp_shexp.weight", hidden, 1, 1, {GgmlType::kF32});
+    l.shexp_gate_inp = Get(p + "ffn_gate_inp_shexp.weight", hidden, 1, 1,
+                           {GgmlType::kF32, GgmlType::kQ8_0});
     l.shexp_gate =
         Get(p + "ffn_gate_shexp.weight", hidden, c.shared_expert_ff, 1, dense);
     l.shexp_up =
@@ -288,8 +288,14 @@ std::optional<ModelWeights> ModelWeights::Bind(const core::GgufReader& reader,
   }
   w.token_embd =
       b.Get("token_embd.weight", c.hidden_size, c.vocab_size, 1, dense);
+  // The head may also be stored as ROCmFP4: its decode and prompt readers take
+  // the FP4 projection paths. The embedding table keeps the list above.
+  const auto head = {GgmlType::kQ8_0,         GgmlType::kQ6_K,
+                     GgmlType::kQ5_K,         GgmlType::kBF16,
+                     GgmlType::kF16,          GgmlType::kF32,
+                     GgmlType::kQ4_0_ROCMFP4, GgmlType::kQ4_0_ROCMFP4_FAST};
   w.output =
-      b.Get("output.weight", c.hidden_size, c.vocab_size, 1, dense, false);
+      b.Get("output.weight", c.hidden_size, c.vocab_size, 1, head, false);
   if (w.output.empty()) {
     w.output = w.token_embd;
   }
@@ -370,6 +376,19 @@ std::optional<MtpWeights> MtpWeights::Bind(const core::GgufReader& reader,
     std::fprintf(stderr,
                  "LFN_MTP roc sidecar: output_hc + output.weight + "
                  "token_embd (shared_head_norm is not applied)\n");
+  } else if (reader.FindTensor("output.weight") != nullptr) {
+    // A draft file with its own nextn head may also carry its own output
+    // head; the draft steps then read it instead of the trunk's.
+    const auto head_types = {
+        GgmlType::kQ8_0,         GgmlType::kQ6_K,
+        GgmlType::kQ5_K,         GgmlType::kBF16,
+        GgmlType::kF16,          GgmlType::kF32,
+        GgmlType::kQ4_0_ROCMFP4, GgmlType::kQ4_0_ROCMFP4_FAST};
+    m.output = b.Get("output.weight", m.config.hidden_size, trunk.vocab_size, 1,
+                     head_types);
+    if (!b.ok) {
+      return std::nullopt;
+    }
   }
   return m;
 }

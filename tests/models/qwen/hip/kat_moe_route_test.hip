@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <string>
@@ -24,6 +25,12 @@ void Expect(bool ok, const std::string& msg) {
     std::cerr << "FAIL " << msg << "\n";
     std::exit(1);
   }
+}
+
+// exists() throws or says yes for a fixture the user cannot read; open it instead.
+bool FixtureReadable(const std::string& p) {
+  std::ifstream f(p, std::ios::binary);
+  return f.good();
 }
 
 #define HIP_REQUIRE(expr)                                                    \
@@ -161,7 +168,7 @@ void Compare(const std::vector<float>& x, const std::vector<float>& gate, int k,
   Expect(std::fabs(gpu_sum - 1.0F) < 1.0e-3F, std::string(name) + " gpu renorm");
 }
 
-// Super ROC QRH: host reference of the one-wave head (same rule as the
+// Super Roc QRH: host reference of the one-wave head (same rule as the
 // device: bigger logit first, equal logits -> lower id, NaN read as -inf;
 // weights = softmax over the picked logits in rank order).
 void QrhRefHead(const float* l, int n_expert, int n_used, int* ids,
@@ -326,7 +333,7 @@ void QrhHeadCases() {
   Expect(mismatched == 0, "qrh head vs reference");
 }
 
-// Super ROC QVB: LaunchQwenMoeRouteRows (1..4 rows, with and without the
+// Super Roc QVB: LaunchQwenMoeRouteRows (1..4 rows, with and without the
 // shared-expert gate) must match per-row LaunchQwenMoeRoute +
 // LaunchQwenMoeShexpSigmoid bit for bit on real KAT layer-0 router weights.
 bool QvbRowsCases() {
@@ -336,7 +343,7 @@ bool QvbRowsCases() {
           ? path_env
           : "/path/to/models/swap/kat-coder/"
             "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf";
-  if (!std::filesystem::exists(path)) {
+  if (!FixtureReadable(path)) {
     std::cout << "SKIP: KAT GGUF not found: " << path << " (set KAT_GGUF)\n";
     return false;
   }
@@ -448,7 +455,42 @@ bool QvbRowsCases() {
 
 }  // namespace
 
+// Fewer routed experts keep the share they have among the count they were selected from.
+static void RouteSelectCase() {
+  constexpr int ne = 64;
+  constexpr int nu = 8;
+  constexpr int fewer = 5;
+  std::vector<float> lg(ne);
+  for (int e = 0; e < ne; ++e) {
+    lg[static_cast<std::size_t>(e)] = static_cast<float>((e * 37) % 64) * 0.25F;
+  }
+  DeviceF32 d_l(lg.size());
+  DeviceI32 d_all_id(nu);
+  DeviceF32 d_all_w(nu);
+  DeviceI32 d_few_id(nu);
+  DeviceF32 d_few_w(nu);
+  HIP_REQUIRE(hipMemcpy(d_l.p, lg.data(), lg.size() * sizeof(float), hipMemcpyHostToDevice));
+  Expect(LaunchQwenMoeRouteHeadForTest(d_l.p, 0, ne, nu, d_all_id.p, d_all_w.p, nullptr) == 0,
+         "select all launch");
+  Expect(LaunchQwenMoeRouteHeadForTest(d_l.p, 0, ne, fewer, d_few_id.p, d_few_w.p, nullptr, nu) == 0,
+         "select fewer launch");
+  HIP_REQUIRE(hipDeviceSynchronize());
+  std::vector<int> all_id(nu), few_id(nu);
+  std::vector<float> all_w(nu), few_w(nu);
+  HIP_REQUIRE(hipMemcpy(all_id.data(), d_all_id.p, nu * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_REQUIRE(hipMemcpy(all_w.data(), d_all_w.p, nu * sizeof(float), hipMemcpyDeviceToHost));
+  HIP_REQUIRE(hipMemcpy(few_id.data(), d_few_id.p, nu * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_REQUIRE(hipMemcpy(few_w.data(), d_few_w.p, nu * sizeof(float), hipMemcpyDeviceToHost));
+  bool same = true;
+  for (int r = 0; r < fewer; ++r) {
+    same = same && all_id[static_cast<std::size_t>(r)] == few_id[static_cast<std::size_t>(r)] &&
+           all_w[static_cast<std::size_t>(r)] == few_w[static_cast<std::size_t>(r)];
+  }
+  Expect(same, "fewer experts keep their weights");
+}
+
 int main() {
+  RouteSelectCase();
   Expect(LaunchQwenMoeRoute(nullptr, nullptr, 32, 32, 8, nullptr, nullptr,
                             nullptr, nullptr) == 1,
          "null rejected before launch");
@@ -490,7 +532,7 @@ int main() {
           ? path_env
           : "/path/to/models/swap/kat-coder/"
             "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf";
-  if (!std::filesystem::exists(path)) {
+  if (!FixtureReadable(path)) {
     std::cout << "SKIP: KAT GGUF not found: " << path << " (set KAT_GGUF)\n";
     return 77;
   }

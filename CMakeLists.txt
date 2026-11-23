@@ -1,24 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
 project(superroc LANGUAGES C CXX)
-# Compatibility with the previous option and cache prefix: when a previous
-# name is set and the new one is not, adopt it with a deprecation note.
-# The previous prefix is built from parts so its spelling never appears here.
-string(CONCAT _superroc_prev_prefix "G" "UFO" "_")
-string(CONCAT _superroc_prev_match "^" "G" "UFO" "_")
-get_cmake_property(_superroc_cache_vars CACHE_VARIABLES)
-foreach(_superroc_old IN LISTS _superroc_cache_vars)
-  if(_superroc_old MATCHES "${_superroc_prev_match}")
-    string(REGEX REPLACE "${_superroc_prev_match}" "SUPERROC_" _superroc_new
-      "${_superroc_old}")
-    if(NOT DEFINED ${_superroc_new})
-      get_property(_superroc_old_type CACHE ${_superroc_old} PROPERTY TYPE)
-      get_property(_superroc_old_help CACHE ${_superroc_old} PROPERTY HELPSTRING)
-      set(${_superroc_new} "${${_superroc_old}}" CACHE ${_superroc_old_type}
-        "${_superroc_old_help}" FORCE)
-      message(DEPRECATION "${_superroc_old} is deprecated; use ${_superroc_new}")
-    endif()
-  endif()
-endforeach()
 if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
   message(FATAL_ERROR "SuperROC requires Linux x86-64 with an AMD gfx1151 GPU")
 endif()
@@ -34,9 +15,9 @@ set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(SUPERROC_RELEASE_VERSION "development" CACHE STRING "SuperROC release version")
-set(SUPERROC_REVISION "unknown" CACHE STRING "Super ROC source revision (unknown = read from git at configure time)")
-# Super ROC: an unset revision is the git commit of the source tree at configure time (12 hex digits, "-dirty" when tracked
+set(SUPERROC_RELEASE_VERSION "development" CACHE STRING "Super Roc release version")
+set(SUPERROC_REVISION "unknown" CACHE STRING "Super Roc source revision (unknown = read from git at configure time)")
+# Super Roc: an unset revision is the git commit of the source tree at configure time (12 hex digits, "-dirty" when tracked
 # files differ from it), so `superroc --version` names the build. An explicit -DSUPERROC_REVISION=<text> is used as given.
 if (SUPERROC_REVISION STREQUAL "unknown")
   find_package(Git QUIET)
@@ -268,6 +249,11 @@ add_library(superroc_logging STATIC src/cli/serve/logging.cpp src/cli/serve/trac
 target_include_directories(superroc_logging PUBLIC ${PROJECT_SOURCE_DIR})
 target_compile_features(superroc_logging PUBLIC cxx_std_20)
 
+# Super Roc recipe (--recipe): pure file/env/argv logic shared by main()'s
+# early pre-scan, the serve llm path, GET /props, and the unit test.
+add_library(superroc_recipe STATIC src/cli/serve/recipe.cpp)
+target_link_libraries(superroc_recipe PUBLIC superroc_core)
+
 # The imported DeepSeek V4 Flash runtime routes its informational messages
 # through the shared logger instead of writing to stderr directly, so it needs
 # the threshold that `--log-level` arms.
@@ -293,7 +279,7 @@ add_library(superroc_http STATIC
   # the engine library, so no translation unit is linked twice.
   src/models/deepseek_v4_flash/tool_calls.cpp
 )
-target_link_libraries(superroc_http PUBLIC superroc_logging superroc_core superroc_qwen3_tts superroc_qwen3_asr superroc_qwen_image_21)
+target_link_libraries(superroc_http PUBLIC superroc_logging superroc_core superroc_qwen3_tts superroc_qwen3_asr superroc_qwen_image_21 superroc_recipe)
 
 # The CLI "serve" text path: the sources that hand a generation request to a
 # model backend, and the model-side libraries they need. inference_backend.cpp
@@ -335,7 +321,7 @@ add_executable(superroc
   ${PROJECT_SOURCE_DIR}/src/cli/serve/ling3_text_runner.cpp
   src/eval/http_client.cpp
 )
-target_link_libraries(superroc PRIVATE superroc_cache superroc_diagnostics superroc_core superroc_llm_cli superroc_http CURL::libcurl)
+target_link_libraries(superroc PRIVATE superroc_cache superroc_diagnostics superroc_core superroc_llm_cli superroc_http superroc_recipe CURL::libcurl)
 target_compile_definitions(superroc PRIVATE
   SUPERROC_RELEASE_VERSION="${SUPERROC_RELEASE_VERSION}"
   SUPERROC_REVISION="${SUPERROC_REVISION}"
@@ -343,11 +329,6 @@ target_compile_definitions(superroc PRIVATE
   SUPERROC_EVAL_INSTALLED_DATA="${CMAKE_INSTALL_PREFIX}/share/superroc/eval/antirez-ds4.json"
   SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
   SUPERROC_H3_INSTALLED_SOURCE_MANIFEST="${CMAKE_INSTALL_PREFIX}/share/superroc/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
-# Compatibility with the previous binary name: the previous name is built
-# from parts so its spelling never appears here; the previous name link stays.
-string(CONCAT _superroc_compat_bin "g" "ufo")
-add_custom_command(TARGET superroc POST_BUILD COMMAND ${CMAKE_COMMAND} -E create_symlink superroc $<TARGET_FILE_DIR:superroc>/${_superroc_compat_bin})
-
 if (ENGINE_ENABLE_HIP)
   target_link_libraries(superroc PRIVATE superroc_cache_hip superroc_deepseek_v4_flash)
 endif()
@@ -360,32 +341,15 @@ target_link_libraries(superroc PRIVATE superroc_qwen3_tts superroc_qwen3_asr)
 # serving tests need; see its definition above.
 target_link_libraries(superroc PRIVATE ${SUPERROC_SERVE_TEXT_LIBRARIES})
 
-# Compatibility with the previous server binary name: the name is built
-# from parts so its spelling never appears here; the link itself stays for
-# seats that invoke the old server entry point (see RunServe routing).
-string(CONCAT _superroc_compat_server_bin "g" "ufo-server")
-add_custom_target(superroc-compat-server ALL
-  COMMAND ${CMAKE_COMMAND} -E create_symlink $<TARGET_FILE_NAME:superroc> ${CMAKE_CURRENT_BINARY_DIR}/${_superroc_compat_server_bin}
-  DEPENDS superroc
-)
-
-# superroc-quant — King's own GGUF quantizer (product track). Standalone C++17,
+# superroc-quant — SuperROC's GGUF quantizer (product track). Standalone C++17,
 # no HIP / no ICU needed. Makes the fork's ROC recipes byte-for-byte.
 add_executable(superroc-quant
   tools/superroc-quant/superroc_quant_main.cpp
 )
-# Compatibility with the previous quantizer binary name: link installed
-# beside superroc-quant. The previous name is built from parts so its
-# spelling never appears here.
-string(CONCAT _superroc_compat_quant "g" "ufo-quant")
-add_custom_command(TARGET superroc-quant POST_BUILD COMMAND
-  ${CMAKE_COMMAND} -E create_symlink superroc-quant
-  $<TARGET_FILE_DIR:superroc-quant>/${_superroc_compat_quant})
-
 target_include_directories(superroc-quant PRIVATE tools/superroc-quant)
 target_compile_features(superroc-quant PRIVATE cxx_std_17)
 
-# superroc-quant G4 twin check + MoE roster fixture builders (SPEC2 items 3 & 5).
+# superroc-quant G4 twin check + MoE roster fixture builders.
 add_executable(g4-twin tools/superroc-quant/g4_twin.cpp)
 target_include_directories(g4-twin PRIVATE tools/superroc-quant)
 target_compile_features(g4-twin PRIVATE cxx_std_17)
@@ -430,10 +394,6 @@ if (ENGINE_ENABLE_HIP AND SUPERROC_BUILD_TOOLS)
 endif()
 
 install(TARGETS superroc DESTINATION bin)
-install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink superroc-quant \"$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/${_superroc_compat_quant}\")")
-
-# Super ROC: install the previous-name compatibility link beside superroc.
-install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink superroc \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/${_superroc_compat_bin}\")")
 install(FILES
   src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json
   DESTINATION share/superroc/models/minimax_h3)
@@ -443,7 +403,6 @@ install(FILES
 install(FILES LICENSE NOTICE THIRD_PARTY_NOTICES.md DESTINATION share/licenses/superroc)
 install(DIRECTORY licenses/ DESTINATION share/licenses/superroc/third-party)
 install(FILES src/models/deepseek_v4_flash/LICENSE.ds4 DESTINATION share/licenses/superroc/third-party)
-install(CODE "execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink superroc \"\$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/bin/${_superroc_compat_server_bin}\")")
 if (ENGINE_ENABLE_HIP AND SUPERROC_BUILD_TOOLS)
   install(TARGETS superroc-kernel-bench tune_hipblaslt
     DESTINATION bin)
@@ -479,19 +438,7 @@ if (BUILD_TESTING)
   set_tests_properties(superroc_version PROPERTIES
     LABELS "cpu"
     PASS_REGULAR_EXPRESSION
-      "Super ROC ${SUPERROC_RELEASE_VERSION} \\(${SUPERROC_REVISION}\\)")
-
-  # Super ROC: prove the previous-name compatibility link prints the same version.
-  add_test(NAME superroc_link_version COMMAND $<TARGET_FILE_DIR:superroc>/${_superroc_compat_bin} --version)
-  # Super ROC: prove the previous quantizer name resolves to the same binary.
-  add_test(NAME superroc_quant_link_resolves COMMAND ${CMAKE_COMMAND} -E compare_files $<TARGET_FILE_DIR:superroc-quant>/${_superroc_compat_quant} $<TARGET_FILE:superroc-quant>)
-  set_tests_properties(superroc_quant_link_resolves PROPERTIES
-    LABELS "cpu")
-
-  set_tests_properties(superroc_link_version PROPERTIES
-    LABELS "cpu"
-    PASS_REGULAR_EXPRESSION
-      "Super ROC ${SUPERROC_RELEASE_VERSION} \\(${SUPERROC_REVISION}\\)")
+      "Super Roc ${SUPERROC_RELEASE_VERSION} \\(${SUPERROC_REVISION}\\)")
 
   add_test(NAME superroc_help COMMAND superroc --help)
   set_tests_properties(superroc_help PROPERTIES LABELS "cpu")
@@ -536,6 +483,28 @@ if (BUILD_TESTING)
   add_test(NAME arg_parser_test COMMAND arg_parser_test)
   set_tests_properties(arg_parser_test PROPERTIES LABELS "cpu;cli")
 
+  add_executable(recipe_test tests/cli/recipe_test.cpp)
+  target_link_libraries(recipe_test PRIVATE superroc_recipe)
+  add_test(NAME recipe_test COMMAND recipe_test)
+  set_tests_properties(recipe_test PROPERTIES LABELS "cpu;cli")
+  # The int4 route weights file comes with a model download; its reader is host
+  # code and is checked here without a GPU.
+  add_executable(int4_route_file_test
+    tests/models/qwen/int4_route_file_test.cpp)
+  target_link_libraries(int4_route_file_test PRIVATE superroc_core)
+  add_test(NAME int4_route_file_test COMMAND int4_route_file_test)
+  set_tests_properties(int4_route_file_test PROPERTIES LABELS "cpu;qwen")
+  add_executable(logprobs_json_test tests/cli/logprobs_json_test.cpp)
+  target_link_libraries(logprobs_json_test PRIVATE superroc_core)
+  add_test(NAME logprobs_json_test COMMAND logprobs_json_test)
+  set_tests_properties(logprobs_json_test PROPERTIES LABELS "cpu;cli")
+
+  # The recipe loader's list of engine variables must match the source tree.
+  add_test(NAME recipe_env_keys_check
+    COMMAND ${Python3_EXECUTABLE} ${PROJECT_SOURCE_DIR}/tools/recipe/gen_env_keys.py
+            --check --root ${PROJECT_SOURCE_DIR})
+  set_tests_properties(recipe_env_keys_check PROPERTIES LABELS "cpu;cli")
+
   add_executable(json_constraint_test tests/core/json_constraint_test.cpp)
   target_link_libraries(json_constraint_test PRIVATE superroc_core)
   target_compile_definitions(json_constraint_test PRIVATE
@@ -543,14 +512,27 @@ if (BUILD_TESTING)
   add_test(NAME json_constraint_test COMMAND json_constraint_test)
   set_tests_properties(json_constraint_test PROPERTIES LABELS "cpu;json;sampling")
 
+  add_executable(content_spans_test tests/core/content_spans_test.cpp)
+  target_link_libraries(content_spans_test PRIVATE superroc_core)
+  add_test(NAME content_spans_test COMMAND content_spans_test)
+  set_tests_properties(content_spans_test PROPERTIES LABELS "cpu;core")
+
   add_executable(json_test tests/core/json_test.cpp)
   target_link_libraries(json_test PRIVATE superroc_core)
   add_test(NAME json_test COMMAND json_test)
   set_tests_properties(json_test PROPERTIES LABELS "cpu;json")
-  add_executable(env_compat_test tests/core/env_compat_test.cpp)
-  target_include_directories(env_compat_test PRIVATE ${CMAKE_SOURCE_DIR})
-  add_test(NAME env_compat_test COMMAND env_compat_test)
-  set_tests_properties(env_compat_test PROPERTIES LABELS "cpu;core")
+  add_executable(env_test tests/core/env_test.cpp)
+  target_include_directories(env_test PRIVATE ${CMAKE_SOURCE_DIR})
+  add_test(NAME env_test COMMAND env_test)
+  set_tests_properties(env_test PROPERTIES LABELS "cpu;core")
+  add_executable(gpu_runtime_environment_test
+    tests/core/gpu_runtime_environment_test.cpp)
+  target_include_directories(gpu_runtime_environment_test PRIVATE
+    ${CMAKE_SOURCE_DIR})
+  add_test(NAME gpu_runtime_environment_test
+    COMMAND gpu_runtime_environment_test)
+  set_tests_properties(gpu_runtime_environment_test PROPERTIES
+    LABELS "cpu;core")
   add_executable(model_family_test tests/core/model_family_test.cpp)
   target_link_libraries(model_family_test PRIVATE superroc_core)
   add_test(NAME model_family_test COMMAND model_family_test)
@@ -593,6 +575,11 @@ if (BUILD_TESTING)
   target_link_libraries(http_server_test PRIVATE superroc_http)
   add_test(NAME http_server_test COMMAND http_server_test)
   set_tests_properties(http_server_test PROPERTIES LABELS "cpu;server;http" TIMEOUT 30)
+  # The same test with the canonical cache switch on, so the /props field and
+  # the request log line are covered in both modes.
+  add_test(NAME http_server_test_canonical COMMAND http_server_test)
+  set_tests_properties(http_server_test_canonical PROPERTIES LABELS "cpu;server;http" TIMEOUT 30
+                       ENVIRONMENT "SUPERROC_CANONICAL_CACHE=1")
   # LFM2: pythonic tool-call parser unit test.
   add_executable(lfm2_tool_parse_test tests/cli/lfm2_tool_parse_test.cpp src/cli/serve/lfm2_tool_parse.cpp)
   target_link_libraries(lfm2_tool_parse_test PRIVATE superroc_core)
@@ -673,6 +660,10 @@ if (BUILD_TESTING)
   target_link_libraries(component_text_cache_test PRIVATE superroc_cache_fake superroc_core superroc_logging)
   add_test(NAME component_text_cache_test COMMAND component_text_cache_test)
   set_tests_properties(component_text_cache_test PROPERTIES LABELS "cpu;server;cache;state;lifecycle")
+  if (SUPERROC_ENABLE_SANITIZERS)
+    # Under ASan the cache test runs for more than the default 600 s.
+    set_tests_properties(component_text_cache_test PROPERTIES TIMEOUT 2400)
+  endif()
 
   add_executable(text_model_runner_test
     tests/cli/text_model_runner_test.cpp
@@ -680,9 +671,21 @@ if (BUILD_TESTING)
     src/cli/serve/continuation_disk_store.cpp
     src/cli/serve/component_text_cache.cpp
   src/cli/serve/text_model_runner.cpp)
-  target_link_libraries(text_model_runner_test PRIVATE superroc_logging superroc_core superroc_cache)
+  target_link_libraries(text_model_runner_test PRIVATE superroc_logging superroc_core superroc_cache_fake)
   add_test(NAME text_model_runner_test COMMAND text_model_runner_test)
   set_tests_properties(text_model_runner_test PROPERTIES
+    LABELS "cpu;server;runner;cache;state;lifecycle")
+  # The late prompt checkpoint (SUPERROC_TAIL_CAPTURE) is read once per
+  # process, so its pair plumbing runs as a second invocation.
+  add_test(NAME text_model_runner_tail_capture_test
+    COMMAND text_model_runner_test --tail-capture)
+  set_tests_properties(text_model_runner_tail_capture_test PROPERTIES
+    LABELS "cpu;server;runner;cache;state;lifecycle")
+  # The canonical cache switch (SUPERROC_CANONICAL_CACHE) is read once per
+  # process too.
+  add_test(NAME text_model_runner_canonical_cache_test
+    COMMAND text_model_runner_test --canonical-cache)
+  set_tests_properties(text_model_runner_canonical_cache_test PROPERTIES
     LABELS "cpu;server;runner;cache;state;lifecycle")
 
   add_executable(continuation_disk_store_test
@@ -827,6 +830,11 @@ if (BUILD_TESTING)
       ${CMAKE_CURRENT_SOURCE_DIR}/tests/functional/cache_disk_faults_test.py
       $<TARGET_FILE:cache_disk_faults>)
   set_tests_properties(cache_disk_faults_test PROPERTIES LABELS "cpu;server;functional")
+  if (SUPERROC_ENABLE_SANITIZERS)
+    # The test preloads the fault library into a Python that is not built
+    # with ASan, which ASan refuses before the test starts.
+    set_tests_properties(cache_disk_faults_test PROPERTIES DISABLED TRUE)
+  endif()
 
   add_test(NAME speculative_corpus_test
     COMMAND ${Python3_EXECUTABLE}
@@ -980,7 +988,7 @@ if (BUILD_TESTING)
   add_test(NAME ggml_dequant_test COMMAND ggml_dequant_test)
   set_tests_properties(ggml_dequant_test PROPERTIES LABELS "cpu;core;quant")
 
-  add_executable(rocmfp4_oracle_test tests/core/rocmfp4_oracle_test.cpp)  # lqw:cmake-test
+  add_executable(rocmfp4_oracle_test tests/core/rocmfp4_oracle_test.cpp)
   target_link_libraries(rocmfp4_oracle_test PRIVATE superroc_core)
 
   add_executable(glimmer_g1_test tests/models/glimmer/glimmer_g1_test.cpp)  # GLIMMER
@@ -995,6 +1003,20 @@ if (BUILD_TESTING)
   set_tests_properties(lfm2_config_test PROPERTIES  # LFM2
     LABELS "cpu;models;lfm2;external-model"  # LFM2
     SKIP_RETURN_CODE 77)  # LFM2
+  if (ENGINE_ENABLE_HIP)
+    add_executable(lfm2_verify_test tests/models/lfm2/lfm2_verify_test.cpp)  # LFM2
+    target_link_libraries(lfm2_verify_test PRIVATE superroc_core)  # LFM2
+    add_test(NAME lfm2_verify_test COMMAND lfm2_verify_test)  # LFM2
+    set_tests_properties(lfm2_verify_test PROPERTIES  # LFM2
+      LABELS "gpu;models;lfm2;external-model"  # LFM2
+      SKIP_RETURN_CODE 77)  # LFM2
+    add_executable(flint_verify_test tests/models/flint/flint_verify_test.cpp)
+    target_link_libraries(flint_verify_test PRIVATE superroc_core)
+    add_test(NAME flint_verify_test COMMAND flint_verify_test)
+    set_tests_properties(flint_verify_test PROPERTIES
+      LABELS "gpu;models;flint;external-model"
+      SKIP_RETURN_CODE 77)
+  endif ()
   add_test(NAME rocmfp4_oracle_test COMMAND rocmfp4_oracle_test)
   set_tests_properties(rocmfp4_oracle_test PROPERTIES LABELS "cpu;core;quant")
 
@@ -1020,13 +1042,18 @@ if (BUILD_TESTING)
   add_test(NAME kat_mtp_pmin_test COMMAND kat_mtp_pmin_test)
   set_tests_properties(kat_mtp_pmin_test PROPERTIES LABELS "cpu;models;qwen;kat")
 
+  add_executable(kat_mtp_sampled_row_test tests/models/qwen/kat_mtp_sampled_row_test.cpp)  # KAT-MTP:
+  target_link_libraries(kat_mtp_sampled_row_test PRIVATE superroc_core)
+  add_test(NAME kat_mtp_sampled_row_test COMMAND kat_mtp_sampled_row_test)
+  set_tests_properties(kat_mtp_sampled_row_test PROPERTIES LABELS "cpu;models;qwen;kat")
+
   # KAT-MTP F2: the load-time type gate for the embedded nextn block.
   add_executable(kat_mtp_types_test tests/models/qwen/kat_mtp_types_test.cpp)
   target_link_libraries(kat_mtp_types_test PRIVATE superroc_core)
   add_test(NAME kat_mtp_types_test COMMAND kat_mtp_types_test)
   set_tests_properties(kat_mtp_types_test PROPERTIES LABELS "cpu;models;qwen;kat")
 
-  # lqw:rv27-fix3 (manual-run). The GPU-side FP4 GEMV check needs a live ROCm
+  # (manual-run). The GPU-side FP4 GEMV check needs a live ROCm
   # device, so it is deliberately NOT part of the default CTest suite. Build
   # and run it explicitly on a GPU box:
   #   cmake --build <build> --target rocmfp4_gpu_gemv_test
@@ -1057,7 +1084,16 @@ if (BUILD_TESTING)
     set_tests_properties(kat_moe_ffn_test PROPERTIES LABELS "gpu;models;qwen;kat"
       SKIP_RETURN_CODE 77)
 
-    # SQ10: FP4 slot ownership (two-stream interleave, exhaustion, zero-alloc).
+    add_executable(mtp_prime_route_test tests/models/qwen/hip/mtp_prime_route_test.hip)
+    target_link_libraries(mtp_prime_route_test PRIVATE superroc_core)
+    set_source_files_properties(
+      tests/models/qwen/hip/mtp_prime_route_test.hip
+      TARGET_DIRECTORY mtp_prime_route_test
+      PROPERTIES LANGUAGE HIP)
+    add_test(NAME mtp_prime_route_test COMMAND mtp_prime_route_test)
+    set_tests_properties(mtp_prime_route_test PROPERTIES LABELS "gpu;models;qwen")
+
+    # FP4 slot ownership (two-stream interleave, exhaustion, zero-alloc).
     add_executable(fp4_slot_owner_test tests/core/rocm_fp4/fp4_slot_owner_test.cpp)
     target_link_libraries(fp4_slot_owner_test PRIVATE superroc_core)
     set_source_files_properties(
@@ -1067,7 +1103,7 @@ if (BUILD_TESTING)
     add_test(NAME fp4_slot_owner_test COMMAND fp4_slot_owner_test)
     set_tests_properties(fp4_slot_owner_test PROPERTIES LABELS "gpu;core;rocm_fp4")
 
-    # MG64 SPEC1 step 5: 64-token grouped GEMM bit-identity gate.
+    # 64-token grouped GEMM bit-identity gate.
     add_executable(fp4_grp64_test tests/core/rocm_fp4/fp4_grp64_test.cpp)
     target_link_libraries(fp4_grp64_test PRIVATE superroc_core)
     set_source_files_properties(
@@ -1077,7 +1113,7 @@ if (BUILD_TESTING)
     add_test(NAME fp4_grp64_test COMMAND fp4_grp64_test)
     set_tests_properties(fp4_grp64_test PROPERTIES LABELS "gpu;core;rocm_fp4")
 
-    # KPF2 SPEC1 step 4: 32k multi-block grouper bit-identity gate.
+    # 32k multi-block grouper bit-identity gate.
     add_executable(fp4_moe_group32k_test tests/core/rocm_fp4/fp4_moe_group32k_test.cpp)
     target_link_libraries(fp4_moe_group32k_test PRIVATE superroc_core)
     set_source_files_properties(
@@ -1087,7 +1123,7 @@ if (BUILD_TESTING)
     add_test(NAME fp4_moe_group32k_test COMMAND fp4_moe_group32k_test)
     set_tests_properties(fp4_moe_group32k_test PROPERTIES LABELS "gpu;core;rocm_fp4")
 
-    # Super ROC QVO: verify_m_xq reuses the held Q8 copy bit-identically and refuses another x/m/k.
+    # Super Roc QVO: verify_m_xq reuses the held Q8 copy bit-identically and refuses another x/m/k.
     add_executable(fp4_verify_xq_test tests/core/rocm_fp4/fp4_verify_xq_test.cpp)
     target_link_libraries(fp4_verify_xq_test PRIVATE superroc_core)
     set_source_files_properties(
@@ -1097,7 +1133,7 @@ if (BUILD_TESTING)
     add_test(NAME fp4_verify_xq_test COMMAND fp4_verify_xq_test)
     set_tests_properties(fp4_verify_xq_test PROPERTIES LABELS "gpu;core;rocm_fp4")
 
-    # SQ10 SPEC3 (S3-3): the alias wiring through the real serve path (one
+    # The alias wiring through the real serve path (one
     # KAT+MTP request). The script SKIPs (77) unless SUPERROC_FP4_TEST_KAT_MODEL
     # names a model file; a dropped serve registration fails it.
     add_test(NAME fp4_slot_alias_serve
@@ -1117,7 +1153,7 @@ if (BUILD_TESTING)
     add_test(NAME kat_mtp_writekv_test COMMAND kat_mtp_writekv_test)
     set_tests_properties(kat_mtp_writekv_test PROPERTIES LABELS "gpu;models;qwen;kat")
 
-    # Super ROC QKS: the Qwen fp16 KV store saturates instead of overflowing.
+    # Super Roc QKS: the Qwen fp16 KV store saturates instead of overflowing.
     add_executable(qwen_kv_f16_test tests/models/qwen/hip/qwen_kv_f16_test.hip)
     target_link_libraries(qwen_kv_f16_test PRIVATE superroc_core)
     set_source_files_properties(
@@ -1134,7 +1170,7 @@ if (BUILD_TESTING)
   add_test(NAME ggml_gemm_parity_test COMMAND ggml_gemm_parity_test)
   set_tests_properties(ggml_gemm_parity_test PROPERTIES LABELS "cpu;core;quant")
 
-  # superroc-quant tool tests (SPEC7). The quantizer and kv_swap are standalone
+  # superroc-quant tool tests. The quantizer and kv_swap are standalone
   # C++17 tools with no engine dependency, so these tests are standalone too:
   #   superroc_quant_stream_test — the streaming GGUF writer (layout + pinned
   #     sha256 on a fixed-payload fixture, and determinism through the real
@@ -1149,7 +1185,7 @@ if (BUILD_TESTING)
   set_tests_properties(superroc_quant_stream_test PROPERTIES
     LABELS "cpu;tools;superroc-quant;streaming")
 
-  # superroc-quant v0.5 rules test (LQP SPEC1 item 6): rule matching, protect
+  # superroc-quant v0.5 rules test: rule matching, protect
   # files, fork head flags, census, and manifest, through the real binary.
   add_executable(superroc_quant_rules_test tests/tools/superroc_quant_rules_test.cpp)
   target_include_directories(superroc_quant_rules_test PRIVATE tools/superroc-quant)
@@ -1159,7 +1195,7 @@ if (BUILD_TESTING)
   set_tests_properties(superroc_quant_rules_test PROPERTIES
     LABELS "cpu;tools;superroc-quant;rules")
 
-  # superroc-quant v0.9 failure test (LQP SPEC3 item 5, SPEC4 item 3): pool error
+  # superroc-quant v0.9 failure test: pool error
   # callback and the (a)-(f) failure paths through the real binary.
   #
   # The two compile lines: the shipped tool is built WITHOUT the failure hook
@@ -1397,6 +1433,11 @@ if (BUILD_TESTING)
       LABELS "gpu;hip;gfx1151"
       ENVIRONMENT "HSA_USERPTR_FOR_PAGED_MEM=0")
 
+    add_executable(hip_runtime_pin_test tests/core/hip_runtime_pin_test.cpp)
+    target_link_libraries(hip_runtime_pin_test PRIVATE superroc_hip_host)
+    add_test(NAME hip_runtime_pin_test COMMAND hip_runtime_pin_test)
+    set_tests_properties(hip_runtime_pin_test PROPERTIES LABELS "cpu;hip;core")
+
     add_executable(hip_weight_upload_test tests/core/hip_weight_upload_test.cpp)
     target_link_libraries(hip_weight_upload_test PRIVATE superroc_core)
     add_test(NAME hip_weight_upload_test COMMAND hip_weight_upload_test)
@@ -1427,6 +1468,16 @@ if (BUILD_TESTING)
     target_link_libraries(speculative_verification_test PRIVATE superroc_core hip::host roc::hipblas roc::rocblas)
     add_test(NAME speculative_verification_test COMMAND speculative_verification_test)
     set_tests_properties(speculative_verification_test PROPERTIES LABELS "hip;gpu;speculative")
+
+    add_executable(lookup_draft_backend_test tests/core/test_lookup_draft_backend.cpp)
+    target_link_libraries(lookup_draft_backend_test PRIVATE superroc_core hip::host roc::hipblas roc::rocblas)
+    add_test(NAME lookup_draft_backend_test COMMAND lookup_draft_backend_test)
+    set_tests_properties(lookup_draft_backend_test PROPERTIES LABELS "hip;gpu;speculative")
+
+    add_executable(speculative_prompt_skip_test tests/core/test_speculative_prompt_skip.cpp)
+    target_link_libraries(speculative_prompt_skip_test PRIVATE superroc_core hip::host)
+    add_test(NAME speculative_prompt_skip_test COMMAND speculative_prompt_skip_test)
+    set_tests_properties(speculative_prompt_skip_test PROPERTIES LABELS "hip;speculative")
   endif()
 
   if (ENGINE_ENABLE_HIP)

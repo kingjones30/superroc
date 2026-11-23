@@ -1,5 +1,5 @@
 // FLASHNEXT G1-CPU: production binder + shared CPU oracle qualification
-// against King's real ROCmFP4 artifact. The file is mmaped read-only and
+// against the real ROCmFP4 artifact. The file is mmaped read-only and
 // never copied (box disk is 99% full).
 //
 // For every sampled weight row this checks:
@@ -311,7 +311,7 @@ int main(int argc, char** argv) {
   CheckRows("blk0.router(F32)", l0.router, 0, {0, 511}, x);
   CheckRows("blk0.shexp_gate_inp(F32)", l0.shexp_gate_inp, 0, {0}, x);
 
-  // MoE experts: the RV22 G1 slices e=0,7,511 plus the shared expert.
+  // MoE experts: the slices e=0,7,511 plus the shared expert.
   Check(l0.ffn_gate_exps.type == GgmlType::kQ4_0_ROCMFP4_FAST,
         "experts are FAST");
   for (std::uint64_t e : {0ULL, 7ULL, 511ULL}) {
@@ -394,7 +394,7 @@ int main(int argc, char** argv) {
       if (!mtp.has_value()) {
         // FINDING (pre-existing on main before the rename, NOT an FP4
         // regression): the binder requires
-        // blk.48.nextn.hc_head_{norm,down,up}.weight but King's sidecar exports
+        // blk.48.nextn.hc_head_{norm,down,up}.weight but the sidecar exports
         // nextn.shared_head_norm plus top-level output_hc_* instead (35
         // tensors, all Q8_0/F32 -- zero FP4, so G1-CPU loses no coverage).
         // Reported, not silently passed; fixing it needs an engine-side
@@ -402,7 +402,7 @@ int main(int argc, char** argv) {
         std::printf("MTP FINDING: bind failed: %s\n", error.c_str());
         std::printf(
             "MTP FINDING: sidecar lacks nextn.hc_head_*; "
-            "binder/artifact mismatch predates this lane\n");
+            "binder/artifact mismatch predates this test\n");
       } else {
         const auto& b = mtp->block;
         CheckRows("mtp.attn_q", b.attn_q, 0, {0}, x);

@@ -1,4 +1,4 @@
-// SQ1 (Super ROC wave, A1a; rd1 DESIGN.md section 2.2.1): the Flash-Next
+// The Flash-Next
 // FP4->F16 prefill kernels, promoted byte-exact from
 // src/models/qwen38_flash_next/kernels/rocm/kernels.hip.cpp at 1194fea
 // (Fp4Int8GemmKernel, Fp4DenseF16GEMMKernel, Fp4SplitF16GemmKernel,
@@ -7,6 +7,7 @@
 // family calls the same launchers for ROC FP4 prefill. Compile flags
 // must match kernels.hip.cpp (-ffast-math -fno-finite-math-only; set in
 // src/models/qwen/CMakeLists.txt next to this file's registration).
+#include <cstdlib>
 #include "src/core/rocm_fp4/fp4_f16_prefill.hpp"
 
 #include <hip/hip_fp16.h>
@@ -22,6 +23,17 @@
 // Launch counting (LFN_DECODE_PROFILE) shared with kernels.hip.cpp.
 #include "src/models/qwen38_flash_next/kernels/rocm/lfn_launch.hpp"
 
+// These kernels exchange data between waves through LDS only. Global inputs are read-only and
+// output stores follow the final exchange, so a barrier needs no global read cache invalidate,
+// which would also drop the L0 lines of every other group on the compute unit.
+__device__ __forceinline__ __attribute__((convergent)) void LfnLdsBarrier() {
+  asm volatile("s_waitcnt lgkmcnt(0)" ::: "memory");
+  __builtin_amdgcn_s_barrier();
+  asm volatile("" ::: "memory");
+}
+#define __syncthreads LfnLdsBarrier
+
+
 #undef hipLaunchKernelGGL
 #define hipLaunchKernelGGL(kernelName, numBlocks, numThreads, memPerBlock, streamId, ...) \
   do {                                                                                    \
@@ -32,7 +44,7 @@
 namespace superroc::models::qwen38_flash_next::rocm {
 namespace {
 
-// ---- copied deps (SQ1): these stay in kernels.hip.cpp too. They are
+// ---- copied deps: these stay in kernels.hip.cpp too. They are
 // TU-local (anonymous namespace) one-paragraph helpers the moved kernels
 // need; copying keeps the Flash-Next TU untouched. ----
 constexpr unsigned kThreads = 256;
@@ -116,7 +128,7 @@ inline unsigned Blocks(std::size_t count) {
 }
 
 
-/// W8A8 WMMA GEMM over FP4 FAST weights (LFP SPEC2 item 3): the same block/
+/// W8A8 WMMA GEMM over FP4 FAST weights: the same block/
 /// grid plan, LDS layout, activation side and epilogue as
 /// W8A8BlockedWmmaGEMMKernel, with the weight fetch swapped. One 17-byte
 /// block decodes to 32 int8 codes (exact: |code| <= 10) plus the ue4m3
@@ -125,7 +137,7 @@ inline unsigned Blocks(std::size_t count) {
 /// route. FAST only: one dw per block cannot express type 100's two
 /// scales (the launcher enforces it). y is [batch][m].
 template<int BM, int BN, int BK, int WM, int WN, bool kFast,
-         bool kHcDown = false>
+         bool kHcDown = false, int kRowGroup = 1>
 __launch_bounds__(256) __global__ void Fp4Int8GemmKernel(
     const void* __restrict__ w, const void* __restrict__ x_blocks,
     std::conditional_t<kHcDown, __half, float>* __restrict__ y,
@@ -169,8 +181,11 @@ __launch_bounds__(256) __global__ void Fp4Int8GemmKernel(
   const int wave_row = wave_id / WN;
   const int wave_tok = wave_id % WN;
 
-  const std::size_t r_block = static_cast<std::size_t>(blockIdx.y) * BM;
-  const std::size_t t_block = static_cast<std::size_t>(blockIdx.x) * BN;
+  const unsigned row_group = blockIdx.y / kRowGroup;
+  const unsigned within = (blockIdx.y % kRowGroup) * gridDim.x + blockIdx.x;
+  const std::size_t r_block =
+      static_cast<std::size_t>(row_group * kRowGroup + within % kRowGroup) * BM;
+  const std::size_t t_block = static_cast<std::size_t>(within / kRowGroup) * BN;
   const std::size_t tt_block = t_block / kQ8ActTileTokens;
 
   float acc[kWaveRowTiles][kWaveTokTiles][8];
@@ -187,12 +202,15 @@ __launch_bounds__(256) __global__ void Fp4Int8GemmKernel(
 
   // Staging registers for the next K stage, fetched one stage ahead so the
   // scattered 34-byte block reads overlap the WMMA work.
+  // Results stay raw until the commit: arithmetic on a load result here would
+  // make the stage wait for every outstanding load before its matrix work.
   constexpr int kPrefetch = (BM * BK) / 256;
-  int32x4_t r_q0[kPrefetch];
-  int32x4_t r_q1[kPrefetch];
-  float r_dw[kPrefetch];
+  std::uint32_t r_packed[kPrefetch][4];
+  std::uint32_t r_scale[kPrefetch];
+  bool r_live[kPrefetch];
   int32x4_t r_b[BK];
   float r_dx[BK];
+  float r_dx_live[BK];
   const int b_tile = wave_id;  // one wave per token subtile
 
   const int num_kb = static_cast<int>(num_blocks);
@@ -222,16 +240,10 @@ __launch_bounds__(256) __global__ void Fp4Int8GemmKernel(
       const bool live = row_live[p] > 0.5F && kb < num_kb;
       const std::uint8_t* blk =
           w_row[p] + static_cast<std::size_t>(kb_clamped) * kBlockBytes;
-      std::uint32_t packed[4];
-      __builtin_memcpy(packed, blk, 16);
-      std::uint32_t* q0 = reinterpret_cast<std::uint32_t*>(&r_q0[p]);
-      std::uint32_t* q1 = reinterpret_cast<std::uint32_t*>(&r_q1[p]);
-#pragma unroll
-      for (int j = 0; j < 4; ++j) {
-        fp4_f16::Fp4NibblesToInt8(packed[j], q0[j]);
-        fp4_f16::Fp4NibblesToInt8(packed[j] >> 4, q1[j]);
-      }
-      r_dw[p] = fp4_f16::Fp4ScaleByteToFloat(live ? blk[16] : 0);
+      __builtin_memcpy(r_packed[p], blk, 16);
+      // The scale byte is the top of a word that overlaps the codes.
+      __builtin_memcpy(&r_scale[p], blk + 13, 4);
+      r_live[p] = live;
     }
     if (b_live) {
 #pragma unroll
@@ -241,9 +253,9 @@ __launch_bounds__(256) __global__ void Fp4Int8GemmKernel(
         const auto* tile =
             b_base + (static_cast<std::size_t>(kb_clamped) * kQ8ActTileBytes);
         r_b[i] = reinterpret_cast<const int32x4_t*>(tile)[lane_id];
-        r_dx[i] = ((kb < num_kb) ? 1.0F : 0.0F) *
-                  reinterpret_cast<const float*>(
-                      tile + kQ8ActScaleOffset)[lane_id & 15];
+        r_dx[i] = reinterpret_cast<const float*>(
+            tile + kQ8ActScaleOffset)[lane_id & 15];
+        r_dx_live[i] = (kb < num_kb) ? 1.0F : 0.0F;
       }
     }
   };
@@ -256,16 +268,29 @@ __launch_bounds__(256) __global__ void Fp4Int8GemmKernel(
       const int kk = idx % BK;
       const int rs = rr / 16;
       const int rl = rr % 16;
-      s_a[kk][rs][rl] = r_q0[p];
-      s_a[kk][rs][16 + rl] = r_q1[p];
-      s_dw[kk][rs][(rl % 2 == 0) ? (rl / 2) : (8 + (rl / 2))] = r_dw[p];
+      std::uint32_t q0[4];
+      std::uint32_t q1[4];
+#pragma unroll
+      for (int j = 0; j < 4; ++j) {
+        fp4_f16::Fp4NibblesToInt8(r_packed[p][j], q0[j]);
+        fp4_f16::Fp4NibblesToInt8(r_packed[p][j] >> 4, q1[j]);
+      }
+      int32x4_t v0;
+      int32x4_t v1;
+      __builtin_memcpy(&v0, q0, 16);
+      __builtin_memcpy(&v1, q1, 16);
+      s_a[kk][rs][rl] = v0;
+      s_a[kk][rs][16 + rl] = v1;
+      s_dw[kk][rs][(rl % 2 == 0) ? (rl / 2) : (8 + (rl / 2))] =
+          fp4_f16::Fp4ScaleByteToFloat(
+              r_live[p] ? static_cast<std::uint8_t>(r_scale[p] >> 24) : 0);
     }
     if (b_live) {
 #pragma unroll
       for (int i = 0; i < BK; ++i) {
         s_b[i][b_tile][lane_id] = r_b[i];
         if (lane_id < 16) {
-          s_dx[i][b_tile][lane_id] = r_dx[i];
+          s_dx[i][b_tile][lane_id] = r_dx_live[i] * r_dx[i];
         }
       }
     }
@@ -408,7 +433,7 @@ __launch_bounds__(256) __global__ void Fp4Int8GemmKernel(
 // (base kernels.hip.cpp:30-4731 is the only anonymous block; the int8
 // kernel at :3715 is inside it, dense/split/SSM/boundary are outside).
 // This keeps every moved kernel symbol byte-identical (symdiff-clean).
-/// Dense F16 WMMA GEMM over ROCmFP4 weights (LFP): the same block/grid plan,
+/// Dense F16 WMMA GEMM over ROCmFP4 weights: the same block/grid plan,
 /// LDS layout, swizzle, K16 product order and epilogue as DenseF16GEMMKernel,
 /// with the weight fetch/decode swapped. One 32-element block is 16 code
 /// bytes plus 1 (kFast, type 101) or 2 (type 100) ue4m3 scale bytes; rows are
@@ -684,7 +709,7 @@ __launch_bounds__(256) __global__ void Fp4DenseF16GEMMKernel(
   }
 }
 
-/// Split-output FP4 GEMM (LFP SPEC2 item 1b): the same tile, fetch and
+/// Split-output FP4 GEMM: the same tile, fetch and
 /// transpose as Fp4DenseF16GEMMKernel, but rows [h*512, h*512+256) store to
 /// `q` and rows [h*512+256, h*512+512) to `gate` (UnpackQGateKernel's
 /// per-head interleave), so the separate unpack disappears. 16-row halves
@@ -702,7 +727,7 @@ __device__ __forceinline__ float* Fp4SplitOut(float* q, float* gate,
   return (j < 256 ? q : gate) + off;
 }
 
-template<int BM, int BN, int BK, int WM, int WN, bool kFast>
+template<int BM, int BN, int BK, int WM, int WN, bool kFast, int kRowGroup = 1>
 __launch_bounds__(256) __global__ void Fp4SplitF16GemmKernel(
     const void* __restrict__ w, const __half* __restrict__ x,
     float* __restrict__ q, float* __restrict__ gate, std::size_t batch,
@@ -745,8 +770,10 @@ __launch_bounds__(256) __global__ void Fp4SplitF16GemmKernel(
   const int half_id = lane_id >> 4;
   const int wave_row = wave_id / WN;
   const int wave_tok = wave_id % WN;
-  const int r_block = static_cast<int>(blockIdx.y) * BM;
-  const int t_block = static_cast<int>(blockIdx.x) * BN;
+  const unsigned row_group = blockIdx.y / kRowGroup;
+  const unsigned within = (blockIdx.y % kRowGroup) * gridDim.x + blockIdx.x;
+  const int r_block = static_cast<int>(row_group * kRowGroup + within % kRowGroup) * BM;
+  const int t_block = static_cast<int>(within / kRowGroup) * BN;
 
   // Weight fetch unit p of a thread: row (p * 256 + tid) / BK, K block
   // (p * 256 + tid) % BK of the stage; rows past m read the last row with
@@ -963,7 +990,7 @@ __launch_bounds__(256) __global__ void Fp4SplitF16GemmKernel(
   }
 }
 
-/// Fused SSM projection over split FP4 weights (LFP SPEC2 item 1b): rows
+/// Fused SSM projection over split FP4 weights: rows
 /// [0,10240) read the qkv tensor, rows [10240,16384) the gate tensor — one
 /// activation pass, like the stacked Q8_0 ssm_in — with the SsmConv epilogue
 /// copied from DenseF16GEMMKernel, so the separate SsmConv4Kernel
@@ -971,7 +998,7 @@ __launch_bounds__(256) __global__ void Fp4SplitF16GemmKernel(
 /// K16 product order as Fp4DenseF16GEMMKernel. y is [batch][m] (raw rows),
 /// conv_out is [batch][10240] (convolved qkv). (8,1) tile only.
 template<int BM, int BN, int BK, int WM, int WN, bool kFastQkv,
-         bool kFastGate>
+         bool kFastGate, int kRowGroup = 1>
 __launch_bounds__(256) __global__ void Fp4SsmF16GemmKernel(
     const void* __restrict__ w0, const void* __restrict__ w1,
     const __half* __restrict__ x, float* __restrict__ y, std::size_t batch,
@@ -1020,8 +1047,10 @@ __launch_bounds__(256) __global__ void Fp4SsmF16GemmKernel(
   const int half_id = lane_id >> 4;
   const int wave_row = wave_id / WN;
   const int wave_tok = wave_id % WN;
-  const int r_block = static_cast<int>(blockIdx.y) * BM;
-  const int t_block = static_cast<int>(blockIdx.x) * BN;
+  const unsigned row_group = blockIdx.y / kRowGroup;
+  const unsigned within = (blockIdx.y % kRowGroup) * gridDim.x + blockIdx.x;
+  const int r_block = static_cast<int>(row_group * kRowGroup + within % kRowGroup) * BM;
+  const int t_block = static_cast<int>(within / kRowGroup) * BN;
 
   // Weight fetch unit p of a thread: row (p * 256 + tid) / BK, K block
   // (p * 256 + tid) % BK of the stage; rows past m read the last row with
@@ -1264,6 +1293,11 @@ __launch_bounds__(256) __global__ void Fp4SsmF16GemmKernel(
   }
 }
 
+
+// Batches from here on take the fused and row-grouped F16 shapes. Only the
+// launch order and the fusion change, so the text does not.
+constexpr std::size_t kF16WideRows = 128;
+
 bool Fp4Int8Gemm(const void* w, const void* x_tiled, float* out,
                  std::size_t batch, std::size_t m, std::size_t k, bool fast,
                  hipStream_t stream) {
@@ -1296,6 +1330,22 @@ bool Fp4Int8Gemm(const void* w, const void* x_tiled, float* out,
   return true;
 }
 
+bool Fp4HcDownF16Gemm(const void* w, const void* x_tiled, __half* out,
+                      std::uint32_t n_tokens, hipStream_t stream) {
+  if (n_tokens < 96 || w == nullptr || x_tiled == nullptr || out == nullptr) {
+    return false;
+  }
+  // The narrow tile plan of Fp4Int8Gemm; the kernel covers a partial last
+  // token tile itself.
+  constexpr std::size_t kRows = 320;
+  constexpr std::size_t kCols = 10240;
+  hipLaunchKernelGGL((Fp4Int8GemmKernel<64, 128, 4, 2, 4, true, true>),
+                     dim3((n_tokens + 127) / 128, 5), dim3(kThreads), 0, stream,
+                     w, x_tiled, out, static_cast<std::size_t>(n_tokens), kRows,
+                     kCols);
+  return true;
+}
+
 template<int BM, int BN, int BK, int WM, int WN, int kRowGroup = 1>
 bool LaunchFp4DenseF16(const void* w, const __half* x, float* out,
                        std::size_t batch, std::size_t m, std::size_t k,
@@ -1318,7 +1368,7 @@ bool Fp4DenseF16Gemm(const void* w, const __half* x, float* out,
   if (m == 0 || k == 0 || batch == 0 || k % 32 != 0) {
     return false;
   }
-  // LFP final (bench ~/ls/lfp/out-round3.txt): the (8, 1) variant hides the
+  // The (8, 1) variant hides the
   // heavier FP4 decode best on every wide shape (6144x2560 1.45x on (4, 2)
   // vs 1.00-1.06x on (8, 1); 2560x2560 1.29x vs 0.99x), so it covers all
   // wide FP4 shapes from batch >= 96; the narrow tile covers m <= 1024
@@ -1330,11 +1380,11 @@ bool Fp4DenseF16Gemm(const void* w, const __half* x, float* out,
   // #421 (stock DenseF16Gemm): row-group launch order on the two m==2560
   // prefill shapes (output projection group 5, shared-expert down group 2).
   // Same tiles as the wide branch, only the order changes.
-  if (batch >= 1024 && m == 2560 && k == 6144) {
+  if (batch >= kF16WideRows && m == 2560 && k == 6144) {
     return LaunchFp4DenseF16<256, 128, 2, 8, 1, 5>(w, x, out, batch, m, k,
                                                    fast, stream);
   }
-  if (batch >= 1024 && m == 2560) {
+  if (batch >= kF16WideRows && m == 2560) {
     return LaunchFp4DenseF16<256, 128, 1, 4, 2, 2>(w, x, out, batch, m, k,
                                                    fast, stream);
   }
@@ -1380,15 +1430,22 @@ bool Fp4SsmF16Gemm(const void* w0, const void* w1, const __half* x,
                    const float* conv_w, const float* history, float* qkvz,
                    float* convolved, std::uint32_t n_tokens, std::uint32_t m,
                    std::uint32_t k, std::uint32_t channels,
-                   std::uint32_t kernel, hipStream_t stream) {
-  if (n_tokens < 1024 || m != 16384 || k != 2560 || channels != 10240 ||
+                   std::uint32_t kernel, hipStream_t stream, bool fast_qkv) {
+  if (n_tokens < kF16WideRows || m != 16384 || k != 2560 || channels != 10240 ||
       kernel != kSsmConvTaps) {
     return false;
   }
-  hipLaunchKernelGGL(
-      (Fp4SsmF16GemmKernel<256, 128, 2, 8, 1, false, true>),
-      dim3((n_tokens + 127) / 128, m / 256), dim3(kThreads), 0, stream, w0,
-      w1, x, qkvz, n_tokens, m, k, conv_w, convolved);
+  if (fast_qkv) {
+    hipLaunchKernelGGL(
+        (Fp4SsmF16GemmKernel<256, 128, 2, 8, 1, true, true>),
+        dim3((n_tokens + 127) / 128, m / 256), dim3(kThreads), 0, stream, w0,
+        w1, x, qkvz, n_tokens, m, k, conv_w, convolved);
+  } else {
+    hipLaunchKernelGGL(
+        (Fp4SsmF16GemmKernel<256, 128, 2, 8, 1, false, true>),
+        dim3((n_tokens + 127) / 128, m / 256), dim3(kThreads), 0, stream, w0,
+        w1, x, qkvz, n_tokens, m, k, conv_w, convolved);
+  }
   hipLaunchKernelGGL(
       SsmConvBoundaryKernel,
       dim3(Blocks(channels),
@@ -1400,7 +1457,7 @@ bool Fp4SsmF16Gemm(const void* w0, const void* w1, const __half* x,
 }
 
 
-// SQ1 occupancy proof (rd1 section 2.4): every instantiation must hold >= 2
+// Occupancy proof: every instantiation must hold >= 2
 // waves/SIMD (one wave issues WMMA at half rate). 256-thread blocks are 8
 // wave32 waves; a gfx1151 CU has 4 SIMDs; waves/SIMD = blocks * 2.
 int Fp4F16PrefillMinWavesPerSimd(char* report, std::size_t report_bytes) {
@@ -1424,8 +1481,10 @@ int Fp4F16PrefillMinWavesPerSimd(char* report, std::size_t report_bytes) {
       {"split<256,128,2,8,1,f>", (const void*)Fp4SplitF16GemmKernel<256, 128, 2, 8, 1, false>},
       {"split<256,128,2,8,1,t>", (const void*)Fp4SplitF16GemmKernel<256, 128, 2, 8, 1, true>},
       {"ssm<256,128,2,8,1,f,t>", (const void*)Fp4SsmF16GemmKernel<256, 128, 2, 8, 1, false, true>},
+      {"ssm<256,128,2,8,1,t,t>", (const void*)Fp4SsmF16GemmKernel<256, 128, 2, 8, 1, true, true>},
       {"ssm-boundary", (const void*)SsmConvBoundaryKernel},
       {"int8<64,128,4,2,4>", (const void*)Fp4Int8GemmKernel<64, 128, 4, 2, 4, true>},
+      {"int8<64,128,4,2,4,hc>", (const void*)Fp4Int8GemmKernel<64, 128, 4, 2, 4, true, true>},
       {"int8<128,128,2,4,2>", (const void*)Fp4Int8GemmKernel<128, 128, 2, 4, 2, true>},
       {"int8<128,64,4,4,2>", (const void*)Fp4Int8GemmKernel<128, 64, 4, 4, 2, true>},
   };

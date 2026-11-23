@@ -16,14 +16,14 @@
 #include <string_view>
 #include <type_traits>
 
-#include "src/core/env_compat.hpp"
+#include "src/core/env.hpp"
 #include "src/core/sampling.hpp"
 #include "src/models/llama/spm_tokenizer.hpp"
 
 namespace superroc::speculative {
 namespace {
 
-// lqw:mtp-cost (SPEC3 item 1). Optional per-step wall-clock accounting for
+//. Optional per-step wall-clock accounting for
 // the speculative loop, behind SUPERROC_SPEC_STEP_COST=1: milliseconds spent in
 // the draft (Propose), the target verification forward, the rollback /
 // re-feed bookkeeping (SaveState/RestoreState + CommitVerificationChunk +
@@ -43,8 +43,8 @@ struct SpecStepCost {
   double ar_ms = 0.0;
   double prime_ms = 0.0;
 };
-SpecStepCost g_cost{
-    .on = ::superroc::core::GetEnvCompat("SUPERROC_SPEC_STEP_COST") != nullptr};
+SpecStepCost g_cost{.on = ::superroc::core::GetEnv("SUPERROC_SPEC_STEP_COST") !=
+                          nullptr};
 
 class CostTimer {
 public:
@@ -229,7 +229,7 @@ public:
     std::size_t rows = 0;
     for (const auto& item : items) {
       auto* target = dynamic_cast<QwenGpuSpeculativeTarget*>(item.executor);
-      // NBFAST T1: the static batched verifier runs the Qwen layer stack;
+      // the static batched verifier runs the Qwen layer stack;
       // llama targets verify per session through their own prefill path.
       if (target == nullptr || target->executor_.GetConfig().llama)
         return ISpeculativeTargetExecutor::ForwardVerificationBatch(items);
@@ -262,7 +262,7 @@ public:
 
   void FinishVerification() override { executor_.FinishVerification(); }
 
-  // NBFAST T1: llama executors have no Qwen tokenizer (GetTokenizer throws);
+  // llama executors have no Qwen tokenizer (GetTokenizer throws);
   // route through the SPM tokenizer when the target is a llama config.
   const models::llama::SpmTokenizer* LlamaTokenizer() const noexcept {
     return executor_.GetConfig().llama
@@ -339,6 +339,24 @@ private:
 
 }  // namespace
 
+// Rows of a prompt chunk that can never enter the drafter's attention
+// window: the drafter attends only the last TargetHistoryCapacity rows of its
+// history, so anything below total_prompt_tokens - window can be advanced
+// over without injecting. Zero when the drafter has no bounded window or the
+// final prompt length is unknown.
+namespace {
+[[nodiscard]] std::uint32_t PromptSkipTokens(
+    const IDraftBackend& backend, std::uint32_t position,
+    std::uint32_t chunk_tokens, std::uint32_t total_prompt_tokens) {
+  const std::uint32_t window = backend.TargetHistoryCapacity();
+  if (window == 0U || total_prompt_tokens <= window ||
+      total_prompt_tokens - window <= position) {
+    return 0U;
+  }
+  return std::min(chunk_tokens, total_prompt_tokens - window - position);
+}
+}  // namespace
+
 bool SpeculativeVerifier::IsStopToken(
     tokenization::TokenId token, tokenization::TokenId eos_id) const noexcept {
   return token == eos_id || target_executor_->IsStopToken(token);
@@ -370,12 +388,6 @@ SpeculativeVerifier::SpeculativeVerifier(
 
 void SpeculativeVerifier::Reset() noexcept {
   stats_ = {};
-  pending_draft_contexts_.clear();
-  guard_rounds_.clear();
-  guard_recorded_rounds_ = 0;
-  guard_published_tokens_ = 0;
-  guard_below_floor_windows_ = 0;
-  speculation_disabled_ = false;
   ResetAdaptiveDraftLength();
   if (draft_backend_ != nullptr) {
     draft_backend_->Reset();
@@ -384,93 +396,9 @@ void SpeculativeVerifier::Reset() noexcept {
 
 void SpeculativeVerifier::BeginRequest() noexcept {
   stats_ = {};
-  guard_rounds_.clear();
-  guard_recorded_rounds_ = 0;
-  guard_published_tokens_ = 0;
-  guard_below_floor_windows_ = 0;
-  speculation_disabled_ = false;
   ResetAdaptiveDraftLength();
   if (draft_backend_ != nullptr)
     draft_backend_->BeginRequest();
-}
-
-double SpeculativeVerifier::PlainRateForContext(
-    std::uint32_t context_length) const noexcept {
-  const auto& rates = options_.plain_decode_rates;
-  if (rates.empty()) {
-    return 0.0;
-  }
-  if (context_length <= rates.front().context_tokens) {
-    return rates.front().tokens_per_second;
-  }
-  for (std::size_t index = 1; index < rates.size(); ++index) {
-    if (context_length <= rates[index].context_tokens) {
-      const auto& lower = rates[index - 1];
-      const auto& upper = rates[index];
-      const double span = upper.context_tokens - lower.context_tokens;
-      if (span <= 0.0) {
-        return upper.tokens_per_second;
-      }
-      const double weight =
-          static_cast<double>(context_length - lower.context_tokens) / span;
-      return lower.tokens_per_second +
-             weight * (upper.tokens_per_second - lower.tokens_per_second);
-    }
-  }
-  return rates.back().tokens_per_second;
-}
-
-void SpeculativeVerifier::RecordDecodeRound(std::size_t published_tokens,
-                                            double seconds,
-                                            std::uint32_t context_length) {
-  if (options_.plain_decode_rates.empty() || speculation_disabled_) {
-    return;
-  }
-  if (published_tokens == 0 || seconds <= 0.0 || !std::isfinite(seconds)) {
-    // A round that produced nothing (a stop) says nothing about throughput.
-    return;
-  }
-  guard_rounds_.emplace_back(published_tokens, seconds);
-  while (guard_rounds_.size() > kGuardWindowRounds) {
-    guard_rounds_.pop_front();
-  }
-  ++guard_recorded_rounds_;
-  guard_published_tokens_ += published_tokens;
-  if (guard_rounds_.size() < kGuardWindowRounds ||
-      guard_recorded_rounds_ < kGuardSettleRounds ||
-      guard_published_tokens_ < kGuardSettleTokens) {
-    // A full window inside the settling budget is acceptance ramp-up, not
-    // evidence that speculation runs slower than plain decoding.
-    return;
-  }
-  std::size_t tokens = 0;
-  double elapsed = 0.0;
-  for (const auto& round : guard_rounds_) {
-    tokens += round.first;
-    elapsed += round.second;
-  }
-  if (elapsed <= 0.0) {
-    return;
-  }
-  const double rate = static_cast<double>(tokens) / elapsed;
-  const double floor = PlainRateForContext(context_length);
-  if (g_cost.on) {
-    std::fprintf(stderr,
-                 "[SpecGuard] ctx=%u window_tokens=%zu window_s=%.4f "
-                 "rate=%.2f floor=%.2f below_run=%zu\n",
-                 static_cast<unsigned>(context_length), tokens, elapsed, rate,
-                 floor, guard_below_floor_windows_);
-  }
-  if (rate >= floor) {
-    guard_below_floor_windows_ = 0;
-    return;
-  }
-  // Published tokens arrive in lumpy blocks, so short runs of slow windows
-  // are noise: confirm before switching the request to plain decoding.
-  ++guard_below_floor_windows_;
-  if (guard_below_floor_windows_ >= kGuardConfirmWindows) {
-    speculation_disabled_ = true;
-  }
 }
 
 void SpeculativeVerifier::ConfigureAdaptiveDraftPolicy() {
@@ -513,83 +441,8 @@ void SpeculativeVerifier::UpdateAdaptiveDraftLength(std::size_t accepted,
   }
 }
 
-void SpeculativeVerifier::QueueDraftContext(
-    std::span<const tokenization::TokenId> tokens, std::size_t hidden_offset,
-    std::size_t hidden_count, std::size_t hidden_size,
-    tokenization::TokenId first_token, std::uint32_t position, bool append) {
-  PendingDraftContext pending;
-  pending.tokens.assign(tokens.begin(), tokens.end());
-  pending.hidden_offset = hidden_offset;
-  pending.hidden_count = hidden_count;
-  pending.hidden_size = hidden_size;
-  pending.first_token = first_token;
-  pending.position = position;
-  pending.append = append;
-  pending_draft_contexts_.push_back(std::move(pending));
-}
-
-void SpeculativeVerifier::FlushPendingDraftContext() {
-  if (pending_draft_contexts_.empty()) {
-    return;
-  }
-  if (draft_backend_ == nullptr) {
-    pending_draft_contexts_.clear();
-    return;
-  }
-  // The rows are re-derived from the live capture buffer at drain time: the
-  // buffer only ever appends between the queueing and the drain.
-  const auto prompt_hidden = target_executor_->GetPromptHiddenStates();
-  // Drain in capture order: Prime's context initializes the drafter, then
-  // later prompt chunks append at their recorded positions.
-  CostTimer cost_prime(g_cost.prime_ms);
-  if (g_cost.on) {
-    std::size_t prime_tokens = 0;
-    std::size_t append_tokens = 0;
-    for (const auto& pending : pending_draft_contexts_) {
-      (pending.append ? append_tokens : prime_tokens) += pending.tokens.size();
-    }
-    const auto epoch_ms =
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count();
-    std::fprintf(stderr,
-                 "[SpecPrime] %lld drain %zu contexts: prime %zu tokens, "
-                 "append %zu tokens\n",
-                 static_cast<long long>(epoch_ms),
-                 pending_draft_contexts_.size(), prime_tokens, append_tokens);
-  }
-  for (const auto& pending : pending_draft_contexts_) {
-    if (pending.hidden_offset > prompt_hidden.size() ||
-        pending.hidden_count > prompt_hidden.size() - pending.hidden_offset ||
-        pending.hidden_count != pending.tokens.size() * pending.hidden_size) {
-      throw std::runtime_error(
-          "deferred draft context no longer matches the captured prompt "
-          "features");
-    }
-    const DraftTargetContext context{
-        .prompt_tokens = pending.tokens,
-        .prompt_hidden_states =
-            prompt_hidden.subspan(pending.hidden_offset, pending.hidden_count),
-        .hidden_size = pending.hidden_size,
-        .first_token = pending.first_token,
-    };
-    const bool ok =
-        pending.append
-            ? draft_backend_->AppendTargetContext(context, pending.position)
-            : draft_backend_->PrimeTargetContext(context);
-    if (!ok) {
-      throw std::runtime_error("draft backend failed to prime target context");
-    }
-    if (g_cost.on) {
-      g_cost.prime_tokens += pending.tokens.size();
-    }
-  }
-  pending_draft_contexts_.clear();
-}
-
 tokenization::TokenId SpeculativeVerifier::AdvanceCommittedToken(
     tokenization::TokenId token, std::uint32_t position) {
-  FlushPendingDraftContext();
   const auto next = target_executor_->ForwardToken(token, position);
   if (draft_backend_ != nullptr &&
       draft_backend_->RequiresTargetHiddenStates()) {
@@ -656,6 +509,8 @@ struct SpeculativeVerifier::PreparedStep {
   std::optional<StepResult> immediate;
   std::uint32_t position{0};
   tokenization::TokenId eos_id{0};
+  bool logprobs{false};
+  std::uint32_t logprobs_top_n{0};
   bool sampled{false};
   bool random_sampling{false};
   bool capture_hidden{false};
@@ -666,6 +521,8 @@ struct SpeculativeVerifier::PreparedStep {
   std::size_t verified_rows{0};
   std::size_t accepted_count{0};
   std::size_t physical_width{1};
+  /// One target report per accepted row, in row order, across chunks.
+  std::vector<sampling::CapturedTokenLogprobs> row_logprobs;
 };
 
 SpeculativeVerifier::StepResult SpeculativeVerifier::VerifyStep(
@@ -675,12 +532,16 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifyStep(
     sampling::SamplerState& sampler) {
   sampler.config().Validate();
   if (!use_batched_verification_ &&
-      sampler.config().can_use_unmodified_argmax()) {
-    return VerifySequentialStep(current_sequence, cur_pos, current_token,
-                                eos_id, max_emitted_tokens);
+      sampler.config().can_use_unmodified_argmax() &&
+      !sampler.ForcedToken().has_value()) {
+    return VerifySequentialStep(
+        current_sequence, cur_pos, current_token, eos_id, max_emitted_tokens,
+        sampler, sampler.logprobs_top_n(), sampler.logprobs_enabled());
   }
-  auto prepared = PrepareStep({*this, current_sequence, cur_pos, current_token,
-                               eos_id, max_emitted_tokens, sampler});
+  auto prepared =
+      PrepareStep({*this, current_sequence, cur_pos, current_token, eos_id,
+                   max_emitted_tokens, sampler, sampler.logprobs_enabled(),
+                   sampler.logprobs_top_n()});
   if (prepared.immediate.has_value())
     return std::move(*prepared.immediate);
   const auto verification = [&prepared, this] {
@@ -698,7 +559,6 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifyStep(
 
 SpeculativeVerifier::PreparedStep SpeculativeVerifier::PrepareStep(
     const StepRequest& request, bool defer_target_only, bool defer_proposal) {
-  FlushPendingDraftContext();
   request.sampler.config().Validate();
   if (request.max_emitted_tokens == 0) {
     throw std::invalid_argument(
@@ -707,26 +567,37 @@ SpeculativeVerifier::PreparedStep SpeculativeVerifier::PrepareStep(
   PreparedStep prepared;
   prepared.position = request.position;
   prepared.eos_id = request.eos_id;
+  prepared.logprobs = request.logprobs;
+  prepared.logprobs_top_n = request.logprobs_top_n;
   prepared.random_sampling = request.sampler.config().uses_random_sampling();
   // A reasoning budget can force a token the target never predicts, so its
-  // greedy rows go through the sampler like penalties and constraints.
-  prepared.sampled = prepared.random_sampling ||
-                     request.sampler.config().penalties_enabled() ||
-                     request.sampler.config().constraint != nullptr ||
-                     request.sampler.config().reasoning_budget != nullptr;
+  // greedy rows go through the sampler like penalties and constraints. A
+  // fired loop guard forces the same way, but only from the step it fires on:
+  // until then the request keeps the raw-argmax path.
+  const bool loop_guard_forced = request.sampler.ForcedToken().has_value();
+  const bool otherwise_sampled =
+      prepared.random_sampling ||
+      request.sampler.config().penalties_enabled() ||
+      request.sampler.config().constraint != nullptr ||
+      request.sampler.config().reasoning_budget != nullptr;
+  prepared.sampled = otherwise_sampled || loop_guard_forced;
   if (prepared.sampled)
     prepared.working_sampler.emplace(request.sampler);
   prepared.max_draft_tokens =
       request.max_emitted_tokens > 1 && draft_backend_ != nullptr &&
               (!prepared.sampled || draft_backend_->SupportsSampledProposals())
-          ? std::min(current_draft_length_, request.max_emitted_tokens - 1)
+          ? std::min(std::max(current_draft_length_,
+                              draft_backend_->ExtraDraftCapacity()),
+                     request.max_emitted_tokens - 1)
           : 0;
+  if (draft_backend_ != nullptr)
+    draft_backend_->SetAdaptiveDraftLimit(current_draft_length_);
   // KAT-MTP: a draft backend with no lossless sampled proposals (the MTP
   // head) is dropped for every sampled, penalized or constrained request --
   // drafting is greedy-only, and SUPERROC_MTP_PMIN is never consulted on those
   // requests. Say so once instead of silently losing the speedup; /health
   // carries the same fact for a running server.
-  if (prepared.sampled && prepared.max_draft_tokens == 0 &&
+  if (otherwise_sampled && prepared.max_draft_tokens == 0 &&
       draft_backend_ != nullptr &&
       !draft_backend_->SupportsSampledProposals() &&
       request.max_emitted_tokens > 1) {
@@ -778,7 +649,8 @@ void SpeculativeVerifier::PrepareTargetOnlyStep(PreparedStep& prepared,
     prepared.capture_hidden = draft_backend_ != nullptr &&
                               draft_backend_->RequiresTargetHiddenStates();
     prepared.capture_logits =
-        (prepared.sampled || options_.retain_frontier_logits) &&
+        (prepared.sampled || options_.retain_frontier_logits ||
+         prepared.logprobs) &&
         !target_executor_->SupportsDeviceResidentSampling();
     return;
   }
@@ -787,6 +659,10 @@ void SpeculativeVerifier::PrepareTargetOnlyStep(PreparedStep& prepared,
     CostTimer cost_ar(g_cost.ar_ms);
     next = AdvanceCommittedToken(request.current_token, request.position);
     if (prepared.sampled && !working_sampler.CanSelectArgmax(next))
+      next = target_executor_->SampleLastLogits(working_sampler);
+    // Without sampling the device argmax publishes as-is; a banned one diverts
+    // to the sampler instead, exactly as a forced token would.
+    if (!prepared.sampled && working_sampler.IsBanned(next))
       next = target_executor_->SampleLastLogits(working_sampler);
   }
   if (g_cost.on) {
@@ -806,6 +682,19 @@ void SpeculativeVerifier::PrepareTargetOnlyStep(PreparedStep& prepared,
       .next_token_logits = std::move(logits),
       .hit_eos = IsStopToken(next, request.eos_id),
   };
+  if (prepared.logprobs) {
+    // The row that produced `next` is still the target's last row; capture
+    // before any later forward replaces it.
+    const auto row = target_executor_->CopyLastLogits();
+    sampling::CapturedTokenLogprobs logged;
+    logged.token = next;
+    logged.logprob = std::numeric_limits<double>::quiet_NaN();
+    if (!row.empty()) {
+      logged =
+          working_sampler.CaptureLogprobs(row, next, prepared.logprobs_top_n);
+    }
+    prepared.immediate->emitted_target_logprobs.push_back(std::move(logged));
+  }
 }
 
 void SpeculativeVerifier::PrepareProposalVerification(
@@ -884,8 +773,11 @@ void SpeculativeVerifier::PrepareProposalVerification(
   prepared.inputs.insert(prepared.inputs.end(), proposal.tokens.begin(),
                          proposal.tokens.end());
   prepared.capture_hidden = draft_backend_->RequiresTargetHiddenStates();
-  prepared.capture_logits =
-      prepared.sampled && !target_executor_->SupportsDeviceResidentSampling();
+  // An armed request needs every examined target row on the host for its
+  // logprobs report; device-resident rows arrive through
+  // CopyVerificationLogits instead (see the row helper below).
+  prepared.capture_logits = (prepared.sampled || prepared.logprobs) &&
+                            !target_executor_->SupportsDeviceResidentSampling();
   target_executor_->SaveState(request.position);
 }
 
@@ -908,6 +800,41 @@ SpeculativeVerifier::ProcessVerificationChunk(
   const std::size_t chunk_end = chunk_begin + chunk_rows;
   auto& working_sampler =
       prepared.sampled ? *prepared.working_sampler : sampler;
+  const bool armed = prepared.logprobs;
+  // One examined target row, whatever the forward downloaded or the device
+  // still stages. Consumed synchronously: the device span aliases executor
+  // scratch reused by the next row fetch.
+  const auto target_row_span = [&](std::size_t local_row) {
+    if (!verification.logits.empty() && verification.vocab_size > 0 &&
+        (local_row + 1) * verification.vocab_size <=
+            verification.logits.size()) {
+      return std::span<const float>(verification.logits)
+          .subspan(local_row * verification.vocab_size,
+                   verification.vocab_size);
+    }
+    if (device_resident_sampling) {
+      return target_executor_->CopyVerificationLogits(local_row);
+    }
+    return std::span<const float>{};
+  };
+  // Reports one emitted token from its target row, before the corresponding
+  // Accept, so the report matches the distribution the decision drew from.
+  // Anything without a host row keeps a placeholder, so the report stays
+  // parallel to the emitted tokens.
+  const auto capture_emitted = [&](std::size_t local_row,
+                                   tokenization::TokenId emitted) {
+    sampling::CapturedTokenLogprobs logged;
+    logged.token = emitted;
+    logged.logprob = std::numeric_limits<double>::quiet_NaN();
+    if (armed) {
+      const auto row = target_row_span(local_row);
+      if (!row.empty()) {
+        logged = working_sampler.CaptureLogprobs(row, emitted,
+                                                 prepared.logprobs_top_n);
+      }
+    }
+    prepared.row_logprobs.push_back(std::move(logged));
+  };
   const auto& token_probabilities = prepared.token_probabilities;
   const auto proposal_row = [&](std::size_t row) {
     const auto offset = row * proposal.candidates_per_token;
@@ -940,6 +867,17 @@ SpeculativeVerifier::ProcessVerificationChunk(
     if (row < verification.predictions.size() &&
         working_sampler.CanSelectArgmax(verification.predictions[row]))
       return verification.predictions[row];
+    // A banned raw argmax must never be emitted: download this one row and
+    // select host-side with the ban masked. Unbanned steps keep their path
+    // and never download here.
+    if (row < verification.predictions.size() &&
+        working_sampler.IsBanned(verification.predictions[row])) {
+      const auto host_row = target_row_span(row);
+      if (host_row.empty())
+        throw std::runtime_error(
+            "target executor did not retain a banned verification row");
+      return working_sampler.Sample(host_row);
+    }
     return device_resident_sampling
                ? target_executor_->SampleVerificationLogits(row,
                                                             working_sampler)
@@ -971,24 +909,47 @@ SpeculativeVerifier::ProcessVerificationChunk(
                            : target_executor_->CopyVerificationLogits(0);
       logits.assign(row.begin(), row.end());
     }
+    if (armed)
+      capture_emitted(0, next);
     sampler.SetRngState(working_sampler.rng_state());
     ++stats_.total_verification_steps;
     ++stats_.total_emitted_tokens;
-    return StepResult{.emitted_tokens = {next},
-                      .next_token = next,
-                      .next_token_logits = std::move(logits),
-                      .hit_eos = IsStopToken(next, eos_id)};
+    auto target_only_result = StepResult{.emitted_tokens = {next},
+                                         .next_token = next,
+                                         .next_token_logits = std::move(logits),
+                                         .hit_eos = IsStopToken(next, eos_id)};
+    if (armed) {
+      target_only_result.emitted_target_logprobs =
+          std::move(prepared.row_logprobs);
+    }
+    return target_only_result;
   }
   auto& accepted_count = prepared.accepted_count;
   tokenization::TokenId correction_token = 0;
+  // Set when the loop already holds the correction token's report: an
+  // accepted stop draft is reported before it enters the sampler's history.
+  bool correction_reported = false;
   for (; accepted_count < std::min(num_draft, chunk_end); ++accepted_count) {
     const auto local_row = accepted_count - chunk_begin;
     if (!prepared.sampled) {
       correction_token = verification.predictions[local_row];
+      // A drafted token equal to a banned target argmax is rejected: the
+      // correction is the masked argmax of this row. Downloads one row, and
+      // only for a banned step.
+      if (working_sampler.IsBanned(correction_token)) {
+        const auto host_row =
+            target_executor_->CopyVerificationLogits(local_row);
+        if (host_row.empty())
+          throw std::runtime_error(
+              "target executor did not retain a banned verification row");
+        correction_token = working_sampler.Sample(host_row);
+      }
       if (correction_token != proposal.tokens[accepted_count] ||
           IsStopToken(correction_token, eos_id)) {
         break;
       }
+      if (armed)
+        capture_emitted(local_row, proposal.tokens[accepted_count]);
       continue;
     }
     if (!random_sampling) {
@@ -1001,6 +962,8 @@ SpeculativeVerifier::ProcessVerificationChunk(
         correction_token = target_token;
         break;
       }
+      if (armed)
+        capture_emitted(local_row, target_token);
       working_sampler.Accept(target_token);
       continue;
     }
@@ -1008,17 +971,32 @@ SpeculativeVerifier::ProcessVerificationChunk(
     const auto [candidate_ids, candidate_probabilities] =
         proposal_row(accepted_count);
     if (device_resident_sampling) {
+      // The device accepts inside the call, so report the draft from the
+      // pre-call state; a rejection leaves the state untouched and only the
+      // entry's token and logprob are refreshed below.
+      if (armed)
+        capture_emitted(local_row, proposal.tokens[accepted_count]);
       const auto decision = target_executor_->VerifySampledToken(
           local_row, proposal.tokens[accepted_count], candidate_ids,
           candidate_probabilities, draft_probability, working_sampler);
       if (decision.accepted) {
         if (IsStopToken(proposal.tokens[accepted_count], eos_id)) {
           correction_token = proposal.tokens[accepted_count];
+          // The pre-call entry is this token's report, taken before the
+          // device accepted it. The assembly below must not report it again
+          // from the state after the accept.
+          correction_reported = armed;
           break;
         }
         continue;
       }
       correction_token = decision.token;
+      if (armed) {
+        // The pre-call entry reported the draft from this row. Drop it so
+        // the common assembly below reports the correction token exactly
+        // once, like every other rejection path.
+        prepared.row_logprobs.pop_back();
+      }
       break;
     }
 
@@ -1029,9 +1007,14 @@ SpeculativeVerifier::ProcessVerificationChunk(
     const double target_probability =
         target_distribution.probability(proposal.tokens[accepted_count]);
     if (working_sampler.Uniform() * draft_probability < target_probability) {
+      if (armed)
+        capture_emitted(local_row, proposal.tokens[accepted_count]);
       working_sampler.Accept(proposal.tokens[accepted_count]);
       if (IsStopToken(proposal.tokens[accepted_count], eos_id)) {
         correction_token = proposal.tokens[accepted_count];
+        // Reported above, before the Accept; the assembly below must not
+        // report it a second time.
+        correction_reported = armed;
         break;
       }
       continue;
@@ -1093,6 +1076,14 @@ SpeculativeVerifier::ProcessVerificationChunk(
       result.emitted_tokens.end(), proposal.tokens.begin(),
       proposal.tokens.begin() + static_cast<std::ptrdiff_t>(accepted_count));
   result.emitted_tokens.push_back(correction_token);
+  if (armed) {
+    // The correction row's report, with every accepted row already
+    // committed, unless the loop reported the token itself.
+    if (!correction_reported) {
+      capture_emitted(correction_row_index, correction_token);
+    }
+    result.emitted_target_logprobs = std::move(prepared.row_logprobs);
+  }
   result.next_token = correction_token;
   result.next_token_logits = std::move(frontier);
   result.hit_eos = std::any_of(
@@ -1103,7 +1094,8 @@ SpeculativeVerifier::ProcessVerificationChunk(
   stats_.total_accepted_tokens += accepted_count;
   ++stats_.total_verification_steps;
   stats_.total_emitted_tokens += result.emitted_tokens.size();
-  UpdateAdaptiveDraftLength(accepted_count, num_draft);
+  if (!draft_backend_->ProposalBypassesAdaptiveLength())
+    UpdateAdaptiveDraftLength(accepted_count, num_draft);
   if (prepared.sampled)
     sampler.SetRngState(working_sampler.rng_state());
   {
@@ -1154,11 +1146,13 @@ std::vector<SpeculativeVerifier::StepResult> SpeculativeVerifier::VerifyBatch(
     const auto& request = requests[index];
     auto& verifier = request.verifier;
     if (!verifier.use_batched_verification_ &&
-        request.sampler.config().can_use_unmodified_argmax()) {
+        request.sampler.config().can_use_unmodified_argmax() &&
+        !request.sampler.ForcedToken().has_value()) {
       request.sampler.config().Validate();
       result[index] = verifier.VerifySequentialStep(
           request.sequence, request.position, request.current_token,
-          request.eos_id, request.max_emitted_tokens);
+          request.eos_id, request.max_emitted_tokens, request.sampler,
+          request.sampler.logprobs_top_n(), request.sampler.logprobs_enabled());
       continue;
     }
     auto& step =
@@ -1248,15 +1242,38 @@ std::vector<SpeculativeVerifier::StepResult> SpeculativeVerifier::VerifyBatch(
 SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
     std::span<const tokenization::TokenId> current_sequence,
     std::uint32_t cur_pos, tokenization::TokenId current_token,
-    tokenization::TokenId eos_id, std::uint32_t max_emitted_tokens) {
-  FlushPendingDraftContext();
+    tokenization::TokenId eos_id, std::uint32_t max_emitted_tokens,
+    sampling::SamplerState& sampler, std::uint32_t logprobs_top_n,
+    bool logprobs) {
   if (max_emitted_tokens == 0) {
     throw std::invalid_argument(
         "speculative verification must emit at least one token");
   }
+  // Sequential verification only runs for requests the sampler leaves
+  // untouched (greedy, unpenalized, unconstrained), so a default sampler
+  // reproduces the exact target distribution for the logprobs report.
+  sampling::SamplerState capture_sampler;
+  const bool armed = logprobs;
+  std::vector<sampling::CapturedTokenLogprobs> row_logprobs;
+  const auto capture_row = [&](tokenization::TokenId emitted) {
+    sampling::CapturedTokenLogprobs logged;
+    logged.token = emitted;
+    logged.logprob = std::numeric_limits<double>::quiet_NaN();
+    if (armed) {
+      const auto row = target_executor_->CopyLastLogits();
+      if (!row.empty()) {
+        logged = capture_sampler.CaptureLogprobs(row, emitted, logprobs_top_n);
+      }
+    }
+    row_logprobs.push_back(std::move(logged));
+  };
   const std::uint32_t max_draft_tokens =
       max_emitted_tokens > 1
-          ? std::min(current_draft_length_, max_emitted_tokens - 1)
+          ? std::min(draft_backend_ != nullptr
+                         ? std::max(current_draft_length_,
+                                    draft_backend_->ExtraDraftCapacity())
+                         : current_draft_length_,
+                     max_emitted_tokens - 1)
           : 0;
   if (draft_backend_ == nullptr || max_draft_tokens == 0) {
     tokenization::TokenId next = 0;
@@ -1275,12 +1292,18 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
     ++stats_.total_verification_steps;
     ++stats_.total_emitted_tokens;
     const bool hit_eos = IsStopToken(next, eos_id);
-    return {.emitted_tokens = {next},
-            .accepted_count = 0,
-            .draft_count = 0,
-            .next_token = next,
-            .next_token_logits = std::move(next_logits),
-            .hit_eos = hit_eos};
+    auto ar_only_result =
+        StepResult{.emitted_tokens = {next},
+                   .accepted_count = 0,
+                   .draft_count = 0,
+                   .next_token = next,
+                   .next_token_logits = std::move(next_logits),
+                   .hit_eos = hit_eos};
+    if (armed) {
+      capture_row(next);
+      ar_only_result.emitted_target_logprobs = std::move(row_logprobs);
+    }
+    return ar_only_result;
   }
 
   // 1. Propose draft tokens
@@ -1304,12 +1327,18 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
     ++stats_.total_verification_steps;
     ++stats_.total_emitted_tokens;
     const bool hit_eos = IsStopToken(next, eos_id);
-    return {.emitted_tokens = {next},
-            .accepted_count = 0,
-            .draft_count = 0,
-            .next_token = next,
-            .next_token_logits = std::move(next_logits),
-            .hit_eos = hit_eos};
+    auto no_draft_result =
+        StepResult{.emitted_tokens = {next},
+                   .accepted_count = 0,
+                   .draft_count = 0,
+                   .next_token = next,
+                   .next_token_logits = std::move(next_logits),
+                   .hit_eos = hit_eos};
+    if (armed) {
+      capture_row(next);
+      no_draft_result.emitted_target_logprobs = std::move(row_logprobs);
+    }
+    return no_draft_result;
   }
 
   const std::size_t num_draft = proposal.tokens.size();
@@ -1348,6 +1377,9 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
   std::vector<tokenization::TokenId> target_predictions;
   target_predictions.reserve(num_draft);
 
+  // A banned prediction stops the forward loop like a mismatch: it is never
+  // pushed or reported, and the correction below reports this row instead.
+  bool banned_break = false;
   tokenization::TokenId input_token = current_token;
   std::uint32_t eval_pos = cur_pos;
   {
@@ -1356,6 +1388,14 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
       const auto target_prediction =
           target_executor_->ForwardToken(input_token, eval_pos);
       append_target_hidden(tentative_target_hidden);
+      if (sampler.IsBanned(target_prediction)) {
+        banned_break = true;
+        break;
+      }
+      // The row just produced this prediction; capture before the next
+      // forward replaces it.
+      if (armed)
+        capture_row(target_prediction);
       target_predictions.push_back(target_prediction);
       if (target_prediction != proposal.tokens[index] ||
           IsStopToken(target_prediction, eos_id)) {
@@ -1369,17 +1409,35 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
   while (accepted_count < target_predictions.size() &&
          !IsStopToken(proposal.tokens[accepted_count], eos_id) &&
          target_predictions[accepted_count] ==
-             proposal.tokens[accepted_count]) {
+             proposal.tokens[accepted_count] &&
+         !sampler.IsBanned(target_predictions[accepted_count])) {
     ++accepted_count;
   }
+
+  // A banned device argmax is corrected with the masked argmax of its row.
+  // Only a banned step downloads the row; every other step keeps the device
+  // token. The row is still staged by the forward that produced it.
+  const auto unbanned_correction = [&](tokenization::TokenId correction_token) {
+    if (sampler.IsBanned(correction_token)) {
+      const auto host_row = target_executor_->CopyLastLogits();
+      if (host_row.empty())
+        throw std::runtime_error(
+            "target executor did not retain a banned correction row");
+      return sampler.Sample(host_row);
+    }
+    return correction_token;
+  };
 
   if (accepted_count == num_draft) {
     CostTimer cost_verify_tail(g_cost.verify_ms);
     correction_token = target_executor_->ForwardToken(input_token, eval_pos);
+    correction_token = unbanned_correction(correction_token);
     if (options_.retain_frontier_logits) {
       const auto logits = target_executor_->CopyLastLogits();
       correction_logits.assign(logits.begin(), logits.end());
     }
+    if (armed)
+      capture_row(correction_token);
     append_target_hidden(tentative_target_hidden);
     committed_target_hidden = std::move(tentative_target_hidden);
   } else {
@@ -1395,10 +1453,17 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
     }
     correction_token =
         target_executor_->ForwardToken(replay_input, replay_pos, true);
+    correction_token = unbanned_correction(correction_token);
     if (options_.retain_frontier_logits) {
       const auto logits = target_executor_->CopyLastLogits();
       correction_logits.assign(logits.begin(), logits.end());
     }
+    // No capture here: the breaking loop iteration already reported this
+    // row's prediction, and the deterministic replay reproduces it exactly.
+    // Only the all-accepted tail above advances to a new row. A banned break
+    // reported nothing, so the masked correction reports this row instead.
+    if (armed && banned_break)
+      capture_row(correction_token);
     append_target_hidden(committed_target_hidden);
   }
 
@@ -1424,6 +1489,12 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
     result.emitted_tokens.push_back(proposal.tokens[i]);
   }
   result.emitted_tokens.push_back(correction_token);
+  if (armed) {
+    // One report per examined row: the accepted prefix plus the breaking
+    // prediction (which the replay reproduces as the correction), or the
+    // all-accepted tail's new row.
+    result.emitted_target_logprobs = std::move(row_logprobs);
+  }
   result.next_token = correction_token;
   result.next_token_logits = std::move(correction_logits);
 
@@ -1441,7 +1512,8 @@ SpeculativeVerifier::StepResult SpeculativeVerifier::VerifySequentialStep(
   stats_.total_verification_steps += 1;
   stats_.total_emitted_tokens += result.emitted_tokens.size();
 
-  UpdateAdaptiveDraftLength(accepted_count, num_draft);
+  if (!draft_backend_->ProposalBypassesAdaptiveLength())
+    UpdateAdaptiveDraftLength(accepted_count, num_draft);
 
   {
     CostTimer cost_book(g_cost.book_ms);
@@ -1536,8 +1608,11 @@ std::size_t SpeculativeVerifierSnapshot::SerializePersistent(
   return destination.size();
 }
 
-std::size_t SpeculativeVerifier::TrailingSnapshotBytes(
-    std::size_t bytes) const {
+std::size_t SpeculativeVerifier::SnapshotPayloadBytes() const {
+  if (draft_backend_ == nullptr) {
+    throw std::logic_error("speculative verifier has no draft backend to size");
+  }
+  std::size_t bytes = draft_backend_->SnapshotPayloadBytes();
   const auto checked_add = [&bytes](std::size_t value) {
     if (value > std::numeric_limits<std::size_t>::max() - bytes) {
       throw std::overflow_error("speculative snapshot size overflows");
@@ -1554,70 +1629,15 @@ std::size_t SpeculativeVerifier::TrailingSnapshotBytes(
   return bytes;
 }
 
-std::size_t SpeculativeVerifier::SnapshotPayloadBytes() const {
-  if (draft_backend_ == nullptr) {
-    throw std::logic_error("speculative verifier has no draft backend to size");
-  }
-  // A session whose prompt never reached the drafter cannot be captured: the
-  // drafter state would lag the target context. The capture path records a
-  // skip, exactly as MTP's position check does, and the queue drains at the
-  // first decode step instead.
-  if (HasPendingDraftContext()) {
-    throw std::logic_error(
-        "speculative drafter is not primed for the captured context");
-  }
-  return TrailingSnapshotBytes(draft_backend_->SnapshotPayloadBytes());
-}
-
-std::size_t SpeculativeVerifier::SnapshotPayloadBytesAtPosition(
-    std::uint32_t position) const {
-  if (draft_backend_ == nullptr) {
-    throw std::logic_error("speculative verifier has no draft backend to size");
-  }
-  if (HasPendingDraftContext()) {
-    throw std::logic_error(
-        "speculative drafter is not primed for the captured context");
-  }
-  return TrailingSnapshotBytes(
-      draft_backend_->SnapshotPayloadBytesAtPosition(position));
-}
-
 std::unique_ptr<SpeculativeVerifierSnapshot> SpeculativeVerifier::Snapshot()
     const {
   if (draft_backend_ == nullptr) {
     throw std::logic_error(
         "speculative verifier has no draft backend to snapshot");
   }
-  // Refuse like SnapshotPayloadBytes: an unprimed drafter cannot be
-  // persisted for the target's committed context.
-  if (HasPendingDraftContext()) {
-    throw std::logic_error(
-        "speculative drafter is not primed for the captured context");
-  }
   auto snapshot = std::unique_ptr<SpeculativeVerifierSnapshot>(
       new SpeculativeVerifierSnapshot());
   snapshot->draft_snapshot_ = draft_backend_->Snapshot();
-  snapshot->stats_ = stats_;
-  snapshot->current_draft_length_ = current_draft_length_;
-  snapshot->rolling_acceptance_ = rolling_acceptance_;
-  return snapshot;
-}
-
-std::unique_ptr<SpeculativeVerifierSnapshot>
-SpeculativeVerifier::SnapshotAtPosition(std::uint32_t position) const {
-  if (draft_backend_ == nullptr) {
-    throw std::logic_error(
-        "speculative verifier has no draft backend to snapshot");
-  }
-  // Refuse like Snapshot(): the drafter must already cover the position, and
-  // a queued prime means it does not.
-  if (HasPendingDraftContext()) {
-    throw std::logic_error(
-        "speculative drafter is not primed for the captured context");
-  }
-  auto snapshot = std::unique_ptr<SpeculativeVerifierSnapshot>(
-      new SpeculativeVerifierSnapshot());
-  snapshot->draft_snapshot_ = draft_backend_->SnapshotAtPosition(position);
   snapshot->stats_ = stats_;
   snapshot->current_draft_length_ = current_draft_length_;
   snapshot->rolling_acceptance_ = rolling_acceptance_;
@@ -1629,8 +1649,6 @@ void SpeculativeVerifier::RestoreSnapshot(
   if (draft_backend_ == nullptr || snapshot.draft_snapshot_ == nullptr) {
     throw std::invalid_argument("speculative verifier snapshot is incomplete");
   }
-  // The restored drafter state replaces any deferred priming.
-  pending_draft_contexts_.clear();
   const bool capture_hidden = draft_backend_->RequiresTargetHiddenStates();
   const auto target_layer_ids = capture_hidden
                                     ? draft_backend_->TargetHiddenLayerIds()
@@ -1648,8 +1666,6 @@ void SpeculativeVerifier::RestorePersistentSnapshot(
     throw std::logic_error(
         "speculative verifier has no draft backend to restore");
   }
-  // The restored drafter state replaces any deferred priming.
-  pending_draft_contexts_.clear();
   if (payload.size() < kVerifierPersistentHeaderBytes ||
       !std::equal(kVerifierPersistentMagic.begin(),
                   kVerifierPersistentMagic.end(), payload.begin()) ||
@@ -1747,7 +1763,12 @@ std::vector<tokenization::TokenId> SpeculativeVerifier::Generate(
 
   tokenization::TokenId first_token = Prime(prompt_tokens);
   sampling::SamplerState sampler(options.sampling, prompt_tokens);
-  if (!options.sampling.can_use_unmodified_argmax()) {
+  // A fresh sampler never reports a guard-forced token (firing needs accepted
+  // generated tokens); the live check keeps this path honest if that changes.
+  // A banned first token diverts the same way; the executor's post-check
+  // keeps the correction masked.
+  if (!options.sampling.can_use_unmodified_argmax() ||
+      sampler.ForcedToken().has_value() || sampler.IsBanned(first_token)) {
     first_token = target_executor_->SampleLastLogits(sampler);
   }
   const auto eos_id = target_executor_->GetEosTokenId();
@@ -1817,39 +1838,148 @@ std::vector<tokenization::TokenId> SpeculativeVerifier::Generate(
 
 tokenization::TokenId SpeculativeVerifier::ExtendPrompt(
     std::span<const tokenization::TokenId> tokens, std::uint32_t position,
-    bool compute_logits) {
+    bool compute_logits, std::uint32_t total_prompt_tokens) {
   if (tokens.empty() || position == 0) {
     throw std::invalid_argument(
         "prompt extension needs a nonempty retained prefix");
   }
   const bool capture =
       draft_backend_ != nullptr && draft_backend_->RequiresTargetHiddenStates();
-  target_executor_->SetPromptHiddenCapture(
-      capture, capture ? draft_backend_->TargetHiddenLayerIds()
-                       : std::span<const std::uint32_t>{});
-  // The capture buffer accumulates across prompt chunks (ForwardPromptBatch
-  // appends for a nonzero position), so this chunk's rows extend the queue
-  // without touching earlier ones.
-  const std::size_t hidden_offset =
-      target_executor_->GetPromptHiddenStates().size();
+  const auto target_layer_ids = capture ? draft_backend_->TargetHiddenLayerIds()
+                                        : std::span<const std::uint32_t>{};
+  const std::uint32_t prompt_skip =
+      capture ? PromptSkipTokens(*draft_backend_, position,
+                                 static_cast<std::uint32_t>(tokens.size()),
+                                 total_prompt_tokens)
+              : 0U;
+  // A chunk whose every row falls below the drafter's window boundary needs
+  // no features; skip the target's device-to-host hidden capture for it.
+  const bool chunk_capture = capture && prompt_skip < tokens.size();
+  target_executor_->SetPromptHiddenCapture(chunk_capture, target_layer_ids);
   const auto next =
       target_executor_->ForwardPromptSuffix(tokens, position, compute_logits);
+  if (compute_logits && target_logits_hook_) {
+    target_logits_hook_(next);
+  }
   if (capture) {
     const auto hidden = target_executor_->GetPromptHiddenStates();
-    const std::size_t hidden_count = hidden.size() - hidden_offset;
-    if (hidden.empty() || tokens.empty() || hidden_count % tokens.size() != 0) {
+    const bool whole_chunk_skipped = prompt_skip == tokens.size();
+    if (!whole_chunk_skipped &&
+        (hidden.empty() || hidden.size() % tokens.size() != 0)) {
+      throw std::runtime_error(
+          "target executor did not capture complete prompt hidden states");
+    }
+    if (!draft_backend_->AppendTargetContext(
+            {.prompt_tokens = tokens,
+             .prompt_hidden_states = whole_chunk_skipped
+                                         ? std::span<const float>{}
+                                         : std::span<const float>(hidden),
+             .hidden_size =
+                 whole_chunk_skipped ? 0 : hidden.size() / tokens.size(),
+             .first_token = next,
+             .skip_tokens = prompt_skip},
+            position)) {
       throw std::runtime_error("draft failed to append target prompt features");
     }
-    // Deferred with the prompt capture: the first drafter use after the
-    // first token drains it together with Prime()'s context.
-    QueueDraftContext(tokens, hidden_offset, hidden_count,
-                      hidden_count / tokens.size(), next, position, true);
+  }
+  return next;
+}
+
+std::optional<std::size_t> SpeculativeVerifier::SnapshotPayloadBytesAt(
+    std::uint32_t boundary, bool fresh_prompt) const {
+  if (draft_backend_ == nullptr) {
+    return std::nullopt;
+  }
+  const auto draft = draft_backend_->SnapshotPayloadBytesAt(boundary);
+  if (!draft.has_value()) {
+    return std::nullopt;
+  }
+  return *draft +
+         (fresh_prompt ? 0U : rolling_acceptance_.size()) * sizeof(float) +
+         sizeof(stats_) + sizeof(current_draft_length_);
+}
+
+tokenization::TokenId SpeculativeVerifier::PromptThrough(
+    std::span<const tokenization::TokenId> tokens, std::uint32_t position,
+    std::uint32_t boundary, std::uint32_t total_prompt_tokens,
+    const std::function<tokenization::TokenId()>& save_target,
+    std::unique_ptr<SpeculativeVerifierSnapshot>* snapshot) {
+  if (tokens.empty() || boundary <= position ||
+      boundary >= position + tokens.size() || snapshot == nullptr) {
+    throw std::invalid_argument("prompt checkpoint is outside the pass");
+  }
+  if (position == 0) {
+    Reset();
+    target_executor_->Reset();
+  }
+  const bool capture =
+      draft_backend_ != nullptr && draft_backend_->RequiresTargetHiddenStates();
+  const auto target_layer_ids = capture ? draft_backend_->TargetHiddenLayerIds()
+                                        : std::span<const std::uint32_t>{};
+  const auto head = tokens.first(boundary - position);
+  const auto tail = tokens.subspan(boundary - position);
+  const std::uint32_t head_skip =
+      capture ? PromptSkipTokens(*draft_backend_, position,
+                                 static_cast<std::uint32_t>(head.size()),
+                                 total_prompt_tokens)
+              : 0U;
+  const std::uint32_t tail_skip =
+      capture ? PromptSkipTokens(*draft_backend_, boundary,
+                                 static_cast<std::uint32_t>(tail.size()),
+                                 total_prompt_tokens)
+              : 0U;
+  const bool chunk_capture =
+      capture && (head_skip < head.size() || tail_skip < tail.size());
+  target_executor_->SetPromptHiddenCapture(chunk_capture, target_layer_ids);
+  const tokenization::TokenId next =
+      target_executor_->ForwardPromptSuffix(tokens, position, true);
+  if (target_logits_hook_) {
+    target_logits_hook_(next);
+  }
+  const tokenization::TokenId boundary_frontier = save_target();
+  std::span<const float> hidden;
+  std::size_t width = 0;
+  if (chunk_capture) {
+    hidden = target_executor_->GetPromptHiddenStates();
+    if (hidden.empty() || hidden.size() % tokens.size() != 0) {
+      throw std::runtime_error(
+          "target executor did not capture complete prompt hidden states");
+    }
+    width = hidden.size() / tokens.size();
+  }
+  const auto feed = [&](std::span<const tokenization::TokenId> part,
+                        std::uint32_t at, std::uint32_t skip,
+                        tokenization::TokenId first) {
+    const bool skipped = skip == part.size();
+    const DraftTargetContext context{
+        .prompt_tokens = part,
+        .prompt_hidden_states =
+            skipped
+                ? std::span<const float>{}
+                : hidden.subspan((at - position) * width, part.size() * width),
+        .hidden_size = skipped ? 0 : width,
+        .first_token = first,
+        .skip_tokens = skip,
+    };
+    const bool fed = at == 0 ? draft_backend_->PrimeTargetContext(context)
+                             : draft_backend_->AppendTargetContext(context, at);
+    if (!fed) {
+      throw std::runtime_error("draft failed to take target prompt features");
+    }
+  };
+  if (capture) {
+    feed(head, position, head_skip, boundary_frontier);
+  }
+  *snapshot = Snapshot();
+  if (capture) {
+    feed(tail, boundary, tail_skip, next);
   }
   return next;
 }
 
 tokenization::TokenId SpeculativeVerifier::Prime(
-    std::span<const tokenization::TokenId> prompt_tokens, bool compute_logits) {
+    std::span<const tokenization::TokenId> prompt_tokens, bool compute_logits,
+    std::uint32_t total_prompt_tokens) {
   if (prompt_tokens.empty()) {
     throw std::invalid_argument("speculative prompt must not be empty");
   }
@@ -1873,22 +2003,52 @@ tokenization::TokenId SpeculativeVerifier::Prime(
   const auto target_layer_ids = capture_hidden
                                     ? draft_backend_->TargetHiddenLayerIds()
                                     : std::span<const std::uint32_t>{};
-  target_executor_->SetPromptHiddenCapture(capture_hidden, target_layer_ids);
+  const std::uint32_t prompt_skip =
+      capture_hidden
+          ? PromptSkipTokens(*draft_backend_, 0U,
+                             static_cast<std::uint32_t>(prompt_tokens.size()),
+                             total_prompt_tokens)
+          : 0U;
+  // A chunk whose every row falls below the drafter's window boundary needs
+  // no features; skip the target's device-to-host hidden capture for it.
+  const bool capture = capture_hidden && prompt_skip < prompt_tokens.size();
+  target_executor_->SetPromptHiddenCapture(capture, target_layer_ids);
   const tokenization::TokenId first_token =
       target_executor_->ForwardPromptSuffix(prompt_tokens, 0, compute_logits);
+  if (compute_logits && target_logits_hook_) {
+    target_logits_hook_(first_token);
+  }
   if (capture_hidden) {
     const auto prompt_hidden = target_executor_->GetPromptHiddenStates();
-    if (prompt_hidden.empty() ||
-        (prompt_hidden.size() % prompt_tokens.size()) != 0) {
+    const bool whole_chunk_skipped = prompt_skip == prompt_tokens.size();
+    if (!whole_chunk_skipped &&
+        (prompt_hidden.empty() ||
+         (prompt_hidden.size() % prompt_tokens.size()) != 0)) {
       throw std::runtime_error(
           "target executor did not capture complete prompt hidden states");
     }
-    // Drafter priming is deferred out of time-to-first-token: the first
-    // drafter use after the first token (proposal, committed-token append)
-    // drains the queue.
-    QueueDraftContext(prompt_tokens, 0, prompt_hidden.size(),
-                      prompt_hidden.size() / prompt_tokens.size(), first_token,
-                      0, false);
+    const DraftTargetContext context{
+        .prompt_tokens = prompt_tokens,
+        .prompt_hidden_states = whole_chunk_skipped
+                                    ? std::span<const float>{}
+                                    : std::span<const float>(prompt_hidden),
+        .hidden_size = whole_chunk_skipped
+                           ? 0
+                           : prompt_hidden.size() / prompt_tokens.size(),
+        .first_token = first_token,
+        .skip_tokens = prompt_skip,
+    };
+    bool primed = false;
+    {
+      CostTimer cost_prime(g_cost.prime_ms);
+      primed = draft_backend_->PrimeTargetContext(context);
+    }
+    if (g_cost.on) {
+      g_cost.prime_tokens += prompt_tokens.size();
+    }
+    if (!primed) {
+      throw std::runtime_error("draft backend failed to prime target context");
+    }
   }
   return first_token;
 }

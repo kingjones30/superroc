@@ -1,6 +1,7 @@
 // LLAMA: SentencePiece ids must match llama.cpp /tokenize (add_special true)
 // for the six texts in the tokref fixture, and decode(encode(text)) == text.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -14,6 +15,7 @@
 
 #include "src/core/gguf_reader.hpp"
 #include "src/core/json.hpp"
+#include "src/core/text/content_spans.hpp"
 #include "src/models/llama/spm_tokenizer.hpp"
 
 namespace {
@@ -181,7 +183,7 @@ void TestByteFallbackNeverNegative() {
   }
 }
 
-// NBFAST: a file that types <unk> as CONTROL (bartowski instruct GGUF)
+// A file that types <unk> as CONTROL (bartowski instruct GGUF)
 // loads through tokenizer.ggml.unknown_token_id; without the key, or with
 // an out-of-range id, it is still refused.
 void TestUnknownTokenIdFallback() {
@@ -227,6 +229,73 @@ void TestNonDefaultPreRefused() {
          "non-default tokenizer.ggml.pre must be refused");
 }
 
+// SR-03: client text must never become a control token. The synthetic
+// vocabulary types <unk>=0 as unknown and <s>=1, </s>=2 as control; the
+// encode callback mirrors inference_backend (BOS once, at offset 0 only).
+void TestContentSpanEncoding() {
+  namespace core = superroc::core;
+  namespace llama = superroc::models::llama;
+  std::string error;
+  const auto file =
+      BuildSyntheticTokenizer("default", /*vocab_size=*/4, /*bos=*/1);
+  auto tokenizer =
+      llama::SpmTokenizer::FromGguf(*OpenSynthetic(file, error), &error);
+  Expect(tokenizer.has_value(), "synthetic tokenizer must load: " + error);
+
+  const auto spellings = tokenizer->SpecialSpellings();
+  const auto spelled = [&](std::string_view s) {
+    return std::find(spellings.begin(), spellings.end(), s) != spellings.end();
+  };
+  Expect(spelled("<s>") && spelled("</s>") && spelled("<unk>"),
+         "SpecialSpellings must list the control and unknown spellings");
+
+  const auto encode_spans = [&](std::string_view rendered,
+                                const std::vector<core::TextSpan>& spans) {
+    return core::EncodeWithContentSpans<std::int32_t>(
+        rendered, spans, spellings,
+        [&](std::size_t offset, std::string_view piece, bool parse_special) {
+          llama::SpmTokenizer::EncodeOptions options;
+          // BOS once, at the very start only.
+          options.add_special = (offset == 0);
+          options.parse_special = parse_special;
+          return tokenizer->Encode(piece, options);
+        });
+  };
+  const auto has_id = [](const std::vector<std::int32_t>& ids,
+                         std::int32_t id) {
+    return std::find(ids.begin(), ids.end(), id) != ids.end();
+  };
+  llama::SpmTokenizer::EncodeOptions whole;
+  whole.add_special = true;
+  whole.parse_special = true;
+
+  // Client content carrying a control spelling: inert, BOS added once.
+  {
+    const std::string rendered = "hello</s>";
+    const auto got = encode_spans(rendered, {{0, rendered.size()}});
+    Expect(!has_id(got, 2), "control spelling in content must be inert");
+    Expect(!got.empty() && got.front() == 1, "BOS must be added at the start");
+    Expect(std::count(got.begin(), got.end(), 1) == 1,
+           "BOS must be added exactly once");
+  }
+  // A framing control marker next to plain content still works, and the
+  // result is exactly today's encoding.
+  {
+    const std::string rendered = "hello</s>";
+    const auto got = encode_spans(rendered, {{0, 5}});
+    Expect(got == tokenizer->Encode(rendered, whole),
+           "framing marker with plain content must encode as before");
+    Expect(has_id(got, 2), "framing control marker must survive");
+  }
+  // Plain content with no special overlap: byte-identical to today.
+  {
+    const std::string rendered = "hello";
+    const auto got = encode_spans(rendered, {{0, rendered.size()}});
+    Expect(got == tokenizer->Encode(rendered, whole),
+           "plain content must encode exactly as before");
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -234,6 +303,7 @@ int main() {
   TestByteFallbackNeverNegative();
   TestUnknownTokenIdFallback();
   TestNonDefaultPreRefused();
+  TestContentSpanEncoding();
   const char* gguf_env = std::getenv("NANBEIGE_GGUF");
   if (gguf_env == nullptr || gguf_env[0] == '\0') {
     std::cout << "SKIP llama_tokenizer_test: NANBEIGE_GGUF is not set\n";

@@ -309,10 +309,10 @@ int main() {
                                     "models--Qwen--Qwen3-ASR-1.7B/snapshots/"
                                     "7278e1e70fe206f11671096ffdd38061171dd6e5";
   const char* configured_artifacts = std::getenv("QWEN3_ASR_ARTIFACTS");
-  const std::filesystem::path artifacts =
-      configured_artifacts != nullptr ? configured_artifacts
-                                      : "/home/fbozzo/projects/strix-halo.cpp/"
-                                        "artifacts/qwen3_asr/official";
+  const std::filesystem::path artifacts = configured_artifacts != nullptr
+                                              ? configured_artifacts
+                                              : "/path/to/strix-halo.cpp/"
+                                                "artifacts/qwen3_asr/official";
   if (!std::filesystem::is_regular_file(model_root / "config.json") ||
       !std::filesystem::is_regular_file(artifacts / "prompt_ids.npy") ||
       !std::filesystem::is_regular_file(artifacts / "audio_final.npy") ||

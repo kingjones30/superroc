@@ -73,6 +73,16 @@ public:
     [[nodiscard]] bool TryReserveSnapshot(std::size_t, std::size_t, bool,
                                           SnapshotPurpose,
                                           std::span<const ContinuationToken>);
+    /// Dual in-pass captures: a second reservation
+    /// for the earlier P boundary. Refusing it never disturbs the stable
+    /// slot-0 reservation.
+    [[nodiscard]] bool TryReserveSecondSnapshot(
+        std::size_t, std::size_t, SnapshotPurpose,
+        std::span<const ContinuationToken>);
+    [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> CaptureSecond();
+    std::size_t PublishSecondSnapshot(
+        std::vector<ContinuationToken>,
+        std::shared_ptr<const ContinuationSnapshot>, bool);
     void SkipSnapshot(SnapshotEventReason, std::size_t, std::size_t) noexcept;
     std::size_t PublishSnapshot(std::vector<ContinuationToken>,
                                 std::shared_ptr<const ContinuationSnapshot>,
@@ -86,11 +96,15 @@ public:
     [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> Capture();
     void PreparePrefill(std::size_t tokens);
     [[nodiscard]] ComponentCacheMetrics Metrics() const;
+    /// `canonical_min_pass`: see cache::CapturePlanRequest (0 = off).
     [[nodiscard]] std::vector<std::size_t> PlannedCaptures(
-        std::size_t stable) const;
+        std::size_t stable, std::size_t canonical_min_pass = 0) const;
 
   private:
     friend class ComponentTextCache;
+    [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> CaptureAt(int slot);
+    std::size_t PublishAt(int slot, std::vector<ContinuationToken>,
+                          std::shared_ptr<const ContinuationSnapshot>, bool);
     std::unique_ptr<Impl> impl_;
   };
   ComponentTextCache(std::shared_ptr<TextModelRunner>, std::size_t,
@@ -156,14 +170,38 @@ public:
   [[nodiscard]] std::size_t CaptureBytes() const;
   [[nodiscard]] std::size_t CaptureBytes(std::size_t boundary) const;
   [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> Capture();
+  /// Dual in-pass captures: component-cache-only second
+  /// reservation/capture/publish for the earlier P boundary.
+  [[nodiscard]] bool TryReserveSecondSnapshot(
+      std::size_t, std::size_t, SnapshotPurpose,
+      std::span<const ContinuationToken>);
+  [[nodiscard]] std::unique_ptr<TextRunnerSnapshot> CaptureSecond();
+  std::size_t PublishSecondSnapshot(std::vector<ContinuationToken>,
+                                    std::shared_ptr<const ContinuationSnapshot>,
+                                    bool);
   void PreparePrefill(std::size_t tokens);
   [[nodiscard]] std::optional<ComponentCacheMetrics> Metrics() const;
   [[nodiscard]] std::vector<std::size_t> PlannedCaptures(
-      std::size_t stable) const;
+      std::size_t stable, std::size_t canonical_min_pass = 0) const;
 
 private:
   ContinuationCache::Lease legacy_;
   std::unique_ptr<ComponentTextCache::Lease> component_;
 };
+/// SUPERROC_TAIL_CAPTURE: tokens before the prompt end for one optional late
+/// prompt checkpoint (0 = off). Read once from the environment.
+std::size_t SuperrocTailCaptureTokens();
+/// Dual in-pass checkpoints: the earlier in-pass boundary
+/// P = (prompt_tokens - tail_tokens) / 64 * 64, valid only strictly between the
+/// reused frontier and the stable capture target: at least 512 fed tokens
+/// before it, at least 64 tokens below the target, the target strictly inside
+/// the prompt, and tail_tokens within 192 (a wider tail would leave P more
+/// than kPairTailRows - 1 behind the pass end). nullopt keeps today's
+/// single-capture behaviour.
+std::optional<std::size_t> SuperrocTailPoint(std::size_t prompt_tokens,
+                                             std::size_t tail_tokens,
+                                             std::size_t reused,
+                                             std::size_t stable);
+
 }  // namespace superroc::server
 #endif

@@ -1,4 +1,4 @@
-// Super ROC M2 R1: the model-family registry.
+// The model-family registry.
 //
 // Every architecture name the engine recognises is spelled once, here. Code
 // asks FindModelFamily(arch) / IsModelFamily(arch, id) instead of comparing
@@ -78,9 +78,20 @@ constexpr const ModelFamily* FindModelFamily(std::string_view arch) noexcept {
   return nullptr;
 }
 
+// Same lookup order as FindModelFamily, without comparing a pointer into the
+// table with nullptr (GCC does not accept that in a constant expression).
 constexpr bool IsModelFamily(std::string_view arch, ModelFamilyId id) noexcept {
-  const ModelFamily* family = FindModelFamily(arch);
-  return family != nullptr && family->id == id;
+  for (const ModelFamily& family : kModelFamilies) {
+    if (!family.prefix_match && family.arch == arch) {
+      return family.id == id;
+    }
+  }
+  for (const ModelFamily& family : kModelFamilies) {
+    if (family.prefix_match && arch.starts_with(family.arch)) {
+      return family.id == id;
+    }
+  }
+  return false;
 }
 
 /// lfm2 (dense) and lfm2moe share the LFM2 runtime (short-conv + GQA, LFM2

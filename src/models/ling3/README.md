@@ -108,7 +108,7 @@ is what `kda_layer_test` / `mla_layer_test` / `moe_router_test` exist to make
 routine.
 
 End-to-end token equality on the real artifact is checked by
-`tools/ling3_ref_main.cpp` against `llama-completion`; see `~/lg/gate_a.sh`.
+`tools/ling3_ref_main.cpp` against `llama-completion`.
 
 ## Running it
 
@@ -134,8 +134,8 @@ runs at roughly a second per token on a dozen threads.
 ## Not done
 
 - **No ROCm session.** The kernels need superroc's `hip::DeviceModel` / `Executor` /
-  `Session`, which do not exist for `ling3`. LK's and LX's headers are ready and
-  LK's KDA state layout already matches this package's byte for byte, so the
+  `Session`, which do not exist for `ling3`. The KDA and MoE headers are ready
+  and the KDA state layout already matches this package's byte for byte, so the
   remaining work is the runtime plumbing, not the semantics.
 - **Speculative decoding.** The MTP block is bound and validated but never
   executed; the routing branch rejects `--speculative` for Ling.

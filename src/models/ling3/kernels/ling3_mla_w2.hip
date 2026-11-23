@@ -1,4 +1,4 @@
-// ling3_mla_w2.hip — LW1 (wave 2): two-pass WMMA absorbed-MLA prefill attention.
+// ling3_mla_w2.hip — two-pass WMMA absorbed-MLA prefill attention.
 // See ling3_mla_w2.hpp for the design and the contracts.
 //
 // Arithmetic (identical per (token, head) to mla_attn / mla_attn_tok):
@@ -23,7 +23,7 @@
 // ascending position order inside one block per output tile. Same inputs,
 // same launch parameters -> bit-identical output run to run.
 //
-// Bounds discipline (LF1's lf_audit model — this lane faults no GPUs):
+// Bounds discipline:
 // every global index is enumerated here and re-checked host-side by
 // w2_audit() before any launch; the kernels themselves add row guards.
 //   q16/k16 rows  < ceil(R/64)*64 <= kMlaW2Rows / cap   (R <= 2048, cap >= n_pos, both mult of 64)
@@ -417,7 +417,7 @@ __global__ __launch_bounds__(256) void w2_out_kernel(
 // host side: audit + launch
 // ---------------------------------------------------------------------------
 
-// LF1's lf_audit model: enumerate every invariant the kernels rely on and
+// The lf_audit model: enumerate every invariant the kernels rely on and
 // refuse the launch (caller falls back to mla_attn_tok) if any fails. No GPU
 // fault may come from a bad index.
 bool w2_audit(const char * where, const MlaShape & sh, const MlaCache & cache,

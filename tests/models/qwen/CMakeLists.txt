@@ -71,12 +71,12 @@ add_qwen_cpu_test(lfm2_chat_test
   "cpu;models;qwen;lfm2")
 set_tests_properties(lfm2_tokenizer_test lfm2_chat_test PROPERTIES
   SKIP_RETURN_CODE 77)
-# HT2: a special spelling straddling a content span edge stays text (KAT_GGUF).
+# A special spelling straddling a content span edge stays text (KAT_GGUF).
 add_qwen_cpu_test(qwen_encode_straddle_test
   tests/models/qwen/qwen_encode_straddle_test.cpp
   "cpu;models;qwen;external-model")
 set_tests_properties(qwen_encode_straddle_test PROPERTIES SKIP_RETURN_CODE 77)
-# HTC: client tool text renders as content (no model file).
+# Client tool text renders as content (no model file).
 add_qwen_cpu_test(lfm2_render_spans_test
   tests/models/lfm2/lfm2_render_spans_test.cpp
   "cpu;models;lfm2")
@@ -103,6 +103,9 @@ if (ENGINE_ENABLE_HIP)
       SKIP_RETURN_CODE 77)
   endfunction()
 
+  add_qwen_hip_test(qwen_int4_prefill_test
+    tests/models/qwen/hip/int4_prefill_test.cpp
+    "hip;gpu;kernels;qwen;prefill")
   add_qwen_hip_test(glimmer_s1_test
     tests/models/glimmer/hip/glimmer_s1_test.cpp
     "hip;gpu;kernels;glimmer;s1")  # GLIMMER
@@ -121,7 +124,7 @@ if (ENGINE_ENABLE_HIP)
   add_qwen_hip_test(lfm2_attention_test  # LFM2
     tests/models/lfm2/hip/lfm2_attention_test.cpp  # LFM2
     "hip;gpu;kernels;lfm2")  # LFM2
-  add_qwen_hip_test(lfm2_kv_f16_test  # LFM2 (SPEC3: fp16 token-major KV)
+  add_qwen_hip_test(lfm2_kv_f16_test  # LFM2
     tests/models/lfm2/hip/lfm2_kv_f16_test.cpp  # LFM2
     "hip;gpu;kernels;lfm2")  # LFM2
   add_qwen_hip_test(glimmer_s1_token
@@ -132,10 +135,10 @@ if (ENGINE_ENABLE_HIP)
     "hip;gpu;kernels;glimmer;s2;prefill;external-model")  # GLIMMER
   add_qwen_hip_test(glimmer_s3_gemm
     tests/models/glimmer/hip/glimmer_s3_gemm.cpp
-    "hip;gpu;kernels;glimmer;s3;gemm;external-model")  # GLM
+    "hip;gpu;kernels;glimmer;s3;gemm;external-model")
   add_qwen_hip_test(glimmer_s4_probe
     tests/models/glimmer/hip/glimmer_s4_probe.cpp
-    "hip;gpu;kernels;glimmer;s4;probe;external-model")  # GLM
+    "hip;gpu;kernels;glimmer;s4;probe;external-model")
 
   add_qwen_hip_test(qwen_hip_device_gate_test
     tests/models/qwen/hip/device_gate_test.cpp
@@ -168,7 +171,7 @@ if (ENGINE_ENABLE_HIP)
     "hip;gpu;kernels;qwen;qwen-kernel-oracle;slow;attention;prefill;kat;opt-kat-attn-wmma")  # KAT-ATTN
   add_qwen_hip_test(qwen_attention_glimmer_wmma_prefill_ops_test
     tests/models/glimmer/hip/attention/glimmer_wmma_prefill_ops_test.cpp
-    "hip;gpu;kernels;qwen;qwen-kernel-oracle;slow;attention;prefill;glimmer;opt-lga-wmma")  # LGA
+    "hip;gpu;kernels;qwen;qwen-kernel-oracle;slow;attention;prefill;glimmer;opt-lga-wmma")
   add_qwen_hip_test(qwen_attention_projection_ops_test
     tests/models/qwen/hip/attention/projection_ops_test.cpp
     "hip;gpu;kernels;qwen;qwen-kernel-oracle;slow;attention;ssm;projection")
@@ -208,7 +211,7 @@ if (ENGINE_ENABLE_HIP)
     tests/models/qwen/hip/integration_test.cpp
     "hip;gpu;kernels;qwen;module;l2")
 
-  # KDG SPEC1 step 4: KAT device-dispatch bit-identity (old host loop vs
+  # KAT device-dispatch bit-identity (old host loop vs
   # new device dispatch on the real MTP block, 8 vectors, memcmp).
   add_qwen_hip_test(qwen_kat_dispatch_test
     tests/models/qwen/hip/qwen_kat_dispatch_test.hip

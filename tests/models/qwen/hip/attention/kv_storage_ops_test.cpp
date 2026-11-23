@@ -71,7 +71,7 @@ superroc::core::ModelConfig ProductionQwen27BConfig() {
 // four KV heads is the production 27B shape (24 query heads of 256).
 void TestCausalDecodeRows(unsigned kv_heads) {
   using superroc::test::DeviceBuffer;
-  constexpr unsigned dim = 256, rows = 8, context = 65544, layer = 1;
+  constexpr unsigned dim = 256, rows = 16, context = 65560, layer = 1;
   const unsigned heads = 6 * kv_heads, width = heads * dim;
   const std::size_t cache_size = std::size_t{2} * context * kv_heads * dim;
   std::vector<float> query(rows * width), gate(query.size()), cache(cache_size);
@@ -92,7 +92,7 @@ void TestCausalDecodeRows(unsigned kv_heads) {
   DeviceBuffer<float> scratch(rows * row_scratch);
   for (bool fp16 : {false, true}) {
     for (bool gated : {false, true}) {
-      for (unsigned batch : {1U, 2U, 3U, rows}) {
+      for (unsigned batch : {1U, 2U, 3U, 8U, 9U, rows}) {
         for (unsigned start : {0U, 17U, 120U, 124U, 127U, 128U, 504U, 508U,
                                511U, 512U, 8192U, 32768U, 65536U}) {
           float* const cache32 = fp16 ? nullptr : kv.data();

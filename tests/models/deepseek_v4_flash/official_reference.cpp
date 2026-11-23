@@ -16,7 +16,6 @@
 
 #include "src/core/crypto/sha256.hpp"
 #include "src/core/json.hpp"
-#include "src/core/previous_name_compat.hpp"
 #include "src/models/deepseek_v4_flash/engine.hpp"
 
 namespace superroc::testing::ds4 {
@@ -94,9 +93,8 @@ void ScoreOfficialReference(
   Require(input.good(), "cannot open official continuation fixture");
   const std::string bytes{std::istreambuf_iterator<char>(input), {}};
   const auto fixture = json::parse(bytes);
-  Require(::superroc::core::MatchesCurrentOrPrevious(
-              fixture.member_str("schema"),
-              "superroc.ds4-official-continuations.v1"),
+  Require((fixture.member_str("schema")) ==
+              ("superroc.ds4-official-continuations.v1"),
           "unexpected official fixture schema");
   const auto& cases = Field(fixture, "cases").items();
   Require(cases.size() == 105, "incomplete official fixture");

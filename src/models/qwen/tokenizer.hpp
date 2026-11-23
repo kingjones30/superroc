@@ -91,7 +91,7 @@ public:
         }
       }
     }
-    // GLM: <|eot|> ends a Muse turn. <|eom|> is only a channel boundary.
+    // <|eot|> ends a Muse Glimmer turn. <|eom|> is only a channel boundary.
     // Qwen pre-tokenizers do not consult eot_token_id_.
     return pre_tokenizer_ == PreTokenizer::kLlama4 && token == eot_token_id_;
   }
@@ -105,6 +105,18 @@ public:
     return pre_tokenizer_ == PreTokenizer::kLlama4;
   }
   [[nodiscard]] bool AddBosToken() const noexcept { return add_bos_token_; }
+  /// The BOS id a RAW prompt (no chat template) has to start with, or nullopt
+  /// when this tokenizer does not ask for one: the GGUF
+  /// tokenizer.ggml.add_bos_token flag together with a BOS id inside the
+  /// vocabulary. Encode() stays flag-blind, so raw-prompt callers prepend
+  /// RawPromptBos() themselves and chat renders keep their own framing.
+  [[nodiscard]] std::optional<TokenId> RawPromptBos() const noexcept {
+    if (!add_bos_token_ || bos_token_id_ == kInvalidTokenId ||
+        bos_token_id_ >= id_to_token_.size()) {
+      return std::nullopt;
+    }
+    return bos_token_id_;
+  }
   /// Pieces before BPE. Round-trip alone does not prove the splitter.
   [[nodiscard]] std::vector<std::string> PreTokenizePieces(
       std::string_view text) const;
@@ -120,8 +132,8 @@ private:
     kNone,
     kQwen35,
     kLlama4,  // GLIMMER
-    kLlama3,  // LFM2
-    kFlint,   // numbers 1-3, CJK/kana isolated, then GPT-4o / kLlama4
+    kLlama3,
+    kFlint,  // numbers 1-3, CJK/kana isolated, then GPT-4o / kLlama4
   };
 
   struct PairHash {
@@ -157,12 +169,12 @@ private:
   std::array<TokenId, 256> byte_tokens_{};
   TokenId bos_token_id_{kInvalidTokenId};
   TokenId eos_token_id_{kInvalidTokenId};
-  TokenId eot_token_id_{kInvalidTokenId};  // GLM: tokenizer.ggml.eot_token_id
+  TokenId eot_token_id_{kInvalidTokenId};  // tokenizer.ggml.eot_token_id
   TokenId endoftext_token_id_{kInvalidTokenId};
   TokenId pad_token_id_{kInvalidTokenId};
   bool add_bos_token_{false};  // GLIMMER: metadata flag, not Encode's default
   PreTokenizer pre_tokenizer_{PreTokenizer::kNone};
-  bool ignore_merges_{false};  // LFM2
+  bool ignore_merges_{false};
   // Flint generation_config eos extras: <|user|> <|observation|> <|developer|>.
   std::array<TokenId, 3> flint_stop_ids_{kInvalidTokenId, kInvalidTokenId,
                                          kInvalidTokenId};

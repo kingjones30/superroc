@@ -1,5 +1,5 @@
 #pragma once
-// superroc_fp4_wmma.hpp — LS3 phase 3: W8A8 int8-WMMA GEMM for the ROCmFP4
+// superroc_fp4_wmma.hpp — W8A8 int8-WMMA GEMM for the ROCmFP4
 // prefill.
 //
 // The phase-1/2 tiled kernel (superroc_fp4_gemm.hip) dequantises FP4 weights to
@@ -12,8 +12,8 @@
 // This file is the Ling instantiation of that design, built from superroc's
 // WKQuantA8BlockedWmmaGEMMKernel skeleton (src/models/qwen/hip/kernels/
 // prefill_quant_gemm.hpp) and the fork's FP4->int8 decode
-// (ggml/rocmfp4/rocmfp4_hip_codebook.cuh). It is a NEW file in the LS3 zone:
-// no qwen file, no other lane's file is touched.
+// (ggml/rocmfp4/rocmfp4_hip_codebook.cuh). It is a NEW file:
+// no qwen file, no other file is touched.
 //
 // Layouts
 //   * weights: ggml rows exactly as superroc_fp4_moe.hpp/superroc_fp4_gemm.hpp
@@ -38,7 +38,7 @@
 // int32 sum and one k-ascending float += per 32-block per output element.
 // No atomics anywhere; same binary twice -> bit-identical output.
 //
-// Bounds discipline (this lane faults no GPUs):
+// Bounds discipline (no GPU fault from a bad index):
 //   * weight reads: the fetch clamps row to n-1 and k-block to num_kb-1 and
 //     zeroes the block scale by a multiply (superroc opt-c179: bit-identical to
 //     zero-filling, and it keeps every load inside the row's blocks).
@@ -94,7 +94,7 @@ int superroc_fp4_wmma_gemm_grp_bk(int qtype, const void* W,
 
 /// Dense W8A8 WMMA GEMM: y[t * n + r] = dot(W_row_r, x_t) for t in [0, m),
 /// x pre-quantised by superroc_fp4_wmma_quant(x, nullptr, nullptr, q8_x, m, k).
-/// MG64: 64-token-block grouped GEMM: same contract as
+/// 64-token-block grouped GEMM: same contract as
 /// superroc_fp4_wmma_gemm_grp_bk(..., 4), but each block covers BN = 64 tokens
 /// indexed through the grp_zb block prefix (grp_zb[n_groups] = total blocks,
 /// built by superroc_fp4_moe_group_blocks). total_tiles must be >= the total
@@ -108,7 +108,7 @@ int superroc_fp4_wmma_gemm_grp64(int qtype, const void* W, size_t expert_stride,
                                  const float* y_scale, int k, int n,
                                  const int* grp_zb);
 
-/// KPF2: device-sized grouped W8A8 WMMA GEMM. Same contract as
+/// Device-sized grouped W8A8 WMMA GEMM. Same contract as
 /// superroc_fp4_wmma_gemm_grp_bk, but n_groups/total_tiles are read from the
 /// 32k grouper's hdr_dev (4 device words) inside the kernel; the grid is
 /// dim3(row_tiles, max_tiles) with max_tiles = GroupQ8Tiles(slots,
@@ -120,7 +120,7 @@ int superroc_fp4_wmma_gemm_grp_bk_dev(
     const int* hdr_dev, int max_tiles, const void* q8_x, float* y,
     const float* y_scale, int k, int n, int bk);
 
-/// KPF2: device-sized MG64 grouped GEMM. Same contract as
+/// Device-sized MG64 grouped GEMM. Same contract as
 /// superroc_fp4_wmma_gemm_grp64 with hdr_dev/max_tiles in place of
 /// n_groups/total_tiles (grp_zb still passed; built by
 /// superroc_fp4_moe_group_blocks_dev).

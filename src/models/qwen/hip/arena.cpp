@@ -12,7 +12,7 @@
 
 #include "src/core/hip/hip_utils.hpp"
 #include "src/core/hip/snapshot_transfer.hpp"
-#include "src/models/glimmer/hip/glimmer_attention.hpp"  // LGA
+#include "src/models/glimmer/hip/glimmer_attention.hpp"
 #include "src/models/qwen/hip/detail/attention_policy.hpp"
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
@@ -418,7 +418,7 @@ QwenGpuMemoryUsage QwenGpuArena::EstimateMemoryUsage(
       CheckedMultiply(total_kv, 2),
       policy.UsesFp16AttentionKv() ? sizeof(std::uint16_t) : sizeof(float),
       &state);
-  // LGA: the fp16 plane is additive. The fp32 allocation above stays.
+  // The fp16 plane is additive. The fp32 allocation above stays.
   if (policy.glimmer_fp16_kv) {
     AddAllocation(CheckedMultiply(total_kv, 2), sizeof(std::uint16_t), &state);
   }
@@ -452,7 +452,7 @@ std::size_t QwenGpuArena::SnapshotPayloadBytes(
       policy_.UsesFp16AttentionKv() ? 2 * sizeof(std::uint16_t)
                                     : 2 * sizeof(float));
   const std::size_t state_bytes = GetMemoryUsage().request_state_bytes - unused;
-  // PGA (measured): LGA's AddAllocation above charges the additive token-major
+  // AddAllocation above charges the additive token-major
   // fp16 plane to request_state_bytes, but SaveSnapshot's payload is KV +
   // conv + deltanet only -- RestoreSnapshot rebuilds the fp16 plane by casting
   // the restored fp32 rows. So the estimate outran the payload and every
@@ -475,7 +475,8 @@ std::size_t QwenGpuArena::SnapshotPayloadBytes(
 }
 
 std::unique_ptr<QwenGpuSnapshot> QwenGpuArena::SaveSnapshot(
-    std::uint32_t valid_context) {
+    std::uint32_t valid_context, const void* conv_source,
+    const void* recurrent_source) {
   if (valid_context > max_context_) {
     throw std::length_error("Qwen snapshot exceeds the context length");
   }
@@ -566,10 +567,13 @@ std::unique_ptr<QwenGpuSnapshot> QwenGpuArena::SaveSnapshot(
                       source + plane * source_plane, source_pitch, target_pitch,
                       rows, hipMemcpyDeviceToDevice);
   }
-  transfer.Copy(snapshot->d_ssm_conv_, d_ssm_conv_state, conv_bytes,
-                hipMemcpyDeviceToDevice);
-  transfer.Copy(snapshot->d_ssm_deltanet_, d_ssm_deltanet_state, deltanet_bytes,
-                hipMemcpyDeviceToDevice);
+  transfer.Copy(snapshot->d_ssm_conv_,
+                conv_source != nullptr ? conv_source : d_ssm_conv_state,
+                conv_bytes, hipMemcpyDeviceToDevice);
+  transfer.Copy(
+      snapshot->d_ssm_deltanet_,
+      recurrent_source != nullptr ? recurrent_source : d_ssm_deltanet_state,
+      deltanet_bytes, hipMemcpyDeviceToDevice);
   return snapshot;
 }
 
@@ -625,7 +629,7 @@ void QwenGpuArena::RestoreSnapshot(const QwenGpuSnapshot& snapshot) {
                            source_pitch, rows, hipMemcpyDeviceToDevice, stream),
           "failed to restore Qwen KV snapshot");
   }
-  // LGA: snapshot restored the fp32 reference. Rebuild the fp16 plane's
+  // Snapshot restored the fp32 reference. Rebuild the fp16 plane's
   // valid rows from it (remaps head-major to token-major).
   if (d_glimmer_kv_f16 != nullptr && d_kv_cache != nullptr) {
     const auto cast = LaunchGlimmerCastKvFp16(
@@ -710,7 +714,7 @@ void QwenGpuArena::RestoreCompactSnapshot(
                          source_pitch, rows, hipMemcpyHostToDevice, stream),
         "failed to restore compact Qwen V cache");
   }
-  // LGA: snapshot restored the fp32 reference. Rebuild the fp16 plane's
+  // Snapshot restored the fp32 reference. Rebuild the fp16 plane's
   // valid rows from it (remaps head-major to token-major).
   if (d_glimmer_kv_f16 != nullptr && d_kv_cache != nullptr) {
     const auto cast =
@@ -856,7 +860,7 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
           hipMalloc(&d_attention_kv_f16, total_kv * sizeof(std::uint16_t) * 2));
     } else {
       HIP_CHECK(hipMalloc(&d_kv_cache, total_kv * sizeof(float) * 2));
-      // LGA: token-major fp16 plane, same element count as the fp32 cache.
+      // Token-major fp16 plane, same element count as the fp32 cache.
       if (policy_.glimmer_fp16_kv) {
         HIP_CHECK(
             hipMalloc(&d_glimmer_kv_f16, total_kv * sizeof(std::uint16_t) * 2));
@@ -865,7 +869,7 @@ QwenGpuArena::QwenGpuArena(const core::ModelConfig& config,
 
     const std::size_t total_conv =
         num_layers * ssm_qkv_size * config_.ssm_conv_kernel;
-    // GLM: attention-only models have no SSM. SsmLayerCount() is already 0
+    // Attention-only models have no SSM. SsmLayerCount() is already 0
     // when every layer is attention; this gate stays null if that changes.
     if (config_.attention_only || total_conv == 0) {
       d_ssm_conv_buffers_[0] = nullptr;
@@ -1016,7 +1020,7 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   d_logits = other.d_logits;
   d_attention_kv_f16 = other.d_attention_kv_f16;
   d_kv_cache = other.d_kv_cache;
-  d_glimmer_kv_f16 = other.d_glimmer_kv_f16;  // LGA
+  d_glimmer_kv_f16 = other.d_glimmer_kv_f16;
   d_ssm_conv_state = other.d_ssm_conv_state;
   d_ssm_deltanet_state = other.d_ssm_deltanet_state;
   d_prompt_tokens = other.d_prompt_tokens;
@@ -1029,7 +1033,7 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   d_split_k_attention = other.d_split_k_attention;
   d_weights_bf16 = other.d_weights_bf16;
   d_moe_logits = other.d_moe_logits;
-  d_lfm2_attn_partial = other.d_lfm2_attn_partial;  // LFM2
+  d_lfm2_attn_partial = other.d_lfm2_attn_partial;
   d_moe_ids = other.d_moe_ids;
   d_moe_weights = other.d_moe_weights;
   d_moe_sig = other.d_moe_sig;
@@ -1073,7 +1077,7 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   other.d_logits = nullptr;
   other.d_attention_kv_f16 = nullptr;
   other.d_kv_cache = nullptr;
-  other.d_glimmer_kv_f16 = nullptr;  // LGA
+  other.d_glimmer_kv_f16 = nullptr;
   other.d_ssm_conv_state = nullptr;
   other.d_ssm_deltanet_state = nullptr;
   other.d_prompt_tokens = nullptr;
@@ -1085,7 +1089,7 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   other.d_split_k_attention = nullptr;
   other.d_weights_bf16 = nullptr;
   other.d_moe_logits = nullptr;
-  other.d_lfm2_attn_partial = nullptr;  // LFM2
+  other.d_lfm2_attn_partial = nullptr;
   other.d_moe_ids = nullptr;
   other.d_moe_weights = nullptr;
   other.d_moe_sig = nullptr;
@@ -1138,7 +1142,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     d_logits = other.d_logits;
     d_attention_kv_f16 = other.d_attention_kv_f16;
     d_kv_cache = other.d_kv_cache;
-    d_glimmer_kv_f16 = other.d_glimmer_kv_f16;  // LGA
+    d_glimmer_kv_f16 = other.d_glimmer_kv_f16;
     d_ssm_conv_state = other.d_ssm_conv_state;
     d_ssm_deltanet_state = other.d_ssm_deltanet_state;
     d_prompt_tokens = other.d_prompt_tokens;
@@ -1151,7 +1155,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     d_split_k_attention = other.d_split_k_attention;
     d_weights_bf16 = other.d_weights_bf16;
     d_moe_logits = other.d_moe_logits;
-    d_lfm2_attn_partial = other.d_lfm2_attn_partial;  // LFM2
+    d_lfm2_attn_partial = other.d_lfm2_attn_partial;
     d_moe_ids = other.d_moe_ids;
     d_moe_weights = other.d_moe_weights;
     d_moe_sig = other.d_moe_sig;
@@ -1195,7 +1199,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     other.d_logits = nullptr;
     other.d_attention_kv_f16 = nullptr;
     other.d_kv_cache = nullptr;
-    other.d_glimmer_kv_f16 = nullptr;  // LGA
+    other.d_glimmer_kv_f16 = nullptr;
     other.d_ssm_conv_state = nullptr;
     other.d_ssm_deltanet_state = nullptr;
     other.d_prompt_tokens = nullptr;
@@ -1207,7 +1211,7 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     other.d_split_k_attention = nullptr;
     other.d_weights_bf16 = nullptr;
     other.d_moe_logits = nullptr;
-    other.d_lfm2_attn_partial = nullptr;  // LFM2
+    other.d_lfm2_attn_partial = nullptr;
     other.d_moe_ids = nullptr;
     other.d_moe_weights = nullptr;
     other.d_moe_sig = nullptr;
@@ -1317,7 +1321,7 @@ void QwenGpuArena::FreeAll() noexcept {
   }
   if (d_kv_cache != nullptr)
     LogCleanupError(hipFree(d_kv_cache));
-  // LGA: free the additive fp16 plane.
+  // Free the additive fp16 plane.
   if (d_glimmer_kv_f16 != nullptr)
     LogCleanupError(hipFree(d_glimmer_kv_f16));
   for (float* buffer : d_ssm_conv_buffers_)
@@ -1337,7 +1341,7 @@ void QwenGpuArena::FreeAll() noexcept {
   if (d_weights_bf16 != nullptr)
     LogCleanupError(hipFree(d_weights_bf16));
   LogCleanupError(hipFree(d_moe_logits));
-  LogCleanupError(hipFree(d_lfm2_attn_partial));  // LFM2
+  LogCleanupError(hipFree(d_lfm2_attn_partial));
   LogCleanupError(hipFree(d_moe_ids));
   LogCleanupError(hipFree(d_moe_weights));
   LogCleanupError(hipFree(d_moe_sig));
@@ -1379,7 +1383,7 @@ void QwenGpuArena::FreeAll() noexcept {
   d_logits = nullptr;
   d_attention_kv_f16 = nullptr;
   d_kv_cache = nullptr;
-  d_glimmer_kv_f16 = nullptr;  // LGA
+  d_glimmer_kv_f16 = nullptr;
   d_ssm_conv_state = nullptr;
   d_ssm_deltanet_state = nullptr;
   d_prompt_tokens = nullptr;
@@ -1412,7 +1416,7 @@ void QwenGpuArena::SnapVerifyStage(const char* tag, std::uint32_t layer,
   if (!detail::VerifyDebugEnabled()) {
     return;
   }
-  // sq16 SPEC2 (S2-3): bound the snapshot buffer; further stages are
+  // Bound the snapshot buffer; further stages are
   // dropped with one warning instead of growing it without limit.
   const std::size_t stage_bytes = floats_per_row * rows * sizeof(float);
   if (verify_debug_bytes_ + stage_bytes > detail::VerifyDebugMaxBytes()) {

@@ -25,7 +25,7 @@ void mul_mat_vec_q8_dispatch(const void* weights, const void* gate,
                             const block_q8_1* input, float* output,
                             int k, int rows, int tokens, int input_stride,
                             hipStream_t stream);
-// LFX: dense Q6_K GEMV (the ROC LM head). K is a multiple of 256,
+// Dense Q6_K GEMV (the ROC LM head). K is a multiple of 256,
 // 1 <= tokens <= 32, token-major output.
 void mul_mat_vec_q6_K_dispatch(const void* weights, const block_q8_1* input,
                                float* output, int k, int rows, int tokens,

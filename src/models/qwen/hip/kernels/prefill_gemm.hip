@@ -10,7 +10,7 @@
 
 #include "src/models/qwen/hip/kernels/small_batch_gemm.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
-#include "src/models/qwen/hip/quant_ops.hpp"  // lqw:dequant-bf16-inc
+#include "src/models/qwen/hip/quant_ops.hpp"
 #include "src/core/hip_launch_check.hpp"
 
 namespace superroc::hip {
@@ -521,7 +521,7 @@ void LaunchDequantizeToBf16(core::GgmlType type, const void* w,
     return;
   }
   if (type == core::GgmlType::kQ4_0_ROCMFP4 ||
-      type == core::GgmlType::kQ4_0_ROCMFP4_FAST) {  // lqw:dequant-bf16-launch
+      type == core::GgmlType::kQ4_0_ROCMFP4_FAST) {
     if (n_elems % 32 != 0) {
       return;
     }

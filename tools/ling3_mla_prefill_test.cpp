@@ -1,6 +1,6 @@
-// ling3_mla_prefill_test.cpp — LF1 SPEC3 unit gate for the PORT of the fork's
+// ling3_mla_prefill_test.cpp — unit gate for the PORT of the fork's
 // tile flash-attention kernel (kernels/ling3_mla_tile.hip) to superroc's absorbed-
-// MLA prefill. Same harness role as the wave-1/2 one, tile-only this time:
+// MLA prefill. Same harness role as the earlier one, tile-only this time:
 //
 //   1. synthetic tensors at the real shapes: T = 1, 2, 5, 63, 64, 65, 130, 512,
 //      n_pos not a multiple of the 64-row tile, and a long-history case;
@@ -26,7 +26,7 @@
 
 #include "ling3_mla.hpp"
 #include "ling3_mla_tile.hpp"
-// LX1 (wave 3): the w2 pair enters the bench and the fused WMMA flash
+// The w2 pair enters the bench and the fused WMMA flash
 // candidate joins the gate — every case runs tok (reference), tile, w2 and
 // fw; the bench times all four end to end.
 #include "ling3_mla_w2.hpp"
@@ -248,7 +248,7 @@ Metrics compare(const std::vector<float>& a, const std::vector<float>& b, int T,
 
 int main(int argc, char** argv) {
     using namespace ::ling3;
-    // LX1: parse --bench BEFORE the case loop so the anchor cases bench too.
+    // Parse --bench BEFORE the case loop so the anchor cases bench too.
     const char* capdir = nullptr;
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--bench") == 0) {
@@ -306,7 +306,7 @@ int main(int argc, char** argv) {
     MLA_TEST_CHECK(hipMemcpy(dnorm.p, hnorm.data(), kv * sizeof(float),
                              hipMemcpyHostToDevice));
 
-    // LX1: deep enough for the bench anchors at n_pos 8,192 / 16,384 /
+    // Deep enough for the bench anchors at n_pos 8,192 / 16,384 /
     // 32,768 / 57,344 (the spec's --bench points).
     const int max_pos = 57856;
     const int max_T = 1024;
@@ -332,7 +332,7 @@ int main(int argc, char** argv) {
         dout_fw2((std::size_t) max_T * od * sizeof(float)),
         dout_w2((std::size_t) max_T * od * sizeof(float)),
         dscores((std::size_t) kSubBatch * H * max_pos * sizeof(float));
-    // LX1: the w2 staging (k16/vt are shared with the fused path) and the
+    // The w2 staging (k16/vt are shared with the fused path) and the
     // fused path's own full-chunk q16/o/rowsum, sized once for max_pos.
     const int w2cap = (max_pos + 63) / 64 * 64;
     Buf dw2k16((std::size_t) w2cap * kva * sizeof(__half)),
@@ -384,7 +384,7 @@ int main(int argc, char** argv) {
         const float* wk_src;
         const float* wv_src;
         std::size_t wk_floats, wv_floats, q_floats, gate_floats, cache_floats;
-        // LX1 SPEC2 (RV17 1e/4): fw-only coverage — a partial chunk range
+        // Fw-only coverage — a partial chunk range
         // (the reference still computes the FULL chunk, fw is gated on rows
         // [tok_base, T)), and history score-shape probes (one history row
         // set to spike_val in all 576 dims: spiky softmax mass / the H1
@@ -473,7 +473,7 @@ int main(int argc, char** argv) {
         ex.latent = (std::size_t) a.n_tokens * (std::size_t) H * (std::size_t) kv;
         audit_indices(sh, ex, n_pos, 0, a.T, a.chunk_tokens, a.n_tokens);
 
-        // reference: LS3's tiled kernel, sub-batched exactly like the caller
+        // reference: the tiled kernel, sub-batched exactly like the caller
         for (int tb = 0; tb < a.T; tb += kSubBatch) {
             const int tc = a.T - tb < kSubBatch ? a.T - tb : kSubBatch;
             mla_attn_tok(sh, sc, w, cache, n_pos, in,
@@ -529,7 +529,7 @@ int main(int argc, char** argv) {
             std::memcmp(htile.data(), htile2.data(), ob) == 0;
         if (!det) ++g_fail;
 
-        // LX1: the w2 pair (reported) and the fused WMMA flash candidate
+        // The w2 pair (reported) and the fused WMMA flash candidate
         // (gated exactly like tile: max_rel <= 2e-3 + byte-equal twice).
         bool w2_ok = mla_w2_prep(sh, cache, n_pos, w2b, stream);
         if (w2_ok) {
@@ -543,7 +543,7 @@ int main(int argc, char** argv) {
                 if (!w2_ok) break;
             }
         }
-        // LX1 SPEC2 (RV17 1e): fw may be asked for a PARTIAL chunk range —
+        // Fw may be asked for a PARTIAL chunk range —
         // rows [tok_base, T) only. The reference above computed the full
         // chunk, so the gate compares the written range at an offset.
         const int fw_tcount = a.T - a.tok_base;
@@ -563,7 +563,7 @@ int main(int argc, char** argv) {
                                  hipMemcpyDeviceToHost));
 
         Metrics mf = compare(hfw, href, fw_tcount, H, hv, fw_off);
-        // RV17 H1: any NaN/Inf in the fused path's written rows is a
+        // Any NaN/Inf in the fused path's written rows is a
         // failure in its own right (the pre-H1 form produced inf -> NaN
         // here when a later chunk's max dropped > ~88 below the running
         // max).
@@ -585,7 +585,7 @@ int main(int argc, char** argv) {
                                  fw_ob) == 0;
             if (!fw_det) ++g_fail;
         }
-        // LX1 SPEC2 (RV17 4.5): PROVE the H1 probe exercises the regime.
+        // PROVE the H1 probe exercises the regime.
         // attn_tok does not dump scores in release builds, so derive it
         // from the fused kernel's OWN q16 (f16, copied back): chunk 0
         // contains the spike row (spike_val in every dim, exactly
@@ -694,7 +694,7 @@ int main(int argc, char** argv) {
                 };
                 const float t_tok = time_tok();
                 const float t_tl = time_tile();
-                // LX1: the w2 pair and the fused flash, end to end (prep
+                // The w2 pair and the fused flash, end to end (prep
                 // included — that is what one layer-call pays).
                 auto time_w2 = [&]() -> float {
                     for (int it = 0; it < kIter; ++it) {
@@ -802,12 +802,12 @@ int main(int argc, char** argv) {
         {7, 512, "T=512 n_pos=519 tail"},
         {0, 512, "T=512 n_pos=512 full chunk"},
         {4096, 512, "T=512 pos0=4096 deep history"},
-        // LX1 SPEC2 (RV17 1e/4): fw partial-chunk coverage — the reference
+        // Fw partial-chunk coverage — the reference
         // computes the full 512-token chunk, fw is gated on rows [256,512)
         // and [511,512).
         {0, 512, "fw tok 512/256/256", /*tok_base=*/256},
         {0, 512, "fw tok 512/511/1", /*tok_base=*/511},
-        // LX1 SPEC2 (RV17 2.4/4): score-shape probes. One history row is
+        // Score-shape probes. One history row is
         // set to spike_val in all 576 dims, so every query row's score at
         // that position is ~spike_val * sum(q16): a spiky softmax (mass
         // concentrates at one position; scores stay modest) and the H1
@@ -817,7 +817,7 @@ int main(int argc, char** argv) {
          /*spike_val=*/25.0f},
         {512, 512, "H1 probe chunk-max drop>88", 0, /*spike_pos=*/0,
          /*spike_val=*/600.0f, /*h1_probe=*/true},
-        // LX1: the spec's --bench anchors (T 512), each also gated.
+        // The spec's --bench anchors (T 512), each also gated.
         {7680, 512, "T=512 anchor n_pos=8192"},
         {15872, 512, "T=512 anchor n_pos=16384"},
         {32256, 512, "T=512 anchor n_pos=32768"},
@@ -866,7 +866,7 @@ int main(int argc, char** argv) {
     }
 
     // -------------------------------------------------------------------
-    // LX1 SPEC2 (RV17 1f/4): the REFUSAL gate — fw_audit must refuse each
+    // The REFUSAL gate — fw_audit must refuse each
     // of these BEFORE any launch (fail-closed; the caller falls back to its
     // proven path). Shapes are chosen so a wrongly-accepted launch would
     // stay inside the allocated extents wherever possible (head_v 64's
@@ -934,7 +934,6 @@ int main(int argc, char** argv) {
 
     // -------------------------------------------------------------------
     // Real captured q / cache / weights from a ~13.8 K prompt.
-    // (capdir / g_bench were parsed at the top of main — LX1.)
     // -------------------------------------------------------------------
     if (capdir == nullptr || capdir[0] == '\0') {
         std::printf("REAL captured q/cache  FAIL  (no capture dir: run a real "

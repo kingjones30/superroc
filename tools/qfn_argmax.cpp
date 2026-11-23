@@ -1,9 +1,9 @@
-// LFT SPEC2 item 1: G2 checkpoint top-2 gaps from the superroc executor.
+// G2 checkpoint top-2 gaps from the superroc executor.
 //
-// Jay's G2 arbiter rule (DECISIONS 14:39) ties a flip against the fork when the
+// The G2 arbiter rule ties a flip against the fork when the
 // FLOAT reference path (LFN_FP4_PREFILL_W8A8=0) has a top-2 gap < 0.05 nats at
 // that checkpoint. superroc serve prints no logprobs, so the clause was
-// unmeasurable (RV-LFP1-final section 7). This tool teacher-forces each G2
+// unmeasurable. This tool teacher-forces each G2
 // checkpoint prefix through the linked executor and prints the argmax, the
 // runner-up, their logprobs and the gap in nats for ONE binary and ONE env.
 //

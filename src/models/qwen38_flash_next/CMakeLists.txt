@@ -82,7 +82,7 @@ if (ENGINE_ENABLE_HIP)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/qfn_ppl.cpp
     PROPERTIES COMPILE_OPTIONS "-O2")
 
-  # LFT SPEC2 item 1: G2 checkpoint top-2 gaps (the G2 arbiter tie clause).
+  # Checkpoint top-2 gaps (the arbiter tie clause).
   # Sibling of qfn_ppl; qfn_ppl itself is untouched.
   add_executable(qfn_argmax EXCLUDE_FROM_ALL
     ${PROJECT_SOURCE_DIR}/tools/qfn_argmax.cpp)
@@ -90,7 +90,7 @@ if (ENGINE_ENABLE_HIP)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/tools/qfn_argmax.cpp
     PROPERTIES COMPILE_OPTIONS "-O2")
 
-  # LFT SPEC1 item 2 + SPEC2 item 2: per-shape GEMM microbench
+  # Per-shape GEMM microbench
   # (timing only, no model load). EXCLUDE_FROM_ALL like the other
   # qualification tools.
   add_executable(qfn_gemm_bench EXCLUDE_FROM_ALL

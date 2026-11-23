@@ -1,8 +1,8 @@
-// ling3-gemv-q8-test — is LS1's integer ROCmFP4 GEMV correct, on small shapes,
+// ling3-gemv-q8-test — is the integer ROCmFP4 GEMV correct, on small shapes,
 // against a CPU reference, BEFORE it runs on the 44 GB model?
 //
-// A page fault in a decode kernel resets the GPU and kills every live seat on
-// amdaimax2, so this runs as its own short gpu-run job and has to be green
+// A page fault in a decode kernel resets the GPU and kills every live seat, so
+// this runs as its own short job on an otherwise idle GPU and has to be green
 // first. It checks three things:
 //
 //   1. the FP4 nibble -> int8 perm codebook, exhaustively, for all 65536
@@ -13,9 +13,9 @@
 //   2. the integer GEMV against a CPU transcription of the SAME algorithm --
 //      this catches every index, stride and scale bug, and it is what caught
 //      the second dot using .x where it has to use .y;
-//   3. the integer GEMV against the float dequant reference build15 uses -- this
-//      is the number that says what the activation quantisation costs, and it is
-//      what the LM head and the expert matrices will live with.
+//   3. the integer GEMV against the float dequant reference an earlier build
+//      uses -- the number that says what the activation quantisation costs,
+//      and what the LM head and the expert matrices will live with.
 //
 // Errors are normalised by the RMS of the reference over the rows, not by each
 // row's own value: with random weights some rows' dots cancel to within a
@@ -146,8 +146,9 @@ float RefInteger(int qtype, const std::uint8_t * wrow, const float * x, int k,
   return s;
 }
 
-/// What build15's k_gemv_wide computes, written out: each weight decoded exactly as
-/// ling3_elem would (same ue4m3 guard, same code table) and multiplied by the FLOAT
+/// What the earlier k_gemv_wide computes, written out: each weight decoded
+/// exactly as ling3_elem would (same ue4m3 guard, same code table) and
+/// multiplied by the FLOAT
 /// activation. The gap between this and the kernel is the price of quantising the
 /// activation, which is what the report has to state.
 float RefFloatExact(int qtype, const std::uint8_t * wrow, const float * x, int k) {
@@ -170,7 +171,7 @@ float RefFloatExact(int qtype, const std::uint8_t * wrow, const float * x, int k
 
 
 // ---------------------------------------------------------------------------
-// The grouped device-routed expert FFN (LS1 phase 3) against the per-expert host loop it
+// The grouped device-routed expert FFN against the per-expert host loop it
 // replaces.
 //
 // The gate for this kernel, and the reason it was wrong for a whole phase: BOTH grouped
@@ -207,10 +208,10 @@ void RunGroupedExperts(int qtype, int n_expert, int n_used, int k, int n_ff, boo
   // Scale bytes in [0x2c, 0x44), where phase 2 drew them up to 0x5c. This does NOT remove
   // the clamp saturation -- with x in [-3,3] and 2560 terms the gate/up preactivations are
   // ~1e2 whatever the weights, so hs still pins at +-limit and the peek below still shows
-  // a [-49, 49] field. I had guessed in REPORT2 that the saturated test data was what hid
-  // the phase-2 bug; it was not, the bug was a 32-lane reduction in a 64-thread CTA. The
-  // narrower range is kept because it is a more honest stand-in for the model's weights,
-  // not because it fixed anything.
+  // a [-49, 49] field. An earlier guess was that the saturated test data was
+  // what hid the phase-2 bug; it was not, the bug was a 32-lane reduction in a
+  // 64-thread CTA. The narrower range is kept because it is a more honest
+  // stand-in for the model's weights, not because it fixed anything.
   const std::uint8_t smin = 0x2c, srange = 0x18;
   for (int s = 0; s < n_used; ++s) {
     std::uint8_t * g = gate.data() + (std::size_t) ids[s] * (std::size_t) n_ff * rb_k;
@@ -308,7 +309,7 @@ void RunGroupedExperts(int qtype, int n_expert, int n_used, int k, int n_ff, boo
 
 
 // ---------------------------------------------------------------------------
-// LS1 phase 4 item 3: the small-m decode forward.
+// The small-m decode forward.
 //
 // The gate is PER COLUMN, against the m = 1 path, not against a float reference: the whole
 // point of the kernel is that column t of an m-way matvec is the same arithmetic as an
@@ -716,8 +717,8 @@ void TimeMoe(int qtype, int n_expert, int n_used, int k, int n_ff) {
 // ---------------------------------------------------------------------------
 // PHASE6 gate: the warp-per-row kernels must produce BIT-IDENTICAL output to the
 // CTA-per-row ones they replace. Timing them without this is how you ship a
-// kernel that is faster and wrong -- the same failure mode as every other one in
-// this lane, where a wrong kernel faults nothing and logs nothing.
+// kernel that is faster and wrong -- the same failure mode as every other one,
+// where a wrong kernel faults nothing and logs nothing.
 // ---------------------------------------------------------------------------
 void CheckWarpEqualsCta(int qtype, int k, int n, int block) {
   const std::size_t rb = RowBytes(qtype, k);
@@ -921,7 +922,7 @@ void RunShape(int qtype, int k, int n) {
   }
   CHECK(worst_int < 1e-5, "kernel != CPU integer reference (rms-normalised)");
   // This number is NOT an indexing check -- it is the price of the activation
-  // quantisation, and it is the numerical change this lane deliberately makes (it is
+  // quantisation, and it is the numerical change deliberately made here (it is
   // llama.cpp's computation, so it moves superroc toward the reference, not away). It
   // measures around 0.012 to 0.027 of rms for k = 2560, because an FP4 block's ue4m3
   // scale reaches 240 and one int8 step of the activation is therefore worth up to ~27

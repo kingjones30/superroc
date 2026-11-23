@@ -2,7 +2,7 @@
 // k_route_batch_logits, the one CTA per (expert, token) pair it replaces?
 //
 // PHASE8 item 1. This is the whole gate. Ling's router has a near-tie at block 2 that flips
-// on a 1-ulp change (LS2 measured it), so "the same to six figures" is worthless here --
+// on a 1-ulp change (as measured), so "the same to six figures" is worthless here --
 // the two kernels have to agree on EVERY BIT, or the routing moves and every text moves
 // with it. The tiled form keeps the old per-row order exactly: lane t accumulates
 // row[t + 64j] * x[t + 64j] for increasing j, then the same binary tree off = 32,16,8,4,2,1.

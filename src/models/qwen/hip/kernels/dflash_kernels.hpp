@@ -101,7 +101,7 @@ void LaunchDFlashNonCausalAttentionSplit(
 /// takes the split route.
 inline constexpr std::uint32_t kDFlashSplitMinKeys = 4096;
 /// Shortest key range of the split route, and how many ranges per row it aims
-/// for at most: halo's 40 CUs measured fastest around 48 ranges at 13K-27K
+/// for at most: the 40-CU GPU measured fastest around 48 ranges at 13K-27K
 /// keys, and 256-key ranges below that.
 inline constexpr std::uint32_t kDFlashSplitKeysPerSplit = 256;
 inline constexpr std::uint32_t kDFlashSplitTargetSplits = 48;
@@ -137,6 +137,9 @@ struct DFlashSelectorSequence {
 // anchor before the proposal slots; all other buffers contain proposals only.
 // Partial buffers need DFlashSelectorScratchElements(vocab_size) per proposal.
 // Requested candidates include one-hot probabilities for greedy sequences.
+// head_rows != 0: `logits` holds rows [0, head_rows) and `tail_logits` holds
+// rows [tail_start, vocab_size), each slot-major; candidates keep their
+// vocabulary ids.
 void LaunchDFlashSelectorBatch(
     const float* logits, const float* projected_hidden,
     const void* predecessor_codebook_bf16, const void* successor_codebook_bf16,
@@ -145,7 +148,8 @@ void LaunchDFlashSelectorBatch(
     std::uint32_t* candidate_ids, float* candidate_probabilities,
     std::span<const DFlashSelectorSequence> sequences, std::uint32_t vocab_size,
     std::uint32_t selector_rank, std::uint32_t selector_top_k,
-    hipStream_t stream);
+    hipStream_t stream, std::uint32_t head_rows = 0U,
+    const float* tail_logits = nullptr, std::uint32_t tail_start = 0U);
 
 }  // namespace superroc::hip::kernels
 #endif  // defined(ENGINE_ENABLE_HIP)

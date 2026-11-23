@@ -31,8 +31,7 @@ void Check(bool condition, const std::string& message) {
 
 int main(int argc, char** argv) {
   const std::filesystem::path model_root =
-      argc > 1 ? argv[1]
-               : "/home/fbozzo/projects/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+      argc > 1 ? argv[1] : "/path/to/Qwen3-TTS-12Hz-1.7B-CustomVoice";
   if (!std::filesystem::is_regular_file(model_root / "vocab.json")) {
     std::cerr
         << "SKIP qwen3_tts_tokenizer_test: external model is unavailable\n";

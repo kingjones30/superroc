@@ -15,6 +15,9 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
+UPSTREAM_GUIDES = ("deepseek-v4-flash", "qwen3.8-27b", "qwen3.8-flash-next",
+                   "qwen3-asr", "qwen3-tts", "qwen-image-2.1", "minimax-h3")
+
 REQUIRED_DOC_FILES = [
     "README.md",
     "CHANGELOG.md",
@@ -30,10 +33,7 @@ REQUIRED_DOC_FILES = [
     "docs/TESTING.md",
     "docs/BENCHMARKS.md",
     "docs/PERFORMANCE.md",
-    *[f"docs/models/{model}/{document}.md"
-      for model in ("deepseek-v4-flash", "qwen3.8-27b", "qwen3.8-flash-next",
-                    "qwen3-asr", "qwen3-tts", "qwen-image-2.1", "minimax-h3")
-      for document in ("README", "BENCHMARKS", "QUALITY", "EXPERIMENTS")],
+    *[f"docs/models/{model}/README.md" for model in UPSTREAM_GUIDES],
 ]
 
 EXCLUDE_DIRS = {

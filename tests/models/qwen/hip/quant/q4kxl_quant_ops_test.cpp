@@ -54,6 +54,8 @@ const FormatCase kFormats[] = {
     {superroc::core::GgmlType::kIQ4_XS, "IQ4_XS"},
     {superroc::core::GgmlType::kIQ3_S, "IQ3_S"},
     {superroc::core::GgmlType::kQ8_0, "Q8_0"},
+    {superroc::core::GgmlType::kQ4_0_ROCMFP4, "ROCMFP4"},
+    {superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST, "ROCMFP4_FAST"},
 };
 
 std::uint32_t NextRandom(std::uint32_t& state) {
@@ -93,6 +95,18 @@ std::vector<std::uint8_t> MakeWeights(superroc::core::GgmlType type,
         tame_half(block);      // d
         tame_half(block + 2);  // dmin
         break;
+      case superroc::core::GgmlType::kQ4_0_ROCMFP4:
+        // Dual UE4M3 scales, one per 16-value half, kept in [0.5, 1.0).
+        block[16] =
+            static_cast<std::uint8_t>(0x38U | (NextRandom(state) & 0x07U));
+        block[17] =
+            static_cast<std::uint8_t>(0x38U | (NextRandom(state) & 0x07U));
+        break;
+      case superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST:
+        // Single UE4M3 scale per 32-value block, kept in [0.5, 1.0).
+        block[16] =
+            static_cast<std::uint8_t>(0x38U | (NextRandom(state) & 0x07U));
+        break;
       case superroc::core::GgmlType::kQ6_K:
         tame_half(block + 208);  // d is last
         break;
@@ -129,6 +143,10 @@ float CpuDot(superroc::core::GgmlType type, const void* row,
       return superroc::quant::DotProductIQ4_XS(row, x, k);
     case superroc::core::GgmlType::kIQ3_S:
       return superroc::quant::DotProductIQ3_S(row, x, k);
+    case superroc::core::GgmlType::kQ4_0_ROCMFP4:
+      return superroc::quant::DotProductROCMFP4_Dual(row, x, k);
+    case superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST:
+      return superroc::quant::DotProductROCMFP4_Fast(row, x, k);
     default:
       return superroc::quant::DotProductQ8_0(row, x, k);
   }
@@ -157,6 +175,12 @@ void Dequantize(superroc::core::GgmlType type, const void* row, float* out,
       return;
     case superroc::core::GgmlType::kIQ3_S:
       superroc::quant::DequantizeIQ3_S(row, out, k);
+      return;
+    case superroc::core::GgmlType::kQ4_0_ROCMFP4:
+      superroc::quant::DequantizeROCMFP4_Dual(row, out, k);
+      return;
+    case superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST:
+      superroc::quant::DequantizeROCMFP4_Fast(row, out, k);
       return;
     default:
       superroc::quant::DequantizeQ8_0(row, out, k);
@@ -662,10 +686,13 @@ void TestFp16Prefill(const FormatCase& format, std::size_t rows,
     const bool paired = superroc::hip::TryLaunchBatchedDualQuantGEMMSwiGLUFp16(
         format.type, format.type, d_gate_weights.data(), d_weights.data(),
         d_half_x.data(), d_up_storage.data(), batch, rows, kK, nullptr);
-    const bool supported = format.type == superroc::core::GgmlType::kQ4_K ||
-                           format.type == superroc::core::GgmlType::kQ5_K ||
-                           format.type == superroc::core::GgmlType::kQ6_K ||
-                           format.type == superroc::core::GgmlType::kIQ4_XS;
+    const bool supported =
+        format.type == superroc::core::GgmlType::kQ4_K ||
+        format.type == superroc::core::GgmlType::kQ5_K ||
+        format.type == superroc::core::GgmlType::kQ6_K ||
+        format.type == superroc::core::GgmlType::kIQ4_XS ||
+        format.type == superroc::core::GgmlType::kQ4_0_ROCMFP4 ||
+        format.type == superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST;
     passed &= paired == supported;
     if (paired) {
       HIP_CHECK(hipMemcpy(fused.data(), d_up_storage.data(),
@@ -832,6 +859,14 @@ int main() {
     }
     if (format.type == superroc::core::GgmlType::kIQ4_XS) {
       TestPrefillGemm(format, 129, 1024);
+    }
+  }
+  for (const auto& format :
+       {FormatCase{superroc::core::GgmlType::kQ4_0_ROCMFP4, "ROCMFP4"},
+        FormatCase{superroc::core::GgmlType::kQ4_0_ROCMFP4_FAST,
+                   "ROCMFP4_FAST"}}) {
+    for (const std::size_t batch : {128U, 129U, 255U, 256U, 1024U}) {
+      TestPrefillGemm(format, batch);
     }
   }
   for (const auto& format : kFormats) {

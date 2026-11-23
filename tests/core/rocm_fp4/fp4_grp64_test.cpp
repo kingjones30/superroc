@@ -1,4 +1,4 @@
-// MG64 SPEC1 step 5: 64-token grouped FP4 GEMM must be bit-identical to the
+// 64-token grouped FP4 GEMM must be bit-identical to the
 // 16-token path. Random ROCmFP4 weights (n = 1792, k = 2048, 8 experts) and
 // int8 activations via superroc_fp4_wmma_quant; group arrays built exactly like
 // superroc_fp4_moe_group_batch makes them (counting-sort slot order, grp_zp

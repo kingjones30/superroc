@@ -37,7 +37,7 @@ __host__ __device__ std::uint32_t SharedScoreCount(std::uint32_t pos,
   return window;
 }
 
-// LGA: scalar inner loop. Each K/V row is staged once per KV head.
+// Scalar inner loop. Each K/V row is staged once per KV head.
 // Warp w owns query row row0+w. Lane L owns query head (L%16) and dims
 // [64*(L/16), 64*(L/16)+64). The two lanes of a head add their partial dots
 // with a warp shuffle, then each keeps a 64-wide fp32 accumulator.
@@ -186,16 +186,16 @@ __global__ void __launch_bounds__(kThreads)
   }
 }
 
-// LGA: remap the head-major fp32 reference into the token-major fp16 plane.
+// Remap the head-major fp32 reference into the token-major fp16 plane.
 // blockIdx.y selects (K/V half, layer, KV head) with per-block index math;
 // blockIdx.x walks the head's (valid_rows x head_dim) elements flat. One
 // 32-bit divmod per thread; restore-only, so throughput is not critical.
-// PGA: layer_base lets a caller cast ONE layer of a many-layer plane, and
+// layer_base lets a caller cast ONE layer of a many-layer plane, and
 // plane_layers is how many layers the WHOLE plane holds. The K/V half stride
 // is that whole per-half plane, not the block being cast, because V always
 // starts one full K plane past K (both halves are [all layers]; the WMMA
 // launcher assumes the same when it walks layer_k / layer_v off k_f16 / v_f16).
-// plane_layers 0 means "stride = layers", which is LGA's original behaviour:
+// plane_layers 0 means "stride = layers", which is the original behaviour:
 // arena.cpp's two snapshot-restore calls pass neither argument and are
 // byte-for-byte unchanged.
 // PGA MEASURED: deriving the stride from (layer_base + layers) instead put V
@@ -217,9 +217,11 @@ __global__ void GlimmerCastKvKernel(const float* __restrict__ src,
   const std::uint32_t l = r / num_kv_heads;
   const std::uint32_t h = r % num_kv_heads;
   const std::size_t layer = static_cast<std::size_t>(l) + layer_base;
+  // One plane passes 2^32 elements on a big model at a long context: a 32-bit
+  // product here puts V in the wrong place and decode turns to noise.
   const std::size_t plane =
-      (plane_layers != 0U ? plane_layers : layers) * max_context *
-      num_kv_heads * head_dim;
+      static_cast<std::size_t>(plane_layers != 0U ? plane_layers : layers) *
+      max_context * num_kv_heads * head_dim;
   const std::size_t per_head =
       static_cast<std::size_t>(valid_rows - row_begin) * head_dim;
   const std::size_t stride =
@@ -347,7 +349,7 @@ GlimmerLaunchStatus LaunchGlimmerSharedAttention(
       need > q_elems || need > out_elems) {
     return {false, "glimmer shared attention index out of range"};
   }
-  // LGA: token-major last element touched:
+  // Token-major last element touched:
   // ((layer*maxctx+last_pos)*nkv + (nkv-1))*hd + (hd-1).
   if (!MulOk(layer, max_context, &layer_span) ||
       layer_span > static_cast<std::size_t>(-1) - last_pos ||
@@ -378,7 +380,7 @@ GlimmerLaunchStatus LaunchGlimmerWmmaPrefillAttention(
     std::size_t cache_elems, std::size_t out_elems,
     std::span<float> packed_k_workspace, std::span<float> packed_v_workspace,
     hipStream_t stream) {
-  // LGA: same host audit as the shared path (token-major cache bound), then
+  // Same host audit as the shared path (token-major cache bound), then
   // the WMMA dispatcher. skip_kv_write is always true: the prefill
   // dual-write already wrote both planes.
   if (q == nullptr || k_f16 == nullptr || v_f16 == nullptr || out == nullptr ||
