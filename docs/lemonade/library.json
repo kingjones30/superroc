@@ -528,5 +528,15 @@
     "labels": ["chat", "tool-calling", "vision"],
     "size_gb": 15.82,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
+  },
+  {
+    "name": "Summerwise-27B",
+    "repo": "kingjones777/Summerwise-27B-SuperRoc-GGUF",
+    "file": "Summerwise-27B-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+    "mmproj": "kingjones777/Summerwise-27B-SuperRoc-GGUF:mmproj-Summerwise-27B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision", "mtp"],
+    "size_gb": 15.31,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--speculative", "mtp", "-d", "2", "--min-draft-tokens", "1", "--prompt-lookup", "--think", "off"]
   }
 ]

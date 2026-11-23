@@ -622,5 +622,19 @@
       "vision"
     ],
     "size": 15.82
+  },
+  "Summerwise-27B": {
+    "checkpoints": {
+      "main": "kingjones777/Summerwise-27B-SuperRoc-GGUF:Summerwise-27B-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+      "mmproj": "kingjones777/Summerwise-27B-SuperRoc-GGUF:mmproj-Summerwise-27B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision",
+      "mtp"
+    ],
+    "size": 15.31
   }
 }

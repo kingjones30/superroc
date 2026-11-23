@@ -458,5 +458,20 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "Summerwise-27B-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--speculative",
+    "mtp",
+    "-d",
+    "2",
+    "--min-draft-tokens",
+    "1",
+    "--prompt-lookup",
+    "--think",
+    "off"
   ]
 }
