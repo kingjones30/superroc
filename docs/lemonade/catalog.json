@@ -496,5 +496,16 @@
       "vision"
     ],
     "size": 18.8
+  },
+  "Qwen-AgentWorld-35B-A3B": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen-AgentWorld-35B-A3B-SuperRoc-GGUF:Qwen-AgentWorld-35B-A3B-Q4_0-ROCmFP4-FAST-imatrix.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 18.8
   }
 }
