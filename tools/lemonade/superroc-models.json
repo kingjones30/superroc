@@ -239,5 +239,13 @@
     "0",
     "--think",
     "off"
+  ],
+  "Wald-4B-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
   ]
 }

@@ -321,5 +321,16 @@
       "vision"
     ],
     "size": 5.58
+  },
+  "Wald-4B": {
+    "checkpoints": {
+      "main": "kingjones777/Wald-4B-SuperRoc-GGUF:Wald-4B-Q4_0-ROCmFP4-FAST-imatrix.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 2.51
   }
 }
