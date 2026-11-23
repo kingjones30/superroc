@@ -428,5 +428,15 @@
     "labels": ["chat", "tool-calling"],
     "size_gb": 18.8,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.6-27B-CoupledWelfare-Curiosity",
+    "repo": "kingjones777/Qwen3.6-27B-CoupledWelfare-Curiosity-SuperRoc-GGUF",
+    "file": "Qwen3.6-27B-CoupledWelfare-Curiosity-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 15.06,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
   }
 ]

@@ -507,5 +507,16 @@
       "tool-calling"
     ],
     "size": 18.8
+  },
+  "Qwen3.6-27B-CoupledWelfare-Curiosity": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.6-27B-CoupledWelfare-Curiosity-SuperRoc-GGUF:Qwen3.6-27B-CoupledWelfare-Curiosity-Q4_0-ROCmFP4-FAST-imatrix.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 15.06
   }
 }

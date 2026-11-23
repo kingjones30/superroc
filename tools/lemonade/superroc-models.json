@@ -369,5 +369,14 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "Qwen3.6-27B-CoupledWelfare-Curiosity-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--think",
+    "off"
   ]
 }
