@@ -48,5 +48,25 @@
     "labels": ["chat", "tool-calling", "vision", "mtp"],
     "size_gb": 5.4,
     "superroc_args": ["--speculative", "mtp", "-d", "3", "--think", "off"]
+  },
+  {
+    "name": "KAT-Coder-V2.5-Dev",
+    "repo": "kingjones777/KAT-Coder-V2.5-Dev-SuperRoc-GGUF",
+    "file": "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling", "mtp"],
+    "size_gb": 19.56,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--speculative", "mtp", "-d", "2", "--min-draft-tokens", "1", "--prompt-lookup", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.6-35B-A3B",
+    "repo": "kingjones777/Qwen3.6-35B-A3B-SuperRoc-GGUF",
+    "file": "Qwen3.6-35B-A3B-Q4_0_ROCMFP4_STRIX_LEAN-MTPq8.gguf",
+    "mmproj": "kingjones777/Qwen3.6-35B-A3B-SuperRoc-GGUF:mmproj-Qwen3.6-35B-A3B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision", "mtp"],
+    "size_gb": 19.64,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--speculative", "mtp", "-d", "2", "--min-draft-tokens", "1", "--prompt-lookup", "--think", "off"]
   }
 ]

@@ -50,5 +50,31 @@
       "mtp"
     ],
     "size": 5.4
+  },
+  "KAT-Coder-V2.5-Dev": {
+    "checkpoints": {
+      "main": "kingjones777/KAT-Coder-V2.5-Dev-SuperRoc-GGUF:KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "mtp"
+    ],
+    "size": 19.56
+  },
+  "Qwen3.6-35B-A3B": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.6-35B-A3B-SuperRoc-GGUF:Qwen3.6-35B-A3B-Q4_0_ROCMFP4_STRIX_LEAN-MTPq8.gguf",
+      "mmproj": "kingjones777/Qwen3.6-35B-A3B-SuperRoc-GGUF:mmproj-Qwen3.6-35B-A3B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision",
+      "mtp"
+    ],
+    "size": 19.64
   }
 }

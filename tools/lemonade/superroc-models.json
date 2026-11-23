@@ -25,5 +25,35 @@
     "3",
     "--think",
     "off"
+  ],
+  "KAT-Coder-V2.5-Dev-Q4_0_ROCMFP4_STRIX-MTP.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--speculative",
+    "mtp",
+    "-d",
+    "2",
+    "--min-draft-tokens",
+    "1",
+    "--prompt-lookup",
+    "--think",
+    "off"
+  ],
+  "Qwen3.6-35B-A3B-Q4_0_ROCMFP4_STRIX_LEAN-MTPq8.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--speculative",
+    "mtp",
+    "-d",
+    "2",
+    "--min-draft-tokens",
+    "1",
+    "--prompt-lookup",
+    "--think",
+    "off"
   ]
 }
