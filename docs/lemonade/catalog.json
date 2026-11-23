@@ -518,5 +518,30 @@
       "tool-calling"
     ],
     "size": 15.06
+  },
+  "Ling-3.0-flash-Research-ROCmFP4-STRIX_LEAN": {
+    "checkpoints": {
+      "main": "kingjones777/Ling-3.0-flash-Research-ROCmFP4-STRIX_LEAN-GGUF:Ling-3.0-flash-I-Research-ROCmFP4-STRIX_LEAN.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 68.02
+  },
+  "Qwen3.8-27B-CodeForge-3xMerge": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.8-27B-CodeForge-3xMerge-SuperRoc-GGUF:Qwen3.8-27B-CodeForge-3xMerge-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+      "mmproj": "kingjones777/Qwen3.8-27B-CodeForge-3xMerge-SuperRoc-GGUF:mmproj-Qwen3.8-27B-CodeForge-3xMerge-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision",
+      "mtp"
+    ],
+    "size": 15.31
   }
 }
