@@ -296,5 +296,30 @@
       "vision"
     ],
     "size": 5.36
+  },
+  "DaisyRose-27B": {
+    "checkpoints": {
+      "main": "kingjones777/DaisyRose-27B-SuperRoc-GGUF:DaisyRose-27B-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "mtp"
+    ],
+    "size": 15.31
+  },
+  "Ornith-1.5-9B-ROCmFP4-COHERENT": {
+    "checkpoints": {
+      "main": "kingjones777/Ornith-1.5-9B-ROCmFP4-COHERENT-GGUF:Ornith-1.5-9B-Q4_0_ROCMFP4_COHERENT.gguf",
+      "mmproj": "kingjones777/Ornith-1.5-9B-ROCmFP4-COHERENT-GGUF:mmproj-Ornith-1.5-9B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 5.58
   }
 }

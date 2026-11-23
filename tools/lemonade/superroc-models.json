@@ -217,5 +217,27 @@
     "0",
     "--think",
     "off"
+  ],
+  "DaisyRose-27B-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--speculative",
+    "mtp",
+    "-d",
+    "4",
+    "--min-draft-tokens",
+    "1",
+    "--think",
+    "off"
+  ],
+  "Ornith-1.5-9B-Q4_0_ROCMFP4_COHERENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
   ]
 }
