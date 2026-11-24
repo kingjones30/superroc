@@ -718,5 +718,31 @@
       "vision"
     ],
     "size": 95.33
+  },
+  "Qwen3.8-Flash-Next-Uncensored-ROCmFP4-FAST-imatrix": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.8-Flash-Next-Uncensored-ROCmFP4-FAST-imatrix-GGUF:Qwen3.8-Flash-Next-Uncensored-Q4_0-ROCmFP4-FAST-imatrix",
+      "mmproj": "kingjones777/Qwen3.8-Flash-Next-Uncensored-ROCmFP4-FAST-imatrix-GGUF:mmproj-Qwen3.8-Flash-Next-Uncensored-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 95.33
+  },
+  "Qwen3.5-9B-Post-Reasoning": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.5-9B-Post-Reasoning-SuperRoc-GGUF:Qwen3.5-9B-Post-Reasoning-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+      "mmproj": "kingjones777/Qwen3.5-9B-Post-Reasoning-SuperRoc-GGUF:mmproj-Qwen3.5-9B-Post-Reasoning-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 5.36
   }
 }

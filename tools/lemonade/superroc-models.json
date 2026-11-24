@@ -537,5 +537,22 @@
     "0",
     "--think",
     "off"
+  ],
+  "Qwen3.8-Flash-Next-Uncensored-Q4_0-ROCmFP4-FAST-imatrix-00001-of-00003.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Qwen3.5-9B-Post-Reasoning-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--think",
+    "off"
   ]
 }
