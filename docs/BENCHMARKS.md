@@ -4,7 +4,7 @@ Build with `nix build` and measure binaries under `result/bin`.
 
 ## Results through Lemonade's benchmark (Strix Halo)
 
-Measured with [Lemonade](https://github.com/lemonade-sdk/lemonade)'s own harness, the command used for the Halogen backend:
+Measured with [Lemonade](https://github.com/lemonade-sdk/lemonade)'s own harness, the command Lemonade's engine entries are measured with:
 
 ```sh
 lemonade bench <model> --scenarios context-4k context-32k chat-long-output --ctx-size 40960 --runs 2
@@ -14,7 +14,33 @@ Every request has temperature 0. Hardware: AMD Ryzen AI Max+ 395 (gfx1151), 128 
 mean of 2 runs. The context scenarios generate about 20 tokens, so their decode figure is short-run; chat-long-output
 generates 256.
 
-### Qwen3.8-27B, one model file for every engine
+### Qwen3.8-27B, release 0.20.0, one model file for every engine (2026-11-23)
+
+File: `Qwen3.8-27B-UD-Q4_K_XL.gguf` (unsloth/Qwen3.8-27B-GGUF). Decode and prefill in tokens per second, mean of 2 runs,
+one Ryzen AI Max+ 395 (128 GB) for every row; each engine through Lemonade with its default settings for this file.
+
+| Engine and setup | Decode chat / 4K / 32K | Prefill 4K / 32K |
+| --- | --- | --- |
+| Super Roc 0.20.0, defaults (MTP drafts from the model file) | 26.1 / 33.8 / 30.3 | 664.9 / 593.9 |
+| Super Roc 0.20.0, DFlash2 draft and prompt lookup | 27.4 / 38.2 / 43.4 | 599.1 / 561.1 |
+| llama.cpp b12223 ROCm (Lemonade's build), default (its automatic MTP drafts) | 23.2 / 26.8 / 29.4 | 377.6 / 329.9 |
+| llama.cpp b12233 Vulkan (Lemonade's build), default | 21.9 / 26.6 / 28.2 | 288.6 / 265.9 |
+
+### Qwen3.8-Flash-Next, each engine on its own files (build of 2026-11-20 that became 0.20.0)
+
+Super Roc on `Qwen3.8-Flash-Next-Q4_0-ROCmFP4-STRIX_LEAN-imatrix-hcq8-ssmf32.gguf`
+(kingjones777/Qwen3.8-Flash-Next-ROCmFP4-STRIX_LEAN-GGUF) with 7 routed experts and the shared Q8_0 MTP head; the other
+engine through its own Lemonade entry for this model. Same machine, same command, mean of 2 runs.
+
+| Engine and setup | Decode chat / 4K / 32K | Prefill 4K / 32K |
+| --- | --- | --- |
+| Super Roc, 7 routed experts, shared MTP head | 60.7 / 61.9 / 58.1 | 2,013.2 / 1,908.7 |
+| Other engine, its Lemonade entry for this model | 64.4 / 40.3 / 39.2 | 2,025.2 / 2,189.3 |
+
+The other engine leads chat decode and prefill at 32K, and prefill at 4K is level; Super Roc leads decode with 4K and
+32K of context.
+
+### Qwen3.8-27B, one model file for every engine (2026-11-19 build)
 
 File: `Qwen3.8-27B-UD-Q4_K_XL.gguf` (unsloth/Qwen3.8-27B-GGUF). Decode and prefill in tokens per second.
 

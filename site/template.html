@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super Roc — Roc-Solid AI Performance</title>
+<meta name="description" content="Super Roc is an LLM inference engine for Strix Halo (gfx1151): ROCmFP4 models, MTP and DSpark drafting, a resumable prompt cache, and OpenAI- and Anthropic-compatible APIs.">
+<meta property="og:title" content="Super Roc — Roc-Solid AI Performance">
+<meta property="og:description" content="Fast. Efficient. Built to move local inference forward.">
+<meta property="og:image" content="assets/social-preview.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0A1324">
+<link rel="icon" href="assets/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="assets/icon-256.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@1,700;1,800;1,900&family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Super Roc home">
+      <picture><source srcset="assets/logo-horizontal.webp" type="image/webp"><img src="assets/logo-horizontal.png" alt="Super Roc" width="160" height="40"></picture>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#top-performers">Top performers</a>
+      <a href="#features">Features</a>
+      <a href="#models">Models</a>
+      <a href="#quickstart">Quick start</a>
+      <a href="#api">API</a>
+      <a class="gh" href="https://github.com/kingjones30/superroc" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero" id="top">
+  <h1 class="sr-only">Super Roc — Roc-Solid AI Performance</h1>
+  <div class="hero-art">
+    <picture>
+      <source srcset="assets/hero.webp" type="image/webp">
+      <img src="assets/hero.jpg" width="1672" height="941" alt="Super Roc. Roc-Solid AI Performance. Fast. Efficient. Built to move local inference forward." fetchpriority="high">
+    </picture>
+  </div>
+  <div class="wrap hero-copy">
+    <p class="eyebrow"><span class="slash" aria-hidden="true"></span>Local inference engine</p>
+    <p class="lede">An LLM inference engine for Strix Halo: Ryzen AI Max+ 395 systems with the Radeon 8060S GPU (<code>gfx1151</code>) and up to 128&nbsp;GB of unified memory. GGUF models, 4-bit ROCmFP4 builds, MTP and DSpark drafting, and a prompt cache that resumes from any earlier conversation state.</p>
+    <div class="cta">
+      <a class="btn primary" href="#quickstart">Get started</a>
+      <a class="btn ghost" href="https://github.com/kingjones30/superroc" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+    <ul class="chips" aria-label="Highlights">
+      <li>Strix Halo</li><li>ROCmFP4</li><li>MTP / DSpark</li><li>OpenAI + Anthropic APIs</li>
+    </ul>
+  </div>
+</section>
+
+<section class="stats" aria-label="Measured speeds">
+  <div class="wrap">
+    <div class="stat-grid">
+      <div class="stat"><span class="num">6,992.6</span><span class="unit">prompt tok/s</span><span class="what">LFM2.5-1.2B-Instruct</span></div>
+      <div class="stat"><span class="num">1,261.2</span><span class="unit">prompt tok/s</span><span class="what">Qwen3.8-Flash-Next · 177B MoE</span></div>
+      <div class="stat"><span class="num">107.3</span><span class="unit">code tok/s</span><span class="what">KAT-Coder-V2.5 · 35B-A3B</span></div>
+      <div class="stat"><span class="num">50.6</span><span class="unit">code tok/s</span><span class="what">Qwen3.8-27B · dense</span></div>
+    </div>
+    <p class="note">From the <a href="#models">models table</a>: Ryzen AI Max+ 395, 128 GB, one request at a time, temperature 0, cold prompt cache, drafter as in each card.</p>
+  </div>
+</section>
+
+<section class="block alt" id="top-performers">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Same machine, same harness</p>
+    <h2>Top performers</h2>
+    <div class="prose">
+{{TOP}}
+    </div>
+  </div>
+</section>
+
+<section class="block" id="features">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Engine</p>
+    <h2>What Super Roc adds</h2>
+    <div class="prose features">
+{{FEATURES}}
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="models">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Measured</p>
+    <h2>Models</h2>
+    <div class="prose">
+{{MODELS}}
+    </div>
+  </div>
+</section>
+
+<section class="block" id="quickstart">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Quick start</p>
+    <h2>Build from source</h2>
+    <div class="prose">
+{{BUILD}}
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="api">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Serve</p>
+    <h2>Run</h2>
+    <div class="prose">
+{{RUN}}
+    </div>
+  </div>
+</section>
+
+<section class="block" id="gaps">
+  <div class="wrap narrow">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Honest notes</p>
+    <h2>Known gaps</h2>
+    <div class="prose">
+{{GAPS}}
+    </div>
+    <h2 id="lineage">Lineage and credits</h2>
+    <div class="prose">
+{{LINEAGE}}
+    </div>
+    <h2>Feedback</h2>
+    <div class="prose">
+{{FEEDBACK}}
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <a class="brand" href="#top"><img src="assets/icon-256.png" alt="" width="36" height="36"><span>Super Roc</span></a>
+    <p>MIT License · the executable is <code>superroc</code> · <a href="https://github.com/kingjones30/superroc/blob/main/NOTICE" target="_blank" rel="noopener">NOTICE</a> · <a href="https://github.com/kingjones30/superroc/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener">Third-party notices</a></p>
+  </div>
+</footer>
+<script src="app.js" defer></script>
+</body>
+</html>

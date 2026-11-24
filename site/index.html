@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Super Roc — Roc-Solid AI Performance</title>
+<meta name="description" content="Super Roc is an LLM inference engine for Strix Halo (gfx1151): ROCmFP4 models, MTP and DSpark drafting, a resumable prompt cache, and OpenAI- and Anthropic-compatible APIs.">
+<meta property="og:title" content="Super Roc — Roc-Solid AI Performance">
+<meta property="og:description" content="Fast. Efficient. Built to move local inference forward.">
+<meta property="og:image" content="assets/social-preview.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="theme-color" content="#0A1324">
+<link rel="icon" href="assets/icon-32.png" sizes="32x32" type="image/png">
+<link rel="apple-touch-icon" href="assets/icon-256.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@1,700;1,800;1,900&family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Super Roc home">
+      <picture><source srcset="assets/logo-horizontal.webp" type="image/webp"><img src="assets/logo-horizontal.png" alt="Super Roc" width="160" height="40"></picture>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#top-performers">Top performers</a>
+      <a href="#features">Features</a>
+      <a href="#models">Models</a>
+      <a href="#quickstart">Quick start</a>
+      <a href="#api">API</a>
+      <a class="gh" href="https://github.com/kingjones30/superroc" target="_blank" rel="noopener">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<section class="hero" id="top">
+  <h1 class="sr-only">Super Roc — Roc-Solid AI Performance</h1>
+  <div class="hero-art">
+    <picture>
+      <source srcset="assets/hero.webp" type="image/webp">
+      <img src="assets/hero.jpg" width="1672" height="941" alt="Super Roc. Roc-Solid AI Performance. Fast. Efficient. Built to move local inference forward." fetchpriority="high">
+    </picture>
+  </div>
+  <div class="wrap hero-copy">
+    <p class="eyebrow"><span class="slash" aria-hidden="true"></span>Local inference engine</p>
+    <p class="lede">An LLM inference engine for Strix Halo: Ryzen AI Max+ 395 systems with the Radeon 8060S GPU (<code>gfx1151</code>) and up to 128&nbsp;GB of unified memory. GGUF models, 4-bit ROCmFP4 builds, MTP and DSpark drafting, and a prompt cache that resumes from any earlier conversation state.</p>
+    <div class="cta">
+      <a class="btn primary" href="#quickstart">Get started</a>
+      <a class="btn ghost" href="https://github.com/kingjones30/superroc" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+    <ul class="chips" aria-label="Highlights">
+      <li>Strix Halo</li><li>ROCmFP4</li><li>MTP / DSpark</li><li>OpenAI + Anthropic APIs</li>
+    </ul>
+  </div>
+</section>
+
+<section class="stats" aria-label="Measured speeds">
+  <div class="wrap">
+    <div class="stat-grid">
+      <div class="stat"><span class="num">6,992.6</span><span class="unit">prompt tok/s</span><span class="what">LFM2.5-1.2B-Instruct</span></div>
+      <div class="stat"><span class="num">1,261.2</span><span class="unit">prompt tok/s</span><span class="what">Qwen3.8-Flash-Next · 177B MoE</span></div>
+      <div class="stat"><span class="num">107.3</span><span class="unit">code tok/s</span><span class="what">KAT-Coder-V2.5 · 35B-A3B</span></div>
+      <div class="stat"><span class="num">50.6</span><span class="unit">code tok/s</span><span class="what">Qwen3.8-27B · dense</span></div>
+    </div>
+    <p class="note">From the <a href="#models">models table</a>: Ryzen AI Max+ 395, 128 GB, one request at a time, temperature 0, cold prompt cache, drafter as in each card.</p>
+  </div>
+</section>
+
+<section class="block alt" id="top-performers">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Same machine, same harness</p>
+    <h2>Top performers</h2>
+    <div class="prose">
+<p>Models where Super Roc measured fastest among the engines we ran on the same machine. Measured with <code>lemonade bench</code>, the public benchmark harness of AMD's <a href="https://github.com/lemonade-sdk/lemonade" target="_blank" rel="noopener">Lemonade</a>, which drives every engine through Lemonade with the same requests (greedy decoding; a fresh model load before each run, mean of two runs) on a Ryzen AI Max+ 395 with 128 GB. <em>4K</em> and <em>32K</em> are the harness's long-context scenarios (about 3,250 and 24,800 prompt tokens). Each engine runs with the speculative decoding it turns on by default for the model.</p>
+<p>Each cell reads <em>Super Roc</em> vs <em>the fastest other engine</em>, in tokens per second; only the tests where Super Roc measured fastest are listed.</p>
+<div class="table-wrap"><table><thead><tr><th class="">Model</th><th class="">Category</th><th class="num">Prompt, 4K</th><th class="num">Prompt, 32K</th><th class="num">Generation, 4K</th><th class="num">Generation, 32K</th></tr></thead><tbody><tr><td class="">Qwen3.8-27B ¹</td><td class="">27B dense</td><td class="num"><strong>664.9</strong> vs 377.6</td><td class="num"><strong>593.9</strong> vs 329.9</td><td class="num"><strong>33.8</strong> vs 26.8</td><td class="num"><strong>43.4</strong> vs 29.4 ²</td></tr><tr><td class="">Qwen3.8-Flash-Next ³</td><td class="">177B MoE</td><td class="num"></td><td class="num"></td><td class="num"><strong>61.9</strong> vs 40.3</td><td class="num"><strong>58.1</strong> vs 39.2</td></tr></tbody></table></div>
+<p>¹ <a href="https://huggingface.co/unsloth/Qwen3.8-27B-GGUF" target="_blank" rel="noopener">Unsloth UD-Q4_K_XL</a>, the same file for every engine.</p>
+<p>² With the DFlash2 drafter and prompt lookup; with the defaults, 30.3 vs 29.4.</p>
+<p>³ Super Roc on the <a href="https://huggingface.co/kingjones777/Qwen3.8-Flash-Next-ROCmFP4-STRIX_LEAN-GGUF" target="_blank" rel="noopener">ROCmFP4 STRIX_LEAN file</a> with 7 routed experts and its shared MTP head; the other engines on their own files for this model.</p>
+<p>Qwen3.8-27B was measured with the 0.20.0 release on 2026-11-23, Qwen3.8-Flash-Next with the build of 2026-11-20 that became 0.20.0. Every scenario and setup of both runs, including the tests where another engine is faster, is in <a href="https://github.com/kingjones30/superroc/blob/main/docs/BENCHMARKS.md#results-through-lemonades-benchmark-strix-halo" target="_blank" rel="noopener">docs/BENCHMARKS.md</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="features">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Engine</p>
+    <h2>What Super Roc adds</h2>
+    <div class="prose features">
+<ul><li><span class="card-title">ROCmFP4 / ROCmFPX tensor types</span>(GGUF types 100 and above) in the loader, the kernels and the serving path, including spill-free dense prefill and decode kernels for the 4-bit types.</li><li><span class="card-title"><code>superroc-quant</code></span>A standalone GGUF quantizer for the ROC recipes (STRIX, STRIX_LEAN, LEAN, COHERENT, FAST and the G4 variants) with protect rules, a tensor census, manifests and streaming output. For the ROC recipes its output is byte for byte the same as the ROCmFPX <code>llama-quantize</code>. See <a href="https://github.com/kingjones30/superroc/blob/main/docs/superroc-quant.md" target="_blank" rel="noopener">docs/superroc-quant.md</a>.</li><li><span class="card-title">More model families</span><code>qwen35</code> / <code>qwen35moe</code> ROC builds (Qwen3.8, KAT-Coder, Ornith, MiniCPM-V, OxCoder, Agnes, Nex, BTL-4, MiMo), <code>bailingmoe3</code> (Ling-3.0-flash and Ling-3.0-flash-VL), <code>lfm2</code> / <code>lfm2moe</code> (LFM2.5), <code>flint</code> (Flint 40B-A2.5B: sliding-window and position-free attention layers with attention sinks), <code>llama</code> (Nanbeige4.3-33B-Base, serve-only: <a href="https://github.com/kingjones30/superroc/blob/main/docs/models/llama/README.md" target="_blank" rel="noopener">limits</a>) and Muse Glimmer.</li><li><span class="card-title">Drafting</span>Embedded and sidecar MTP heads with a per-request draft depth and exact verification, the DSpark drafter, and prompt-cache snapshots that keep working while a drafter is on.</li><li><span class="card-title">Stock MoE GGUFs</span><code>qwen35moe</code> files with Q4_K, Q5_K, Q6_K or Q8_0 routed experts, such as common Q4_K_XL builds and ROCmFPX Q8 files, run on the mixture-of-experts kernels with the expert choice kept on the GPU.</li><li><span class="card-title">Speed settings</span>A 4-bit prefill route for dense ROCmFP4 files, a tensor overlay and a routed-expert count for mixture-of-experts files, and prompt-lookup drafting (<a href="https://github.com/kingjones30/superroc/blob/main/docs/CLI.md#llm-or-text" target="_blank" rel="noopener">options</a>).</li><li><span class="card-title">Tool calls</span>In each model's native format (Qwen, GLM-style, Ling, Flint), constrained by a grammar built from the request's tools where the format allows it.</li><li><span class="card-title">Hardening</span>HTTP header and body read deadlines and size caps, constant-time API key comparison, checked HIP kernel launches, and validation in the GGUF reader, configuration and weight binders.</li></ul>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="models">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Measured</p>
+    <h2>Models</h2>
+    <div class="prose">
+<p>Measured with this repository's code on Ryzen AI Max+ 395 systems (128 GB, ROCm 7.2.4 or 7.13.0, named in each card): one request at a time, temperature 0, cold prompt cache, drafter as in the card's serve command. <em>Prompt</em> is prompt processing on a document question of 1,517 to 1,641 tokens (depending on the tokenizer); <em>Generation</em> is the speed of the answer to that prompt (up to 256 tokens); <em>Code</em> is the mean generation speed over six coding prompts (up to 256 tokens each). Each card has the exact files, the serve command, more measurements, quality numbers where they exist, and known limits.</p>
+<div class="table-wrap"><table><thead><tr><th class="">Model</th><th class="">Size</th><th class="">File (Hugging Face)</th><th class="">Drafter</th><th class="num">Prompt tok/s</th><th class="num">Generation tok/s</th><th class="num">Code tok/s</th><th class="">Card</th></tr></thead><tbody><tr><td class="">KAT-Coder-V2.5-Dev Abliterated</td><td class="">35B-A3B MoE</td><td class=""><a href="https://huggingface.co/kingjones777/KAT-Coder-V2.5-Dev-Abliterated-MTP-ROCmFP4-GGUF" target="_blank" rel="noopener">STRIX_LEAN, MTP block Q8_0</a></td><td class="">embedded MTP</td><td class="num">1,713.1</td><td class="num">84.7</td><td class="num">107.3</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/kat-coder-v2.5/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Ornith-1.5-35B-A3B</td><td class="">35B-A3B MoE</td><td class=""><a href="https://huggingface.co/kingjones777/Ornith-1.5-35B-A3B-ROCmFP4-STRIX-LEAN-GGUF" target="_blank" rel="noopener">LEAN v1</a></td><td class="">embedded MTP</td><td class="num">1,773.7</td><td class="num">74.6</td><td class="num">96.4</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/ornith-1.5-35b/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">MiniCPM-V-4.7-35B-A3B</td><td class="">35B-A3B MoE, vision</td><td class=""><a href="https://huggingface.co/kingjones777/MiniCPM-V-4.7-35B-A3B-ROCmFP4-GGUF" target="_blank" rel="noopener">LEAN, Q6_K trunk</a></td><td class="">none</td><td class="num">1,876.3</td><td class="num">65.2</td><td class="num">65.7</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/minicpm-v-4.7-35b-a3b/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Agents-A1 Abliterated</td><td class="">35B-A3B MoE</td><td class=""><a href="https://huggingface.co/kingjones777/Agents-A1-Abliterated-MTP-ROCmFP4-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">none</td><td class="num">1,767.7</td><td class="num">77.0</td><td class="num">78.0</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/agents-a1/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">BTL-4</td><td class="">MoE (qwen35moe)</td><td class=""><a href="https://huggingface.co/kingjones777/BTL-4-ROCmFP4-STRIX_LEAN-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">none</td><td class="num">1,771.0</td><td class="num">80.6</td><td class="num">81.4</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/btl-4/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Nex-N2.5-mini</td><td class="">MoE (qwen35moe)</td><td class=""><a href="https://huggingface.co/kingjones777/Nex-N2.5-mini-ROCmFP4-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">none</td><td class="num">1,753.1</td><td class="num">77.1</td><td class="num">78.0</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/nex-n2.5-mini/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Qwen3.8-Flash-Next Uncensored</td><td class="">177B MoE</td><td class=""><a href="https://huggingface.co/kingjones777/Qwen3.8-Flash-Next-Uncensored-ROCmFP4-STRIX_LEAN-imatrix-GGUF" target="_blank" rel="noopener">STRIX_LEAN imatrix, hc tensors Q8_0</a></td><td class="">MTP head Q8_0</td><td class="num">1,261.2</td><td class="num">56.1</td><td class="num">56.8</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3.8-flash-next/SUPERROC.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Qwen3.8-Flash-Next</td><td class="">177B MoE</td><td class=""><a href="https://huggingface.co/unsloth/Qwen3.8-Flash-Next-GGUF" target="_blank" rel="noopener">Unsloth UD-Q4_K_XL</a></td><td class="">shared MTP Q8_0</td><td class="num">1,369.1</td><td class="num">47.6</td><td class="num">59.9</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3.8-flash-next/SUPERROC.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Qwen3.8-27B</td><td class="">27B dense</td><td class=""><a href="https://huggingface.co/kingjones777/Qwen3.8-27B-ROCmFP4-STRIX-MTP-GGUF" target="_blank" rel="noopener">STRIX imatrix, head/embedding Q6_K</a></td><td class="">DFlash2</td><td class="num">513.6</td><td class="num">27.6</td><td class="num">50.6</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3.8-27b/SUPERROC.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Qwen3.8-27B</td><td class="">27B dense</td><td class=""><a href="https://huggingface.co/unsloth/Qwen3.8-27B-GGUF" target="_blank" rel="noopener">Unsloth UD-Q4_K_XL</a></td><td class="">DFlash2</td><td class="num">545.6</td><td class="num">27.2</td><td class="num">44.3</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3.8-27b/SUPERROC.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Qwen3.8-27B Uncensored</td><td class="">27B dense</td><td class=""><a href="https://huggingface.co/kingjones777/Qwen3.8-27B-Uncensored-ROCmFP4-STRIX-MTP-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">MTP Q4_0</td><td class="num">509.6</td><td class="num">26.3</td><td class="num">43.9</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3.8-27b-uncensored/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Qwen3.8-27B Fable Cold Fusion Heretic</td><td class="">27B dense, vision</td><td class=""><a href="https://huggingface.co/kingjones777/Qwen3.8-27B-TURBO-Fable-Cold-Fusion-Heretic-ROCmFP4-FAST-imatrix-GGUF" target="_blank" rel="noopener">FAST imatrix</a></td><td class="">MTP Q4_0</td><td class="num">498.8</td><td class="num">29.1</td><td class="num">41.7</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3.8-27b-fable-heretic/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Agnes-3.0-Flash-Preview</td><td class="">33B dense</td><td class=""><a href="https://huggingface.co/kingjones777/Agnes-3.0-Flash-Preview-MTP-ROCmFP4-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">MTP sidecar Q8_0</td><td class="num">423.0</td><td class="num">21.5</td><td class="num">29.2</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/agnes-3.0-flash/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">OxCoder-9B</td><td class="">9B dense</td><td class=""><a href="https://huggingface.co/kingjones777/OxCoder-9B-MTP-ROCmFP4-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">MTP (own block)</td><td class="num">1,437.7</td><td class="num">51.8</td><td class="num">76.4</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/oxcoder-9b/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Ornith-1.5-9B</td><td class="">9B dense</td><td class=""><a href="https://huggingface.co/kingjones777/Ornith-1.5-9B-ROCmFP4-STRIX-LEAN-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">none</td><td class="num">1,703.1</td><td class="num">42.3</td><td class="num">42.7</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/ornith-1.5-9b/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">MiMo-V2.6-Distill-Qwen-9B</td><td class="">9B dense</td><td class=""><a href="https://huggingface.co/kingjones777/MiMo-V2.6-Distill-Qwen-9B-ROCmFP4-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">none</td><td class="num">1,625.4</td><td class="num">42.2</td><td class="num">42.5</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/mimo-v2.6-9b/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Ling-3.0-flash-VL</td><td class="">124B-A5.5B MoE, vision</td><td class=""><a href="https://huggingface.co/kingjones777/Ling-3.0-flash-VL-MTP-ROCmFP4-GGUF" target="_blank" rel="noopener">STRIX_LEAN</a></td><td class="">none</td><td class="num">569.2</td><td class="num">38.4</td><td class="num">37.4</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/ling-3.0-flash-vl/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">LFM2.5-24B-A2B</td><td class="">24B-A2B MoE</td><td class=""><a href="https://huggingface.co/kingjones777/LFM2.5-24B-A2B-ROCmFP4-GGUF" target="_blank" rel="noopener">LEAN (from the QAD 4-bit file)</a></td><td class="">none</td><td class="num">2,459.2</td><td class="num">97.8</td><td class="num">101.8</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/lfm2.5/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">LFM2.5-8B-A1B</td><td class="">8B-A1B MoE</td><td class=""><a href="https://huggingface.co/kingjones777/LFM2.5-8B-A1B-ROCmFP4-LEAN-GGUF" target="_blank" rel="noopener">LEAN</a></td><td class="">none</td><td class="num">4,037.2</td><td class="num">153.4</td><td class="num">158.5</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/lfm2.5/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">LFM2.5-2.6B</td><td class="">2.6B dense</td><td class=""><a href="https://huggingface.co/kingjones777/LFM2.5-2.6B-ROCmFP4-LEAN-GGUF" target="_blank" rel="noopener">LEAN</a></td><td class="">none</td><td class="num">3,317.9</td><td class="num">104.9</td><td class="num">108.6</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/lfm2.5/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">LFM2.5-1.2B-Instruct</td><td class="">1.2B dense</td><td class=""><a href="https://huggingface.co/kingjones777/LFM2.5-1.2B-Instruct-ROCmFP4-GGUF" target="_blank" rel="noopener">LEAN</a></td><td class="">none</td><td class="num">6,992.6</td><td class="num">210.7</td><td class="num">223.3</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/lfm2.5/README.md" target="_blank" rel="noopener">card</a></td></tr><tr><td class="">Flint 40B-A2.5B</td><td class="">40B-A2.5B MoE</td><td class=""><a href="https://huggingface.co/kingjones777/Flint-40B-A2.5B-ROCmFP4-GGUF" target="_blank" rel="noopener">COHERENT-PAS</a></td><td class="">none</td><td class="num">1,119 ¹</td><td class="num">58.9 ¹</td><td class="num">—</td><td class=""><a href="https://github.com/kingjones30/superroc/blob/main/docs/models/flint/README.md" target="_blank" rel="noopener">card</a></td></tr></tbody></table></div>
+<p>¹ Flint was measured with its own method: a 512-token prompt and 128 generated tokens. Its card has the 4K and 16K numbers.</p>
+<p>The table was measured on the 2026-10-25 build. Speed settings new in this release, each measured on the card's file with the setting off and on in alternating runs on one build (method and serve command in each card):</p>
+<div class="table-wrap"><table><thead><tr><th class="">Model</th><th class="">Setting</th><th class="num">Prompt tok/s</th><th class="num">Generation tok/s</th><th class="num">Perplexity</th></tr></thead><tbody><tr><td class="">Qwen3.8-27B, ROCmFP4 STRIX imatrix</td><td class="">4-bit prefill route</td><td class="num">586 → 782 (1K), 577 → 754 (8K)</td><td class="num">30.2 → 31.4</td><td class="num">4.641 → 4.645</td></tr><tr><td class="">Qwen3.8-Flash-Next Uncensored</td><td class="">tensor overlay, 6 of 10 experts</td><td class="num">1,393 → 1,523</td><td class="num">52.4 → 58.2</td><td class="num">5.128 → 5.046</td></tr><tr><td class="">KAT-Coder-V2.5-Dev Abliterated</td><td class="">6 of 8 experts</td><td class="num">2,101 → 2,315</td><td class="num">98.5 → 105.4</td><td class="num">6.402 → 6.512</td></tr></tbody></table></div>
+<p>Also supported, with the upstream project's guides (its measurements, not re-measured here): <a href="https://github.com/kingjones30/superroc/blob/main/docs/models/deepseek-v4-flash/README.md" target="_blank" rel="noopener">DeepSeek V4 Flash</a>, <a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3-asr/README.md" target="_blank" rel="noopener">Qwen3-ASR 1.7B</a>, <a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3-tts/README.md" target="_blank" rel="noopener">Qwen3-TTS 1.7B</a>, <a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen-image-2.1/README.md" target="_blank" rel="noopener">Qwen-Image-2.1</a> and <a href="https://github.com/kingjones30/superroc/blob/main/docs/models/minimax-h3/README.md" target="_blank" rel="noopener">MiniMax H3</a>. The upstream usage guides for <a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3.8-27b/README.md" target="_blank" rel="noopener">Qwen3.8 27B</a> and <a href="https://github.com/kingjones30/superroc/blob/main/docs/models/qwen3.8-flash-next/README.md" target="_blank" rel="noopener">Qwen3.8 Flash-Next</a> are kept next to the Super Roc cards for those models.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="quickstart">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Quick start</p>
+    <h2>Build from source</h2>
+    <div class="prose">
+<p>Linux x86-64 on AMD Strix Halo (<code>gfx1151</code>) is the supported target.</p>
+<h3>With Nix</h3>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>nix build
+./result/bin/superroc diagnose
+./result/bin/superroc serve llm --model /path/to/model.gguf</code></pre></div>
+<h3>Without Nix</h3>
+<p>Install a C++20 compiler, CMake 3.21+, Ninja, pkg-config and the ROCm HIP development libraries (ROCm normally installs under <code>/opt/rocm</code>), then:</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>sudo apt install build-essential cmake ninja-build pkg-config \
+  libicu-dev libcurl4-openssl-dev libssl-dev libpng-dev libjpeg-dev libwebp-dev ffmpeg
+
+# ROCm libraries, named as AMD&#x27;s repository ships them.
+sudo apt install hipblas-dev hipblaslt-dev rocblas-dev \
+  hipcub-dev rocprim-dev rocwmma-dev
+
+cmake --preset release -DCMAKE_INSTALL_PREFIX=&quot;$HOME/.local&quot;
+cmake --build --preset release --parallel 4
+./build/release/superroc diagnose</code></pre></div>
+<p><code>cmake --install build/release</code> installs Super Roc, its runtime data and the license notices.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block alt" id="api">
+  <div class="wrap">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Serve</p>
+    <h2>Run</h2>
+    <div class="prose">
+<p>Serve a model (here KAT-Coder-V2.5-Dev Abliterated with its embedded MTP drafter, see its card):</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>./build/release/superroc serve --host 127.0.0.1 --port 8080 llm \
+  --model /path/to/KAT-Coder-V2.5-Dev-Abliterated-MTPq8-Q4_0_ROCMFP4_STRIX_LEAN.gguf \
+  --served-model-name kat-coder --context 131072 --think off --speculative mtp -d 3 --min-draft-tokens 1</code></pre></div>
+<p>Then ask it something through the OpenAI-compatible API:</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>curl http://localhost:8080/v1/chat/completions \
+  -H &quot;Content-Type: application/json&quot; \
+  -d &#x27;{&quot;model&quot;: &quot;kat-coder&quot;, &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Write a Python function that reverses a list.&quot;}]}&#x27;</code></pre></div>
+<h3>Recipes</h3>
+<p>A tuned setup can travel with the model file as <code>superroc-recipe.json</code>: engine variables, sidecar files (such as an int4 prefill route or a tensor overlay) and tuning flags. Put the recipe and its sidecars next to the model and start with <code>--recipe auto</code>; flags on the command line still take precedence:</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>./build/release/superroc serve --host 127.0.0.1 --port 8080 llm \
+  --model /path/to/Qwen3.8-27B-UD-Q4_K_XL.gguf --dflash-model /path/to/Qwen3.8-27B-DFlash2-Q4_K_M.gguf \
+  --speculative dflash2 --recipe auto</code></pre></div>
+<p>The recipe for that file is on Hugging Face at <a href="https://huggingface.co/kingjones777/Qwen3.8-27B-SuperROC-Recipe" target="_blank" rel="noopener">kingjones777/Qwen3.8-27B-SuperROC-Recipe</a>. The format and its rules are in <a href="https://github.com/kingjones30/superroc/blob/main/docs/recipes.md" target="_blank" rel="noopener">docs/recipes.md</a>; measured results are in <a href="https://github.com/kingjones30/superroc/blob/main/docs/BENCHMARKS.md" target="_blank" rel="noopener">docs/BENCHMARKS.md</a>.</p>
+<h3>Anthropic API and Claude Code</h3>
+<p>The same server speaks the Anthropic Messages API:</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>curl http://localhost:8080/v1/messages \
+  -H &quot;Content-Type: application/json&quot; \
+  -H &quot;anthropic-version: 2023-06-01&quot; \
+  -H &quot;x-api-key: none&quot; \
+  -d &#x27;{&quot;model&quot;: &quot;kat-coder&quot;, &quot;max_tokens&quot;: 64, &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Write a Python function that reverses a list.&quot;}]}&#x27;</code></pre></div>
+<p>It supports streaming SSE, system prompts, tools with <code>tool_result</code> round trips, thinking blocks, <code>count_tokens</code>, and prompt-cache usage fields. The request and response shapes are in <a href="https://github.com/kingjones30/superroc/blob/main/docs/SERVER.md#responses-api-subset" target="_blank" rel="noopener">docs/SERVER.md</a>.</p>
+<p>Claude Code works against the server with these variables:</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>export ANTHROPIC_BASE_URL=http://localhost:8080
+export ANTHROPIC_AUTH_TOKEN=none
+export ANTHROPIC_MODEL=kat-coder
+export ANTHROPIC_SMALL_FAST_MODEL=kat-coder
+claude</code></pre></div>
+<p><code>ANTHROPIC_MODEL</code> is the name the server was started with (<code>--served-model-name</code>).</p>
+<p>For Open WebUI, VS Code, the OpenAI SDK and Responses-API clients, set the API base URL to <code>http://localhost:8080/v1</code>. Anthropic SDK clients and Claude Code use <code>http://localhost:8080</code> as the base URL. Chat Completions and Responses support text, images, function tools, structured output and streaming. The server uses the model's native context by default; <code>--context N</code> sets the context per session and <code>--max-tokens N</code> a default response limit that clients can override (reasoning tokens count toward it). The full API contract is in <a href="https://github.com/kingjones30/superroc/blob/main/docs/SERVER.md" target="_blank" rel="noopener">docs/SERVER.md</a> and the command line in <a href="https://github.com/kingjones30/superroc/blob/main/docs/CLI.md" target="_blank" rel="noopener">docs/CLI.md</a>.</p>
+<h3>Lemonade</h3>
+<p>Super Roc runs inside a stock <a href="https://github.com/lemonade-sdk/lemonade" target="_blank" rel="noopener">Lemonade</a> install today: point Lemonade's llama.cpp ROCm slot at the Super Roc launcher and add the Super Roc model list.</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>tools/lemonade/install.sh --superroc ./build/release/superroc --prefix /opt/superroc
+lemonade config set llamacpp.rocm_bin=/opt/superroc/lemonade</code></pre></div>
+<p>Models that Super Roc does not run go to the stock llama-server unchanged. Setup, the model list and troubleshooting: <a href="https://github.com/kingjones30/superroc/blob/main/docs/LEMONADE.md" target="_blank" rel="noopener">docs/LEMONADE.md</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="block" id="gaps">
+  <div class="wrap narrow">
+    <p class="kicker"><span class="slash" aria-hidden="true"></span>Honest notes</p>
+    <h2>Known gaps</h2>
+    <div class="prose">
+<ul><li>Muse Glimmer loads, but its DFlash drafter does not yet, and without it Super Roc generates more slowly than llama.cpp (ROCmFPX build) on that model.</li><li>Several GPU tests and tools read a model file; they take its path from an environment variable and fail without it.</li></ul>
+    </div>
+    <h2 id="lineage">Lineage and credits</h2>
+    <div class="prose">
+<p>Super Roc began as a fork of an MIT-licensed ROCm inference engine. The code is released under the MIT License in <a href="https://github.com/kingjones30/superroc/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a>. <a href="https://github.com/kingjones30/superroc/blob/main/NOTICE" target="_blank" rel="noopener">NOTICE</a> names the upstream project; it and <a href="https://github.com/kingjones30/superroc/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener">THIRD_PARTY_NOTICES.md</a> list the code that came from that project, from llama.cpp / ggml and from other projects, with their licenses. Model weights are not included; each Hugging Face card states the license of its weights.</p>
+<p>Thanks to the ROCmFPX team, Carlo Pasquale (<a href="https://github.com/charlie12345" target="_blank" rel="noopener">@charlie12345</a>) and the <a href="https://github.com/charlie12345/ROCmFPX" target="_blank" rel="noopener">ROCmFPX</a> contributors, for the ROCm-FP4 formats and the llama.cpp work they started from, and to Donato Capitella (<a href="https://github.com/kyuz0" target="_blank" rel="noopener">@kyuz0</a>) for the ROCmFPX builds in his Strix Halo toolboxes.</p>
+    </div>
+    <h2>Feedback</h2>
+    <div class="prose">
+<p>Open an issue with the hardware (CPU/GPU, memory, ROCm version), the model file, the exact command and the server log. Measurements on other Strix Halo systems, new model families and kernel improvements are welcome as pull requests.</p>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-inner">
+    <a class="brand" href="#top"><img src="assets/icon-256.png" alt="" width="36" height="36"><span>Super Roc</span></a>
+    <p>MIT License · the executable is <code>superroc</code> · <a href="https://github.com/kingjones30/superroc/blob/main/NOTICE" target="_blank" rel="noopener">NOTICE</a> · <a href="https://github.com/kingjones30/superroc/blob/main/THIRD_PARTY_NOTICES.md" target="_blank" rel="noopener">Third-party notices</a></p>
+  </div>
+</footer>
+<script src="app.js" defer></script>
+</body>
+</html>

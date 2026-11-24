@@ -1,4 +1,23 @@
-# Super Roc
+<h1 align="center">
+  <img src="docs/assets/brand/README-banner-original.png" alt="Super Roc — Roc-Solid AI Performance" width="100%">
+</h1>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-0066FF?style=flat-square&labelColor=0A1324"></a>
+  <a href="https://github.com/kingjones30/superroc/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/kingjones30/superroc?style=flat-square&labelColor=0A1324&color=0066FF"></a>
+  <img alt="Target: gfx1151 (Strix Halo)" src="https://img.shields.io/badge/target-gfx1151%20Strix%20Halo-00E5FF?style=flat-square&labelColor=0A1324">
+  <img alt="APIs: OpenAI and Anthropic" src="https://img.shields.io/badge/API-OpenAI%20%2B%20Anthropic-0066FF?style=flat-square&labelColor=0A1324">
+  <a href="https://github.com/kingjones30/superroc/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/kingjones30/superroc/actions/workflows/ci.yml/badge.svg"></a>
+</p>
+
+<p align="center">
+  <a href="#top-performers"><b>Top performers</b></a> &nbsp;·&nbsp;
+  <a href="#models"><b>Models</b></a> &nbsp;·&nbsp;
+  <a href="#build-from-source"><b>Build</b></a> &nbsp;·&nbsp;
+  <a href="#run"><b>Run</b></a> &nbsp;·&nbsp;
+  <a href="#anthropic-api-and-claude-code"><b>API</b></a> &nbsp;·&nbsp;
+  <a href="#lineage-and-credits"><b>Lineage</b></a>
+</p>
 
 Super Roc is an LLM inference engine for AMD Strix Halo: Ryzen AI Max+ 395 systems with the Radeon 8060S GPU (`gfx1151`)
 and up to 128 GB of unified memory. It serves GGUF models, including 4-bit ROCmFP4 builds, through an OpenAI- and
@@ -20,12 +39,41 @@ Super Roc is its own engine project. Issues, pull requests and forks are welcome
   (Nanbeige4.3-33B-Base, serve-only: [limits](docs/models/llama/README.md)) and Muse Glimmer.
 - **Drafting**: embedded and sidecar MTP heads with a per-request draft depth and exact verification, the DSpark
   drafter, and prompt-cache snapshots that keep working while a drafter is on.
+- **Stock MoE GGUFs**: `qwen35moe` files with Q4_K, Q5_K, Q6_K or Q8_0 routed experts, such as common Q4_K_XL
+  builds and ROCmFPX Q8 files, run on the mixture-of-experts kernels with the expert choice kept on the GPU.
 - **Speed settings**: a 4-bit prefill route for dense ROCmFP4 files, a tensor overlay and a routed-expert count for
   mixture-of-experts files, and prompt-lookup drafting ([options](docs/CLI.md#llm-or-text)).
 - **Tool calls** in each model's native format (Qwen, GLM-style, Ling, Flint), constrained by a grammar built from the
   request's tools where the format allows it.
 - **Hardening**: HTTP header and body read deadlines and size caps, constant-time API key comparison, checked HIP kernel
   launches, and validation in the GGUF reader, configuration and weight binders.
+
+## Top performers
+
+Models where Super Roc measured fastest among the engines we ran on the same machine. Measured with `lemonade bench`, the public
+benchmark harness of AMD's [Lemonade](https://github.com/lemonade-sdk/lemonade), which drives every engine through Lemonade with
+the same requests (greedy decoding; a fresh model load before each run, mean of two runs) on a Ryzen AI Max+ 395 with
+128 GB. *4K* and *32K* are the harness's long-context scenarios (about 3,250 and 24,800 prompt tokens). Each engine runs with
+the speculative decoding it turns on by default for the model.
+
+Each cell reads *Super Roc* vs *the fastest other engine*, in tokens per second; only the tests where Super Roc
+measured fastest are listed.
+
+| Model | Category | Prompt, 4K | Prompt, 32K | Generation, 4K | Generation, 32K |
+|---|---|---:|---:|---:|---:|
+| Qwen3.8-27B ¹ | 27B dense | **664.9** vs 377.6 | **593.9** vs 329.9 | **33.8** vs 26.8 | **43.4** vs 29.4 ² |
+| Qwen3.8-Flash-Next ³ | 177B MoE | | | **61.9** vs 40.3 | **58.1** vs 39.2 |
+
+¹ [Unsloth UD-Q4_K_XL](https://huggingface.co/unsloth/Qwen3.8-27B-GGUF), the same file for every engine.
+
+² With the DFlash2 drafter and prompt lookup; with the defaults, 30.3 vs 29.4.
+
+³ Super Roc on the [ROCmFP4 STRIX_LEAN file](https://huggingface.co/kingjones777/Qwen3.8-Flash-Next-ROCmFP4-STRIX_LEAN-GGUF)
+with 7 routed experts and its shared MTP head; the other engines on their own files for this model.
+
+Qwen3.8-27B was measured with the 0.20.0 release on 2026-11-23, Qwen3.8-Flash-Next with the build of 2026-11-20 that
+became 0.20.0. Every scenario and setup of both runs, including the tests where another engine is faster, is in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md#results-through-lemonades-benchmark-strix-halo).
 
 ## Models
 
@@ -195,7 +243,6 @@ troubleshooting: [docs/LEMONADE.md](docs/LEMONADE.md).
 
 - Muse Glimmer loads, but its DFlash drafter does not yet, and without it Super Roc generates more slowly than
   llama.cpp (ROCmFPX build) on that model.
-- A Qwen3.6-35B-A3B file with its MoE experts stored as Q8_0 does not load on this build.
 - Several GPU tests and tools read a model file; they take its path from an environment variable and fail without it.
 
 ## Lineage and credits
@@ -215,3 +262,10 @@ toolboxes.
 
 Open an issue with the hardware (CPU/GPU, memory, ROCm version), the model file, the exact command and the server log.
 Measurements on other Strix Halo systems, new model families and kernel improvements are welcome as pull requests.
+
+---
+
+<p align="center">
+  <img src="docs/assets/brand/icon-256.png" alt="" width="64"><br>
+  <sub><b>Super Roc</b> · MIT License · the executable is <code>superroc</code></sub>
+</p>
