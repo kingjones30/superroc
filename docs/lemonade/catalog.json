@@ -831,5 +831,18 @@
       "tool-calling"
     ],
     "size": 2.47
+  },
+  "Player-1-35B-A3B": {
+    "checkpoints": {
+      "main": "kingjones777/Player-1-35B-A3B-SuperRoc-GGUF:Player-1-35B-A3B-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+      "mmproj": "kingjones777/Player-1-35B-A3B-SuperRoc-GGUF:mmproj-Player-1-35B-A3B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 18.8
   }
 }

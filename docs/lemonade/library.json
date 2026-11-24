@@ -698,5 +698,15 @@
     "labels": ["chat", "tool-calling"],
     "size_gb": 2.47,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
+  },
+  {
+    "name": "Player-1-35B-A3B",
+    "repo": "kingjones777/Player-1-35B-A3B-SuperRoc-GGUF",
+    "file": "Player-1-35B-A3B-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+    "mmproj": "kingjones777/Player-1-35B-A3B-SuperRoc-GGUF:mmproj-Player-1-35B-A3B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 18.8,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
   }
 ]

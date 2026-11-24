@@ -627,5 +627,14 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "Player-1-35B-A3B-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--think",
+    "off"
   ]
 }
