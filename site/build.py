@@ -14,6 +14,12 @@ SITE = ROOT / "site"
 REPO = "https://github.com/kingjones30/superroc"
 
 
+def slug(text):
+    """GitHub's heading anchor: lower case, punctuation dropped, spaces to hyphens."""
+    text = re.sub(r"[`*]", "", text).strip().lower()
+    return re.sub(r"[^\w\- ]", "", text).replace(" ", "-")
+
+
 def inline(text):
     """Inline markdown subset: code, bold, italics, links, footnote marks."""
     out = []
@@ -61,7 +67,7 @@ def render(md):
         m = re.match(r"^(#{3,4}) (.+)$", line)
         if m:
             level = len(m.group(1))
-            out.append(f"<h{level}>{inline(m.group(2))}</h{level}>")
+            out.append(f'<h{level} id="{slug(m.group(2))}">{inline(m.group(2))}</h{level}>')
             i += 1
             continue
         if line.startswith("|"):

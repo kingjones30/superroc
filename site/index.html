@@ -125,14 +125,14 @@ lemonade chat LFM2.5-1.2B-Instruct</code></pre></div>
 <p><code>tools/lemonade/setup.sh</code> is optional: it checks the machine, builds Super Roc, installs it in <code>/opt/superroc</code> (with sudo for that step only when needed), points Lemonade at it and adds the Super Roc model list, keeping any model lists you already have. Run it again at any time. <code>--dry-run</code> shows what it would do, <code>--undo</code> switches Lemonade back to its own llama.cpp, and <code>--help</code> lists the options. The same steps by hand are in <a href="https://github.com/kingjones30/superroc/blob/main/docs/LEMONADE.md" target="_blank" rel="noopener">docs/LEMONADE.md</a>. Models Super Roc does not run keep running on Lemonade's own llama.cpp.</p>
 <p>Without Lemonade, build it (<a href="#build-from-source">Build from source</a>) and serve a model directly (<a href="#run">Run</a>).</p>
     </div>
-    <h2>Build from source</h2>
+    <h2 id="build-from-source">Build from source</h2>
     <div class="prose">
 <p>Linux x86-64 on AMD Strix Halo (<code>gfx1151</code>) is the supported target.</p>
-<h3>With Nix</h3>
+<h3 id="with-nix">With Nix</h3>
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>nix build
 ./result/bin/superroc diagnose
 ./result/bin/superroc serve llm --model /path/to/model.gguf</code></pre></div>
-<h3>Without Nix</h3>
+<h3 id="without-nix">Without Nix</h3>
 <p>Install a C++20 compiler, CMake 3.21+, Ninja, pkg-config and the ROCm HIP development libraries (ROCm normally installs under <code>/opt/rocm</code>), then:</p>
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>sudo apt install build-essential cmake ninja-build pkg-config \
   libicu-dev libcurl4-openssl-dev libssl-dev libpng-dev libjpeg-dev libwebp-dev ffmpeg
@@ -152,7 +152,7 @@ cmake --build --preset release --parallel 4
 <section class="block alt" id="api">
   <div class="wrap">
     <p class="kicker"><span class="slash" aria-hidden="true"></span>Serve</p>
-    <h2>Run</h2>
+    <h2 id="run">Run</h2>
     <div class="prose">
 <p>Serve a model (here KAT-Coder-V2.5-Dev Abliterated with its embedded MTP drafter, see its card):</p>
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>./build/release/superroc serve --host 127.0.0.1 --port 8080 llm \
@@ -162,13 +162,13 @@ cmake --build --preset release --parallel 4
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>curl http://localhost:8080/v1/chat/completions \
   -H &quot;Content-Type: application/json&quot; \
   -d &#x27;{&quot;model&quot;: &quot;kat-coder&quot;, &quot;messages&quot;: [{&quot;role&quot;: &quot;user&quot;, &quot;content&quot;: &quot;Write a Python function that reverses a list.&quot;}]}&#x27;</code></pre></div>
-<h3>Recipes</h3>
+<h3 id="recipes">Recipes</h3>
 <p>A tuned setup can travel with the model file as <code>superroc-recipe.json</code>: engine variables, sidecar files (such as an int4 prefill route or a tensor overlay) and tuning flags. Put the recipe and its sidecars next to the model and start with <code>--recipe auto</code>; flags on the command line still take precedence:</p>
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>./build/release/superroc serve --host 127.0.0.1 --port 8080 llm \
   --model /path/to/Qwen3.8-27B-UD-Q4_K_XL.gguf --dflash-model /path/to/Qwen3.8-27B-DFlash2-Q4_K_M.gguf \
   --speculative dflash2 --recipe auto</code></pre></div>
 <p>The recipe for that file is on Hugging Face at <a href="https://huggingface.co/kingjones777/Qwen3.8-27B-SuperROC-Recipe" target="_blank" rel="noopener">kingjones777/Qwen3.8-27B-SuperROC-Recipe</a>. The format and its rules are in <a href="https://github.com/kingjones30/superroc/blob/main/docs/recipes.md" target="_blank" rel="noopener">docs/recipes.md</a>; measured results are in <a href="https://github.com/kingjones30/superroc/blob/main/docs/BENCHMARKS.md" target="_blank" rel="noopener">docs/BENCHMARKS.md</a>.</p>
-<h3>Anthropic API and Claude Code</h3>
+<h3 id="anthropic-api-and-claude-code">Anthropic API and Claude Code</h3>
 <p>The same server speaks the Anthropic Messages API:</p>
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>curl http://localhost:8080/v1/messages \
   -H &quot;Content-Type: application/json&quot; \
@@ -184,7 +184,7 @@ export ANTHROPIC_SMALL_FAST_MODEL=kat-coder
 claude</code></pre></div>
 <p><code>ANTHROPIC_MODEL</code> is the name the server was started with (<code>--served-model-name</code>).</p>
 <p>For Open WebUI, VS Code, the OpenAI SDK and Responses-API clients, set the API base URL to <code>http://localhost:8080/v1</code>. Anthropic SDK clients and Claude Code use <code>http://localhost:8080</code> as the base URL. Chat Completions and Responses support text, images, function tools, structured output and streaming. The server uses the model's native context by default; <code>--context N</code> sets the context per session and <code>--max-tokens N</code> a default response limit that clients can override (reasoning tokens count toward it). The full API contract is in <a href="https://github.com/kingjones30/superroc/blob/main/docs/SERVER.md" target="_blank" rel="noopener">docs/SERVER.md</a> and the command line in <a href="https://github.com/kingjones30/superroc/blob/main/docs/CLI.md" target="_blank" rel="noopener">docs/CLI.md</a>.</p>
-<h3>Lemonade</h3>
+<h3 id="lemonade">Lemonade</h3>
 <p>Super Roc runs inside a stock <a href="https://github.com/lemonade-sdk/lemonade" target="_blank" rel="noopener">Lemonade</a> install today: point Lemonade's llama.cpp ROCm slot at the Super Roc launcher and add the Super Roc model list.</p>
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>tools/lemonade/setup.sh                # build, install and configure in one step</code></pre></div>
 <p>or by hand:</p>
