@@ -628,5 +628,25 @@
     "labels": ["chat", "tool-calling", "vision"],
     "size_gb": 5.36,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.8-27B-ROCmFPX-Q8_0",
+    "repo": "kingjones777/Qwen3.8-27B-ROCmFPX-Q8_0-GGUF",
+    "file": "Qwen3.8-27B-Q8_0_ROCMFPX.gguf",
+    "mmproj": "kingjones777/Qwen3.8-27B-ROCmFPX-Q8_0-GGUF:mmproj-Qwen3.8-27B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 27.83,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Qwen3.8-27B-ROCmFPX-Q8_0-AGENT",
+    "repo": "kingjones777/Qwen3.8-27B-ROCmFPX-Q8_0-AGENT-GGUF",
+    "file": "Qwen3.8-27B-Q8_0_ROCMFPX_AGENT.gguf",
+    "mmproj": "kingjones777/Qwen3.8-27B-ROCmFPX-Q8_0-AGENT-GGUF:mmproj-Qwen3.8-27B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 28.21,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
   }
 ]

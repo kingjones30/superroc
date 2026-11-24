@@ -554,5 +554,21 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "Qwen3.8-27B-Q8_0_ROCMFPX.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Qwen3.8-27B-Q8_0_ROCMFPX_AGENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
   ]
 }

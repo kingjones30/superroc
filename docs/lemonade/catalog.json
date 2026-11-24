@@ -744,5 +744,31 @@
       "vision"
     ],
     "size": 5.36
+  },
+  "Qwen3.8-27B-ROCmFPX-Q8_0": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.8-27B-ROCmFPX-Q8_0-GGUF:Qwen3.8-27B-Q8_0_ROCMFPX.gguf",
+      "mmproj": "kingjones777/Qwen3.8-27B-ROCmFPX-Q8_0-GGUF:mmproj-Qwen3.8-27B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 27.83
+  },
+  "Qwen3.8-27B-ROCmFPX-Q8_0-AGENT": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.8-27B-ROCmFPX-Q8_0-AGENT-GGUF:Qwen3.8-27B-Q8_0_ROCMFPX_AGENT.gguf",
+      "mmproj": "kingjones777/Qwen3.8-27B-ROCmFPX-Q8_0-AGENT-GGUF:mmproj-Qwen3.8-27B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 28.21
   }
 }
