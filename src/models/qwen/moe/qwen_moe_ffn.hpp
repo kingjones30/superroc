@@ -24,4 +24,14 @@ int LaunchQwenMoeShexpSigmoid(const float* x, const float* gate_vec, int k,
 int LaunchQwenMoeCombine(const float* moe_y, const float* shexp_y, int hidden,
                          int n_tokens, float* out, hipStream_t stream);
 
+// K-quant combine. slot_y is [n][used][hidden] (unweighted expert
+// outputs, slot s = routed rank s), weights [n][used], shexp_y [n][hidden]
+// (unscaled shared-expert output), sig [n]. out[t][h] = sum_s weights*slot_y
+// + sig*shexp_y, slots summed s=0..used-1 then the shexp term, the order
+// ForwardMoe uses. Returns 0 queued, 1 rejected argument, 2 HIP error.
+int LaunchQwenMoeCombineSlots(const float* slot_y, const float* weights,
+                              const float* shexp_y, const float* sig, int used,
+                              int hidden, int n_tokens, float* out,
+                              hipStream_t stream);
+
 #endif

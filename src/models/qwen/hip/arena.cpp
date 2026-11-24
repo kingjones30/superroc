@@ -1040,6 +1040,12 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   d_moe_zero_ids = other.d_moe_zero_ids;
   d_moe_y = other.d_moe_y;
   d_moe_shexp_y = other.d_moe_shexp_y;
+  d_moe_slot_y = other.d_moe_slot_y;
+  d_moe_gate_e = other.d_moe_gate_e;
+  d_moe_up_e = other.d_moe_up_e;
+  d_moe_shexp_h = other.d_moe_shexp_h;
+  d_moe_shexp_gate = other.d_moe_shexp_gate;
+  d_moe_shexp_act = other.d_moe_shexp_act;
   d_ssm_conv_buffers_ = other.d_ssm_conv_buffers_;
   d_ssm_deltanet_buffers_ = other.d_ssm_deltanet_buffers_;
   live_recurrent_ = other.live_recurrent_;
@@ -1096,6 +1102,12 @@ QwenGpuArena::QwenGpuArena(QwenGpuArena&& other) noexcept
   other.d_moe_zero_ids = nullptr;
   other.d_moe_y = nullptr;
   other.d_moe_shexp_y = nullptr;
+  other.d_moe_slot_y = nullptr;
+  other.d_moe_gate_e = nullptr;
+  other.d_moe_up_e = nullptr;
+  other.d_moe_shexp_h = nullptr;
+  other.d_moe_shexp_gate = nullptr;
+  other.d_moe_shexp_act = nullptr;
   other.d_ssm_conv_buffers_ = {};
   other.d_ssm_deltanet_buffers_ = {};
   other.live_recurrent_ = 0;
@@ -1162,6 +1174,12 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     d_moe_zero_ids = other.d_moe_zero_ids;
     d_moe_y = other.d_moe_y;
     d_moe_shexp_y = other.d_moe_shexp_y;
+    d_moe_slot_y = other.d_moe_slot_y;
+    d_moe_gate_e = other.d_moe_gate_e;
+    d_moe_up_e = other.d_moe_up_e;
+    d_moe_shexp_h = other.d_moe_shexp_h;
+    d_moe_shexp_gate = other.d_moe_shexp_gate;
+    d_moe_shexp_act = other.d_moe_shexp_act;
     d_ssm_conv_buffers_ = other.d_ssm_conv_buffers_;
     d_ssm_deltanet_buffers_ = other.d_ssm_deltanet_buffers_;
     live_recurrent_ = other.live_recurrent_;
@@ -1218,6 +1236,12 @@ QwenGpuArena& QwenGpuArena::operator=(QwenGpuArena&& other) noexcept {
     other.d_moe_zero_ids = nullptr;
     other.d_moe_y = nullptr;
     other.d_moe_shexp_y = nullptr;
+    other.d_moe_slot_y = nullptr;
+    other.d_moe_gate_e = nullptr;
+    other.d_moe_up_e = nullptr;
+    other.d_moe_shexp_h = nullptr;
+    other.d_moe_shexp_gate = nullptr;
+    other.d_moe_shexp_act = nullptr;
     other.d_ssm_conv_buffers_ = {};
     other.d_ssm_deltanet_buffers_ = {};
     other.live_recurrent_ = 0;
@@ -1348,6 +1372,12 @@ void QwenGpuArena::FreeAll() noexcept {
   LogCleanupError(hipFree(d_moe_zero_ids));
   LogCleanupError(hipFree(d_moe_y));
   LogCleanupError(hipFree(d_moe_shexp_y));
+  LogCleanupError(hipFree(d_moe_slot_y));
+  LogCleanupError(hipFree(d_moe_gate_e));
+  LogCleanupError(hipFree(d_moe_up_e));
+  LogCleanupError(hipFree(d_moe_shexp_h));
+  LogCleanupError(hipFree(d_moe_shexp_gate));
+  LogCleanupError(hipFree(d_moe_shexp_act));
   if (d_ssm_replay_qkv_ != nullptr)
     LogCleanupError(hipFree(d_ssm_replay_qkv_));
   if (d_ssm_replay_alpha_ != nullptr)

@@ -359,7 +359,8 @@ static int moe_vector_projection(int weight_type, const void* W,
   constexpr const char* tag = "qfn_mmq_moe_vec";
   const auto type = static_cast<ggml_type>(weight_type);
   if (type != GGML_TYPE_Q4_K && type != GGML_TYPE_Q5_K &&
-      type != GGML_TYPE_Q5_1 && type != GGML_TYPE_Q8_0) {
+      type != GGML_TYPE_Q5_1 && type != GGML_TYPE_Q8_0 &&
+      type != GGML_TYPE_Q6_K) {
     fprintf(stderr, "%s: unsupported weight type %d\n", tag, weight_type);
     return -1;
   }
@@ -389,7 +390,7 @@ static int moe_vector_projection(int weight_type, const void* W,
                                  : MMVQ_MAX_BATCH_SIZE;
   if (gated && (n_tokens > max_gated_rows || n_expert_used > 32 ||
                 (type != GGML_TYPE_Q4_K && type != GGML_TYPE_Q5_K &&
-                 type != GGML_TYPE_Q8_0))) {
+                 type != GGML_TYPE_Q8_0 && type != GGML_TYPE_Q6_K))) {
     fprintf(stderr,
             "%s: gated vector exceeds its format's row or expert limit\n",
             tag);
@@ -561,6 +562,15 @@ extern "C" int qfn_mmq_q5_K_moe_raw(
         int M, int K, int n_tokens, int n_experts, int n_expert_used,
         hipStream_t stream) {
     return qfn_mmq_moe_impl<GGML_TYPE_Q5_K>("qfn_mmq_q5_K_moe_raw", W, X, ids, out, M, K,
+                                            n_tokens, n_experts, n_expert_used, stream,
+                                            nullptr, nullptr);
+}
+
+extern "C" int qfn_mmq_q6_K_moe_raw(
+        const void * W, const float * X, const int32_t * ids, float * out,
+        int M, int K, int n_tokens, int n_experts, int n_expert_used,
+        hipStream_t stream) {
+    return qfn_mmq_moe_impl<GGML_TYPE_Q6_K>("qfn_mmq_q6_K_moe_raw", W, X, ids, out, M, K,
                                             n_tokens, n_experts, n_expert_used, stream,
                                             nullptr, nullptr);
 }
@@ -870,5 +880,7 @@ template void mul_mat_q_case<GGML_TYPE_Q4_K>(
 template void mul_mat_q_case<GGML_TYPE_Q5_1>(
     ggml_backend_hip_context&, const mmq_args&, hipStream_t);
 template void mul_mat_q_case<GGML_TYPE_Q5_K>(
+    ggml_backend_hip_context&, const mmq_args&, hipStream_t);
+template void mul_mat_q_case<GGML_TYPE_Q6_K>(
     ggml_backend_hip_context&, const mmq_args&, hipStream_t);
 } // namespace qfn_mmq

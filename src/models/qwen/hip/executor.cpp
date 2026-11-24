@@ -73,6 +73,34 @@ QwenGpuExecutor::QwenGpuExecutor(std::shared_ptr<const QwenGpuModel> model,
   // and an unattached stream would decline to a different arithmetic than
   // the executor that owns set 0.
   AttachAndWarmRocmFp4ExecutorSet(arena_.stream, weights_, weights_.config);
+  // K-quant MoE scratch, allocated once here (never in-step).
+  // R=512 covers decode (1), verify batches and prefill sub-chunks.
+  {
+    bool need = false;
+    for (const auto& l : weights_.layers) {
+      if (l.moe_kquant) {
+        need = true;
+        break;
+      }
+    }
+    if (need) {
+      const std::size_t R = 512;
+      const std::size_t used = weights_.config.expert_used_count;
+      const std::size_t hidden = weights_.config.hidden_size;
+      const std::size_t ff = weights_.config.expert_feed_forward_length;
+      const std::size_t ffs = weights_.config.expert_shared_feed_forward_length;
+      HIP_CHECK(
+          hipMalloc(&arena_.d_moe_slot_y, R * used * hidden * sizeof(float)));
+      HIP_CHECK(hipMalloc(&arena_.d_moe_gate_e, R * used * ff * sizeof(float)));
+      HIP_CHECK(hipMalloc(&arena_.d_moe_up_e, R * used * ff * sizeof(float)));
+      HIP_CHECK(hipMalloc(&arena_.d_moe_shexp_h, R * ffs * sizeof(float)));
+      const std::size_t max_batch = arena_.GetMaxBatch();
+      HIP_CHECK(
+          hipMalloc(&arena_.d_moe_shexp_gate, max_batch * ffs * sizeof(float)));
+      HIP_CHECK(
+          hipMalloc(&arena_.d_moe_shexp_act, max_batch * ffs * sizeof(float)));
+    }
+  }
   AllocateGpuSamplingWorkspace(&sampling_workspace_, weights_.config.vocab_size,
                                max_context);
   detail::EmitQwenExecutionPolicy(policy_.Fingerprint());

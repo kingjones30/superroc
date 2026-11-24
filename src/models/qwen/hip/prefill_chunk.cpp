@@ -30,6 +30,8 @@
 #include "src/models/qwen/moe/qwen_moe_prefill.hpp"  // KAT:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"    // KAT:
 #include "src/models/qwen/qwen_fp4_f16_gate.hpp"
+#include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_ggml_stubs.h"
+#include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
 namespace superroc::hip {
 // the promoted FP4->F16 prefill launchers (Flash-Next namespace kept
@@ -575,6 +577,10 @@ void QwenGpuExecutor::PrepareInt4Route() {
   const auto& config = weights_.config;
   for (std::uint32_t l = 0; l < config.num_layers && l < int4.layers; ++l) {
     const auto& layer = weights_.layers[l];
+    // K-quant MoE layers never use the int4 route file (it carries
+    // gate/up only, no down projections).
+    if (layer.moe_kquant)
+      continue;
     if (int4.cols != config.hidden_size)
       continue;
     if (int4.Has(detail::kInt4FfnGate, l) && int4.Has(detail::kInt4FfnUp, l) &&
@@ -1213,7 +1219,173 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
         throw std::runtime_error("qwen35moe prefill sigmoid launch failed");
       }
       kat_prof.sigmoid_ms += kat_prof.Take();
-      if (KatMoeGrouped(moe_expert, moe_used)) {
+      if (layer.moe_kquant) {
+        // K-quant prefill. Routed experts run in 512-row sub-chunks
+        // (tiled raw path; chunks of <=8 rows reuse the decode calls). The
+        // shared expert does not depend on routing, so it runs ONCE per layer
+        // over all moe_tokens rows through the dense Q8_0 prefill launchers.
+        //
+        // The qwen->mmq type ids must match the ggml enum the mmq side
+        // switches on (qfn_ggml_stubs.h:135-170); the asserts pin that.
+        static_assert(static_cast<int>(core::GgmlType::kQ4_K) == GGML_TYPE_Q4_K,
+                      "qwen Q4_K id must match the mmq ggml enum");
+        static_assert(static_cast<int>(core::GgmlType::kQ5_K) == GGML_TYPE_Q5_K,
+                      "qwen Q5_K id must match the mmq ggml enum");
+        static_assert(static_cast<int>(core::GgmlType::kQ6_K) == GGML_TYPE_Q6_K,
+                      "qwen Q6_K id must match the mmq ggml enum");
+        static_assert(static_cast<int>(core::GgmlType::kQ8_0) == GGML_TYPE_Q8_0,
+                      "qwen Q8_0 id must match the mmq ggml enum");
+        const int kq_gate = static_cast<int>(layer.ffn_gate_exps.type);
+        const int kq_down = static_cast<int>(layer.ffn_down_exps.type);
+        auto raw_by_type = [&](int qtype, const void* w, const float* x,
+                               const int32_t* ids, float* out, int m, int k,
+                               int ntok) -> int {
+          switch (qtype) {
+            case static_cast<int>(core::GgmlType::kQ4_K):
+              return qfn_mmq_q4_K_moe_raw(w, x, ids, out, m, k, ntok,
+                                          moe_expert, moe_used, arena_.stream);
+            case static_cast<int>(core::GgmlType::kQ5_K):
+              return qfn_mmq_q5_K_moe_raw(w, x, ids, out, m, k, ntok,
+                                          moe_expert, moe_used, arena_.stream);
+            case static_cast<int>(core::GgmlType::kQ6_K):
+              return qfn_mmq_q6_K_moe_raw(w, x, ids, out, m, k, ntok,
+                                          moe_expert, moe_used, arena_.stream);
+            case static_cast<int>(core::GgmlType::kQ8_0):
+              return qfn_mmq_q8_0_moe_raw(w, x, ids, out, m, k, ntok,
+                                          moe_expert, moe_used, arena_.stream);
+            default:
+              return -1;
+          }
+        };
+        // Shared expert, once per layer over the whole chunk. moe_tokens is
+        // batch_size by construction (line 1201), the same width gemm_weight
+        // uses, so no refuse is needed there. half_prefill is false for any
+        // model with an MoE layer (line 444-447), so gemm_weight takes the
+        // non-half route below.
+        //
+        // ResolveQwenGemmRoute returns kHipPrefillQuantDirect for Q8_0 at any
+        // batch (gemm_route.hpp:219-222), so gemm_weight runs
+        // LaunchBatchedQuantGEMMPreQuantized, which reads the tiled Q8_1
+        // activation. Gate/up read the norm's Q8_1 (prepared with the launcher
+        // the dense FFN path uses at line 1478); the down leg reads the Q8_1
+        // of the SwiGLU output (the launcher the dense path uses when down
+        // reads Q8, line 1577). d_scratch_q8_act is free in this branch (the
+        // routed path reads f32 d_normed; route/sigmoid write only d_moe_*)
+        // and its capacity covers any k <= hidden_size (arena sizes it for
+        // q8_row_elements >= hidden_size), hence the refuse below.
+        if (moe_ffs > moe_hidden) {
+          throw std::runtime_error("qwen35moe shared expert exceeds scratch");
+        }
+        kat_prof.Arm();
+        LaunchQuantizeActivationQ8_1(arena_.d_scratch_bf16,
+                                     arena_.d_scratch_q8_act, batch_size,
+                                     hidden_size, arena_.stream);
+        gemm_weight(layer.ffn_gate_shexp, arena_.d_scratch_bf16,
+                    arena_.d_normed, arena_.d_moe_shexp_gate,
+                    static_cast<std::size_t>(moe_ffs), hidden_size,
+                    arena_.d_scratch_q8_act);
+        gemm_weight(layer.ffn_up_shexp, arena_.d_scratch_bf16, arena_.d_normed,
+                    arena_.d_moe_shexp_act, static_cast<std::size_t>(moe_ffs),
+                    hidden_size, arena_.d_scratch_q8_act);
+        LaunchBatchedSwiGLUActivation(arena_.d_moe_shexp_gate,
+                                      arena_.d_moe_shexp_act,
+                                      arena_.d_moe_shexp_act, nullptr,
+                                      static_cast<std::size_t>(batch_size) *
+                                          static_cast<std::size_t>(moe_ffs),
+                                      arena_.stream);
+        LaunchQuantizeActivationQ8_1FromFp32(
+            arena_.d_moe_shexp_act, arena_.d_scratch_q8_act, batch_size,
+            static_cast<std::size_t>(moe_ffs), arena_.stream);
+        gemm_weight(layer.ffn_down_shexp, arena_.d_scratch_bf16,
+                    arena_.d_moe_shexp_act, arena_.d_moe_shexp_y, hidden_size,
+                    static_cast<std::size_t>(moe_ffs), arena_.d_scratch_q8_act);
+        kat_prof.shared_ms += kat_prof.Take();
+        for (int t0 = 0; t0 < moe_tokens; t0 += 512) {
+          const int r = std::min(512, moe_tokens - t0);
+          const float* x_chunk =
+              arena_.d_normed + static_cast<std::size_t>(t0) * hidden_size;
+          const int32_t* ids_chunk =
+              arena_.d_moe_ids + static_cast<std::size_t>(t0) * moe_used;
+          const float* w_chunk =
+              arena_.d_moe_weights + static_cast<std::size_t>(t0) * moe_used;
+          kat_prof.Arm();
+          if (r <= 8) {
+            if (qfn_mmq_moe_gated_vec(
+                    kq_gate, layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+                    x_chunk, ids_chunk, arena_.d_moe_gate_e, moe_ff, moe_hidden,
+                    r, moe_expert, moe_used, arena_.stream) != 0) {
+              throw std::runtime_error("qwen35moe prefill experts failed");
+            }
+            if (qfn_mmq_moe_vec(
+                    kq_down, layer.ffn_down_exps.data, arena_.d_moe_gate_e,
+                    ids_chunk, arena_.d_moe_slot_y, moe_hidden, moe_ff,
+                    r * moe_used, moe_expert, 1, arena_.stream) != 0) {
+              throw std::runtime_error("qwen35moe prefill experts failed");
+            }
+          } else {
+            if (raw_by_type(kq_gate, layer.ffn_gate_exps.data, x_chunk,
+                            ids_chunk, arena_.d_moe_gate_e, moe_ff, moe_hidden,
+                            r) != 0) {
+              throw std::runtime_error("qwen35moe prefill experts failed");
+            }
+            if (raw_by_type(kq_gate, layer.ffn_up_exps.data, x_chunk, ids_chunk,
+                            arena_.d_moe_up_e, moe_ff, moe_hidden, r) != 0) {
+              throw std::runtime_error("qwen35moe prefill experts failed");
+            }
+            LaunchBatchedSwiGLUActivation(
+                arena_.d_moe_gate_e, arena_.d_moe_up_e, arena_.d_moe_gate_e,
+                nullptr, static_cast<std::size_t>(r) * moe_used * moe_ff,
+                arena_.stream);
+            // Down leg over the SwiGLU rows: each slot is its own token.
+            const int down_ntok = r * moe_used;
+            int rc_down = -1;
+            switch (kq_down) {
+              case static_cast<int>(core::GgmlType::kQ4_K):
+                rc_down = qfn_mmq_q4_K_moe_raw(
+                    layer.ffn_down_exps.data, arena_.d_moe_gate_e, ids_chunk,
+                    arena_.d_moe_slot_y, moe_hidden, moe_ff, down_ntok,
+                    moe_expert, 1, arena_.stream);
+                break;
+              case static_cast<int>(core::GgmlType::kQ5_K):
+                rc_down = qfn_mmq_q5_K_moe_raw(
+                    layer.ffn_down_exps.data, arena_.d_moe_gate_e, ids_chunk,
+                    arena_.d_moe_slot_y, moe_hidden, moe_ff, down_ntok,
+                    moe_expert, 1, arena_.stream);
+                break;
+              case static_cast<int>(core::GgmlType::kQ6_K):
+                rc_down = qfn_mmq_q6_K_moe_raw(
+                    layer.ffn_down_exps.data, arena_.d_moe_gate_e, ids_chunk,
+                    arena_.d_moe_slot_y, moe_hidden, moe_ff, down_ntok,
+                    moe_expert, 1, arena_.stream);
+                break;
+              case static_cast<int>(core::GgmlType::kQ8_0):
+                rc_down = qfn_mmq_q8_0_moe_raw(
+                    layer.ffn_down_exps.data, arena_.d_moe_gate_e, ids_chunk,
+                    arena_.d_moe_slot_y, moe_hidden, moe_ff, down_ntok,
+                    moe_expert, 1, arena_.stream);
+                break;
+              default:
+                rc_down = -1;
+                break;
+            }
+            if (rc_down != 0) {
+              throw std::runtime_error("qwen35moe prefill experts failed");
+            }
+          }
+          kat_prof.routed_ms += kat_prof.Take();
+          kat_prof.Arm();
+          if (LaunchQwenMoeCombineSlots(
+                  arena_.d_moe_slot_y, w_chunk,
+                  arena_.d_moe_shexp_y +
+                      static_cast<std::size_t>(t0) * hidden_size,
+                  arena_.d_moe_sig + t0, moe_used, moe_hidden, r,
+                  arena_.d_ffn_out + static_cast<std::size_t>(t0) * hidden_size,
+                  arena_.stream) != 0) {
+            throw std::runtime_error("qwen35moe prefill combine failed");
+          }
+          kat_prof.combine_ms += kat_prof.Take();
+        }
+      } else if (KatMoeGrouped(moe_expert, moe_used)) {
         kat_prof.Arm();
         if (LaunchKatMoeRoutedGrouped(
                 static_cast<int>(layer.ffn_gate_exps.type),
@@ -1277,11 +1449,14 @@ tokenization::TokenId QwenGpuExecutor::ForwardPromptChunk(
           throw std::runtime_error("qwen35moe prefill expert device status");
         }
       }
-      kat_prof.Arm();
-      if (LaunchQwenMoeCombine(arena_.d_moe_y, arena_.d_moe_shexp_y, moe_hidden,
-                               moe_tokens, arena_.d_ffn_out,
-                               arena_.stream) != 0) {
-        throw std::runtime_error("qwen35moe prefill combine failed");
+      if (!layer.moe_kquant) {
+        kat_prof.Arm();
+        if (LaunchQwenMoeCombine(arena_.d_moe_y, arena_.d_moe_shexp_y,
+                                 moe_hidden, moe_tokens, arena_.d_ffn_out,
+                                 arena_.stream) != 0) {
+          throw std::runtime_error("qwen35moe prefill combine failed");
+        }
+        kat_prof.combine_ms += kat_prof.Take();
       }
       LaunchBatchedResidualAdd(arena_.d_hidden, arena_.d_ffn_out,
                                arena_.d_hidden, batch_size, hidden_size,

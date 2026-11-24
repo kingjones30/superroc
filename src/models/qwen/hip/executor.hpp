@@ -384,6 +384,16 @@ public:
   int* d_moe_zero_ids{nullptr};
   float* d_moe_y{nullptr};
   float* d_moe_shexp_y{nullptr};
+  // K-quant MoE scratch (allocated only when a moe_kquant layer
+  // exists). slot_y [R][used][hidden], gate_e/up_e [R][used][expert_ff],
+  // shexp_h [R][shexp_ff]; R covers the largest sub-chunk (512).
+  float* d_moe_slot_y{nullptr};
+  float* d_moe_gate_e{nullptr};
+  float* d_moe_up_e{nullptr};
+  float* d_moe_shexp_h{nullptr};
+  // batched prefill shared expert gate/act [max_batch][moe_ffs].
+  float* d_moe_shexp_gate{nullptr};
+  float* d_moe_shexp_act{nullptr};
 
   [[nodiscard]] std::uint32_t GetMaxBatch() const noexcept {
     return max_batch_;

@@ -266,6 +266,56 @@ Experts MakeQ8_0(std::size_t e, std::size_t m, std::size_t k,
   return w;
 }
 
+/// Random Q6_K blocks (210 bytes: ql[128], qh[64], scales[16], d).
+/// Packs random 6-bit codes so w.values matches the Q6Value dequant
+/// (d * scale[scale_index] * quant, quant in [-32, 31]).
+Experts MakeQ6K(std::size_t e, std::size_t m, std::size_t k,
+                std::uint32_t seed) {
+  Experts w;
+  const std::size_t blocks = e * m * (k / 256);
+  w.packed.resize(blocks * 210);
+  w.values.resize(e * m * k);
+  for (std::size_t b = 0; b < blocks; ++b) {
+    std::uint8_t* blk = w.packed.data() + b * 210;
+    const __half d = __float2half(Uniform(&seed, 0.02F) + 0.03F);
+    std::memcpy(blk + 208, &d, 2);
+    const float df = __half2float(d);
+    std::int8_t scales[16];
+    for (int i = 0; i < 16; ++i) {
+      int s = static_cast<int>(NextRandom(&seed) % 16) - 8;
+      if (s == 0)
+        s = 1;
+      scales[i] = static_cast<std::int8_t>(s);
+      blk[192 + i] = static_cast<std::uint8_t>(scales[i]);
+    }
+    std::uint8_t* ql = blk;
+    std::uint8_t* qh = blk + 128;
+    for (std::size_t half = 0; half < 2; ++half) {
+      for (std::size_t lane = 0; lane < 32; ++lane) {
+        std::uint8_t code[4];
+        for (std::size_t seg = 0; seg < 4; ++seg) {
+          const std::size_t index = half * 128 + seg * 32 + lane;
+          const std::size_t scale_index = half * 8 + lane / 16 + seg * 2;
+          const int quant = static_cast<int>(NextRandom(&seed) % 64) - 32;
+          code[seg] = static_cast<std::uint8_t>(quant + 32);
+          w.values[b * 256 + index] = df *
+                                      static_cast<float>(scales[scale_index]) *
+                                      static_cast<float>(quant);
+        }
+        ql[half * 64 + lane] = static_cast<std::uint8_t>(
+            (code[0] & 0x0FU) | ((code[2] & 0x0FU) << 4U));
+        ql[half * 64 + 32 + lane] = static_cast<std::uint8_t>(
+            (code[1] & 0x0FU) | ((code[3] & 0x0FU) << 4U));
+        qh[half * 32 + lane] = static_cast<std::uint8_t>(
+            ((code[0] >> 4U) & 0x03U) | (((code[1] >> 4U) & 0x03U) << 2U) |
+            (((code[2] >> 4U) & 0x03U) << 4U) |
+            (((code[3] >> 4U) & 0x03U) << 6U));
+      }
+    }
+  }
+  return w;
+}
+
 struct Result {
   double vs_mmq;
   double vs_ref;
@@ -917,6 +967,166 @@ void CheckPairedMmq() {
     throw std::runtime_error("paired MMQ differs from separate projections");
 }
 
+/// Q6_K MoE coverage at the 35B-A3B expert shapes: gate/up M=512 K=2048 and
+/// down M=2048 K=512. moe_vec and moe_gated_vec at tokens 1,4,8 (same
+/// bit-exact harness as Q4_K/Q5_K in CheckVectorGrouping: scalar vs batched,
+/// gated vs SwiGLU) and moe_raw at tokens 64 (same Ok tolerance as Run:
+/// worst |MMQ-F64| < 1e-2 * scale, NMSE reported).
+void CheckQ6KMoE() {
+  constexpr int kType = 14;  // ggml GGML_TYPE_Q6_K, == core::GgmlType::kQ6_K
+  constexpr int kExperts = 8;
+  constexpr int kUsed = 2;
+  for (const bool down : {false, true}) {
+    const int m = down ? 2048 : 512;
+    const int k = down ? 512 : 2048;
+    const int used = down ? 1 : kUsed;
+    for (const int n : {1, 4, 8}) {
+      const std::uint32_t seed =
+          static_cast<std::uint32_t>(0x6B6000U + (down ? 0x100U : 0U) + n);
+      const Experts w = MakeQ6K(kExperts, m, k, seed);
+      const Experts w2 = MakeQ6K(kExperts, m, k, seed ^ 0x9E3779B9U);
+      std::uint32_t st = seed ^ 0xA5A5A5A5U;
+      std::vector<float> x(static_cast<std::size_t>(n) * k);
+      for (float& v : x)
+        v = Uniform(&st, 2.0F);
+      std::vector<std::int32_t> ids(static_cast<std::size_t>(n) * used);
+      for (std::size_t i = 0; i < ids.size(); ++i)
+        ids[i] = static_cast<std::int32_t>((3 * i + 1) % kExperts);
+      auto* dw = Upload(w.packed);
+      auto* dw2 = Upload(w2.packed);
+      auto* dx = Upload(x);
+      auto* di = Upload(ids);
+      const std::size_t slots = static_cast<std::size_t>(n) * used;
+      auto* dout = Upload(std::vector<float>(slots * m, 0.0F));
+      auto* gout = Upload(std::vector<float>(slots * m, 0.0F));
+      if (qfn_mmq_moe_vec(kType, dw, dx, di, dout, m, k, n, kExperts, used,
+                          nullptr))
+        throw std::runtime_error("Q6_K moe_vec launch failed");
+      CheckHip(hipDeviceSynchronize(), "Q6_K moe_vec");
+      const auto out = Download(dout, slots * m);
+      // Scalar (per-token) reference: bit-exact vs the batched call.
+      for (int t = 0; t < n; ++t) {
+        auto* sref = Upload(std::vector<float>(used * m, 0.0F));
+        if (qfn_mmq_moe_vec(kType, dw, dx + t * k, di + t * used, sref, m, k, 1,
+                            kExperts, used, nullptr))
+          throw std::runtime_error("Q6_K scalar moe_vec launch failed");
+        CheckHip(hipDeviceSynchronize(), "Q6_K scalar moe_vec");
+        const auto s = Download(sref, used * m);
+        for (int i = 0; i < used * m; ++i) {
+          if (std::memcmp(&s[i], &out[t * used * m + i], sizeof(float)) != 0)
+            throw std::runtime_error("Q6_K batched moe_vec differs");
+        }
+        CheckHip(hipFree(sref), "Q6_K scalar free");
+      }
+      // F64 reference over the dequantized weights (same tolerance as Run).
+      double scale = 0.0, sq_err = 0.0, ref_sq = 0.0, worst = 0.0;
+      for (std::size_t s = 0; s < slots; ++s) {
+        const float* xr = x.data() + (s / used) * k;
+        for (int row = 0; row < m; ++row) {
+          const float* wr = w.values.data() +
+                            (static_cast<std::size_t>(ids[s]) * m + row) * k;
+          double ref = 0.0;
+          for (int i = 0; i < k; ++i)
+            ref += static_cast<double>(wr[i]) * xr[i];
+          const double e = ref - out[s * m + row];
+          worst = std::max(worst, std::abs(e));
+          sq_err += e * e;
+          ref_sq += ref * ref;
+          scale = std::max(scale, std::abs(ref));
+        }
+      }
+      std::cout << "Q6_K " << (down ? "down" : "gate/up") << " moe_vec n=" << n
+                << " m=" << m << " k=" << k << ": worst " << worst << ", NMSE "
+                << sq_err / ref_sq << " (scale " << scale << ")\n";
+      if (!(worst < 1e-2 * scale))
+        throw std::runtime_error("Q6_K moe_vec exceeds Run tolerance");
+      // Gated vector vs GPU SwiGLU over the separate projections (same
+      // device-side harness as CheckVectorGrouping: bit-exact).
+      if (qfn_mmq_moe_gated_vec(kType, dw, dw2, dx, di, gout, m, k, n, kExperts,
+                                used, nullptr))
+        throw std::runtime_error("Q6_K moe_gated_vec launch failed");
+      CheckHip(hipDeviceSynchronize(), "Q6_K moe_gated_vec");
+      const auto gated = Download(gout, slots * m);
+      auto* gref = Upload(std::vector<float>(slots * m, 0.0F));
+      auto* uref = Upload(std::vector<float>(slots * m, 0.0F));
+      if (qfn_mmq_moe_vec(kType, dw, dx, di, gref, m, k, n, kExperts, used,
+                          nullptr) ||
+          qfn_mmq_moe_vec(kType, dw2, dx, di, uref, m, k, n, kExperts, used,
+                          nullptr))
+        throw std::runtime_error("Q6_K gated reference launch failed");
+      CheckHip(hipDeviceSynchronize(), "Q6_K gated reference");
+      q::Swiglu(gref, uref, slots * m, nullptr);
+      CheckHip(hipDeviceSynchronize(), "Q6_K SwiGLU reference");
+      const auto gate = Download(gref, slots * m);
+      for (std::size_t i = 0; i < gate.size(); ++i) {
+        if (std::memcmp(&gate[i], &gated[i], sizeof(float)) != 0)
+          throw std::runtime_error("Q6_K gated vector changed SwiGLU output");
+      }
+      for (void* p : {static_cast<void*>(dw), static_cast<void*>(dw2),
+                      static_cast<void*>(dx), static_cast<void*>(di),
+                      static_cast<void*>(dout), static_cast<void*>(gout),
+                      static_cast<void*>(gref), static_cast<void*>(uref)})
+        CheckHip(hipFree(p), "Q6_K vec free");
+    }
+    // Prefill-tier raw GEMM at tokens 64 vs the F64 reference.
+    {
+      constexpr int n = 64;
+      const std::uint32_t seed =
+          static_cast<std::uint32_t>(0x6B6400U + (down ? 0x100U : 0U));
+      const Experts w = MakeQ6K(kExperts, m, k, seed);
+      std::uint32_t st = seed ^ 0x5A5A5A5AU;
+      std::vector<float> x(static_cast<std::size_t>(n) * k);
+      for (float& v : x)
+        v = Uniform(&st, 2.0F);
+      std::vector<std::int32_t> ids(static_cast<std::size_t>(n) * used);
+      for (std::size_t t = 0; t < static_cast<std::size_t>(n); ++t) {
+        std::vector<std::int32_t> chosen;
+        while (chosen.size() < static_cast<std::size_t>(used)) {
+          const std::uint32_t r = NextRandom(&st);
+          const auto e = static_cast<std::int32_t>(r % kExperts);
+          if (std::find(chosen.begin(), chosen.end(), e) == chosen.end())
+            chosen.push_back(e);
+        }
+        std::copy(chosen.begin(), chosen.end(), ids.begin() + t * used);
+      }
+      auto* dw = Upload(w.packed);
+      auto* dx = Upload(x);
+      auto* di = Upload(ids);
+      const std::size_t slots = static_cast<std::size_t>(n) * used;
+      auto* dout = Upload(std::vector<float>(slots * m, 0.0F));
+      if (qfn_mmq_q6_K_moe_raw(dw, dx, di, dout, m, k, n, kExperts, used,
+                               nullptr))
+        throw std::runtime_error("Q6_K moe_raw launch failed");
+      CheckHip(hipDeviceSynchronize(), "Q6_K moe_raw");
+      const auto out = Download(dout, slots * m);
+      double scale = 0.0, sq_err = 0.0, ref_sq = 0.0, worst = 0.0;
+      for (std::size_t s = 0; s < slots; ++s) {
+        const float* xr = x.data() + (s / used) * k;
+        for (int row = 0; row < m; ++row) {
+          const float* wr = w.values.data() +
+                            (static_cast<std::size_t>(ids[s]) * m + row) * k;
+          double ref = 0.0;
+          for (int i = 0; i < k; ++i)
+            ref += static_cast<double>(wr[i]) * xr[i];
+          const double e = ref - out[s * m + row];
+          worst = std::max(worst, std::abs(e));
+          sq_err += e * e;
+          ref_sq += ref * ref;
+          scale = std::max(scale, std::abs(ref));
+        }
+      }
+      std::cout << "Q6_K " << (down ? "down" : "gate/up") << " moe_raw n=64"
+                << " m=" << m << " k=" << k << ": worst " << worst << ", NMSE "
+                << sq_err / ref_sq << " (scale " << scale << ")\n";
+      if (!(worst < 1e-2 * scale))
+        throw std::runtime_error("Q6_K moe_raw exceeds Run tolerance");
+      for (void* p : {static_cast<void*>(dw), static_cast<void*>(dx),
+                      static_cast<void*>(di), static_cast<void*>(dout)})
+        CheckHip(hipFree(p), "Q6_K raw free");
+    }
+  }
+}
+
 }  // namespace
 
 namespace {
@@ -1538,6 +1748,7 @@ int main() {
     CheckVectorGrouping();
     CheckVectorGrouping(true);
     CheckPairedMmq();
+    CheckQ6KMoE();
     bool ok = true;
     // Gate/up view: 64 experts, top-10, 640 x 2560 Q4_K.
     ok = Ok(Run(q::WeightType::kQ4_K, 300, 10, 64, 640, 2560, 0x1234ABCDU)) &&

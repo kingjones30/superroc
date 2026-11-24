@@ -965,10 +965,13 @@ bool BindKatMoe(const core::GgufReader& reader, QwenLayerWeights& layer,
     }
   }
   if (require_fp4) {  // audit J7
+    const auto is_fp4 = [](core::GgmlType t) {
+      return t == core::GgmlType::kQ4_0_ROCMFP4 ||
+             t == core::GgmlType::kQ4_0_ROCMFP4_FAST;
+    };
     const auto require_fp4_type = [&](const QwenTensorRef& ref,
                                       const std::string& name) -> bool {
-      if (ref.type != core::GgmlType::kQ4_0_ROCMFP4 &&
-          ref.type != core::GgmlType::kQ4_0_ROCMFP4_FAST) {
+      if (!is_fp4(ref.type)) {
         if (error_msg != nullptr) {
           *error_msg =
               "qwen35moe trunk experts must be ROCmFP4 (Q4_0_ROCMFP4/_FAST); " +
@@ -978,18 +981,56 @@ bool BindKatMoe(const core::GgufReader& reader, QwenLayerWeights& layer,
       }
       return true;
     };
-    if (!require_fp4_type(layer.ffn_gate_exps,
-                          prefix + "ffn_gate_exps.weight") ||
-        !require_fp4_type(layer.ffn_up_exps, prefix + "ffn_up_exps.weight") ||
-        !require_fp4_type(layer.ffn_down_exps,
-                          prefix + "ffn_down_exps.weight") ||
-        !require_fp4_type(layer.ffn_gate_shexp,
-                          prefix + "ffn_gate_shexp.weight") ||
-        !require_fp4_type(layer.ffn_up_shexp, prefix + "ffn_up_shexp.weight") ||
-        !require_fp4_type(layer.ffn_down_shexp,
-                          prefix + "ffn_down_shexp.weight")) {
-      return false;
+    if (is_fp4(layer.ffn_gate_exps.type) && is_fp4(layer.ffn_up_exps.type) &&
+        is_fp4(layer.ffn_down_exps.type)) {
+      // Exactly today's FP4 rule (shexp FP4 too).
+      if (!require_fp4_type(layer.ffn_gate_exps,
+                            prefix + "ffn_gate_exps.weight") ||
+          !require_fp4_type(layer.ffn_up_exps, prefix + "ffn_up_exps.weight") ||
+          !require_fp4_type(layer.ffn_down_exps,
+                            prefix + "ffn_down_exps.weight") ||
+          !require_fp4_type(layer.ffn_gate_shexp,
+                            prefix + "ffn_gate_shexp.weight") ||
+          !require_fp4_type(layer.ffn_up_shexp,
+                            prefix + "ffn_up_shexp.weight") ||
+          !require_fp4_type(layer.ffn_down_shexp,
+                            prefix + "ffn_down_shexp.weight")) {
+        return false;
+      }
+      return true;
     }
+    // K-quant path: routed gate/up/down in {Q4_K,Q5_K,Q6_K,Q8_0}
+    // with gate.type == up.type; shexp gate/up/down Q8_0 (the intersection
+    // of LaunchFusedSwiGLUGEMV + LaunchGEMV + dense prefill launchers).
+    // Anything else refuses below.
+    const auto is_routed = [](core::GgmlType t) {
+      return t == core::GgmlType::kQ4_K || t == core::GgmlType::kQ5_K ||
+             t == core::GgmlType::kQ6_K || t == core::GgmlType::kQ8_0;
+    };
+    const auto is_shexp = [](core::GgmlType t) {
+      return t == core::GgmlType::kQ8_0;
+    };
+    if (is_routed(layer.ffn_gate_exps.type) &&
+        is_routed(layer.ffn_up_exps.type) &&
+        is_routed(layer.ffn_down_exps.type) &&
+        layer.ffn_gate_exps.type == layer.ffn_up_exps.type &&
+        is_shexp(layer.ffn_gate_shexp.type) &&
+        is_shexp(layer.ffn_up_shexp.type) &&
+        is_shexp(layer.ffn_down_shexp.type)) {
+      layer.moe_kquant = true;
+      return true;
+    }
+    if (error_msg != nullptr) {
+      *error_msg =
+          std::string("qwen35moe experts: unsupported type mix gate=") +
+          std::string(core::ToString(layer.ffn_gate_exps.type)) +
+          " up=" + std::string(core::ToString(layer.ffn_up_exps.type)) +
+          " down=" + std::string(core::ToString(layer.ffn_down_exps.type)) +
+          " shexp=" + std::string(core::ToString(layer.ffn_gate_shexp.type)) +
+          "/" + std::string(core::ToString(layer.ffn_up_shexp.type)) + "/" +
+          std::string(core::ToString(layer.ffn_down_shexp.type));
+    }
+    return false;
   }
   return true;
 }

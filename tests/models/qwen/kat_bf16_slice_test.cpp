@@ -360,15 +360,15 @@ int main() {
     close(fd);
     auto reader = superroc::core::GgufReader::OpenFile(ok_path, &ok_error);
     Expect(reader != nullptr, "open ok gguf: " + ok_error);
-    // A qwen35moe trunk whose experts are not ROCmFP4 is refused at bind (the
-    // GPU expert path reads ROCmFP4 only), so the BF16 slice stride is checked
-    // on a hand-made ref instead of a bound layer.
+    // A qwen35moe trunk whose experts are neither ROCmFP4 nor the K-quant
+    // allowlist is refused at bind (BF16 is neither), so the BF16
+    // slice stride is checked on a hand-made ref instead of a bound layer.
     auto weights =
         superroc::models::QwenModelWeights::LoadFromGguf(*reader, &ok_error);
-    Expect(
-        !weights.has_value() &&
-            ok_error.find("trunk experts must be ROCmFP4") != std::string::npos,
-        "bf16 trunk experts refused at bind: " + ok_error);
+    Expect(!weights.has_value() &&
+               ok_error.find("qwen35moe experts: unsupported type mix") !=
+                   std::string::npos,
+           "bf16 trunk experts refused at bind: " + ok_error);
     const auto* gate = reader->FindTensor("blk.0.ffn_gate_exps.weight");
     Expect(gate != nullptr && gate->dimensions.size() == 3 &&
                gate->dimensions[0] == 32 && gate->dimensions[1] == 8 &&

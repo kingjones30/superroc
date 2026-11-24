@@ -117,6 +117,54 @@ int main() {
          "sigmoid null rejected");
   Expect(LaunchQwenMoeCombine(nullptr, nullptr, 32, 1, nullptr, nullptr) == 1,
          "combine null rejected");
+  Expect(LaunchQwenMoeCombineSlots(nullptr, nullptr, nullptr, nullptr, 8, 32,
+                                   1, nullptr, nullptr) == 1,
+         "combine-slots null rejected");
+  // CombineSlots vs the CPU ForwardMoe order (slots s=0..used-1
+  // then sig*shexp) on synthetic data; bit-exact.
+  {
+    const int used = 3, hidden = 64, n = 5;
+    std::vector<float> slot(n * used * hidden), w(n * used), sy(n * hidden),
+        sig(n), ref(n * hidden);
+    Fill(slot, 11);
+    Fill(w, 23);
+    Fill(sy, 37);
+    Fill(sig, 53);
+    for (int t = 0; t < n; ++t) {
+      for (int h = 0; h < hidden; ++h) {
+        // ForwardMoe order: routed slots s=0..used-1, then the shexp term.
+        float acc = 0.0F;
+        for (int s = 0; s < used; ++s)
+          acc += w[t * used + s] * slot[(t * used + s) * hidden + h];
+        acc += sig[t] * sy[t * hidden + h];
+        ref[t * hidden + h] = acc;
+      }
+    }
+    DeviceBuf d_slot(slot.size() * sizeof(float)),
+        d_w(w.size() * sizeof(float)), d_sy(sy.size() * sizeof(float)),
+        d_sig(sig.size() * sizeof(float)),
+        d_out(ref.size() * sizeof(float));
+    Upload(d_slot, slot.data(), slot.size() * sizeof(float));
+    Upload(d_w, w.data(), w.size() * sizeof(float));
+    Upload(d_sy, sy.data(), sy.size() * sizeof(float));
+    Upload(d_sig, sig.data(), sig.size() * sizeof(float));
+    Expect(LaunchQwenMoeCombineSlots(d_slot.f32(), d_w.f32(), d_sy.f32(),
+                                     d_sig.f32(), used, hidden, n, d_out.f32(),
+                                     nullptr) == 0,
+           "combine-slots launch");
+    HIP_REQUIRE(hipDeviceSynchronize());
+    std::vector<float> out(ref.size());
+    Fetch(out, d_out);
+    // FMA contraction on the device (vs separate mul+add on the host) can
+    // differ by 1 ulp per slot; compare with tolerance like the oracle legs.
+    {
+      double worst = 0.0;
+      for (std::size_t i = 0; i < ref.size(); ++i)
+        worst = std::max(
+            worst, std::abs(static_cast<double>(out[i]) - ref[i]));
+      Expect(worst < 1e-5, "combine-slots matches CPU order");
+    }
+  }
   Expect(LaunchQwenMoeRouteBatch(nullptr, nullptr, 32, 32, 1, 8, nullptr,
                                  nullptr, nullptr, nullptr) == 1,
          "batch route null rejected");

@@ -163,6 +163,9 @@ struct QwenLayerWeights {
 
   // KAT: qwen35moe routed experts + gated shared expert. Empty on dense layers.
   bool is_moe = false;
+  // true when the routed experts are K-quant/Q8_0 (non-FP4) and the
+  // shared experts are Q8_0; serve takes the mmq + dense Q8_0 branch.
+  bool moe_kquant = false;
   QwenTensorRef ffn_gate_inp;
   QwenTensorRef ffn_gate_exps;
   QwenTensorRef ffn_up_exps;

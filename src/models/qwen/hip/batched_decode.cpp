@@ -23,6 +23,7 @@
 #include "src/models/qwen/hip/ops.hpp"
 #include "src/models/qwen/moe/qwen_moe_ffn.hpp"    // KAT-MTP:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"  // KAT-MTP:
+#include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
 namespace superroc::hip {
 namespace {
@@ -423,7 +424,9 @@ void LaunchVerifyFfn(const models::QwenLayerWeights& layer,
                      float* out, float* moe_logits, int* moe_ids,
                      float* moe_weights, float* moe_sig, int* moe_zero_ids,
                      float* moe_y, float* moe_shexp_y, std::size_t batch_size,
-                     std::size_t hidden_size, hipStream_t stream) {
+                     std::size_t hidden_size, hipStream_t stream,
+                     float* moe_gate_e = nullptr, float* moe_slot_y = nullptr,
+                     float* moe_shexp_h = nullptr) {
   const int moe_expert = static_cast<int>(config.expert_count);
   const int moe_used = static_cast<int>(config.expert_used_count);
   const int moe_ff = static_cast<int>(config.expert_feed_forward_length);
@@ -451,6 +454,55 @@ void LaunchVerifyFfn(const models::QwenLayerWeights& layer,
             static_cast<int>(config.ExpertsInFile())) != 0) {
       throw std::runtime_error("qwen35moe verify route launch failed");
     }
+  }
+  if (layer.moe_kquant) {
+    // K-quant verify path. Gated in <=8-row chunks (the entry
+    // point's row limit), down in one call, shexp per row via dense Q8_0
+    // GEMV, weighted combine in LaunchQwenMoeCombineSlots.
+    if (moe_gate_e == nullptr || moe_slot_y == nullptr ||
+        moe_shexp_h == nullptr) {
+      throw std::runtime_error("qwen35moe verify K-quant scratch missing");
+    }
+    if (batch_size > 512) {
+      throw std::runtime_error("qwen35moe verify batch exceeds K-quant R");
+    }
+    const int b = static_cast<int>(batch_size);
+    for (std::size_t r0 = 0; r0 < batch_size; r0 += 8) {
+      const int r = static_cast<int>(std::min<std::size_t>(8, batch_size - r0));
+      if (qfn_mmq_moe_gated_vec(
+              gate_type, layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+              normed + r0 * hidden_size,
+              moe_ids + r0 * static_cast<std::size_t>(moe_used),
+              moe_gate_e + r0 * static_cast<std::size_t>(moe_used) * moe_ff,
+              moe_ff, moe_hidden, r, moe_expert, moe_used, stream) != 0) {
+        throw std::runtime_error("qwen35moe verify experts failed");
+      }
+    }
+    if (qfn_mmq_moe_vec(static_cast<int>(layer.ffn_down_exps.type),
+                        layer.ffn_down_exps.data, moe_gate_e, moe_ids,
+                        moe_slot_y, moe_hidden, moe_ff, b * moe_used,
+                        moe_expert, 1, stream) != 0) {
+      throw std::runtime_error("qwen35moe verify experts failed");
+    }
+    for (std::size_t row = 0; row < batch_size; ++row) {
+      LaunchFusedSwiGLUGEMV(
+          layer.ffn_gate_shexp.data, layer.ffn_gate_shexp.type,
+          layer.ffn_up_shexp.data, layer.ffn_up_shexp.type,
+          normed + row * hidden_size,
+          moe_shexp_h + row * static_cast<std::size_t>(moe_ffs),
+          static_cast<std::size_t>(moe_ffs),
+          static_cast<std::size_t>(moe_hidden), stream);
+      LaunchGEMV(layer.ffn_down_shexp.data, layer.ffn_down_shexp.type,
+                 moe_shexp_h + row * static_cast<std::size_t>(moe_ffs),
+                 moe_shexp_y + row * hidden_size,
+                 static_cast<std::size_t>(moe_hidden),
+                 static_cast<std::size_t>(moe_ffs), stream);
+    }
+    if (LaunchQwenMoeCombineSlots(moe_slot_y, moe_weights, moe_shexp_y, moe_sig,
+                                  moe_used, moe_hidden, b, out, stream) != 0) {
+      throw std::runtime_error("qwen35moe verify combine failed");
+    }
+    return;
   }
   // Routed and shared experts in one launch per stage, each weight row read
   // once; writes `out` directly, the combine included. Bit-identical to the
@@ -895,7 +947,8 @@ std::vector<tokenization::TokenId> QwenGpuExecutor::ForwardTokenBatch(
                       scratch.ffn.out.data(), arena.d_moe_logits,
                       arena.d_moe_ids, arena.d_moe_weights, arena.d_moe_sig,
                       arena.d_moe_zero_ids, arena.d_moe_y, arena.d_moe_shexp_y,
-                      batch_size, hidden_size, arena.stream);
+                      batch_size, hidden_size, arena.stream, arena.d_moe_gate_e,
+                      arena.d_moe_slot_y, arena.d_moe_shexp_h);
     } else {
       LaunchFfnActivation(layer, scratch, batch_size, intermediate_size,
                           hidden_size, arena.stream);
@@ -1411,7 +1464,8 @@ QwenGpuExecutor::ForwardVerificationBatch(
           layer, config, scratch.decode.normed.data(), scratch.ffn.out.data(),
           arena_.d_moe_logits, arena_.d_moe_ids, arena_.d_moe_weights,
           arena_.d_moe_sig, arena_.d_moe_zero_ids, arena_.d_moe_y,
-          arena_.d_moe_shexp_y, batch_size, hidden_size, arena_.stream);
+          arena_.d_moe_shexp_y, batch_size, hidden_size, arena_.stream,
+          arena_.d_moe_gate_e, arena_.d_moe_slot_y, arena_.d_moe_shexp_h);
     } else {
       LaunchFfnActivation(layer, scratch, batch_size, intermediate_size,
                           hidden_size, arena_.stream);

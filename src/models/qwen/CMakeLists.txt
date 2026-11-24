@@ -207,6 +207,9 @@ if (ENGINE_ENABLE_HIP)
       ${PROJECT_SOURCE_DIR}/src/models/qwen/hip/kernels/prefill_quant_wave64.hip
     TARGET_DIRECTORY superroc_core
     APPEND PROPERTY COMPILE_OPTIONS -fno-slp-vectorize)
+  # qwen serve calls the Flash-Next mmq entry points for K-quant
+  # routed experts; link the static mmq library (no Executor behaviour change).
+  target_link_libraries(superroc_core PRIVATE superroc_qwen38_flash_next_mmq)
 endif()
 
 # Teacher-forced perplexity on the GPU executor over a prompt

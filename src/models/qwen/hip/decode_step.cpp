@@ -17,6 +17,7 @@
 #include "src/models/qwen/modules/modules.hpp"
 #include "src/models/qwen/moe/qwen_moe_ffn.hpp"    // KAT:
 #include "src/models/qwen/moe/qwen_moe_route.hpp"  // KAT:
+#include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
 namespace superroc::hip {
 
@@ -324,28 +325,67 @@ void ExecuteDecodeStep(QwenGpuArena& arena,
               static_cast<int>(config.ExpertsInFile())) != 0) {
         throw std::runtime_error("qwen35moe decode route launch failed");
       }
-      if (superroc_fp4_expert_ffn_dev(
-              static_cast<int>(layer.ffn_gate_exps.type),
-              layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
-              layer.ffn_down_exps.data, decode_scratch.normed.data(),
-              arena.d_moe_ids, arena.d_moe_weights, moe_used, moe_expert,
-              moe_hidden, moe_ff, 0.0F, arena.d_moe_y,
-              arena.stream) != SUPERROC_FP4_OK) {
-        throw std::runtime_error("qwen35moe decode experts failed");
-      }
-      // Same normed x on the same stream as the routed call above, so
-      // the shared expert reuses its Q8 copy (bit-identical, one launch less).
-      if (superroc_fp4_expert_ffn_dev_xq(
-              static_cast<int>(layer.ffn_gate_shexp.type),
-              layer.ffn_gate_shexp.data, layer.ffn_up_shexp.data,
-              layer.ffn_down_shexp.data, decode_scratch.normed.data(),
-              arena.d_moe_zero_ids, arena.d_moe_sig, 1, 1, moe_hidden, moe_ffs,
-              0.0F, arena.d_moe_shexp_y, arena.stream) != SUPERROC_FP4_OK) {
-        throw std::runtime_error("qwen35moe decode shared expert failed");
-      }
-      if (LaunchQwenMoeCombine(arena.d_moe_y, arena.d_moe_shexp_y, moe_hidden,
-                               1, ffn_scratch.out.data(), arena.stream) != 0) {
-        throw std::runtime_error("qwen35moe decode combine failed");
+      if (layer.moe_kquant) {
+        // K-quant routed experts via mmq; shared expert via dense
+        // Q8_0 GEMV; weighted combine in LaunchQwenMoeCombineSlots.
+        if (qfn_mmq_moe_gated_vec(static_cast<int>(layer.ffn_gate_exps.type),
+                                  layer.ffn_gate_exps.data,
+                                  layer.ffn_up_exps.data,
+                                  decode_scratch.normed.data(), arena.d_moe_ids,
+                                  arena.d_moe_gate_e, moe_ff, moe_hidden, 1,
+                                  moe_expert, moe_used, arena.stream) != 0) {
+          throw std::runtime_error("qwen35moe decode experts failed");
+        }
+        if (qfn_mmq_moe_vec(static_cast<int>(layer.ffn_down_exps.type),
+                            layer.ffn_down_exps.data, arena.d_moe_gate_e,
+                            arena.d_moe_ids, arena.d_moe_slot_y, moe_hidden,
+                            moe_ff, moe_used, moe_expert, 1,
+                            arena.stream) != 0) {
+          throw std::runtime_error("qwen35moe decode experts failed");
+        }
+        LaunchFusedSwiGLUGEMV(
+            layer.ffn_gate_shexp.data, layer.ffn_gate_shexp.type,
+            layer.ffn_up_shexp.data, layer.ffn_up_shexp.type,
+            decode_scratch.normed.data(), arena.d_moe_shexp_h,
+            static_cast<std::size_t>(moe_ffs),
+            static_cast<std::size_t>(moe_hidden), arena.stream);
+        LaunchGEMV(layer.ffn_down_shexp.data, layer.ffn_down_shexp.type,
+                   arena.d_moe_shexp_h, arena.d_moe_shexp_y,
+                   static_cast<std::size_t>(moe_hidden),
+                   static_cast<std::size_t>(moe_ffs), arena.stream);
+        if (LaunchQwenMoeCombineSlots(
+                arena.d_moe_slot_y, arena.d_moe_weights, arena.d_moe_shexp_y,
+                arena.d_moe_sig, moe_used, moe_hidden, 1,
+                ffn_scratch.out.data(), arena.stream) != 0) {
+          throw std::runtime_error("qwen35moe decode combine failed");
+        }
+      } else {
+        if (superroc_fp4_expert_ffn_dev(
+                static_cast<int>(layer.ffn_gate_exps.type),
+                layer.ffn_gate_exps.data, layer.ffn_up_exps.data,
+                layer.ffn_down_exps.data, decode_scratch.normed.data(),
+                arena.d_moe_ids, arena.d_moe_weights, moe_used, moe_expert,
+                moe_hidden, moe_ff, 0.0F, arena.d_moe_y,
+                arena.stream) != SUPERROC_FP4_OK) {
+          throw std::runtime_error("qwen35moe decode experts failed");
+        }
+        // Same normed x on the same stream as the routed call above, so
+        // the shared expert reuses its Q8 copy (bit-identical, one launch
+        // less).
+        if (superroc_fp4_expert_ffn_dev_xq(
+                static_cast<int>(layer.ffn_gate_shexp.type),
+                layer.ffn_gate_shexp.data, layer.ffn_up_shexp.data,
+                layer.ffn_down_shexp.data, decode_scratch.normed.data(),
+                arena.d_moe_zero_ids, arena.d_moe_sig, 1, 1, moe_hidden,
+                moe_ffs, 0.0F, arena.d_moe_shexp_y,
+                arena.stream) != SUPERROC_FP4_OK) {
+          throw std::runtime_error("qwen35moe decode shared expert failed");
+        }
+        if (LaunchQwenMoeCombine(arena.d_moe_y, arena.d_moe_shexp_y, moe_hidden,
+                                 1, ffn_scratch.out.data(),
+                                 arena.stream) != 0) {
+          throw std::runtime_error("qwen35moe decode combine failed");
+        }
       }
     } else {
       const auto ffn_view = superroc::models::qwen::MakeFfnView(layer, config);

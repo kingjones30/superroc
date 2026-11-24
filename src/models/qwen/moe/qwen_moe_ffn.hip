@@ -108,3 +108,74 @@ int LaunchQwenMoeCombine(const float* moe_y, const float* shexp_y, int hidden,
   }
   return 0;
 }
+
+namespace {
+
+// One thread per (token, hidden): out[t][h] = sum_{s} w[t][s]*slot[t][s][h]
+// + sig[t]*shexp[t][h], slots in s=0..used-1 order then the shexp term,
+// the order ForwardMoe accumulates (forward_moe.cpp:229-257).
+__global__ void QwenMoeCombineSlotsKernel(const float* __restrict__ slot_y,
+                                          const float* __restrict__ weights,
+                                          const float* __restrict__ shexp_y,
+                                          const float* __restrict__ sig,
+                                          int used, int hidden, int n_tokens,
+                                          float* __restrict__ out) {
+  const std::size_t idx =
+      static_cast<std::size_t>(blockIdx.x) * kThreads + threadIdx.x;
+  const std::size_t n =
+      static_cast<std::size_t>(n_tokens) * static_cast<std::size_t>(hidden);
+  if (idx >= n) return;
+  const int t = static_cast<int>(idx / static_cast<std::size_t>(hidden));
+  const int h = static_cast<int>(idx % static_cast<std::size_t>(hidden));
+  const std::size_t used_hidden =
+      static_cast<std::size_t>(used) * static_cast<std::size_t>(hidden);
+  float acc = 0.0F;
+  for (int s = 0; s < used; ++s) {
+    acc +=
+        weights[static_cast<std::size_t>(t) * used + s] *
+        slot_y[static_cast<std::size_t>(t) * used_hidden +
+               static_cast<std::size_t>(s) * hidden + h];
+  }
+  acc += sig[t] * shexp_y[idx];
+  out[idx] = acc;
+}
+
+}  // namespace
+
+int LaunchQwenMoeCombineSlots(const float* slot_y, const float* weights,
+                              const float* shexp_y, const float* sig, int used,
+                              int hidden, int n_tokens, float* out,
+                              hipStream_t stream) {
+  if (slot_y == nullptr || weights == nullptr || shexp_y == nullptr ||
+      sig == nullptr || out == nullptr) {
+    return 1;
+  }
+  if (used <= 0 || used > 8 || hidden <= 0 || hidden > kMaxK || n_tokens <= 0 ||
+      n_tokens > kMaxTokens) {
+    return 1;
+  }
+  const std::size_t n =
+      static_cast<std::size_t>(hidden) * static_cast<std::size_t>(n_tokens);
+  if (n / static_cast<std::size_t>(hidden) !=
+          static_cast<std::size_t>(n_tokens) ||
+      n > static_cast<std::size_t>(kMaxTokens) *
+              static_cast<std::size_t>(kMaxK)) {
+    return 1;
+  }
+  const int blocks =
+      static_cast<int>((n + kThreads - 1) / static_cast<std::size_t>(kThreads));
+  const hipError_t stale = hipGetLastError();
+  if (stale != hipSuccess) {
+    std::fprintf(stderr, "LKAT combine-slots stale %s\n",
+                 hipGetErrorString(stale));
+  }
+  QwenMoeCombineSlotsKernel<<<blocks, kThreads, 0, stream>>>(
+      slot_y, weights, shexp_y, sig, used, hidden, n_tokens, out);
+  const hipError_t err = hipGetLastError();
+  if (err != hipSuccess) {
+    std::fprintf(stderr, "LKAT combine-slots launch %s\n",
+                 hipGetErrorString(err));
+    return 2;
+  }
+  return 0;
+}

@@ -17,6 +17,7 @@
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/fp4_launch.hpp"
 #include "src/models/qwen/hip/ops/gemm.hpp"
+#include "src/models/qwen38_flash_next/kernels/rocm/mmq/qfn_mmq.h"
 
 namespace superroc::hip {
 namespace {
@@ -329,6 +330,9 @@ bool ModelHasRocmFp4Tensors(const models::QwenModelWeights& weights) {
     return true;
   }
   for (const auto& layer : weights.layers) {
+    // moe_kquant layers carry K-quant/Q8_0 experts, never FP4; skip
+    // their expert/shexp tensors here (plain device copies, no FP4 warmup).
+    const bool skip_experts = layer.moe_kquant;
     if (HasRocmFp4Tensor(layer.attn_norm) || HasRocmFp4Tensor(layer.ffn_norm) ||
         HasRocmFp4Tensor(layer.attn_q) || HasRocmFp4Tensor(layer.attn_k) ||
         HasRocmFp4Tensor(layer.attn_v) || HasRocmFp4Tensor(layer.attn_output) ||
@@ -340,12 +344,12 @@ bool ModelHasRocmFp4Tensors(const models::QwenModelWeights& weights) {
         HasRocmFp4Tensor(layer.ssm_beta) || HasRocmFp4Tensor(layer.ssm_norm) ||
         HasRocmFp4Tensor(layer.ssm_out) || HasRocmFp4Tensor(layer.ffn_gate) ||
         HasRocmFp4Tensor(layer.ffn_up) || HasRocmFp4Tensor(layer.ffn_down) ||
-        HasRocmFp4Tensor(layer.ffn_gate_exps) ||
-        HasRocmFp4Tensor(layer.ffn_up_exps) ||
-        HasRocmFp4Tensor(layer.ffn_down_exps) ||
-        HasRocmFp4Tensor(layer.ffn_gate_shexp) ||
-        HasRocmFp4Tensor(layer.ffn_up_shexp) ||
-        HasRocmFp4Tensor(layer.ffn_down_shexp)) {  // KAT:
+        (!skip_experts && (HasRocmFp4Tensor(layer.ffn_gate_exps) ||
+                           HasRocmFp4Tensor(layer.ffn_up_exps) ||
+                           HasRocmFp4Tensor(layer.ffn_down_exps) ||
+                           HasRocmFp4Tensor(layer.ffn_gate_shexp) ||
+                           HasRocmFp4Tensor(layer.ffn_up_shexp) ||
+                           HasRocmFp4Tensor(layer.ffn_down_shexp)))) {  // KAT:
       return true;
     }
   }
@@ -469,6 +473,23 @@ std::unique_ptr<QwenGpuExecutor> QwenGpuExecutor::Create(
     }
     if (!RocmFp4SwigluScratchWarm(config.intermediate_size)) {
       DiscardRocmFp4Warmup();
+    }
+  }
+  // K-quant routed experts use the mmq tier; init it once at load.
+  // The expert/shexp tensors themselves stay plain device copies via Remap.
+  {
+    bool need_mmq = false;
+    for (const auto& layer : model->GetWeights().layers) {
+      if (layer.moe_kquant) {
+        need_mmq = true;
+        break;
+      }
+    }
+    if (need_mmq && qfn_mmq_init(0) != 0) {
+      if (error_msg != nullptr) {
+        *error_msg = "qwen35moe K-quant expert tier init failed";
+      }
+      return nullptr;
     }
   }
   auto executor =
