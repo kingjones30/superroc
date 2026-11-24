@@ -708,5 +708,35 @@
     "labels": ["chat", "tool-calling", "vision"],
     "size_gb": 18.8,
     "superroc_args": ["-t", "0", "--presence-penalty", "0", "--prompt-lookup", "--think", "off"]
+  },
+  {
+    "name": "Apodex-1.1-mini-ROCmFPX-Q8_0",
+    "repo": "kingjones777/Apodex-1.1-mini-ROCmFPX-Q8_0-GGUF",
+    "file": "apodex-1.1-mini-Q8_0_ROCMFPX.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 35.82,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Apodex-1.1-mini-ROCmFPX-Q8_0-AGENT",
+    "repo": "kingjones777/Apodex-1.1-mini-ROCmFPX-Q8_0-AGENT-GGUF",
+    "file": "apodex-1.1-mini-Q8_0_ROCMFPX_AGENT.gguf",
+    "mmproj": null,
+    "draft": null,
+    "labels": ["chat", "tool-calling"],
+    "size_gb": 36.4,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
+  },
+  {
+    "name": "Ornith-1.5-35B-A3B-ROCmFPX-AGENT",
+    "repo": "kingjones777/Ornith-1.5-35B-A3B-ROCmFPX-AGENT-GGUF",
+    "file": "Ornith-1.5-35B-A3B-Q8_0_ROCMFPX.gguf",
+    "mmproj": "kingjones777/Ornith-1.5-35B-A3B-ROCmFPX-AGENT-GGUF:mmproj-Ornith-1.5-35B-BF16.gguf",
+    "draft": null,
+    "labels": ["chat", "tool-calling", "vision"],
+    "size_gb": 37.63,
+    "superroc_args": ["-t", "0", "--presence-penalty", "0", "--think", "off"]
   }
 ]

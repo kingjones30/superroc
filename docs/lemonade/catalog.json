@@ -844,5 +844,40 @@
       "vision"
     ],
     "size": 18.8
+  },
+  "Apodex-1.1-mini-ROCmFPX-Q8_0": {
+    "checkpoints": {
+      "main": "kingjones777/Apodex-1.1-mini-ROCmFPX-Q8_0-GGUF:apodex-1.1-mini-Q8_0_ROCMFPX.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 35.82
+  },
+  "Apodex-1.1-mini-ROCmFPX-Q8_0-AGENT": {
+    "checkpoints": {
+      "main": "kingjones777/Apodex-1.1-mini-ROCmFPX-Q8_0-AGENT-GGUF:apodex-1.1-mini-Q8_0_ROCMFPX_AGENT.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 36.4
+  },
+  "Ornith-1.5-35B-A3B-ROCmFPX-AGENT": {
+    "checkpoints": {
+      "main": "kingjones777/Ornith-1.5-35B-A3B-ROCmFPX-AGENT-GGUF:Ornith-1.5-35B-A3B-Q8_0_ROCMFPX.gguf",
+      "mmproj": "kingjones777/Ornith-1.5-35B-A3B-ROCmFPX-AGENT-GGUF:mmproj-Ornith-1.5-35B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 37.63
   }
 }

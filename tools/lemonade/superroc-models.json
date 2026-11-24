@@ -636,5 +636,29 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "apodex-1.1-mini-Q8_0_ROCMFPX.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "apodex-1.1-mini-Q8_0_ROCMFPX_AGENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Ornith-1.5-35B-A3B-Q8_0_ROCMFPX.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
   ]
 }
