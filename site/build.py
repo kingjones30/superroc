@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build site/index.html from site/template.html and the README.
 
-The website's technical sections (top performers, features, models, build, run, recipes, API, known gaps, lineage) are rendered from
+The website's technical sections (quick start, top performers, features, models, build, run, recipes, API, known gaps, lineage) are rendered from
 README.md so the numbers and commands never drift from the repository's own documentation. Standard library only.
 Usage: python3 site/build.py
 """
@@ -115,6 +115,7 @@ def main():
         "TOP": sec["Top performers"],
         "FEATURES": sec["What Super Roc adds"],
         "MODELS": sec["Models"],
+        "QUICK": sec["Quick start"],
         "BUILD": sec["Build from source"],
         "RUN": sec["Run"],
         "GAPS": sec["Known gaps"],

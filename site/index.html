@@ -53,7 +53,7 @@
       <a class="btn ghost" href="https://github.com/kingjones30/superroc" target="_blank" rel="noopener">View on GitHub</a>
     </div>
     <ul class="chips" aria-label="Highlights">
-      <li>Strix Halo</li><li>ROCmFP4</li><li>MTP / DSpark</li><li>OpenAI + Anthropic APIs</li>
+      <li>Strix Halo</li><li>ROCmFP4</li><li>MTP / DSpark</li><li>OpenAI + Anthropic APIs</li><li>Lemonade backend</li>
     </ul>
   </div>
 </section>
@@ -114,6 +114,17 @@
 <section class="block" id="quickstart">
   <div class="wrap">
     <p class="kicker"><span class="slash" aria-hidden="true"></span>Quick start</p>
+    <h2>Run it with Lemonade</h2>
+    <div class="prose">
+<p>On a Strix Halo machine running Linux with ROCm and <a href="https://github.com/lemonade-sdk/lemonade" target="_blank" rel="noopener">Lemonade</a>, install the packages listed under <a href="#without-nix">Without Nix</a>, then:</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>git clone https://github.com/kingjones30/superroc.git
+cd superroc
+tools/lemonade/setup.sh
+lemonade pull LFM2.5-1.2B-Instruct
+lemonade chat LFM2.5-1.2B-Instruct</code></pre></div>
+<p><code>tools/lemonade/setup.sh</code> is optional: it checks the machine, builds Super Roc, installs it in <code>/opt/superroc</code> (with sudo for that step only when needed), points Lemonade at it and adds the Super Roc model list, keeping any model lists you already have. Run it again at any time. <code>--dry-run</code> shows what it would do, <code>--undo</code> switches Lemonade back to its own llama.cpp, and <code>--help</code> lists the options. The same steps by hand are in <a href="https://github.com/kingjones30/superroc/blob/main/docs/LEMONADE.md" target="_blank" rel="noopener">docs/LEMONADE.md</a>. Models Super Roc does not run keep running on Lemonade's own llama.cpp.</p>
+<p>Without Lemonade, build it (<a href="#build-from-source">Build from source</a>) and serve a model directly (<a href="#run">Run</a>).</p>
+    </div>
     <h2>Build from source</h2>
     <div class="prose">
 <p>Linux x86-64 on AMD Strix Halo (<code>gfx1151</code>) is the supported target.</p>
@@ -175,6 +186,8 @@ claude</code></pre></div>
 <p>For Open WebUI, VS Code, the OpenAI SDK and Responses-API clients, set the API base URL to <code>http://localhost:8080/v1</code>. Anthropic SDK clients and Claude Code use <code>http://localhost:8080</code> as the base URL. Chat Completions and Responses support text, images, function tools, structured output and streaming. The server uses the model's native context by default; <code>--context N</code> sets the context per session and <code>--max-tokens N</code> a default response limit that clients can override (reasoning tokens count toward it). The full API contract is in <a href="https://github.com/kingjones30/superroc/blob/main/docs/SERVER.md" target="_blank" rel="noopener">docs/SERVER.md</a> and the command line in <a href="https://github.com/kingjones30/superroc/blob/main/docs/CLI.md" target="_blank" rel="noopener">docs/CLI.md</a>.</p>
 <h3>Lemonade</h3>
 <p>Super Roc runs inside a stock <a href="https://github.com/lemonade-sdk/lemonade" target="_blank" rel="noopener">Lemonade</a> install today: point Lemonade's llama.cpp ROCm slot at the Super Roc launcher and add the Super Roc model list.</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>tools/lemonade/setup.sh                # build, install and configure in one step</code></pre></div>
+<p>or by hand:</p>
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>tools/lemonade/install.sh --superroc ./build/release/superroc --prefix /opt/superroc
 lemonade config set llamacpp.rocm_bin=/opt/superroc/lemonade</code></pre></div>
 <p>Models that Super Roc does not run go to the stock llama-server unchanged. Setup, the model list and troubleshooting: <a href="https://github.com/kingjones30/superroc/blob/main/docs/LEMONADE.md" target="_blank" rel="noopener">docs/LEMONADE.md</a>.</p>

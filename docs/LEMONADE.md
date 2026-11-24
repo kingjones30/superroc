@@ -25,7 +25,40 @@ models just run on the faster engine.
 - A `superroc` binary (build below).
 - `python3` (the shim is a single stdlib-only script).
 
-## Install
+## One-step setup (optional)
+
+`tools/lemonade/setup.sh` does everything below in one run, with Lemonade
+running:
+
+```sh
+tools/lemonade/setup.sh
+```
+
+1. Checks the machine: Linux x86-64, an AMD `gfx1151` GPU, the build tools.
+2. Builds Super Roc with the `release` preset (skipped with
+   `--superroc PATH_TO_BINARY`).
+3. Installs it under `/opt/superroc` (`--prefix DIR` for another place); it
+   uses sudo for this step only when that folder is not writable.
+4. Points the running Lemonade at the launcher and adds the Super Roc model
+   list, keeping any model lists already configured.
+5. With `--model NAME`, downloads that model through Lemonade.
+
+Every step is safe to repeat. Options:
+
+| Option | Effect |
+| --- | --- |
+| `--dry-run` | Print the steps; change nothing. |
+| `--undo` | Switch Lemonade back to its own llama-server and remove the Super Roc model list. |
+| `--lemonade-url URL` | Lemonade server to configure (default `http://localhost:13305`). |
+| `--no-lemonade` | Build and install only. |
+| `--jobs N` | Parallel build jobs (default 4). |
+| `--force` | Continue when no `gfx1151` GPU is found. |
+
+A Lemonade server that requires a key: set `LEMONADE_ADMIN_API_KEY` (or
+`LEMONADE_API_KEY`) first. If Lemonade is not running, the script finishes the
+build and install and prints the command that completes the setup later.
+
+## Install by hand
 
 Build Super Roc (see the README for toolchain details):
 
@@ -86,6 +119,8 @@ Lemonade's and the shim's control.
 ```sh
 lemonade config set llamacpp.rocm_bin=builtin
 ```
+
+or `tools/lemonade/setup.sh --undo`, which also removes the Super Roc model list.
 
 That returns Lemonade to its bundled `llama-server` for every model.
 

@@ -27,6 +27,9 @@ jobs:
           python3 -m unittest discover -s tests/functional -p test_impact.py
           python3 -m unittest discover -s tests/functional -p test_report.py
 
+      - name: Lemonade launcher and setup script
+        run: python3 -m unittest discover -s tests/lemonade -t . -v
+
       - name: Compute CMake compiler cache key
         id: ccache-key
         shell: bash

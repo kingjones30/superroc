@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="#quick-start"><b>Quick start</b></a> &nbsp;·&nbsp;
   <a href="#top-performers"><b>Top performers</b></a> &nbsp;·&nbsp;
   <a href="#models"><b>Models</b></a> &nbsp;·&nbsp;
   <a href="#build-from-source"><b>Build</b></a> &nbsp;·&nbsp;
@@ -25,6 +26,27 @@ Anthropic-compatible server with MTP and DSpark drafting and a prompt cache that
 conversation state.
 
 Super Roc is its own engine project. Issues, pull requests and forks are welcome.
+
+## Quick start
+
+On a Strix Halo machine running Linux with ROCm and [Lemonade](https://github.com/lemonade-sdk/lemonade), install the
+packages listed under [Without Nix](#without-nix), then:
+
+```sh
+git clone https://github.com/kingjones30/superroc.git
+cd superroc
+tools/lemonade/setup.sh
+lemonade pull LFM2.5-1.2B-Instruct
+lemonade chat LFM2.5-1.2B-Instruct
+```
+
+`tools/lemonade/setup.sh` is optional: it checks the machine, builds Super Roc, installs it in `/opt/superroc` (with
+sudo for that step only when needed), points Lemonade at it and adds the Super Roc model list, keeping any model
+lists you already have. Run it again at any time. `--dry-run` shows what it would do, `--undo` switches Lemonade back
+to its own llama.cpp, and `--help` lists the options. The same steps by hand are in [docs/LEMONADE.md](docs/LEMONADE.md).
+Models Super Roc does not run keep running on Lemonade's own llama.cpp.
+
+Without Lemonade, build it ([Build from source](#build-from-source)) and serve a model directly ([Run](#run)).
 
 ## What Super Roc adds
 
@@ -230,6 +252,12 @@ response limit that clients can override (reasoning tokens count toward it). The
 
 Super Roc runs inside a stock [Lemonade](https://github.com/lemonade-sdk/lemonade) install today: point
 Lemonade's llama.cpp ROCm slot at the Super Roc launcher and add the Super Roc model list.
+
+```sh
+tools/lemonade/setup.sh                # build, install and configure in one step
+```
+
+or by hand:
 
 ```sh
 tools/lemonade/install.sh --superroc ./build/release/superroc --prefix /opt/superroc
