@@ -8,7 +8,7 @@
 namespace superroc::tokenization {
 
 /// Shared Qwen framing, also used by Qwen-Image, audio models and MiniMax H3.
-/// Other token families remain with their models. See AGENTS.md for guidance.
+/// Other token families remain with their models. See CONTROL_TOKENS.md.
 inline constexpr std::string_view kEndOfText = "<|endoftext|>";
 inline constexpr std::string_view kImStart = "<|im_start|>";
 inline constexpr std::string_view kImEnd = "<|im_end|>";

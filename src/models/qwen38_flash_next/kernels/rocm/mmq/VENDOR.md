@@ -20,4 +20,4 @@ HIP-only dispatch, update the pin, and run the Flash-Next operator tests
 under `tests/models/qwen38_flash_next/` plus the AR/MTP session replay.
 The routed GEMM test compares supported formats against a floating-point
 reference and checks the paired adapter against two separate projections.
-Build and validate through Nix as described in `AGENTS.md`.
+Build and validate through Nix as described in `docs/DEVELOPMENT.md`.

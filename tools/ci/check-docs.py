@@ -24,7 +24,6 @@ REQUIRED_DOC_FILES = [
     "LICENSE",
     "NOTICE",
     "THIRD_PARTY_NOTICES.md",
-    "AGENTS.md",
     "docs/CLI.md",
     "docs/DEVELOPMENT.md",
     "docs/RELEASING.md",

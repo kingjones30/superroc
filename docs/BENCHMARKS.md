@@ -64,8 +64,7 @@ without speculation, llama.cpp 0.805.
 over HTTP for SuperROC and for the reference project of its category (llama.cpp
 for Qwen; antirez/ds4 for DeepSeek), writes per-table artifacts, and renders the tables
 and SVG charts between the `<!-- bench:<id> -->` markers. Workloads and table
-layouts are declared in `docs/models/<model>/artifacts/bench.json`; the
-`benchmark-model` skill in `.agents/skills` describes the procedure.
+layouts are declared in `docs/models/<model>/artifacts/bench.json`.
 
 Reference runtimes are explicitly selected Nix packages, excluded from SuperROC,
 the normal development shell and hosted checks:

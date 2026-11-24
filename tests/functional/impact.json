@@ -91,9 +91,7 @@
         "LICENSE",
         "NOTICE",
         "licenses/**",
-        "THIRD_PARTY_NOTICES.md",
-        "**/AGENTS.md",
-        "AGENTS.md"
+        "THIRD_PARTY_NOTICES.md"
       ],
       "priority": 10,
       "profiles": [],

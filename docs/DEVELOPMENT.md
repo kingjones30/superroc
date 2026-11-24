@@ -3,8 +3,7 @@
 Production targets Linux x86-64 on AMD Strix Halo (`gfx1151`). CMake owns the
 compiler flags, dependencies and installation for every build; Nix supplies the
 pinned toolchain. System dependencies and the qualified compiler/ROCm versions
-are listed in [the README](../README.md#build-from-source). Repository rules for
-agents and contributors are in [AGENTS.md](../AGENTS.md).
+are listed in [the README](../README.md#build-from-source).
 
 ## Repository layout
 
@@ -147,8 +146,7 @@ documentation-only changes.
 
 Measure with `result/bin/superroc` from `nix build` or a `release` build, keeping
 compiler and dependency versions fixed across compared runs. Follow
-[performance engineering](PERFORMANCE.md) and the
-[kernel optimization skill](../.agents/skills/optimize-kernel/SKILL.md). Use
+[performance engineering](PERFORMANCE.md). Use
 `tools/bench/build.sh` for standalone HIP experiments,
 `tools/bench/gfx1151_peak.hip` for measured hardware ceilings,
 `tools/prof/prof.py` for pipeline and wall-time profiles, and
