@@ -6,6 +6,26 @@ Notable user-facing changes to Super Roc are recorded here. Releases follow
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-11-24
+
+### Added
+
+- `qwen35moe` models with stock K-quant or Q8_0 routed experts now load and
+  serve: Q4_K, Q5_K, Q6_K and Q8_0 routed experts (gate and up of one type)
+  with Q8_0 shared experts, as in common Q4_K_XL MoE GGUFs, and ROCmFPX Q8 MoE
+  files, whose experts convert to Q8_0 at load. Routed experts run on the mmq
+  MoE kernels with expert ids kept on the GPU; the shared expert runs as one
+  batched Q8_0 GEMM per prefill chunk. ROCmFP4 MoE files keep their existing
+  path, and any other type mix is refused at load with every tensor's type
+  named. Qwen3.6-35B-A3B UD-Q4_K_XL on a Ryzen AI Max+ 395: perplexity 7.58
+  on an 11K-token technical document (context 4096; llama.cpp on the CPU:
+  7.60), prompt 1,401 tok/s at 512 tokens, decode 60.5 tok/s.
+- The Lemonade model list adds Rewrite3-27B, Qwen3.6-27B-Curiosity,
+  Qwen3.5-9B-Post-Reasoning, Zenotron-Mini-0.5-Multilingual, Ornith-1.5-9B
+  ROCmFPX AGENT, Muse-Glimmer-30B ROCmFPX Q8_0 (and AGENT), Qwen3.8-27B ROCmFPX
+  Q8_0 (and AGENT) and the Qwen3.8-Flash-Next ROCmFP4-FAST builds (base,
+  Uncensored and Uncensored imatrix).
+
 ## [0.20.2] - 2026-11-23
 
 ### Added
