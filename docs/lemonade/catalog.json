@@ -636,5 +636,17 @@
       "mtp"
     ],
     "size": 15.31
+  },
+  "Rewrite3-27B": {
+    "checkpoints": {
+      "main": "kingjones777/Rewrite3-27B-SuperRoc-GGUF:Rewrite3-27B-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "mtp"
+    ],
+    "size": 15.31
   }
 }
