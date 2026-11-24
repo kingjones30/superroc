@@ -659,5 +659,64 @@
       "tool-calling"
     ],
     "size": 15.06
+  },
+  "Ornith-1.5-9B-ROCmFPX-AGENT": {
+    "checkpoints": {
+      "main": "kingjones777/Ornith-1.5-9B-ROCmFPX-AGENT-GGUF:Ornith-1.5-9B-Q8_0_ROCMFPX.gguf",
+      "mmproj": "kingjones777/Ornith-1.5-9B-ROCmFPX-AGENT-GGUF:mmproj-Ornith-1.5-9B-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 9.31
+  },
+  "Muse-Glimmer-30B-ROCmFPX-Q8_0": {
+    "checkpoints": {
+      "main": "kingjones777/Muse-Glimmer-30B-ROCmFPX-Q8_0-GGUF:muse-glimmer-30B-Q8_0_ROCMFPX.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 28.83
+  },
+  "Muse-Glimmer-30B-ROCmFPX-Q8_0-AGENT": {
+    "checkpoints": {
+      "main": "kingjones777/Muse-Glimmer-30B-ROCmFPX-Q8_0-AGENT-GGUF:muse-glimmer-30B-Q8_0_ROCMFPX_AGENT.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 29.24
+  },
+  "Qwen3.8-Flash-Next-ROCmFP4-FAST": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.8-Flash-Next-ROCmFP4-FAST-GGUF:Qwen3.8-Flash-Next-Q4_0-ROCmFP4-FAST"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 94.42
+  },
+  "Qwen3.8-Flash-Next-Uncensored-ROCmFP4-FAST": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.8-Flash-Next-Uncensored-ROCmFP4-FAST-GGUF:Qwen3.8-Flash-Next-Uncensored-Q4_0-ROCmFP4-FAST",
+      "mmproj": "kingjones777/Qwen3.8-Flash-Next-Uncensored-ROCmFP4-FAST-GGUF:mmproj-Qwen3.8-Flash-Next-Uncensored-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision"
+    ],
+    "size": 95.33
   }
 }

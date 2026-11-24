@@ -497,5 +497,45 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "Ornith-1.5-9B-Q8_0_ROCMFPX.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "muse-glimmer-30B-Q8_0_ROCMFPX.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "muse-glimmer-30B-Q8_0_ROCMFPX_AGENT.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Qwen3.8-Flash-Next-Q4_0-ROCmFP4-FAST-00001-of-00003.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
+  ],
+  "Qwen3.8-Flash-Next-Uncensored-Q4_0-ROCmFP4-FAST-00001-of-00003.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--think",
+    "off"
   ]
 }
