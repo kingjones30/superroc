@@ -648,5 +648,16 @@
       "mtp"
     ],
     "size": 15.31
+  },
+  "Qwen3.6-27B-Curiosity": {
+    "checkpoints": {
+      "main": "kingjones777/Qwen3.6-27B-Curiosity-SuperRoc-GGUF:Qwen3.6-27B-Curiosity-Q4_0-ROCmFP4-FAST-imatrix.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling"
+    ],
+    "size": 15.06
   }
 }
