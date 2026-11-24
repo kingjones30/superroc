@@ -770,5 +770,19 @@
       "vision"
     ],
     "size": 28.21
+  },
+  "Zenotron-Mini-0.5-Multilingual": {
+    "checkpoints": {
+      "main": "kingjones777/Zenotron-Mini-0.5-Multilingual-SuperRoc-GGUF:Zenotron-Mini-0.5-Multilingual-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf",
+      "mmproj": "kingjones777/Zenotron-Mini-0.5-Multilingual-SuperRoc-GGUF:mmproj-Zenotron-Mini-0.5-Multilingual-BF16.gguf"
+    },
+    "recipe": "llamacpp",
+    "labels": [
+      "chat",
+      "tool-calling",
+      "vision",
+      "mtp"
+    ],
+    "size": 19.7
   }
 }
