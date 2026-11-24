@@ -585,5 +585,47 @@
     "--prompt-lookup",
     "--think",
     "off"
+  ],
+  "Qwen3.5-4B-Post-Reasoning-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--think",
+    "off"
+  ],
+  "XLL-Acts-Qwen3.5-9B-Q4_0-ROCmFP4-STRIX_LEAN-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--think",
+    "off"
+  ],
+  "Qwen3.5-4B-Flexible-Chat-Template-MTP-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--speculative",
+    "mtp",
+    "-d",
+    "2",
+    "--min-draft-tokens",
+    "1",
+    "--prompt-lookup",
+    "--think",
+    "off"
+  ],
+  "Qwen3.5-4B-Kazakh-OptimizedTokenizer-Q4_0-ROCmFP4-FAST-imatrix.gguf": [
+    "-t",
+    "0",
+    "--presence-penalty",
+    "0",
+    "--prompt-lookup",
+    "--think",
+    "off"
   ]
 }
