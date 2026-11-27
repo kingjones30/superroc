@@ -6,6 +6,33 @@ Notable user-facing changes to Super Roc are recorded here. Releases follow
 
 ## [Unreleased]
 
+## [0.20.4] - 2026-11-27
+
+### Added
+
+- Releases include a prebuilt Linux x86-64 archive for ROCm 7.2 on gfx1151,
+  `superroc-<version>-linux-x86_64-rocm7.2-gfx1151.tar.gz`, with a
+  `SHA256SUMS` file. A nightly build of `main` is published as the `nightly`
+  pre-release on every night that `main` has changed. Both are built by
+  `.github/workflows/binaries.yml` with `tools/release/build-linux.sh` and
+  `tools/release/package-linux.sh`.
+- `tools/lemonade/setup.sh` sets up Super Roc as a Lemonade backend in one
+  step: it checks the machine, builds and installs Super Roc, points Lemonade
+  at it and adds the Super Roc model list. `--dry-run` shows the steps and
+  `--undo` switches Lemonade back to its own llama.cpp.
+- The Lemonade model list adds Qwen3.5-4B-Post-Reasoning,
+  XLL-Acts-Qwen3.5-9B, Qwen3.5-4B-Flexible-Chat-Template (MTP),
+  Qwen3.5-4B-Kazakh-OptimizedTokenizer, Player-1-35B-A3B, Apodex 1.1 mini
+  ROCmFPX Q8_0 (plain and AGENT) and Ornith-1.5-35B-A3B ROCmFPX Q8_0 AGENT.
+- A project website, published from the README with GitHub Pages.
+
+### Changed
+
+- An installed or unpacked binary finds its data files (the evaluation suite
+  and the MiniMax H3 source manifest) beside itself, under `../share`, so a
+  release archive works wherever it is unpacked.
+- Release builds carry no file paths of the machine that built them.
+
 ## [0.20.3] - 2026-11-24
 
 ### Added
