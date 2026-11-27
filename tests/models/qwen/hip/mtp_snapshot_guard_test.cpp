@@ -1,4 +1,4 @@
-// F7: the MTP capture-site position check.
+// The MTP capture-site position check.
 //
 // A full capture needs a GPU-resident target executor plus a primed MTP draft
 // backend, which the CPU test target cannot build. This test drives the exact

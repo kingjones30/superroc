@@ -575,7 +575,7 @@ int ds4_mmq_iq2_xxs_aligned_derepack(
     int             n_experts,
     hipStream_t    stream);
 
-// M2 moe-down: aligned row-pair-SoA Q2_K routed-expert decode matvec.  Twin
+// MoE down: aligned row-pair-SoA Q2_K routed-expert decode matvec.  Twin
 // of mul_mat_vec_q_moe<GGML_TYPE_Q2_K, 2> at the down-leg call shape
 // (n_expert_used == 1: each (token, slot) assignment is its own "token") with
 // bit-identical outputs; only the weight layout changes.  W_aligned is the

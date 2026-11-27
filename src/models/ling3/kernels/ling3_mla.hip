@@ -1666,7 +1666,7 @@ void mla_attn_splitk(const MlaShape & sh, const MlaScalars & sc, const MlaWeight
                        sh.head_k, sh.nope, sh.kv);
     LING3_HIP_CHECK(hipGetLastError());
     if (head_shared == 2 && sh.n_head * 8 <= 256 && sh.kv_a() == 8 * 72) {
-        // P6 register-fused: one workgroup per slice, all heads, no LDS
+        // Register-fused: one workgroup per slice, all heads, no LDS
         hipLaunchKernelGGL(attn_sk_partial_rf_kernel, dim3((unsigned) k_slices),
                             256, 0, stream,
                             in.q.p, cache.kv, q_abs, part_m, part_l, part_acc,

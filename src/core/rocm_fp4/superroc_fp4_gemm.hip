@@ -54,7 +54,7 @@ static int ls3_chk(const char * what) {
 // tiled grouped GEMM
 // ---------------------------------------------------------------------------
 #define SUPERROC_FP4_LS3_TR 64        // weight rows per block
-#define SUPERROC_FP4_LS3_TC_DENSE 64  // P2: dense path token tile (4 rows x 4 tokens per
+#define SUPERROC_FP4_LS3_TC_DENSE 64  // dense path token tile (4 rows x 4 tokens per
                          // thread -- the u32-staged kernel measured
                          // LDS-read-bound; doubling the token span halved
                          // kda_proj).

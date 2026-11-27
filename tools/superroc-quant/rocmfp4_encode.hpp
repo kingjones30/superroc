@@ -348,7 +348,7 @@ inline void PostPassRefine(const float* x, const float* w, int n, std::uint8_t& 
   }
 
   if (best_inc >= best_err) return;  // no strict improvement: keep fork bytes
-  // D7: write the refined scale back; the caller stores it into the block.
+  // Write the refined scale back; the caller stores it into the block.
   e = best_e;
   const float new_inv = 1.0f / ScaleFromByte(e);
   if (half < 0) {  // type 101: re-pack both nibble planes (nearest codes)
@@ -476,7 +476,7 @@ inline void QuantizeRowRocmFp4FastEx(const float* x, block_rocmfp4_fast* y, std:
     }
     if (post_pass) {
       PostPassRefine(xb, ms, 32, e, y[ib].qs, -1);
-      y[ib].e = e;  // D7: write the refined scale byte back
+      y[ib].e = e;  // write the refined scale byte back
     }
   }
 }

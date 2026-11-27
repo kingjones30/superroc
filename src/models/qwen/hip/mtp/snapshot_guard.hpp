@@ -8,7 +8,7 @@
 
 namespace superroc::hip {
 
-// F7: the MTP draft KV prefix must cover exactly the target's committed
+// The MTP draft KV prefix must cover exactly the target's committed
 // context at capture. Draft and target advance in lockstep at every commit
 // boundary (prime, append, proposal feedback, cancellation rewind), so a
 // mismatch means the draft lagged: restoring it would resume drafting at the

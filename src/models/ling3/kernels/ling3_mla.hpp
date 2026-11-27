@@ -174,7 +174,7 @@ void mla_cache_append(const MlaShape& sh, const MlaCache& cache,
 // The decode fusions.
 // ---------------------------------------------------------------------------
 
-/// M1: rope(q) + rope(kv) + latent_norm + cache_append in ONE kernel (-3
+/// rope(q) + rope(kv) + latent_norm + cache_append in ONE kernel (-3
 /// launches per MLA layer). Same per-element expressions as the four, so the
 /// result is bit-identical; both MLA arms and MTP verify's per-row calls go
 /// through it. `pos` is a DEVICE pointer (mla_rope's contract). `pos_d` is the
@@ -286,7 +286,7 @@ void mla_block_scratch(const MlaShape& sh, const MlaScalars& sc,
 // ---------------------------------------------------------------------------
 constexpr int kMlaSplitkSlice = 1024;
 
-/// P7: partial-slot cap. The partial buffers are sized for THIS many slices
+/// Partial-slot cap. The partial buffers are sized for THIS many slices
 /// regardless of the slice length, so an adaptive (short) slice cannot
 /// over-run them; the callers clamp the launch to k_slices <= this.
 constexpr int kMlaSplitkMaxSlices = 192;
@@ -296,13 +296,13 @@ inline size_t mla_splitk_slices(std::uint32_t max_ctx,
   return (size_t)((max_ctx + (std::uint32_t)slice - 1) / (std::uint32_t)slice);
 }
 
-/// P7: partial-buffer size -- fixed slots, independent of the slice length.
+/// Partial-buffer size -- fixed slots, independent of the slice length.
 inline size_t mla_splitk_bytes(const MlaShape& sh) {
   return ((size_t)2 + (size_t)sh.kv) * (size_t)sh.n_head *
          (size_t)kMlaSplitkMaxSlices * sizeof(float);
 }
 
-/// P7: adaptive slice length. One workgroup per slice means a 6.5K context
+/// Adaptive slice length. One workgroup per slice means a 6.5K context
 /// at slice 1024 launches 7 workgroups on a 40-CU GPU; picking the slice so
 /// the grid is ~target_wg workgroups fills the box at every depth. Clamped
 /// to [64, 1024] and to kMlaSplitkMaxSlices slices; a pure function of

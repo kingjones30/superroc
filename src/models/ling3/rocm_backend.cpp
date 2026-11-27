@@ -975,7 +975,7 @@ bool MlaSplitkOn() {
 int MlaSplitkHeads() {
   static const int on = [] {
     const char* e = std::getenv("LING3_MLA_SPLITK_HEADS");
-    // P6: 2 = register-fused partial (one workgroup per slice, all heads,
+    // 2 = register-fused partial (one workgroup per slice, all heads,
     // fused score+latent, no LDS). Unit-gated like the others and the curve
     // winner (31.95/31.36/30.28 tok/s at 13.8K/27.7K/56K vs the LDS-tile
     // kernel's 24.24/17.98/11.88), so it is the default. 1 = the P5
@@ -985,7 +985,7 @@ int MlaSplitkHeads() {
   return on;
 }
 
-/// P7: the adaptive slice knobs. LING3_MLA_SPLITK_SLICE forces a slice
+/// The adaptive slice knobs. LING3_MLA_SPLITK_SLICE forces a slice
 /// length (64..1024); 0 = auto, sized so the partial grid is ~target
 /// workgroups (LING3_MLA_SPLITK_WG, default 120 = 3x the 40 CUs).
 int MlaSplitkSlice(int n_pos) {
@@ -1029,7 +1029,7 @@ bool MlaSplitkSlicesFit(int n_pos) {
 int MlaSplitkMin() {
   static const int min = [] {
     const char* e = std::getenv("LING3_MLA_SPLITK_MIN");
-    // P7: 1024, the measured serial/split-K crossover. Measured on a Strix
+    // 1024, the measured serial/split-K crossover. Measured on a Strix
     // Halo machine (out-p7chain.txt bench arms, sha 6cbab1eaea0df5f2): at ~300
     // decode positions (bench.sh short prompts) the serial 32-block kernel
     // (39.20/39.17 tok/s vs split-K's 38.92/38.91); from ~1.4K positions
@@ -1054,7 +1054,7 @@ bool BatchProfile() {
   return on;
 }
 
-/// P3: LING3_PREFILL_W8A8=0 opts the MoE prefill back onto the phase-2 float
+/// LING3_PREFILL_W8A8=0 opts the MoE prefill back onto the phase-2 float
 /// tiled GEMM (still on the compacted grid). Default ON: the W8A8 path is
 /// the deliverable; the knob is the escape hatch, like LING3_PREFILL_BATCH.
 /// Types other than ROCmFP4 fall back regardless (checked at the call site).
@@ -1209,12 +1209,12 @@ struct BatchBufs {
   // they are allocated so the device grouping kernel can be handed the SAME
   // bound the host code used, instead of one guessed at the call site.
   int grp_e_cap{0};
-  // P3: 16-token-tile prefix over the groups (compacted grids; the WMMA
+  // 16-token-tile prefix over the groups (compacted grids; the WMMA
   // activation tiles are numbered by it too) and the per-slot quantiser
   // destination (tile<<4 | lane, group-local).
   int* grp_zp{nullptr};
   int* slot_dest{nullptr};
-  // P3: tiled Q8_1 activations for the W8A8 WMMA path. q8_t holds the
+  // Tiled Q8_1 activations for the W8A8 WMMA path. q8_t holds the
   // gate/up input (B->t rows, slot order, k = hidden), q8_h the down input
   // (B->eh rows, k = expert_ff). Both sized for the worst-case tile count.
   void *q8_t{nullptr}, *q8_h{nullptr};
@@ -1263,7 +1263,7 @@ BatchBufs* NewBatchBufs(std::uint32_t max_ctx) {
   const std::size_t CAP = static_cast<std::size_t>(cap);
   const std::size_t SLOTS = CAP * kMaxExperts;
   const std::size_t E = static_cast<std::size_t>(g.n_expert);
-  // P3: worst-case group-local 16-token tiles the W8A8 path can address:
+  // Worst-case group-local 16-token tiles the W8A8 path can address:
   // every group pads to less than one tile beyond its slots, and there are
   // at most E + SLOTS/kMoeGroupCap groups (kMoeGroupCap splits).
   const std::size_t kQ8Tiles = SLOTS / 16 + E + SLOTS / 64 + 2;
@@ -1327,7 +1327,7 @@ BatchBufs* NewBatchBufs(std::uint32_t max_ctx) {
       ((b->grp_e_cap = E + SLOTS / 8 + 2), ai(&b->grp_e, b->grp_e_cap) &&
                                                ai(&b->grp_off, b->grp_e_cap) &&
                                                ai(&b->grp_cnt, b->grp_e_cap)) &&
-      // P3: the tile prefix needs one entry more than the groups; the Q8_1
+      // The tile prefix needs one entry more than the groups; the Q8_1
       // buffers take the worst-case group-local tile count (every group pads
       // to <1 tile beyond its slots: SLOTS/16 + one per group).
       ai(&b->grp_zp, E + SLOTS / 8 + 3) && ai(&b->slot_dest, SLOTS) &&
@@ -2147,7 +2147,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
   std::vector<int> counts(static_cast<std::size_t>(g.n_expert) + 1);
   std::vector<int> fill(static_cast<std::size_t>(g.n_expert));
   std::vector<int> hgrp_e, hgrp_off, hgrp_cnt;
-  // P3: 16-token-tile prefix (compacted grid + WMMA activation tile
+  // 16-token-tile prefix (compacted grid + WMMA activation tile
   // numbering) and the per-slot quantiser destination (tile<<4|lane).
   std::vector<int> hgrp_zp, hslot_dest;
   int moe_max_cnt = 0, moe_big = 0, moe_groups = 0, moe_tiles = 0;
@@ -2499,7 +2499,7 @@ bool ForwardBatch(const std::int32_t* tokens, int n, State* st,
       const std::size_t stride_ff =
           static_cast<std::size_t>(g.hidden) * L.rb_ff;
       sec(kSecMoeGemm);
-      // P3: the W8A8 int8-WMMA path (superroc's kernel skeleton, fork numerics:
+      // The W8A8 int8-WMMA path (superroc's kernel skeleton, fork numerics:
       // Q8_1 activations, FP4->int8 weights, per-half block scales in the
       // epilogue). LING3_PREFILL_W8A8=0 keeps the phase-2 float tiled GEMM
       // -- now on the compacted per-group grid (same arithmetic, so both

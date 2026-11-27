@@ -25,7 +25,7 @@ static int ling3_sync(const char * what) {
     return ling3_hip(hipDeviceSynchronize(), what);
 }
 
-// H1 2026-10-01: every kernel here runs on the NULL stream, so launches are already
+// Every kernel here runs on the NULL stream, so launches are already
 // ordered against each other and against hipMemcpy. The per-call hipDeviceSynchronize()
 // in ling3_sync was serialising ~2200 launches per token against the host for no
 // ordering benefit: the only places the host reads device data go through hipMemcpy,
@@ -50,7 +50,7 @@ __global__ void k_gemv(int qtype, const uint8_t * W, size_t row_bytes, const flo
     y[row] = ling3_dot_row(qtype, W + (size_t) row * row_bytes, x, k);
 }
 
-// H1 2026-10-01: ling3_elem() re-reads the block's ue4m3 scale byte and re-runs ling3_ue4m3_half()
+// ling3_elem() re-reads the block's ue4m3 scale byte and re-runs ling3_ue4m3_half()
 // for EVERY one of the 32 elements of a ROCmFP4 block. This decodes the scale once per block and
 // then walks the nibbles. Identical decode, identical values: element j takes the scale at offset
 // 16 (j<16) or 17 (j>=16) for ROCmFP4, and offset 16 for ROCmFP4_FAST, exactly as ling3_term_block
@@ -246,7 +246,7 @@ __device__ __forceinline__ int h1_argsort_desc_par(const float * x, int * dst, i
     return LING3_OK;
 }
 
-// H1 2026-10-01: the whole route, on one block. Structure, padding rule, comparison operators,
+// The whole route, on one block. Structure, padding rule, comparison operators,
 // the group keep/n_group_used logic, the weight normalisation order and the w_scale multiply are
 // all copied from ling3_route_core; only the thread mapping and the scratch residency differ.
 __global__ void k_route(
@@ -868,7 +868,7 @@ extern "C" int ling3_dense_ffn_w1(
     if (rc == LING3_OK) rc = ling3_gemv_fp4_q8(qtype, up, LING3_Q8_SLOT_FFN_X, w1_u, k, n_ff, stream);
     if (rc == LING3_OK) rc = ling3_swiglu(w1_g, w1_u, w1_h, n_ff, limit, stream);
     if (rc == LING3_OK) rc = ling3_quant_q8(w1_h, n_ff, LING3_Q8_SLOT_FFN_H, stream);
-    // F3: down writes y directly -- y[i] = 0.0f + acc, not memset + axpy.
+    // Down writes y directly -- y[i] = 0.0f + acc, not memset + axpy.
     if (rc == LING3_OK) rc = ling3_gemv_fp4_q8_zp(qtype, down, LING3_Q8_SLOT_FFN_H, y, n_ff, k, stream);
     return rc;
 }

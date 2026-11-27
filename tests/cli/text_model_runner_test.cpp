@@ -3071,7 +3071,7 @@ void TestServerInstructionsAreFraming() {
 
 void TestLlamaRenderPrompt() {
   using superroc::tokenization::ChatRole;
-  // F13: content plus framing_suffix (structured-output instructions) reach
+  // Content plus framing_suffix (structured-output instructions) reach
   // the prompt when no tools are requested.
   ChatRequest plain({{ChatRole::kUser, "hi"}});
   plain.messages.front().framing_suffix = " [suffix]";
@@ -3085,7 +3085,7 @@ void TestLlamaRenderPrompt() {
   Expect(with_spans.has_value() && spans.size() == 2 && spans[0].offset == 0 &&
              spans[0].size == 2 && spans[1].offset == 4 && spans[1].size == 6,
          "llama spans cover content and the suffix's client range");
-  // F13: tool requests are refused, not silently dropped.
+  // Tool requests are refused, not silently dropped.
   for (const auto choice :
        {ChatRequest::ToolChoice::kAuto, ChatRequest::ToolChoice::kRequired}) {
     ChatRequest tools({{ChatRole::kUser, "hi"}});
@@ -3104,7 +3104,7 @@ void TestLlamaRenderPrompt() {
 }
 
 void TestLlamaIncrementalTextNotExact() {
-  // F14: llama TokenText pieces are not Decode()-exact (leading space),
+  // Llama TokenText pieces are not Decode()-exact (leading space),
   // other families are unaffected.
   Expect(!superroc::server::RunnerIncrementalTextIsExact(true),
          "llama incremental text is not exact");

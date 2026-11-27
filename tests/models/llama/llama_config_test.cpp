@@ -47,7 +47,7 @@ void ExpectEq(const T& got, const T& want, const std::string& what) {
 
 namespace {
 
-// F3: a llama QwenGpuModel carries no Qwen tokenizer. GetTokenizer() must
+// A llama QwenGpuModel carries no Qwen tokenizer. GetTokenizer() must
 // throw std::logic_error instead of dereferencing null (previously UB).
 // Runs without NANBEIGE_GGUF.
 void TestLlamaGetTokenizerThrows() {
@@ -64,7 +64,7 @@ void TestLlamaGetTokenizerThrows() {
   Expect(threw, "llama QwenGpuModel::GetTokenizer must throw");
 }
 
-// F4: QwenGpuExecutor::Create must resolve the llama fp32-KV policy
+// QwenGpuExecutor::Create must resolve the llama fp32-KV policy
 // centrally (serve, prompt and bench all create through here). Runs without
 // NANBEIGE_GGUF and without a GPU: it exercises ApplyLlamaExecutionPolicy,
 // the exact override Create applies, since building an executor needs a fully
@@ -163,7 +163,7 @@ std::optional<superroc::core::ModelConfig> ParseSyntheticConfig(
   return reader->ExtractModelConfig(&error);
 }
 
-// F9: sliding-window and scaled-RoPE llama files must be refused at load.
+// Sliding-window and scaled-RoPE llama files must be refused at load.
 void TestLlamaUnsupportedGeometryRefused() {
   std::string error;
   std::vector<std::uint8_t> swa_extra;
@@ -187,7 +187,7 @@ void TestLlamaUnsupportedGeometryRefused() {
          "valid llama config must load: " + error);
 }
 
-// F11: only head_dim 128 and GQA groups <= 8 reach Flint decode intact.
+// Only head_dim 128 and GQA groups <= 8 reach Flint decode intact.
 void TestLlamaDecodeGeometryValidated() {
   std::string error;
   Expect(!ParseSyntheticConfig(BuildSyntheticLlamaConfig(64, 4, 2), error)

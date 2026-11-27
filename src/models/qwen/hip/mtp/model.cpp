@@ -427,7 +427,7 @@ bool QwenMtpGpuModel::BuildBlockWeights(speculative::QwenMtpWeights& weights,
     return false;
   }
 
-  // F1 support: the MTP head needs the target's final output_norm on the host
+  // The MTP head needs the target's final output_norm on the host
   // to normalize captured pre-norm features at ingest.
   target_output_norm->resize(target_weights.output_norm.num_elements);
   const auto norm_error = hipMemcpy(
@@ -476,7 +476,7 @@ std::shared_ptr<const QwenMtpGpuModel> QwenMtpGpuModel::Create(
   const auto start = std::chrono::steady_clock::now();
   try {
     PackPrivateWeights(*weights, allocations, packed_bytes);
-    // F1 support: the MTP head needs the target's final output_norm on
+    // The MTP head needs the target's final output_norm on
     // the host to normalize captured pre-norm features at ingest.
     target_output_norm.resize(target_weights.output_norm.num_elements);
     if (target_output_norm.empty() ||
@@ -512,7 +512,7 @@ std::shared_ptr<const QwenMtpGpuModel> QwenMtpGpuModel::Create(
   // neither is set, an MTP file that is the model file borrows both.
   // (Before M4, BORROW_HEAD=1 borrowed both; it now borrows output only, so
   // the old BORROW_HEAD=1 spells EMBD=1 plus HEAD=1.)
-  // M5: SUPERROC_MTP_LEAN=1 borrows both (memory-tight seats); the three
+  // SUPERROC_MTP_LEAN=1 borrows both (memory-tight seats); the three
   // single switches keep working for tests.
   const char* const borrow_embd_env =
       ::superroc::core::GetEnv("SUPERROC_MTP_BORROW_EMBD");

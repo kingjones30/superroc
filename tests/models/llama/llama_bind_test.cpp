@@ -82,7 +82,7 @@ void AppendF32Tensor(std::vector<std::uint8_t>& header,
                offset);
 }
 
-// F6: an F32 projection (output.weight) must be refused at bind time: the
+// An F32 projection (output.weight) must be refused at bind time: the
 // batched prefill FP16 GEMM throws on F32/BF16/Q8_K. Runs without
 // NANBEIGE_GGUF.
 void TestF32ProjectionRefused() {

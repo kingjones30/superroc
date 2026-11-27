@@ -442,7 +442,7 @@ public:
     return executor_->GetMemoryUsage();
   }
 
-  /// F7: the draft executor's next position, for the capture-site check that
+  /// The draft executor's next position, for the capture-site check that
   /// the draft prefix covers exactly the target's committed context.
   [[nodiscard]] std::uint32_t DraftPosition() const noexcept {
     return executor_ != nullptr ? executor_->GetNextPosition() : 0;

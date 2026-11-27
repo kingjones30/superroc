@@ -238,7 +238,7 @@ void CheckMatrix(const char* what, const qfn::TensorRef& t, std::uint64_t e) {
   (void)hipFree(w_dev);
 }
 
-// S7: grouped FP4 expert FFN (superroc_fp4_expert_ffn_m) on the real l47 expert
+// Grouped FP4 expert FFN (superroc_fp4_expert_ffn_m) on the real l47 expert
 // tensors vs an exact CPU reference built from the oracle row dots:
 //   y[t] = sum_s w[t][s] * down_id( silu(gate_id . x_t) * (up_id . x_t) )
 // accumulated in double. The kernel quantises activations to Q8_1 internally
@@ -491,7 +491,7 @@ int main(int argc, char** argv) {
   CheckMatrix("l47.shexp_gate (fast)", l47.shexp_gate, 0);
   CheckMatrix("l47.shexp_down (fast)", l47.shexp_down, 0);
 
-  // S7: the grouped expert FFN over the real 512-expert tensors, m=1 and
+  // The grouped expert FFN over the real 512-expert tensors, m=1 and
   // m=4 (the executor chunk limit), vs the exact oracle reference.
   CheckMoe("l47.moe (fast)", l47, w.config);
 

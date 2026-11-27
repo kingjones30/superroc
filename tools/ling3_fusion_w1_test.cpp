@@ -142,7 +142,7 @@ void ReportDiff(const char* what, const float* a, const float* b, std::size_t n)
 }
 
 // ---------------------------------------------------------------------------
-// F4: residual#2 + next norm fused into one add_rms_norm.
+// Residual#2 + next norm fused into one add_rms_norm.
 // ---------------------------------------------------------------------------
 void TestF4(int H, int cases) {
   std::printf("== F4: add_rms_norm vs residual_add + rms_norm  H=%d rows=1\n", H);

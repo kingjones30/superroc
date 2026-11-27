@@ -471,7 +471,7 @@ bool IsTracedRoute(const HttpRequest& req) {
           req.path == "/completion");
 }
 
-// F5: the Messages routes answer Anthropic-shaped errors, including
+// The Messages routes answer Anthropic-shaped errors, including
 // generation failures and device loss (the dispatcher below otherwise
 // replies with the OpenAI shape Anthropic clients do not parse).
 bool IsAnthropicApiPath(std::string_view path) {
@@ -2877,7 +2877,7 @@ void HttpServer::handle_connection(int client_fd) {
     }
     HttpResponse resp = Err(exception.http_status(), reason, exception.what(),
                             "server_error", exception.stable_code());
-    // F5: generation failures on the Messages routes must keep the
+    // Generation failures on the Messages routes must keep the
     // Anthropic {"type":"error",...} shape, not the OpenAI one above.
     if (IsAnthropicApiPath(req.path))
       resp = ToAnthropicError(std::move(resp));
@@ -2905,7 +2905,7 @@ void HttpServer::handle_connection(int client_fd) {
     HttpResponse resp =
         Err(500, "Internal Server Error", "internal server error",
             "internal_error", "server_exception");
-    // F5: same Anthropic-shape rule as generation failures above.
+    // Same Anthropic-shape rule as generation failures above.
     if (IsAnthropicApiPath(req.path))
       resp = ToAnthropicError(std::move(resp));
     resp.headers.emplace_back("X-Request-ID", req.request_id);
@@ -2923,7 +2923,7 @@ void HttpServer::handle_connection(int client_fd) {
     HttpResponse resp =
         Err(500, "Internal Server Error", "unknown server error",
             "internal_error", "server_exception");
-    // F5: same Anthropic-shape rule as generation failures above.
+    // Same Anthropic-shape rule as generation failures above.
     if (IsAnthropicApiPath(req.path))
       resp = ToAnthropicError(std::move(resp));
     resp.headers.emplace_back("X-Request-ID", req.request_id);

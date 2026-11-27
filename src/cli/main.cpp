@@ -34,7 +34,7 @@ std::string_view Basename(std::string_view path) {
 }
 
 void print_version() {
-  // Super Roc: product identity; internal names stay superroc in M1.
+  // Super Roc: product identity; internal names stay superroc.
   std::cout << "Super Roc " << kSuperROCReleaseVersion << " ("
             << kSuperROCRevision
             << ") - engine lineage: upstream v0.19.0 (MIT)\n";

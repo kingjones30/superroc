@@ -236,7 +236,7 @@ __global__ __launch_bounds__(FW_THREADS) void fw_attn_kernel(
                 mx = fmaxf(mx, __shfl_xor(mx, off));
             }
 
-            // H1: the STANDARD online-softmax form. m_new =
+            // The STANDARD online-softmax form. m_new =
             // fmaxf(m_old, mx) keeps every rescale factor <= 1, so a later
             // chunk whose max drops far below the running max (a > ~88 gap
             // overflows expf) can no longer send l_run and the O
@@ -541,7 +541,7 @@ static bool fw_audit(const MlaShape & sh, const MlaWeights & w, int n_pos,
     const char * bad = nullptr;
     if (sh.n_head != FW_NHEAD || sh.head_k != 192 || sh.nope != 128 ||
         sh.rot != 64 || sh.kv != FW_KV || sh.kv_a() != FW_KVA ||
-        sh.head_v != 128)   // H2: deabsorb bakes head_v = 128
+        sh.head_v != 128)   // deabsorb bakes head_v = 128
         bad = "unsupported MlaShape (needs 32/192/128/64/512/576/head_v 128)";
     else if (in.n_seqs != 1) bad = "n_seqs != 1";
     else if (tok_base < 0 || tok_count <= 0) bad = "tok range";

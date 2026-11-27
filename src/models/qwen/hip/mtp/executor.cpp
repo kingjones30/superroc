@@ -117,7 +117,7 @@ struct DraftStepProf {
 
 bool QwenMtpGpuExecutor::KvSinglePlane() noexcept {
   static const bool kv_one = [] {
-    // M5: the single F16 plane is the default; SUPERROC_MTP_KV_ONE=0 restores
+    // The single F16 plane is the default; SUPERROC_MTP_KV_ONE=0 restores
     // the old F32+F16 two-copy plane.
     const char* e = ::superroc::core::GetEnv("SUPERROC_MTP_KV_ONE");
     return e == nullptr || e[0] != '0';
@@ -383,7 +383,7 @@ void QwenMtpGpuExecutor::Allocate() {
   // Account what Allocate() just reserved, in the same terms the serving layer
   // reports: the context-scaling KV copy (or copies) is retained state,
   // everything else is per-step scratch that is reused on every drafted token.
-  // M2: a single F16 plane holds half the state.
+  // A single F16 plane holds half the state.
   state_bytes_ = KvSinglePlane()
                      ? 2 * total_kv * sizeof(std::uint16_t)
                      : 2 * total_kv * (sizeof(float) + sizeof(std::uint16_t));
@@ -602,7 +602,7 @@ tokenization::TokenId QwenMtpGpuExecutor::Run(tokenization::TokenId input_token,
                     config.num_attention_heads, config.num_key_value_heads,
                     config.head_dim, stream_, d_split_k_scratch_);
   } else {
-    // M2: d_kv_cache_ is null, so the F32 writes are null too (the kernel
+    // d_kv_cache_ is null, so the F32 writes are null too (the kernel
     // null-checks each plane); d_kv_cache_ + total_kv must NOT be formed.
     float* const kv_f32_k = KvSinglePlane() ? nullptr : d_kv_cache_;
     float* const kv_f32_v = KvSinglePlane() ? nullptr : d_kv_cache_ + total_kv;
@@ -878,7 +878,7 @@ std::size_t QwenMtpGpuExecutor::SnapshotPayloadBytesAt(
   const std::size_t kv =
       MtpCheckedMultiply(config.num_key_value_heads, config.head_dim);
   const std::size_t rows = MtpCheckedMultiply(position, kv);
-  // M2: the snapshot holds only the F16 plane.
+  // The snapshot holds only the F16 plane.
   if (KvSinglePlane()) {
     return MtpCheckedMultiply(rows, 2 * sizeof(std::uint16_t));
   }
@@ -961,7 +961,7 @@ void QwenMtpGpuExecutor::RestoreSnapshot(const QwenMtpGpuSnapshot& snapshot) {
   }
   const std::size_t kv = MtpCheckedMultiply(heads, dim);
   const std::size_t rows = MtpCheckedMultiply(valid, kv);
-  // M2: the snapshot holds only the F16 plane; a snapshot from the other mode
+  // The snapshot holds only the F16 plane; a snapshot from the other mode
   // fails this size check (clean reject, never a partial restore).
   const bool kv_one = KvSinglePlane();
   const std::size_t expected =
@@ -1027,7 +1027,7 @@ std::size_t QwenMtpGpuSnapshot::SerializePersistent(
     throw std::invalid_argument("MTP GPU snapshot metadata is malformed");
   }
   const std::size_t kv = static_cast<std::size_t>(num_kv_heads_) * head_dim_;
-  // M2: the F32 plane is absent, so the persistent header records f32_plane 0
+  // The F32 plane is absent, so the persistent header records f32_plane 0
   // (the layout version is unchanged: the plane sizes were always fields).
   const std::size_t f32_plane =
       QwenMtpGpuExecutor::KvSinglePlane()
@@ -1120,7 +1120,7 @@ void QwenMtpGpuExecutor::RestorePersistentSnapshot(
       MtpCheckedMultiply(MtpCheckedMultiply(valid, kv), sizeof(float));
   const std::size_t expected_f16 =
       MtpCheckedMultiply(MtpCheckedMultiply(valid, kv), sizeof(std::uint16_t));
-  // M2: an F16-only payload (f32_plane 0) restores the F16 plane; a full
+  // An F16-only payload (f32_plane 0) restores the F16 plane; a full
   // payload restores F16 and ignores the F32 part. A base-mode executor still
   // rejects an F16-only payload via the f32_plane check below.
   const bool kv_one = QwenMtpGpuExecutor::KvSinglePlane();
@@ -1146,7 +1146,7 @@ void QwenMtpGpuExecutor::RestorePersistentSnapshot(
   const std::size_t dst_pitch =
       MtpCheckedMultiply(MtpCheckedMultiply(max_context_, dim), sizeof(float));
   const std::uint8_t* planes = payload.data() + kMtpGpuPersistentHeaderBytes;
-  // M2: no F32 cache exists, so only the F16 plane is restored (a full
+  // No F32 cache exists, so only the F16 plane is restored (a full
   // payload's F32 part is skipped by the f32_plane offset below).
   if (!kv_one) {
     auto* dst_k = static_cast<float*>(d_kv_cache_);

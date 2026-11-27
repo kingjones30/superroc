@@ -505,7 +505,7 @@ int main(int argc, char** argv) {
 
         const Metrics m = compare(htile, href, a.T, H, hv);
         const Metrics s = compare(htile, hserial, a.T, H, hv);
-        // H1 probe: out-of-distribution scores (see Args) — gate tile on
+        // Probe: out-of-distribution scores (see Args) — gate tile on
         // finiteness instead of the 2e-3 tolerance, and report max_rel.
         int tl_nonfinite = -1;   // -1 = not scanned (not the H1 probe)
         if (a.h1_probe) {
@@ -907,7 +907,7 @@ int main(int argc, char** argv) {
                       make_view((float*) dout_fw.p, od, 1), fwb, 64, 0, 1, 2);
         {
             MlaShape s2 = sh;
-            s2.head_v = 64;   // H2: deabsorb bakes head_v = 128
+            s2.head_v = 64;   // deabsorb bakes head_v = 128
             expect_refuse("head_v=64 (H2)", s2, rin,
                           make_view((float*) dout_fw.p, 32 * 64, 1), fwb, 64,
                           0, 1, 1);

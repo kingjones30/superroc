@@ -1614,7 +1614,7 @@ size_t kda_forward_scratch_bytes(const KdaShape & sh, int n_tokens, int n_seqs) 
     return per_tok_seq * (size_t) n_tokens * (size_t) n_seqs * sizeof(float);
 }
 
-// K1: conv + gate + beta + l2(q) + l2(k), decode only.
+// Conv + gate + beta + l2(q) + l2(k), decode only.
 // Grid (d_inner/256, 1, 4), block 256. z = 0,1,2 is the serial conv body on q,k,v
 // (same helpers and the same acc loop as conv_silu_out_at). z = 3 is gate_kernel's
 // per-channel formula; block 0 also writes beta (32 sigmoids). Each z<2 block then

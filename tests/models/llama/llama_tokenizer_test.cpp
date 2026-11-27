@@ -140,7 +140,7 @@ std::unique_ptr<superroc::core::GgufReader> OpenSynthetic(
   return reader;
 }
 
-// F7: the tokenizer array must match llama.vocab_size, and bos/eos/pad must
+// The tokenizer array must match llama.vocab_size, and bos/eos/pad must
 // be in range. Runs without NANBEIGE_GGUF.
 void TestTokenizerVocabValidation() {
   std::string error;
@@ -164,7 +164,7 @@ void TestTokenizerVocabValidation() {
          "matching vocab with in-range ids must load: " + error);
 }
 
-// F8: a character with no vocab piece must fall back to <unk>, never emit
+// A character with no vocab piece must fall back to <unk>, never emit
 // -1 (the serve backend casts ids to unsigned for the embedding lookup).
 void TestByteFallbackNeverNegative() {
   std::string error;
@@ -218,7 +218,7 @@ void TestUnknownTokenIdFallback() {
          "out-of-range unknown_token_id must be refused");
 }
 
-// F12: only the default pre-tokenizer is implemented.
+// Only the default pre-tokenizer is implemented.
 void TestNonDefaultPreRefused() {
   std::string error;
   const auto file =

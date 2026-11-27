@@ -223,7 +223,7 @@ public:
       result.text = output_;
     }
     result.prompt_tokens = 10;
-    // F18: fixed generated ids so completion tests can pin the tokens array.
+    // Fixed generated ids so completion tests can pin the tokens array.
     result.tokens = {7, 8, 9};
     result.cached_prompt_tokens = 8;
     result.cache_hit = true;
@@ -1533,7 +1533,7 @@ void TestCompatibilityRequests() {
        }) {
     auto body = parse(endpoint.body);
     response_body(server.Post(endpoint.path, body.dump()));
-    // F18: the additive tokens array carries the backend's generated ids on
+    // The additive tokens array carries the backend's generated ids on
     // the completion routes (missing or prompt ids would fail this).
     if (std::string_view(endpoint.path) == "/v1/completions" ||
         std::string_view(endpoint.path) == "/completion") {
@@ -1679,7 +1679,7 @@ void TestCompatibilityRequests() {
     assert(error != nullptr && error->is_object());
     assert(!error->member_str("type").empty());
     assert(!error->member_str("message").empty());
-    // F18: malformed JSON must keep the same shape, with a code.
+    // Malformed JSON must keep the same shape, with a code.
     const auto malformed = server.Post(path, "{");
     ExpectStatus(malformed, 400);
     const auto malformed_parsed =
@@ -1689,7 +1689,7 @@ void TestCompatibilityRequests() {
     assert(malformed_error != nullptr && malformed_error->is_object());
     assert(!malformed_error->member_str("code").empty());
   }
-  // F5: generation failures on /v1/messages keep the Anthropic shape
+  // Generation failures on /v1/messages keep the Anthropic shape
   // (previously the dispatcher's OpenAI shape), with the stable code.
   {
     RunningServer failing;

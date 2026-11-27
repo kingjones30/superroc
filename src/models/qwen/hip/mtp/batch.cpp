@@ -77,7 +77,7 @@ void QwenMtpGpuExecutor::ForwardTargetChunk(
   const std::size_t total_kv =
       static_cast<std::size_t>(config.num_key_value_heads) * max_context_ *
       config.head_dim;
-  // M2: d_kv_cache_ is null, so the F32 writes are null too (the kernels
+  // d_kv_cache_ is null, so the F32 writes are null too (the kernels
   // null-check each plane); d_kv_cache_ + total_kv must NOT be formed.
   float* const kv_f32_k = KvSinglePlane() ? nullptr : d_kv_cache_;
   float* const kv_f32_v = KvSinglePlane() ? nullptr : d_kv_cache_ + total_kv;
@@ -267,7 +267,7 @@ void QwenMtpGpuExecutor::ForwardTargetChunk(
 }
 
 void QwenMtpGpuExecutor::MaybeFreeQ4Scratch() {
-  // M5: SUPERROC_MTP_LEAN=1 implies the free (memory-tight seats).
+  // SUPERROC_MTP_LEAN=1 implies the free (memory-tight seats).
   static const bool free_q4 = [] {
     const char* e = ::superroc::core::GetEnv("SUPERROC_MTP_PRIME_FREE_Q4");
     const char* l = ::superroc::core::GetEnv("SUPERROC_MTP_LEAN");

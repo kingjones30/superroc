@@ -69,7 +69,7 @@
 #include "src/models/qwen/hip/executor.hpp"
 #include "src/models/qwen/hip/mtp.hpp"
 #include "src/models/qwen/hip/mtp/kat_mtp_pmin.hpp"  // KAT-MTP:
-#include "src/models/qwen/hip/mtp/snapshot_guard.hpp"  // F7: draft/target position check.
+#include "src/models/qwen/hip/mtp/snapshot_guard.hpp"  // draft/target position check.
 #include "src/models/qwen/moe/dispatch.hpp"            // KAT:
 #include "src/models/qwen/state.hpp"                   // KAT:
 #include "src/models/qwen38_flash_next/continuation_adapter.hpp"
@@ -1097,7 +1097,7 @@ public:
   SaveVerifierSnapshot() const {
     return verifier_ != nullptr ? verifier_->Snapshot() : nullptr;
   }
-  // F7: refuse an MTP capture unless the draft prefix covers exactly the
+  // Refuse an MTP capture unless the draft prefix covers exactly the
   // target's committed context. A lagging draft would restore at the wrong
   // position and every later Propose would throw (an HTTP 500 in serve),
   // so the capture is refused here and the cache path records a skip.
@@ -2125,7 +2125,7 @@ public:
     // MTP sessions snapshot like DFlash ones: the target executor plus the
     // draft backend's own KV prefix, restored exactly (the MTP draft persists
     // its draft KV prefix, so disk admission accepts it like DFlash).
-    // F7: refuse the capture when the draft prefix does not cover exactly
+    // Refuse the capture when the draft prefix does not cover exactly
     // the target's committed context (the cache path records a skip).
     qwen.CheckMtpDraftPosition();
     return std::make_unique<QwenTextRunnerSnapshot>(

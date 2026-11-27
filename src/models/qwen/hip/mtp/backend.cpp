@@ -830,7 +830,7 @@ void QwenMtpGpuDraftBackend::RestorePersistentSnapshot(
 
   executor_->RestorePersistentSnapshot(
       payload.subspan(gpu_offset, gpu_payload_bytes));
-  // F7: the restored draft prefix must cover exactly the stored boundary.
+  // The restored draft prefix must cover exactly the stored boundary.
   CheckMtpSnapshotPosition(DraftPosition(), valid_context);
   target_hidden_ = std::move(target_hidden);
   proposed_tokens_.clear();
