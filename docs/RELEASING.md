@@ -76,15 +76,16 @@ maintainer:
    `tools/ci/check-docs.py` and `tools/ci/check-dependencies.py`.
 2. Update `version.txt` and move the `[Unreleased]` section of `CHANGELOG.md`
    under the new version and date in the same commit.
-3. Tag that commit `vX.Y.Z` and publish a GitHub Release with the changelog
-   section as its notes.
+3. Tag that commit `vX.Y.Z`, push the tag and publish the GitHub Release with
+   the changelog section as its notes
+   (`gh release create vX.Y.Z --verify-tag --notes-file <notes>`).
 4. The `vX.Y.Z` tag starts `.github/workflows/binaries.yml`, which builds the
    release binary from the tag with `tools/release/build-linux.sh`, packages it
    with `tools/release/package-linux.sh` and attaches
    `superroc-X.Y.Z-linux-x86_64-rocm7.2-gfx1151.tar.gz` and `SHA256SUMS` to the
-   release (creating the release from the changelog section if it does not
-   exist yet). Download the archive on Strix Halo and check that it serves a
-   model before announcing the release.
+   release (if the release does not exist yet, the workflow creates it from the
+   changelog section). Download the archive on Strix Halo and check that it
+   serves a model before announcing the release.
 
 ## Nightly builds
 
