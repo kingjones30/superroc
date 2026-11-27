@@ -78,6 +78,20 @@ maintainer:
    under the new version and date in the same commit.
 3. Tag that commit `vX.Y.Z` and publish a GitHub Release with the changelog
    section as its notes.
+4. Build the release binary from the tag with
+   `-DSUPERROC_RELEASE_VERSION=X.Y.Z`, package it with
+   `tools/release/package-linux.sh <binary> X.Y.Z <out-dir>` and attach both
+   files to the release:
+
+   ```bash
+   gh release upload vX.Y.Z \
+     <out-dir>/superroc-X.Y.Z-linux-x86_64-rocm7.2-gfx1151.tar.gz \
+     <out-dir>/SHA256SUMS
+   ```
+
+   The package holds the stripped `superroc` binary, `INSTALL.md`, the license
+   and the third-party notices. The script refuses a binary whose `--version`
+   does not report `X.Y.Z`.
 
 GitHub Actions runs the CPU contracts and repository checks on every push and
 pull request and once a day on `main`. GPU tests need Strix Halo hardware and

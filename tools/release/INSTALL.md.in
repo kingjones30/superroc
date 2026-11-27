@@ -1,0 +1,35 @@
+# Super Roc @VERSION@ — Linux x86_64 binary (ROCm 7.2, gfx1151)
+
+A prebuilt `superroc` for AMD Strix Halo: Ryzen AI Max+ 395 / 390 / 385 systems with the Radeon 8060S / 8050S GPU (`gfx1151`).
+It runs only on that GPU.
+
+## Requirements
+
+- Ubuntu 24.04 (x86_64), or a distribution with the same system libraries.
+- ROCm 7.2 (tested with 7.2.4) with the HIP runtime, hipBLAS, rocBLAS and hipBLASLt.
+- These Ubuntu packages: `libcurl4t64 libicu74 libpng16-16t64 libjpeg8 libwebp7 libssl3t64 libgomp1 zlib1g`.
+
+## Install
+
+```bash
+sha256sum -c SHA256SUMS
+tar -xzf superroc-@VERSION@-linux-x86_64-rocm7.2-gfx1151.tar.gz
+sudo install -m 755 superroc-@VERSION@-linux-x86_64-rocm7.2-gfx1151/bin/superroc /usr/local/bin/superroc
+superroc --version
+```
+
+If `superroc` cannot find a ROCm library, add the ROCm library folder to the loader path, for example
+`export LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH`.
+
+## Run
+
+```bash
+superroc serve -i 127.0.0.1 -p 8080 llm -m /path/to/model.gguf --context 32768
+```
+
+This serves an OpenAI-compatible API at `http://127.0.0.1:8080/v1`. Models built for Super Roc (ROCmFP4 GGUF files) are
+listed in the repository README. To use Super Roc from Lemonade, see `tools/lemonade/` in the source tree.
+
+## Licenses
+
+Super Roc is MIT licensed (`LICENSE`); `NOTICE` and `THIRD_PARTY_NOTICES.md` list the projects it builds on.
