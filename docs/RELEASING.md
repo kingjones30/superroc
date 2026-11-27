@@ -78,20 +78,36 @@ maintainer:
    under the new version and date in the same commit.
 3. Tag that commit `vX.Y.Z` and publish a GitHub Release with the changelog
    section as its notes.
-4. Build the release binary from the tag with
-   `-DSUPERROC_RELEASE_VERSION=X.Y.Z`, package it with
-   `tools/release/package-linux.sh <binary> X.Y.Z <out-dir>` and attach both
-   files to the release:
+4. The `vX.Y.Z` tag starts `.github/workflows/binaries.yml`, which builds the
+   release binary from the tag with `tools/release/build-linux.sh`, packages it
+   with `tools/release/package-linux.sh` and attaches
+   `superroc-X.Y.Z-linux-x86_64-rocm7.2-gfx1151.tar.gz` and `SHA256SUMS` to the
+   release (creating the release from the changelog section if it does not
+   exist yet). Download the archive on Strix Halo and check that it serves a
+   model before announcing the release.
 
-   ```bash
-   gh release upload vX.Y.Z \
-     <out-dir>/superroc-X.Y.Z-linux-x86_64-rocm7.2-gfx1151.tar.gz \
-     <out-dir>/SHA256SUMS
-   ```
+## Nightly builds
 
-   The package holds the stripped `superroc` binary, `INSTALL.md`, the license
-   and the third-party notices. The script refuses a binary whose `--version`
-   does not report `X.Y.Z`.
+The same workflow runs every night. When `main` has changed since the last
+nightly build, it builds `main`, moves the `nightly` tag to that commit and
+replaces the archive of the `nightly` pre-release. A nightly binary reports
+`Super Roc development (<revision>)`. Nightly builds pass the hosted CPU
+checks; only tagged releases are tested on Strix Halo before they are
+published.
+
+A package can be built on any Ubuntu 24.04 machine, without a GPU:
+
+```bash
+sudo tools/release/install-build-deps-ubuntu.sh
+tools/release/build-linux.sh . ../build ../stage X.Y.Z
+tools/release/package-linux.sh ../stage ../out X.Y.Z
+```
+
+The archive holds the stripped `superroc` binary, its data files under `share/`,
+`INSTALL.md`, the license and the third-party notices. `package-linux.sh`
+refuses a binary whose `--version` does not report the expected version, and
+`build-linux.sh` refuses a binary that still names its source or build
+directory.
 
 GitHub Actions runs the CPU contracts and repository checks on every push and
 pull request and once a day on `main`. GPU tests need Strix Halo hardware and

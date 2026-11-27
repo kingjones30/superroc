@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "src/cli/arg_parser.hpp"
+#include "src/cli/data_path.hpp"
 #include "src/core/env.hpp"
 #include "src/core/json.hpp"
 #include "src/eval/dataset.hpp"
@@ -76,12 +77,8 @@ struct ParsedCompletion {
 };
 
 std::filesystem::path DefaultEvalData() {
-  std::filesystem::path source = SUPERROC_EVAL_SOURCE_DATA;
-  std::error_code error;
-  if (std::filesystem::is_regular_file(source, error)) {
-    return source;
-  }
-  return SUPERROC_EVAL_INSTALLED_DATA;
+  return FindDataFile(SUPERROC_EVAL_SOURCE_DATA, SUPERROC_EVAL_INSTALLED_DATA,
+                      "superroc/eval/antirez-ds4.json");
 }
 
 std::string Environment(std::string_view name) {

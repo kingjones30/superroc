@@ -128,6 +128,11 @@ lemonade chat LFM2.5-1.2B-Instruct</code></pre></div>
     <h2 id="build-from-source">Build from source</h2>
     <div class="prose">
 <p>Linux x86-64 on AMD Strix Halo (<code>gfx1151</code>) is the supported target.</p>
+<h3 id="prebuilt-binaries">Prebuilt binaries</h3>
+<p>Every <a href="https://github.com/kingjones30/superroc/releases/latest" target="_blank" rel="noopener">release</a> has a Linux x86-64 archive for ROCm 7.2, <code>superroc-&lt;version&gt;-linux-x86_64-rocm7.2-gfx1151.tar.gz</code>, with a <code>SHA256SUMS</code> file. A <a href="https://github.com/kingjones30/superroc/releases/tag/nightly" target="_blank" rel="noopener">nightly build</a> of <code>main</code> is published the same way every night that <code>main</code> has changed. The archive runs where it is unpacked; its <code>INSTALL.md</code> lists the ROCm and system packages it needs:</p>
+<div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>sha256sum -c SHA256SUMS
+tar -xzf superroc-*-linux-x86_64-rocm7.2-gfx1151.tar.gz
+./superroc-*-linux-x86_64-rocm7.2-gfx1151/bin/superroc diagnose</code></pre></div>
 <h3 id="with-nix">With Nix</h3>
 <div class="code"><button class="copy" type="button" aria-label="Copy">Copy</button><pre data-lang="sh"><code>nix build
 ./result/bin/superroc diagnose

@@ -1,0 +1,155 @@
+name: Binaries
+
+# Builds the Linux x86-64 gfx1151 archive. A vX.Y.Z tag attaches it to that
+# release; the nightly schedule publishes main as the `nightly` pre-release
+# when main has changed since the last nightly build.
+on:
+  push:
+    tags: [ 'v*.*.*' ]
+  schedule:
+    - cron: '41 7 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: binaries-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x86_64:
+    name: Linux x86-64 (ROCm 7.2, gfx1151)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Select the build
+        id: select
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=$(git rev-parse HEAD)
+          short=$(git rev-parse --short=12 HEAD)
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version=${GITHUB_REF_NAME#v}
+            [ "$version" = "$(cat version.txt)" ] || { echo "tag $GITHUB_REF_NAME does not match version.txt" >&2; exit 1; }
+            echo "kind=release" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "expect=$version" >> "$GITHUB_OUTPUT"
+            echo "label=$version" >> "$GITHUB_OUTPUT"
+            echo "build=yes" >> "$GITHUB_OUTPUT"
+          else
+            [ "$GITHUB_REF" = refs/heads/main ] || { echo "nightly builds run on main only" >&2; exit 1; }
+            last=$(git ls-remote origin refs/tags/nightly | cut -f1)
+            echo "kind=nightly" >> "$GITHUB_OUTPUT"
+            echo "version=" >> "$GITHUB_OUTPUT"
+            echo "expect=development" >> "$GITHUB_OUTPUT"
+            echo "label=nightly-$(date -u +%Y%m%d)-$short" >> "$GITHUB_OUTPUT"
+            if [ "$last" = "$sha" ] && [ "$GITHUB_EVENT_NAME" = schedule ]; then
+              echo "main is unchanged since the last nightly build ($short)"
+              echo "build=no" >> "$GITHUB_OUTPUT"
+            else
+              echo "build=yes" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Free disk space
+        if: steps.select.outputs.build == 'yes'
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/share/powershell
+          sudo docker image prune --all --force > /dev/null
+          df -h /
+
+      - name: Install build dependencies
+        if: steps.select.outputs.build == 'yes'
+        run: sudo tools/release/install-build-deps-ubuntu.sh
+
+      - name: Compute compiler cache key
+        if: steps.select.outputs.build == 'yes'
+        id: ccache-key
+        shell: bash
+        run: echo "epoch-week=$(( $(date -u +%s) / 604800 ))" >> "$GITHUB_OUTPUT"
+
+      - name: Restore compiler cache
+        if: steps.select.outputs.build == 'yes'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: binaries-ccache-v1-rocm7.2.4-${{ steps.ccache-key.outputs.epoch-week }}-${{ github.sha }}
+          restore-keys: |
+            binaries-ccache-v1-rocm7.2.4-${{ steps.ccache-key.outputs.epoch-week }}-
+            binaries-ccache-v1-rocm7.2.4-
+
+      - name: Build
+        if: steps.select.outputs.build == 'yes'
+        env:
+          CCACHE: '1'
+          CCACHE_DIR: ${{ runner.temp }}/ccache
+          CCACHE_MAXSIZE: 4G
+          JOBS: '4'
+        run: tools/release/build-linux.sh . "$RUNNER_TEMP/build" "$RUNNER_TEMP/stage" ${{ steps.select.outputs.version }}
+
+      - name: Package
+        if: steps.select.outputs.build == 'yes'
+        run: |
+          tools/release/package-linux.sh "$RUNNER_TEMP/stage" "$RUNNER_TEMP/out" \
+            "${{ steps.select.outputs.expect }}" "${{ steps.select.outputs.label }}"
+          rm -rf "$RUNNER_TEMP/build"
+
+      - name: Keep the archive with the run
+        if: steps.select.outputs.build == 'yes'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: superroc-${{ steps.select.outputs.label }}-linux-x86_64-rocm7.2-gfx1151
+          path: ${{ runner.temp }}/out/*
+          retention-days: 14
+
+      - name: Attach to the release
+        if: steps.select.outputs.build == 'yes' && steps.select.outputs.kind == 'release'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=$GITHUB_REF_NAME
+          version=${{ steps.select.outputs.version }}
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            awk -v v="$version" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on {print}' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+            gh release create "$tag" --verify-tag --title "Super Roc $version" --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+          gh release upload "$tag" "$RUNNER_TEMP"/out/*.tar.gz "$RUNNER_TEMP"/out/SHA256SUMS --clobber
+
+      - name: Publish the nightly build
+        if: steps.select.outputs.build == 'yes' && steps.select.outputs.kind == 'nightly'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha=${{ steps.select.outputs.sha }}
+          short=$(git rev-parse --short=12 "$sha")
+          day=$(date -u +%Y-%m-%d)
+          git push --force origin "$sha:refs/tags/nightly"
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          Development build of \`main\` at $sha, built $day by the Binaries workflow.
+          The binary reports \`Super Roc development ($short)\`.
+
+          Nightly builds pass the hosted CPU checks. Tagged releases are also tested on
+          Strix Halo hardware before they are published; use the
+          [latest release](https://github.com/${GITHUB_REPOSITORY}/releases/latest) for a tested build.
+          EOF
+          if gh release view nightly > /dev/null 2>&1; then
+            for asset in $(gh release view nightly --json assets --jq '.assets[].name'); do
+              gh release delete-asset nightly "$asset" --yes
+            done
+            gh release edit nightly --prerelease --latest=false --title "Nightly $day ($short)" --notes-file "$RUNNER_TEMP/notes.md"
+          else
+            gh release create nightly --prerelease --latest=false --verify-tag --title "Nightly $day ($short)" \
+              --notes-file "$RUNNER_TEMP/notes.md"
+          fi
+          gh release upload nightly "$RUNNER_TEMP"/out/*.tar.gz "$RUNNER_TEMP"/out/SHA256SUMS --clobber

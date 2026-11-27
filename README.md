@@ -152,6 +152,20 @@ are kept next to the Super Roc cards for those models.
 
 Linux x86-64 on AMD Strix Halo (`gfx1151`) is the supported target.
 
+### Prebuilt binaries
+
+Every [release](https://github.com/kingjones30/superroc/releases/latest) has a Linux x86-64 archive for ROCm 7.2,
+`superroc-<version>-linux-x86_64-rocm7.2-gfx1151.tar.gz`, with a `SHA256SUMS` file. A
+[nightly build](https://github.com/kingjones30/superroc/releases/tag/nightly) of `main` is published the same way
+every night that `main` has changed. The archive runs where it is unpacked; its `INSTALL.md` lists the ROCm and
+system packages it needs:
+
+```sh
+sha256sum -c SHA256SUMS
+tar -xzf superroc-*-linux-x86_64-rocm7.2-gfx1151.tar.gz
+./superroc-*-linux-x86_64-rocm7.2-gfx1151/bin/superroc diagnose
+```
+
 ### With Nix
 
 ```sh

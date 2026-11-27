@@ -9,6 +9,7 @@ endif()
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 option(BUILD_TESTING "Build correctness tests" OFF)
 option(SUPERROC_BUILD_TOOLS "Build development benchmarks and tuning tools" OFF)
+option(SUPERROC_RELOCATABLE "Release package build: the binary carries no source-tree paths" OFF)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
@@ -325,10 +326,15 @@ target_link_libraries(superroc PRIVATE superroc_cache superroc_diagnostics super
 target_compile_definitions(superroc PRIVATE
   SUPERROC_RELEASE_VERSION="${SUPERROC_RELEASE_VERSION}"
   SUPERROC_REVISION="${SUPERROC_REVISION}"
-  SUPERROC_EVAL_SOURCE_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/models/deepseek_v4_flash/fixtures/antirez-ds4.json"
   SUPERROC_EVAL_INSTALLED_DATA="${CMAKE_INSTALL_PREFIX}/share/superroc/eval/antirez-ds4.json"
-  SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json"
   SUPERROC_H3_INSTALLED_SOURCE_MANIFEST="${CMAKE_INSTALL_PREFIX}/share/superroc/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
+# A build tree reads its data files from the source tree; a release package
+# finds them beside the binary instead (src/cli/data_path.hpp).
+if (NOT SUPERROC_RELOCATABLE)
+  target_compile_definitions(superroc PRIVATE
+    SUPERROC_EVAL_SOURCE_DATA="${CMAKE_CURRENT_SOURCE_DIR}/tests/models/deepseek_v4_flash/fixtures/antirez-ds4.json"
+    SUPERROC_H3_SOURCE_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/src/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json")
+endif()
 if (ENGINE_ENABLE_HIP)
   target_link_libraries(superroc PRIVATE superroc_cache_hip superroc_deepseek_v4_flash)
 endif()

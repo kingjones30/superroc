@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "src/cli/arg_parser.hpp"
+#include "src/cli/data_path.hpp"
 #include "src/models/minimax_h3/sha256.hpp"
 
 #ifndef SUPERROC_H3_SOURCE_MANIFEST
@@ -233,12 +234,9 @@ void PrintProgress(std::string_view phase, int completed, int total,
 }  // namespace
 
 std::filesystem::path DefaultH3SourceManifest() {
-  std::filesystem::path build_path = SUPERROC_H3_SOURCE_MANIFEST;
-  std::error_code error;
-  if (std::filesystem::is_regular_file(build_path, error)) {
-    return build_path;
-  }
-  return SUPERROC_H3_INSTALLED_SOURCE_MANIFEST;
+  return FindDataFile(
+      SUPERROC_H3_SOURCE_MANIFEST, SUPERROC_H3_INSTALLED_SOURCE_MANIFEST,
+      "superroc/models/minimax_h3/MINIMAX_H3_FL2VA_BF16.source-manifest.json");
 }
 
 void PrintVideoHelp(std::string_view program_name) {
